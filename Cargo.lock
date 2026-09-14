@@ -2639,6 +2639,8 @@ version = "0.1.0"
 dependencies = [
  "lexift-core",
  "reqwest",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 

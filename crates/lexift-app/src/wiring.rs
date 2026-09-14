@@ -24,7 +24,7 @@ impl AppServices {
         let platform = lexift_platform::PlatformCapabilities::mock();
 
         #[cfg(not(feature = "m1-demo"))]
-        let translators = lexift_translate::ProviderRegistry::new()?;
+        let translators = production_translators(std::env::var("LEXIFT_DEEPL_AUTH_KEY").ok())?;
         #[cfg(feature = "m1-demo")]
         let translators = lexift_translate::ProviderRegistry::with_mock();
 
@@ -37,11 +37,7 @@ impl AppServices {
         translators: lexift_translate::ProviderRegistry,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let selection = platform.selection();
-        let translator = translators.default_translator().ok_or_else(|| {
-            lexift_core::Error::new(
-                "no production translator is configured; use --features m1-demo for the M1 demo",
-            )
-        })?;
+        let translator = translators.default_translator();
         let runtime = Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("lexift-worker")
@@ -54,6 +50,16 @@ impl AppServices {
             selection,
             translator,
         })
+    }
+}
+
+#[cfg(not(feature = "m1-demo"))]
+fn production_translators(
+    deepl_auth_key: Option<String>,
+) -> Result<lexift_translate::ProviderRegistry, lexift_core::Error> {
+    match deepl_auth_key.filter(|key| !key.trim().is_empty()) {
+        Some(auth_key) => lexift_translate::ProviderRegistry::with_deepl_api(auth_key),
+        None => Ok(lexift_translate::ProviderRegistry::new()),
     }
 }
 
@@ -71,6 +77,18 @@ mod tests {
         .expect("selection must be optional during M2");
 
         assert!(services.selection.is_none());
+    }
+
+    #[cfg(not(feature = "m1-demo"))]
+    #[test]
+    fn missing_deepl_credential_uses_the_unconfigured_translator() {
+        let providers = production_translators(None)
+            .expect("a missing credential must not prevent application startup");
+        assert!(!providers.has_configured_provider());
+
+        let providers = production_translators(Some("   ".into()))
+            .expect("a blank credential must not prevent application startup");
+        assert!(!providers.has_configured_provider());
     }
 
     #[test]

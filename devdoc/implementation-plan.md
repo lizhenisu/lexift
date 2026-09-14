@@ -315,6 +315,8 @@ reqwest 错误在 Translate Adapter 边界转换为 `lexift_core::Error`。
 
 ### M2.7 第一个真实 Translator Provider
 
+状态：✅ 已完成
+
 第一阶段只实现 **一个真实 Provider**。
 
 建议：
@@ -339,7 +341,7 @@ lexift-translate/
 实现：
 
 ```rust
-DeepLTranslator
+DeepLApiTranslator
 ```
 
 并实现 Core：
@@ -357,38 +359,18 @@ TranslatorPort
 - Provider-specific Error 转换成统一错误
 - 设置合理的网络 Timeout
 
-### M2.8 Secret 临时方案
+当前 Production Composition Root 根据 `LEXIFT_DEEPL_AUTH_KEY` 选择官方 DeepL API
+Adapter；`:fx` Key 使用 Free Endpoint，其余 Key 使用 Pro Endpoint。Provider 复用 M2.6
+共享 Client 配置，语言映射、请求/响应 Schema 和状态码错误映射均留在 Adapter 内。缺少
+或空白 Key 时使用 `UnconfiguredTranslator`，应用仍可启动；`m1-demo` 始终使用 Mock。
 
-M2 暂时不实现完整系统 Credential Store。
+### M2.8 Real Translation Hardening
 
-开发阶段使用：
+状态：待开始
 
-```text
-LEXIFT_DEEPL_AUTH_KEY
-```
-
-环境变量。
-
-链路：
-
-```text
-Environment
-    ↓
-lexift-app
-    ↓
-DeepLTranslator
-```
-
-禁止：
-
-```text
-.env 提交仓库
-config.toml 明文 API Key
-代码硬编码 API Key
-日志打印 API Key
-```
-
-系统级 Secret Storage 留到后续 Desktop Integration 阶段。
+在真实 Provider 链路上完善网络错误 UX、Provider unavailable、连续请求和并发过期结果
+验证，并清理 Production / Demo UI。M2 阶段继续通过 `LEXIFT_DEEPL_AUTH_KEY` 临时注入
+Credential；系统级 Secret Storage 留到 Desktop Integration 阶段。
 
 ---
 
@@ -815,13 +797,9 @@ Linux Wayland
         ↓
 ⑥ HTTP Client 基础设施 ✅
         ↓
-⑦ DeepL Translator
+⑦ DeepL Translator + Environment Credential ✅
         ↓
-⑧ Environment Credential
-        ↓
-⑨ Error / Timeout
-        ↓
-⑩ M2 自动化测试
+⑧ Real Translation Hardening
         ↓
 M2 验收
 ```

@@ -212,9 +212,7 @@ mod tests {
             runtime.handle().clone(),
             Arc::new(Mutex::new(AppState::default())),
             None,
-            providers
-                .default_translator()
-                .expect("mock registry should provide a translator"),
+            providers.default_translator(),
             Arc::new(RecordingView::default()),
         );
     }
@@ -233,9 +231,7 @@ mod tests {
             runtime.handle().clone(),
             Arc::clone(&state),
             None,
-            providers
-                .default_translator()
-                .expect("mock registry should provide a translator"),
+            providers.default_translator(),
             view.clone(),
         ));
 
@@ -264,9 +260,7 @@ mod tests {
             runtime.handle().clone(),
             Arc::clone(&state),
             platform.selection(),
-            providers
-                .default_translator()
-                .expect("mock registry should provide a translator"),
+            providers.default_translator(),
             view.clone(),
         ));
 
@@ -325,9 +319,7 @@ mod tests {
             runtime.handle().clone(),
             Arc::clone(&state),
             None,
-            providers
-                .default_translator()
-                .expect("mock registry should provide a translator"),
+            providers.default_translator(),
             Arc::new(RecordingView::default()),
         ));
 
