@@ -1,5 +1,6 @@
 //! Windows-specific platform adapters belong in this module.
 
+mod clipboard_selection;
 mod hotkey;
 mod selection;
 

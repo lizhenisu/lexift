@@ -1,4 +1,5 @@
 use lexift_core::{Error, Result, domain::selection::Selection, ports::selection::SelectionPort};
+use std::time::Instant;
 use windows::{
     Win32::{
         System::Com::{
@@ -27,14 +28,58 @@ impl WindowsSelectionPort {
 
 impl SelectionPort for WindowsSelectionPort {
     fn selected_text(&self) -> Result<Option<Selection>> {
-        let _apartment = ComApartment::initialize()?;
-        let automation = create_automation()?;
-        probe_foreground_window(&automation)?;
-        let focused = unsafe { automation.GetFocusedElement() }
-            .map_err(|error| uia_error(error, "Could not access the focused Windows control"))?;
+        let started_at = Instant::now();
+        let result = capture_with_fallback(capture_with_uia(), || {
+            super::clipboard_selection::capture_selected_text()
+        });
 
-        selected_text_from_ancestors(&automation, focused)
-            .map(|text| text.map(|text| Selection { text, anchor: None }))
+        tracing::debug!(
+            elapsed_ms = started_at.elapsed().as_millis(),
+            success = result.is_ok(),
+            "Windows selection capture finished"
+        );
+
+        result.map(|text| text.map(|text| Selection { text, anchor: None }))
+    }
+}
+
+fn capture_with_uia() -> Result<Option<String>> {
+    let _apartment = ComApartment::initialize()?;
+    let automation = create_automation()?;
+    probe_foreground_window(&automation)?;
+    let focused = unsafe { automation.GetFocusedElement() }
+        .map_err(|error| uia_error(error, "Could not access the focused Windows control"))?;
+
+    selected_text_from_ancestors(&automation, focused)
+}
+
+fn capture_with_fallback<F>(
+    uia_result: Result<Option<String>>,
+    clipboard_capture: F,
+) -> Result<Option<String>>
+where
+    F: FnOnce() -> Result<Option<String>>,
+{
+    match uia_result {
+        Ok(Some(text)) => {
+            tracing::debug!(strategy = "uia", "Windows selection capture succeeded");
+            Ok(Some(text))
+        }
+        Ok(None) => {
+            tracing::debug!(strategy = "clipboard", "UI Automation found no selection");
+            clipboard_capture()
+        }
+        Err(uia_error) => {
+            tracing::warn!(error = %uia_error, "UI Automation selection capture failed; trying clipboard");
+            match clipboard_capture() {
+                Ok(Some(text)) => Ok(Some(text)),
+                Ok(None) => Err(uia_error),
+                Err(clipboard_error) => {
+                    tracing::warn!(error = %clipboard_error, "Clipboard selection fallback also failed");
+                    Err(Error::new("Could not capture selected text"))
+                }
+            }
+        }
     }
 }
 
@@ -175,7 +220,11 @@ fn merge_selected_ranges(ranges: impl IntoIterator<Item = String>) -> Option<Str
 
 #[cfg(test)]
 mod tests {
-    use super::merge_selected_ranges;
+    use std::cell::Cell;
+
+    use lexift_core::Error;
+
+    use super::{capture_with_fallback, merge_selected_ranges};
 
     #[test]
     fn merges_non_empty_ranges_without_changing_their_text() {
@@ -195,5 +244,63 @@ mod tests {
             merge_selected_ranges([String::new(), " \n\t ".to_owned()]),
             None
         );
+    }
+
+    #[test]
+    fn uia_selection_does_not_invoke_clipboard_fallback() {
+        let invoked = Cell::new(false);
+
+        let result = capture_with_fallback(Ok(Some("selected".into())), || {
+            invoked.set(true);
+            Ok(None)
+        });
+
+        assert_eq!(result, Ok(Some("selected".into())));
+        assert!(!invoked.get());
+    }
+
+    #[test]
+    fn empty_uia_selection_uses_clipboard_fallback() {
+        let result = capture_with_fallback(Ok(None), || Ok(Some("copied".into())));
+
+        assert_eq!(result, Ok(Some("copied".into())));
+    }
+
+    #[test]
+    fn two_empty_strategies_report_no_selection() {
+        let result = capture_with_fallback(Ok(None), || Ok(None));
+
+        assert_eq!(result, Ok(None));
+    }
+
+    #[test]
+    fn clipboard_error_is_returned_after_empty_uia_selection() {
+        let result = capture_with_fallback(Ok(None), || Err(Error::new("clipboard failed")));
+
+        assert_eq!(result, Err(Error::new("clipboard failed")));
+    }
+
+    #[test]
+    fn clipboard_success_recovers_from_uia_error() {
+        let result =
+            capture_with_fallback(Err(Error::new("uia failed")), || Ok(Some("copied".into())));
+
+        assert_eq!(result, Ok(Some("copied".into())));
+    }
+
+    #[test]
+    fn original_uia_error_wins_when_clipboard_finds_nothing() {
+        let result = capture_with_fallback(Err(Error::new("uia failed")), || Ok(None));
+
+        assert_eq!(result, Err(Error::new("uia failed")));
+    }
+
+    #[test]
+    fn two_strategy_errors_are_combined_into_a_stable_error() {
+        let result = capture_with_fallback(Err(Error::new("uia failed")), || {
+            Err(Error::new("clipboard failed"))
+        });
+
+        assert_eq!(result, Err(Error::new("Could not capture selected text")));
     }
 }

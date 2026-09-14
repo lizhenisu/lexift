@@ -529,7 +529,7 @@ selection = Some(WindowsSelectionPort)
 
 ### M3.3 Clipboard Selection Fallback
 
-状态：← 当前阶段
+状态：✅ 已完成
 
 在 UI Automation 返回无有效 Selection 时，使用 Clipboard fallback：
 
@@ -572,6 +572,14 @@ Clipboard fallback
 不要因为某个应用不支持就向 Core 写特殊判断。
 
 特殊兼容逻辑只能存在于 Platform Adapter。
+
+Windows Selection 现在先尝试 UI Automation；未得到选择或 UIA 调用失败时，在独立 STA
+线程中事务式执行 `Ctrl+C` fallback。事务在覆盖前枚举并通过 `OleDuplicateData` 深拷贝全部
+可物化的剪贴板格式，读取 Unicode 文本后恢复原内容；若复制后用户或其他应用再次更新剪贴板，则通过 sequence number
+检测并保留更新内容。快捷键释放、剪贴板打开和复制等待均有短超时，未发生 sequence 变化时
+不会读取旧剪贴板。UIA 与 Clipboard 的组合策略仍封装在 Platform Adapter 内，Core Port
+保持不变。受 Windows UIPI 限制，普通权限 Lexift 暂不能向管理员权限进程可靠发送复制输入；
+本阶段不自动提权。
 
 ---
 
@@ -839,8 +847,10 @@ Global Hotkey
     ✅
     ↓
 Windows Selection
+    ✅
     ↓
 Clipboard fallback
+    ✅
     ↓
 真实划词翻译
 ```
