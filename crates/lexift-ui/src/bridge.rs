@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use lexift_core::{AppEvent, AppState};
 use slint::ComponentHandle;
 
@@ -24,8 +26,16 @@ impl Ui {
     }
 
     pub fn on_event(&self, handler: impl Fn(AppEvent) + 'static) {
-        self.main
-            .on_translation_requested(move || handler(AppEvent::SelectionTranslationRequested));
+        let handler = Rc::new(handler);
+        let selection_handler = Rc::clone(&handler);
+        self.main.on_selection_translation_requested(move || {
+            selection_handler(AppEvent::SelectionTranslationRequested);
+        });
+        self.main.on_input_translation_requested(move |text| {
+            handler(AppEvent::InputTranslationRequested {
+                text: text.to_string(),
+            });
+        });
     }
 
     pub fn run(&self) -> Result<(), slint::PlatformError> {

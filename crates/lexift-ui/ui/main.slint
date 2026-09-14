@@ -1,22 +1,50 @@
-import { Button } from "std-widgets.slint";
 import { Colors } from "design/colors.slint";
 import { Spacing } from "design/spacing.slint";
 import { Typography } from "design/typography.slint";
 export { TranslationPopup } from "popup.slint";
 
+component ActionButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: false;
+    callback clicked();
+
+    height: 40px;
+    border-radius: 20px;
+    border-width: primary ? 0px : 1px;
+    border-color: Colors.outline;
+    background: primary ? Colors.primary : Colors.surface;
+
+    Text {
+        text: root.label;
+        color: root.primary ? Colors.surface : Colors.primary;
+        font-size: Typography.body-size;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "Lexift";
-    width: 480px;
-    height: 280px;
+    width: 560px;
+    height: 520px;
     background: Colors.background;
 
+    in-out property <string> input-text: "";
     in property <string> status-text: "Idle";
     in property <bool> translation-busy: false;
-    callback translation-requested();
+    in property <string> target-language: "";
+    in property <string> translated-text: "";
+    in property <string> error-text: "";
+    callback selection-translation-requested();
+    callback input-translation-requested(string);
 
     VerticalLayout {
         padding: Spacing.large;
-        alignment: center;
         spacing: Spacing.medium;
 
         Text {
@@ -24,34 +52,108 @@ export component AppWindow inherits Window {
             color: Colors.foreground;
             font-size: Typography.title-size;
             font-weight: 700;
-            horizontal-alignment: center;
+            horizontal-alignment: left;
         }
 
-        Text {
-            text: "M1 — Translation Vertical Slice";
-            color: Colors.secondary-foreground;
-            font-size: Typography.body-size;
-            horizontal-alignment: center;
-        }
-
-        Rectangle {
-            height: 44px;
-            border-radius: 22px;
-            background: #e8f0fe;
+        HorizontalLayout {
+            Text {
+                text: "Target";
+                color: Colors.secondary-foreground;
+                font-size: Typography.body-size;
+            }
 
             Text {
-                text: root.status-text;
-                color: #1967d2;
+                text: root.target-language;
+                color: Colors.foreground;
                 font-size: Typography.body-size;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+                font-weight: 700;
+                horizontal-alignment: right;
             }
         }
 
-        Button {
-            text: root.translation-busy ? "Translation in progress…" : "Run mock translation";
-            enabled: !root.translation-busy;
-            clicked => { root.translation-requested(); }
+        Rectangle {
+            height: 148px;
+            border-radius: Spacing.small;
+            border-width: input.has-focus ? 2px : 1px;
+            border-color: input.has-focus ? Colors.primary : Colors.outline;
+            background: Colors.surface;
+
+            input := TextInput {
+                x: Spacing.medium;
+                y: Spacing.medium;
+                width: parent.width - 2 * Spacing.medium;
+                height: parent.height - 2 * Spacing.medium;
+                text <=> root.input-text;
+                color: Colors.foreground;
+                selection-background-color: Colors.primary-container;
+                selection-foreground-color: Colors.foreground;
+                font-size: Typography.body-size;
+                text-cursor-width: 2px;
+                single-line: false;
+                wrap: word-wrap;
+                vertical-alignment: top;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: Spacing.small;
+            alignment: end;
+
+            ActionButton {
+                width: 220px;
+                label: "Translate selection (demo)";
+                clicked => { root.selection-translation-requested(); }
+            }
+
+            ActionButton {
+                width: 120px;
+                primary: true;
+                label: root.translation-busy ? "Translating…" : "Translate";
+                clicked => { root.input-translation-requested(root.input-text); }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Colors.outline;
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            border-radius: Spacing.small;
+            background: Colors.surface;
+
+            VerticalLayout {
+                padding: Spacing.medium;
+                spacing: Spacing.small;
+
+                Text {
+                    text: "Translation";
+                    color: Colors.secondary-foreground;
+                    font-size: Typography.body-size;
+                    font-weight: 700;
+                }
+
+                Text {
+                    text: root.error-text != ""
+                        ? root.error-text
+                        : root.translation-busy
+                            ? "Translating…"
+                            : root.translated-text == ""
+                                ? "Translation will appear here"
+                                : root.translated-text;
+                    color: root.error-text != "" ? Colors.error : Colors.foreground;
+                    font-size: Typography.body-size;
+                    wrap: word-wrap;
+                    vertical-stretch: 1;
+                }
+
+                Text {
+                    text: root.status-text;
+                    color: root.error-text != "" ? Colors.error : Colors.secondary-foreground;
+                    font-size: Typography.body-size;
+                }
+            }
         }
     }
 }

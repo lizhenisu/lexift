@@ -263,6 +263,8 @@ AppEvent::InputTranslationRequested {
 
 ### M2.5 实现输入翻译 UI
 
+状态：✅ 已完成
+
 主窗口暂时只需要满足真实功能验证，不进行最终视觉精修。
 
 目标界面：
@@ -297,6 +299,10 @@ AppEvent::InputTranslationRequested {
 - Provider Error 能正确显示
 
 此阶段不投入大量时间制作动画和复杂视觉效果。
+
+当前主窗口已连接 `InputTranslationRequested`，输入编辑状态保留在 Slint，Core 状态单向
+映射目标语言、Loading、结果与错误。翻译期间仍允许编辑和重新提交；Selection Demo
+入口继续保留。
 
 ### M2.6 第一个真实 Translator Provider
 
@@ -796,7 +802,7 @@ Linux Wayland
         ↓
 ④ Input Translation Event / Use Case ✅
         ↓
-⑤ Slint 输入翻译 UI
+⑤ Slint 输入翻译 UI ✅
         ↓
 ⑥ HTTP Client 基础设施
         ↓
