@@ -6,15 +6,15 @@ use windows::{
             CoUninitialize,
         },
         UI::Accessibility::{
-            CUIAutomation8, IUIAutomation, IUIAutomationElement, IUIAutomationTextPattern,
-            UIA_E_NOTSUPPORTED, UIA_TextPatternId,
+            CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTextPattern,
+            UIA_TextPatternId,
         },
+        UI::WindowsAndMessaging::GetForegroundWindow,
     },
-    core::{HRESULT, IUnknown},
+    core::IUnknown,
 };
 
 const MAX_PARENT_DEPTH: usize = 8;
-const E_POINTER: HRESULT = HRESULT(0x8000_4003_u32 as i32);
 
 /// Reads selected text from the foreground Windows application through UI Automation.
 pub(crate) struct WindowsSelectionPort;
@@ -29,12 +29,26 @@ impl SelectionPort for WindowsSelectionPort {
     fn selected_text(&self) -> Result<Option<Selection>> {
         let _apartment = ComApartment::initialize()?;
         let automation = create_automation()?;
+        probe_foreground_window(&automation)?;
         let focused = unsafe { automation.GetFocusedElement() }
-            .map_err(|_| Error::new("Could not access the focused Windows control"))?;
+            .map_err(|error| uia_error(error, "Could not access the focused Windows control"))?;
 
         selected_text_from_ancestors(&automation, focused)
             .map(|text| text.map(|text| Selection { text, anchor: None }))
     }
+}
+
+fn probe_foreground_window(automation: &IUIAutomation) -> Result<()> {
+    let foreground = unsafe { GetForegroundWindow() };
+    if foreground.0.is_null() {
+        return Err(Error::new("Could not access the foreground Windows window"));
+    }
+
+    // Chromium may not expose its usable accessibility provider until the native
+    // foreground window has been resolved through UI Automation at least once.
+    unsafe { automation.ElementFromHandle(foreground) }
+        .map(|_| ())
+        .map_err(|error| uia_error(error, "Could not access the foreground Windows window"))
 }
 
 struct ComApartment;
@@ -43,7 +57,7 @@ impl ComApartment {
     fn initialize() -> Result<Self> {
         unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
             .ok()
-            .map_err(|_| Error::new("Could not initialize Windows UI Automation"))?;
+            .map_err(|error| uia_error(error, "Could not initialize Windows UI Automation"))?;
         Ok(Self)
     }
 }
@@ -55,64 +69,100 @@ impl Drop for ComApartment {
 }
 
 fn create_automation() -> Result<IUIAutomation> {
-    unsafe { CoCreateInstance(&CUIAutomation8, None::<&IUnknown>, CLSCTX_INPROC_SERVER) }
-        .map_err(|_| Error::new("Could not create the Windows UI Automation client"))
+    // CUIAutomation has broader proxy-provider compatibility than CUIAutomation8.
+    // Browser accessibility providers are part of the compatibility matrix here.
+    unsafe { CoCreateInstance(&CUIAutomation, None::<&IUnknown>, CLSCTX_INPROC_SERVER) }
+        .map_err(|error| uia_error(error, "Could not create the Windows UI Automation client"))
 }
 
 fn selected_text_from_ancestors(
     automation: &IUIAutomation,
-    mut element: IUIAutomationElement,
+    focused: IUIAutomationElement,
 ) -> Result<Option<String>> {
+    if let Some(text) = text_pattern_selection(&focused) {
+        return Ok(Some(text));
+    }
+
     let walker = unsafe { automation.ControlViewWalker() }
-        .map_err(|_| Error::new("Could not navigate the Windows accessibility tree"))?;
+        .map_err(|error| uia_error(error, "Could not navigate the Windows accessibility tree"))?;
+    let mut element = focused;
 
-    for depth in 0..=MAX_PARENT_DEPTH {
-        match text_pattern_selection(&element)? {
-            Some(text) => return Ok(Some(text)),
-            None if depth == MAX_PARENT_DEPTH => break,
-            None => {}
-        }
-
+    for _ in 0..MAX_PARENT_DEPTH {
         element = match unsafe { walker.GetParentElement(&element) } {
             Ok(parent) => parent,
-            Err(error) if is_unsupported(&error) || error.code() == E_POINTER => {
+            Err(error) => {
+                trace_unavailable_pattern("get Control View parent", &error);
                 break;
             }
-            Err(_) => return Err(Error::new("Could not inspect the focused Windows control")),
         };
+
+        if let Some(text) = text_pattern_selection(&element) {
+            return Ok(Some(text));
+        }
     }
 
     Ok(None)
 }
 
-fn text_pattern_selection(element: &IUIAutomationElement) -> Result<Option<String>> {
+fn text_pattern_selection(element: &IUIAutomationElement) -> Option<String> {
     let pattern =
         match unsafe { element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) }
         {
             Ok(pattern) => pattern,
-            Err(error) if is_unsupported(&error) => return Ok(None),
-            Err(_) => return Err(Error::new("Could not inspect the focused Windows control")),
+            Err(error) => {
+                trace_unavailable_pattern("get TextPattern", &error);
+                return None;
+            }
         };
 
-    let ranges = unsafe { pattern.GetSelection() }
-        .map_err(|_| Error::new("Could not read the selected text"))?;
-    let length =
-        unsafe { ranges.Length() }.map_err(|_| Error::new("Could not read the selected text"))?;
+    let ranges = match unsafe { pattern.GetSelection() } {
+        Ok(ranges) => ranges,
+        Err(error) => {
+            trace_unavailable_pattern("get TextPattern selection", &error);
+            return None;
+        }
+    };
+    let length = match unsafe { ranges.Length() } {
+        Ok(length) => length,
+        Err(error) => {
+            trace_unavailable_pattern("get TextPattern range count", &error);
+            return None;
+        }
+    };
     let mut selected_ranges = Vec::with_capacity(length.max(0) as usize);
 
     for index in 0..length {
-        let range = unsafe { ranges.GetElement(index) }
-            .map_err(|_| Error::new("Could not read the selected text"))?;
-        let text = unsafe { range.GetText(-1) }
-            .map_err(|_| Error::new("Could not read the selected text"))?;
-        selected_ranges.push(text.to_string());
+        let range = match unsafe { ranges.GetElement(index) } {
+            Ok(range) => range,
+            Err(error) => {
+                trace_unavailable_pattern("get TextPattern range", &error);
+                continue;
+            }
+        };
+        match unsafe { range.GetText(-1) } {
+            Ok(text) => selected_ranges.push(text.to_string()),
+            Err(error) => trace_unavailable_pattern("read TextPattern range", &error),
+        }
     }
 
-    Ok(merge_selected_ranges(selected_ranges))
+    merge_selected_ranges(selected_ranges)
 }
 
-fn is_unsupported(error: &windows::core::Error) -> bool {
-    matches!(error.code(), HRESULT(code) if code == UIA_E_NOTSUPPORTED as i32)
+fn trace_unavailable_pattern(operation: &'static str, error: &windows::core::Error) {
+    tracing::debug!(
+        operation,
+        hresult = format_args!("{:#010X}", error.code().0 as u32),
+        "Windows UI Automation selection path was unavailable"
+    );
+}
+
+fn uia_error(error: windows::core::Error, message: &'static str) -> Error {
+    tracing::warn!(
+        operation = message,
+        hresult = format_args!("{:#010X}", error.code().0 as u32),
+        "Windows UI Automation call failed"
+    );
+    Error::new(message)
 }
 
 fn merge_selected_ranges(ranges: impl IntoIterator<Item = String>) -> Option<String> {

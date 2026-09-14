@@ -512,10 +512,12 @@ Windows Production 已装配 `WindowsSelectionPort`。划词请求先在现有
 前台应用焦点。捕获失败通过独立的 `SelectionCaptureFailed` 事件进入 Error 状态，不影响
 输入翻译的错误行为。
 
-每次捕获都在调用线程初始化 MTA COM apartment，并创建 `CUIAutomation8` client。Adapter
+每次捕获都在调用线程初始化 MTA COM apartment，并创建 `CUIAutomation` client。选择传统
+client 是为了保持 Chromium 等 proxy provider 的兼容性。Adapter
 从 focused element 开始，在 Control View 中最多向上查找 8 层 `TextPattern`，读取并按原顺序
-合并有效 selection ranges。正常不支持或空选择返回 `None`，COM 和 provider 异常转换为稳定
-的 Core Error。Windows capability 现在为：
+合并有效 selection ranges。单个节点的 pattern/provider 路径不可用时继续尝试父节点，空选择
+返回 `None`；COM 初始化、client 创建、foreground/focus 获取异常转换为稳定的 Core Error。
+Windows capability 现在为：
 
 ```text
 hotkey    = Some(WindowsHotkeyPort)

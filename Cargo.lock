@@ -2631,6 +2631,7 @@ name = "lexift-platform"
 version = "0.1.0"
 dependencies = [
  "lexift-core",
+ "tracing",
  "windows",
 ]
 
