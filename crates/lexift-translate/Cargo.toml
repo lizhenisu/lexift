@@ -9,4 +9,5 @@ mock = ["dep:tokio"]
 
 [dependencies]
 lexift-core.workspace = true
+reqwest.workspace = true
 tokio = { workspace = true, optional = true }

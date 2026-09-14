@@ -304,7 +304,16 @@ AppEvent::InputTranslationRequested {
 映射目标语言、Loading、结果与错误。翻译期间仍允许编辑和重新提交；Selection Demo
 入口继续保留。
 
-### M2.6 第一个真实 Translator Provider
+### M2.6 HTTP Infrastructure
+
+状态：✅ 已完成
+
+`lexift-translate` 通过共享的 reqwest Client 提供统一网络基础设施。Production Registry
+在启动装配时创建一次 Client，并配置 5 秒连接超时、20 秒总超时、统一 User-Agent、
+HTTPS、JSON 和系统代理发现。自动重试被显式关闭；Mock Registry 不创建网络 Client。
+reqwest 错误在 Translate Adapter 边界转换为 `lexift_core::Error`。
+
+### M2.7 第一个真实 Translator Provider
 
 第一阶段只实现 **一个真实 Provider**。
 
@@ -348,7 +357,7 @@ TranslatorPort
 - Provider-specific Error 转换成统一错误
 - 设置合理的网络 Timeout
 
-### M2.7 Secret 临时方案
+### M2.8 Secret 临时方案
 
 M2 暂时不实现完整系统 Credential Store。
 
@@ -804,7 +813,7 @@ Linux Wayland
         ↓
 ⑤ Slint 输入翻译 UI ✅
         ↓
-⑥ HTTP Client 基础设施
+⑥ HTTP Client 基础设施 ✅
         ↓
 ⑦ DeepL Translator
         ↓

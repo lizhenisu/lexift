@@ -22,6 +22,7 @@ lexift-platform = { path = "crates/lexift-platform" }
 lexift-translate = { path = "crates/lexift-translate" }
 lexift-config = { path = "crates/lexift-config" }
 lexift-observability = { path = "crates/lexift-observability" }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "system-proxy"] }
 slint = { version = "1.17.1", default-features = false, features = [
     "backend-winit",
     "compat-1-2",

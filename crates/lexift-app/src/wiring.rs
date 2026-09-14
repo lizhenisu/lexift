@@ -24,7 +24,7 @@ impl AppServices {
         let platform = lexift_platform::PlatformCapabilities::mock();
 
         #[cfg(not(feature = "m1-demo"))]
-        let translators = lexift_translate::ProviderRegistry::new();
+        let translators = lexift_translate::ProviderRegistry::new()?;
         #[cfg(feature = "m1-demo")]
         let translators = lexift_translate::ProviderRegistry::with_mock();
 

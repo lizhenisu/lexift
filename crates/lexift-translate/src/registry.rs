@@ -6,6 +6,7 @@ use lexift_core::{
     ports::translator::{TranslationFuture, TranslatorPort},
 };
 
+use crate::http;
 #[cfg(feature = "mock")]
 use crate::mock::MockTranslator;
 
@@ -13,15 +14,17 @@ use crate::mock::MockTranslator;
 pub struct ProviderRegistry {
     default: Option<Arc<dyn TranslatorPort>>,
     configured: bool,
+    _http_client: Option<reqwest::Client>,
 }
 
 impl ProviderRegistry {
     /// Creates a production registry without implicit development providers.
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> lexift_core::Result<Self> {
+        Ok(Self {
             default: Some(Arc::new(UnconfiguredTranslator)),
             configured: false,
-        }
+            _http_client: Some(http::build_client()?),
+        })
     }
 
     #[cfg(feature = "mock")]
@@ -29,6 +32,7 @@ impl ProviderRegistry {
         Self {
             default: Some(Arc::new(MockTranslator)),
             configured: true,
+            _http_client: None,
         }
     }
 
@@ -53,21 +57,16 @@ impl TranslatorPort for UnconfiguredTranslator {
     }
 }
 
-impl Default for ProviderRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn production_registry_does_not_install_mock_provider() {
-        let registry = ProviderRegistry::new();
+        let registry = ProviderRegistry::new().expect("production registry should initialize");
         assert!(registry.default_translator().is_some());
         assert!(!registry.has_configured_provider());
+        assert!(registry._http_client.is_some());
     }
 
     #[cfg(feature = "mock")]
@@ -76,5 +75,6 @@ mod tests {
         let registry = ProviderRegistry::with_mock();
         assert!(registry.default_translator().is_some());
         assert!(registry.has_configured_provider());
+        assert!(registry._http_client.is_none());
     }
 }
