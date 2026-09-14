@@ -574,12 +574,48 @@ Clipboard fallback
 特殊兼容逻辑只能存在于 Platform Adapter。
 
 Windows Selection 现在先尝试 UI Automation；未得到选择或 UIA 调用失败时，在独立 STA
-线程中事务式执行 `Ctrl+C` fallback。事务在覆盖前枚举并通过 `OleDuplicateData` 深拷贝全部
-可物化的剪贴板格式，读取 Unicode 文本后恢复原内容；若复制后用户或其他应用再次更新剪贴板，则通过 sequence number
+线程中事务式执行 `Ctrl+C` fallback。事务在覆盖前通过 `OleGetClipboard` 访问原内容，
+将各格式数据保存到独立 Shell `IDataObject`，读取 Unicode 文本后使用
+`OleSetClipboard` 和 `OleFlushClipboard` 恢复内容；
+若复制后用户或其他应用再次更新剪贴板，则通过 sequence number
 检测并保留更新内容。快捷键释放、剪贴板打开和复制等待均有短超时，未发生 sequence 变化时
 不会读取旧剪贴板。UIA 与 Clipboard 的组合策略仍封装在 Platform Adapter 内，Core Port
 保持不变。受 Windows UIPI 限制，普通权限 Lexift 暂不能向管理员权限进程可靠发送复制输入；
 本阶段不自动提权。
+
+#### M3.3.1 Clipboard Restore Correctness
+
+状态：✅ 已完成
+
+直接恢复 `OleGetClipboard` 返回对象曾在人工测试中出现
+`CLIPBRD_E_CANT_CLOSE (0x800401D4)`。现改为复制前通过
+`EnumFormatEtc/GetData` 将各格式的 OLE storage medium 存入独立 Shell `IDataObject`，
+由 `SetData` 接管所有权；保存失败则不发送 Ctrl+C。恢复继续使用 OLE API。
+新增不操作全局剪贴板的测试，确认释放源对象后快照仍可读取。
+
+2026-09-14 用户本机运行 `interactive_selection_capture_restores_text_clipboard`
+通过（1 passed）：剪贴板 sequence 发生变化、读取到非空 Unicode 选区、fallback 结束后
+`sentinel preserved=true`。这确认了文本剪贴板的取词和恢复链路。
+同日用户本机运行 `interactive_selection_capture_restores_empty_clipboard` 通过
+（1 passed）：复制后读取到非空 Unicode 选区，fallback 结束后 `format count=0`，
+确认恢复为没有任何格式的空剪贴板。测试初始化用的 OLE apartment 在倒计时前释放，
+避免休眠的 STA 窗口阻塞目标应用的剪贴板消息。
+同日用户在资源管理器复制文件、执行一次 Lexift 划词翻译后粘贴成功；恢复后的文件名、
+大小一致且可以正常打开。
+
+同日用户本机运行 `interactive_newer_clipboard_content_wins` 通过（1 passed）：Lexift 读取
+选区后，测试写入新的剪贴板内容，结束时 `newer content preserved=true`。这确认 sequence
+guard 会在剪贴板再次变化时放弃旧快照，用户的新内容不会被覆盖。
+
+同日用户运行图片和文件专用的强制 Clipboard fallback 测试。文件测试
+`interactive_selection_capture_restores_file_clipboard` 通过（1 passed），恢复后报告
+`original formats preserved=true`；图片测试同样通过。两类内容在测试后均可正常粘贴，
+图片内容和尺寸一致，文件名、大小和内容一致。
+
+剪贴板恢复不再枚举、复制和手工释放不同格式的 native handle。原内容以 OLE
+`IDataObject` 快照保存，恢复成功并完成 `OleFlushClipboard` 后才消费快照；失败时 RAII
+仍会在 sequence guard 允许的前提下重试。原剪贴板为空时通过 `OleSetClipboard(None)`
+恢复空状态。`SendInput` 部分失败会补发 `C Up` 和 `Ctrl Up`，避免残留按键状态。
 
 ---
 
