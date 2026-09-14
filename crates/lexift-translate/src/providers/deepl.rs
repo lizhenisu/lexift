@@ -1,0 +1,1 @@
+//! DeepL translation adapter.

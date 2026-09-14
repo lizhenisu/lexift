@@ -1,0 +1,13 @@
+[package]
+name = "lexift-app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+lexift-core.workspace = true
+lexift-ui.workspace = true
+lexift-platform.workspace = true
+lexift-translate.workspace = true
+lexift-config.workspace = true
+lexift-observability.workspace = true
+tracing.workspace = true

@@ -1,0 +1,33 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/lexift-app",
+    "crates/lexift-core",
+    "crates/lexift-ui",
+    "crates/lexift-platform",
+    "crates/lexift-translate",
+    "crates/lexift-config",
+    "crates/lexift-observability",
+]
+default-members = ["crates/lexift-app"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+
+[workspace.dependencies]
+lexift-core = { path = "crates/lexift-core" }
+lexift-ui = { path = "crates/lexift-ui" }
+lexift-platform = { path = "crates/lexift-platform" }
+lexift-translate = { path = "crates/lexift-translate" }
+lexift-config = { path = "crates/lexift-config" }
+lexift-observability = { path = "crates/lexift-observability" }
+slint = { version = "1.17.1", default-features = false, features = [
+    "backend-winit",
+    "compat-1-2",
+    "renderer-femtovg",
+    "std",
+] }
+slint-build = "1.17.1"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.20"

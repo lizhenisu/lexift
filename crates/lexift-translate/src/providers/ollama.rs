@@ -1,0 +1,1 @@
+//! Ollama translation adapter.

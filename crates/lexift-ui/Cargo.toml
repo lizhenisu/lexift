@@ -1,0 +1,12 @@
+[package]
+name = "lexift-ui"
+version.workspace = true
+edition.workspace = true
+build = "build.rs"
+
+[dependencies]
+lexift-core.workspace = true
+slint.workspace = true
+
+[build-dependencies]
+slint-build.workspace = true

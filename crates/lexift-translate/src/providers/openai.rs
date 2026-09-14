@@ -1,0 +1,1 @@
+//! OpenAI translation adapter.

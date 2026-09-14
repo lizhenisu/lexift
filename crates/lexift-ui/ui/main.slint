@@ -1,0 +1,33 @@
+import { Colors } from "design/colors.slint";
+import { Spacing } from "design/spacing.slint";
+import { Typography } from "design/typography.slint";
+
+export component AppWindow inherits Window {
+    title: "Lexift";
+    width: 480px;
+    height: 280px;
+    background: Colors.background;
+
+    in property <string> status-text: "Ready";
+
+    VerticalLayout {
+        padding: Spacing.large;
+        alignment: center;
+        spacing: Spacing.medium;
+
+        Text {
+            text: "Lexift";
+            color: Colors.foreground;
+            font-size: Typography.title-size;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: root.status-text;
+            color: Colors.secondary-foreground;
+            font-size: Typography.body-size;
+            horizontal-alignment: center;
+        }
+    }
+}

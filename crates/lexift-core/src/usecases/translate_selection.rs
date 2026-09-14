@@ -1,0 +1,20 @@
+use crate::{
+    Result,
+    domain::{language::Language, translation::TranslateResult},
+    ports::{selection::SelectionPort, translator::TranslatorPort},
+};
+
+pub fn execute(
+    selection: &impl SelectionPort,
+    translator: &impl TranslatorPort,
+    target_language: Language,
+) -> Result<Option<TranslateResult>> {
+    let Some(selection) = selection.selected_text()? else {
+        return Ok(None);
+    };
+    let request = crate::domain::translation::TranslateRequest {
+        text: selection.text,
+        target_language,
+    };
+    translator.translate(request).map(Some)
+}
