@@ -7,9 +7,9 @@ use crate::{
     ports::{clipboard::ClipboardPort, translator::TranslatorPort},
 };
 
-pub fn execute(
-    clipboard: &impl ClipboardPort,
-    translator: &impl TranslatorPort,
+pub async fn execute(
+    clipboard: &(impl ClipboardPort + ?Sized),
+    translator: &(impl TranslatorPort + ?Sized),
     target_language: Language,
 ) -> Result<Option<TranslateResult>> {
     let Some(text) = clipboard.read_text()? else {
@@ -20,5 +20,6 @@ pub fn execute(
             text,
             target_language,
         })
+        .await
         .map(Some)
 }

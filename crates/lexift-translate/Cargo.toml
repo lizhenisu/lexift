@@ -5,3 +5,4 @@ edition.workspace = true
 
 [dependencies]
 lexift-core.workspace = true
+tokio.workspace = true

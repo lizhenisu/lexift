@@ -4,9 +4,9 @@ use crate::{
     ports::translator::TranslatorPort,
 };
 
-pub fn execute(
-    translator: &impl TranslatorPort,
+pub async fn execute(
+    translator: &(impl TranslatorPort + ?Sized),
     request: TranslateRequest,
 ) -> Result<TranslateResult> {
-    translator.translate(request)
+    translator.translate(request).await
 }

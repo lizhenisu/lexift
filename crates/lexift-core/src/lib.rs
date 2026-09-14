@@ -6,5 +6,7 @@ pub mod ports;
 pub mod state;
 pub mod usecases;
 
+pub use command::AppCommand;
 pub use error::{Error, Result};
-pub use state::AppState;
+pub use event::AppEvent;
+pub use state::{AppState, TranslationPhase};

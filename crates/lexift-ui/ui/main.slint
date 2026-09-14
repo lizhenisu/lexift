@@ -1,6 +1,8 @@
+import { Button } from "std-widgets.slint";
 import { Colors } from "design/colors.slint";
 import { Spacing } from "design/spacing.slint";
 import { Typography } from "design/typography.slint";
+export { TranslationPopup } from "popup.slint";
 
 export component AppWindow inherits Window {
     title: "Lexift";
@@ -8,7 +10,9 @@ export component AppWindow inherits Window {
     height: 280px;
     background: Colors.background;
 
-    in property <string> status-text: "Ready";
+    in property <string> status-text: "Idle";
+    in property <bool> translation-busy: false;
+    callback translation-requested();
 
     VerticalLayout {
         padding: Spacing.large;
@@ -24,10 +28,30 @@ export component AppWindow inherits Window {
         }
 
         Text {
-            text: root.status-text;
+            text: "M1 — Translation Vertical Slice";
             color: Colors.secondary-foreground;
             font-size: Typography.body-size;
             horizontal-alignment: center;
+        }
+
+        Rectangle {
+            height: 44px;
+            border-radius: 22px;
+            background: #e8f0fe;
+
+            Text {
+                text: root.status-text;
+                color: #1967d2;
+                font-size: Typography.body-size;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        Button {
+            text: root.translation-busy ? "Translation in progress…" : "Run mock translation";
+            enabled: !root.translation-busy;
+            clicked => { root.translation-requested(); }
         }
     }
 }

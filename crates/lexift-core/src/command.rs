@@ -1,5 +1,10 @@
+use crate::domain::translation::TranslateRequest;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppCommand {
-    ShowMainWindow,
+    CaptureSelection,
+    Translate(TranslateRequest),
+    ShowPopup,
+    HidePopup,
     Exit,
 }

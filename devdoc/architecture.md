@@ -28,6 +28,17 @@ Lexift 的桌面端实现以以下目标为优先级：
 - 核心实现使用 **Rust**。
 - Windows、macOS、Linux 的平台差异应封装在平台适配层中，避免平台判断散落在业务代码中。
 
+## 运行时与线程模型
+
+Lexift 采用 **Slint 主线程 + Tokio 后台 Runtime**：
+
+- Slint 事件循环运行在主线程，只处理窗口、动画、属性绑定和轻量 UI callback。
+- `lexift-app` 创建并持有 Tokio 多线程 Runtime，负责异步翻译、网络、OCR 等后台任务。
+- 可能阻塞线程的平台调用通过 Tokio blocking worker 执行，不占用 Slint 主线程。
+- 后台任务完成后先将结果转换为 Core `AppEvent`，由 Core 更新 `AppState`。
+- UI 状态更新通过 `slint::invoke_from_event_loop()` 排入 Slint 事件循环。
+- 禁止在 Slint callback 中直接执行 HTTP、平台 API 或其他可能阻塞的工作。
+
 ## Workspace 架构基线
 
 Lexift V0.1 采用 **Virtual Cargo Workspace + Dependency Inversion**，固定 7 个核心 crate：

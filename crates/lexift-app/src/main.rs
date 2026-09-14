@@ -1,4 +1,5 @@
 mod bootstrap;
+mod controller;
 mod lifecycle;
 mod wiring;
 

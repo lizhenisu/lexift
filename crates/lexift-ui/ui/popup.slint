@@ -1,4 +1,48 @@
+import { Colors } from "design/colors.slint";
+import { Spacing } from "design/spacing.slint";
+import { Typography } from "design/typography.slint";
+
 export component TranslationPopup inherits Window {
-    width: 360px;
-    height: 180px;
+    title: "Lexift Translation";
+    width: 420px;
+    height: 240px;
+    background: Colors.background;
+
+    in property <string> phase-text: "Idle";
+    in property <string> source-text: "";
+    in property <string> translated-text: "";
+    in property <string> error-text: "";
+
+    VerticalLayout {
+        padding: Spacing.large;
+        spacing: Spacing.medium;
+
+        Text {
+            text: root.phase-text;
+            color: #1967d2;
+            font-size: Typography.body-size;
+            font-weight: 700;
+        }
+
+        Text {
+            text: root.source-text == "" ? "Waiting for selected text…" : root.source-text;
+            color: Colors.secondary-foreground;
+            font-size: Typography.body-size;
+            wrap: word-wrap;
+        }
+
+        Text {
+            text: root.translated-text == "" ? "Translation will appear here" : root.translated-text;
+            color: Colors.foreground;
+            font-size: Typography.title-size;
+            wrap: word-wrap;
+        }
+
+        if root.error-text != "": Text {
+            text: root.error-text;
+            color: #b3261e;
+            font-size: Typography.body-size;
+            wrap: word-wrap;
+        }
+    }
 }

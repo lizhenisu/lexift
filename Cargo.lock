@@ -2403,6 +2403,7 @@ dependencies = [
  "lexift-platform",
  "lexift-translate",
  "lexift-ui",
+ "tokio",
  "tracing",
 ]
 
@@ -2436,6 +2437,7 @@ name = "lexift-translate"
 version = "0.1.0"
 dependencies = [
  "lexift-core",
+ "tokio",
 ]
 
 [[package]]
@@ -4685,6 +4687,15 @@ name = "tinyvec"
 version = "1.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
+
+[[package]]
+name = "tokio"
+version = "1.53.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+dependencies = [
+ "pin-project-lite",
+]
 
 [[package]]
 name = "toml"

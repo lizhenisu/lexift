@@ -4,4 +4,4 @@ mod mapper;
 
 slint::include_modules!();
 
-pub use bridge::run;
+pub use bridge::{Ui, UiHandle};

@@ -1,5 +1,29 @@
-use lexift_core::AppState;
+use lexift_core::{AppState, TranslationPhase};
 
-pub(crate) fn status_text(state: &AppState) -> String {
-    state.status.clone()
+pub(crate) struct UiState {
+    pub status: String,
+    pub busy: bool,
+    pub source: String,
+    pub translated: String,
+    pub error: String,
+}
+
+pub(crate) fn view_state(state: &AppState) -> UiState {
+    UiState {
+        status: match state.phase {
+            TranslationPhase::Idle => "Idle",
+            TranslationPhase::Capturing => "Capturing selection…",
+            TranslationPhase::Translating => "Translating…",
+            TranslationPhase::Success => "Translation complete",
+            TranslationPhase::Error => "Translation failed",
+        }
+        .into(),
+        busy: matches!(
+            state.phase,
+            TranslationPhase::Capturing | TranslationPhase::Translating
+        ),
+        source: state.source_text.clone(),
+        translated: state.translated_text.clone(),
+        error: state.error_message.clone(),
+    }
 }

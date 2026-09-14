@@ -11,3 +11,4 @@ lexift-translate.workspace = true
 lexift-config.workspace = true
 lexift-observability.workspace = true
 tracing.workspace = true
+tokio.workspace = true

@@ -4,9 +4,9 @@ use crate::{
     ports::{selection::SelectionPort, translator::TranslatorPort},
 };
 
-pub fn execute(
-    selection: &impl SelectionPort,
-    translator: &impl TranslatorPort,
+pub async fn execute(
+    selection: &(impl SelectionPort + ?Sized),
+    translator: &(impl TranslatorPort + ?Sized),
     target_language: Language,
 ) -> Result<Option<TranslateResult>> {
     let Some(selection) = selection.selected_text()? else {
@@ -16,5 +16,5 @@ pub fn execute(
         text: selection.text,
         target_language,
     };
-    translator.translate(request).map(Some)
+    translator.translate(request).await.map(Some)
 }
