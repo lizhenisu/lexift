@@ -6,7 +6,10 @@ use crate::domain::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppEvent {
     Started,
-    TranslateRequested,
+    SelectionTranslationRequested,
+    InputTranslationRequested {
+        text: String,
+    },
     SelectionCaptured {
         task_id: TranslationTaskId,
         selection: Selection,

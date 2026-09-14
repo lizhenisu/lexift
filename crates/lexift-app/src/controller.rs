@@ -239,7 +239,7 @@ mod tests {
             view.clone(),
         ));
 
-        controller.dispatch(AppEvent::TranslateRequested);
+        controller.dispatch(AppEvent::SelectionTranslationRequested);
 
         let state = state
             .lock()
@@ -270,7 +270,7 @@ mod tests {
             view.clone(),
         ));
 
-        controller.dispatch(AppEvent::TranslateRequested);
+        controller.dispatch(AppEvent::SelectionTranslationRequested);
         assert_ne!(
             state
                 .lock()
@@ -313,6 +313,49 @@ mod tests {
     }
 
     #[test]
+    fn input_translation_succeeds_without_selection_capability() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("test runtime should start");
+        let providers = lexift_translate::ProviderRegistry::with_mock();
+        let state = Arc::new(Mutex::new(AppState::default()));
+        let controller = Arc::new(AppController::new(
+            runtime.handle().clone(),
+            Arc::clone(&state),
+            None,
+            providers
+                .default_translator()
+                .expect("mock registry should provide a translator"),
+            Arc::new(RecordingView::default()),
+        ));
+
+        controller.dispatch(AppEvent::InputTranslationRequested {
+            text: "Hello world".into(),
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let phase = state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .phase;
+            if phase == TranslationPhase::Success {
+                break;
+            }
+            assert!(Instant::now() < deadline, "input translation timed out");
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let state = state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(state.source_text, "Hello world");
+        assert_eq!(state.translated_text, "你好，世界");
+    }
+
+    #[test]
     fn late_result_does_not_overwrite_the_newest_translation() {
         let runtime = Builder::new_multi_thread()
             .worker_threads(2)
@@ -320,8 +363,8 @@ mod tests {
             .build()
             .expect("test runtime should start");
         let mut initial_state = AppState::default();
-        initial_state.reduce(AppEvent::TranslateRequested);
-        initial_state.reduce(AppEvent::TranslateRequested);
+        initial_state.reduce(AppEvent::SelectionTranslationRequested);
+        initial_state.reduce(AppEvent::SelectionTranslationRequested);
         let state = Arc::new(Mutex::new(initial_state));
         let controller = Arc::new(AppController::new(
             runtime.handle().clone(),

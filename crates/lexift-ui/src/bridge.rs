@@ -25,7 +25,7 @@ impl Ui {
 
     pub fn on_event(&self, handler: impl Fn(AppEvent) + 'static) {
         self.main
-            .on_translation_requested(move || handler(AppEvent::TranslateRequested));
+            .on_translation_requested(move || handler(AppEvent::SelectionTranslationRequested));
     }
 
     pub fn run(&self) -> Result<(), slint::PlatformError> {

@@ -218,6 +218,8 @@ TranslateRequest
 
 ### M2.4 实现输入翻译
 
+状态：✅ 已完成
+
 新增一条不经过 Selection 的业务路径：
 
 ```text
@@ -251,11 +253,13 @@ TranslateRequest
 ```rust
 AppEvent::InputTranslationRequested {
     text,
-    target_language,
 }
 ```
 
 空字符串应直接拒绝，不发送 HTTP 请求。
+
+当前 Core 已提供 Selection 和 Input 两种入口。Input 路径绕过 `SelectionPort`，复用
+`TranslationTaskId`、当前 Settings 和已有异步 `Translate` 命令链；空输入会使旧任务失效。
 
 ### M2.5 实现输入翻译 UI
 
@@ -483,7 +487,7 @@ Windows Hotkey
      ↓
 Platform
      ↓
-AppEvent::TranslateRequested
+AppEvent::SelectionTranslationRequested
 ```
 
 ### M3.2 Windows Selection
@@ -790,7 +794,7 @@ Linux Wayland
         ↓
 ③ Settings.target_language 接入 Core ✅
         ↓
-④ Input Translation Event / Use Case
+④ Input Translation Event / Use Case ✅
         ↓
 ⑤ Slint 输入翻译 UI
         ↓

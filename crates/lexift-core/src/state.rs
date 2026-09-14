@@ -50,7 +50,8 @@ impl AppState {
     pub fn reduce(&mut self, event: AppEvent) -> Vec<AppCommand> {
         match event {
             AppEvent::Started => Vec::new(),
-            AppEvent::TranslateRequested => self.request_translation(),
+            AppEvent::SelectionTranslationRequested => self.request_selection_translation(),
+            AppEvent::InputTranslationRequested { text } => self.request_input_translation(text),
             AppEvent::SelectionCaptured { task_id, selection } if self.is_current_task(task_id) => {
                 self.source_text = selection.text.clone();
                 vec![AppCommand::Translate {
@@ -91,17 +92,45 @@ impl AppState {
         }
     }
 
-    fn request_translation(&mut self) -> Vec<AppCommand> {
-        let task_id = self.next_task_id();
-        self.current_translation_task = Some(task_id);
+    fn request_selection_translation(&mut self) -> Vec<AppCommand> {
+        let task_id = self.begin_translation_task();
         self.phase = TranslationPhase::Capturing;
         self.source_text.clear();
-        self.translated_text.clear();
-        self.error_message.clear();
         vec![
             AppCommand::ShowPopup,
             AppCommand::CaptureSelection { task_id },
         ]
+    }
+
+    fn request_input_translation(&mut self, text: String) -> Vec<AppCommand> {
+        let text = text.trim();
+        if text.is_empty() {
+            self.current_translation_task = None;
+            self.phase = TranslationPhase::Error;
+            self.source_text.clear();
+            self.translated_text.clear();
+            self.error_message = "Translation text cannot be empty".into();
+            return Vec::new();
+        }
+
+        let task_id = self.begin_translation_task();
+        self.phase = TranslationPhase::Idle;
+        self.source_text = text.into();
+        vec![AppCommand::Translate {
+            task_id,
+            request: TranslateRequest {
+                text: self.source_text.clone(),
+                target_language: self.settings.target_language.clone(),
+            },
+        }]
+    }
+
+    fn begin_translation_task(&mut self) -> TranslationTaskId {
+        let task_id = self.next_task_id();
+        self.current_translation_task = Some(task_id);
+        self.translated_text.clear();
+        self.error_message.clear();
+        task_id
     }
 
     fn is_current_task(&self, task_id: TranslationTaskId) -> bool {
@@ -129,7 +158,7 @@ mod tests {
         let mut state = AppState::default();
 
         assert_eq!(
-            state.reduce(AppEvent::TranslateRequested),
+            state.reduce(AppEvent::SelectionTranslationRequested),
             vec![
                 AppCommand::ShowPopup,
                 AppCommand::CaptureSelection {
@@ -183,7 +212,7 @@ mod tests {
         let mut state = AppState::new(Settings {
             target_language: Language("de".into()),
         });
-        state.reduce(AppEvent::TranslateRequested);
+        state.reduce(AppEvent::SelectionTranslationRequested);
 
         assert_eq!(
             state.reduce(AppEvent::SelectionCaptured {
@@ -204,12 +233,121 @@ mod tests {
     }
 
     #[test]
-    fn newer_requests_replace_the_current_task() {
+    fn input_translation_bypasses_selection() {
         let mut state = AppState::default();
-        state.reduce(AppEvent::TranslateRequested);
 
         assert_eq!(
-            state.reduce(AppEvent::TranslateRequested),
+            state.reduce(AppEvent::InputTranslationRequested {
+                text: "Hello world".into(),
+            }),
+            vec![AppCommand::Translate {
+                task_id: TranslationTaskId::new(1),
+                request: TranslateRequest {
+                    text: "Hello world".into(),
+                    target_language: Language("zh-CN".into()),
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn input_translation_uses_current_settings() {
+        let mut state = AppState::new(Settings {
+            target_language: Language("ja".into()),
+        });
+
+        let commands = state.reduce(AppEvent::InputTranslationRequested {
+            text: "Hello".into(),
+        });
+
+        let AppCommand::Translate { request, .. } = &commands[0] else {
+            panic!("input translation should create a translate command");
+        };
+        assert_eq!(request.target_language, Language("ja".into()));
+    }
+
+    #[test]
+    fn input_translation_trims_and_records_source_text() {
+        let mut state = AppState::default();
+
+        state.reduce(AppEvent::InputTranslationRequested {
+            text: "  Hello world\n".into(),
+        });
+
+        assert_eq!(state.source_text, "Hello world");
+    }
+
+    #[test]
+    fn empty_input_invalidates_current_task_without_translating() {
+        let mut state = AppState::default();
+        state.reduce(AppEvent::InputTranslationRequested {
+            text: "old request".into(),
+        });
+
+        let commands = state.reduce(AppEvent::InputTranslationRequested {
+            text: " \n\t ".into(),
+        });
+
+        assert!(commands.is_empty());
+        assert_eq!(state.phase, TranslationPhase::Error);
+        assert_eq!(state.current_translation_task, None);
+        assert!(state.source_text.is_empty());
+        assert!(state.translated_text.is_empty());
+        assert_eq!(state.error_message, "Translation text cannot be empty");
+    }
+
+    #[test]
+    fn newer_input_replaces_the_current_task() {
+        let mut state = AppState::default();
+        state.reduce(AppEvent::InputTranslationRequested {
+            text: "Input A".into(),
+        });
+        state.reduce(AppEvent::InputTranslationRequested {
+            text: "Input B".into(),
+        });
+
+        assert_eq!(
+            state.current_translation_task,
+            Some(TranslationTaskId::new(2))
+        );
+        assert_eq!(state.source_text, "Input B");
+    }
+
+    #[test]
+    fn stale_input_result_does_not_overwrite_the_newest_result() {
+        let mut state = AppState::default();
+        state.reduce(AppEvent::InputTranslationRequested {
+            text: "Input A".into(),
+        });
+        state.reduce(AppEvent::InputTranslationRequested {
+            text: "Input B".into(),
+        });
+
+        state.reduce(AppEvent::TranslationFinished {
+            task_id: TranslationTaskId::new(1),
+            result: TranslateResult {
+                text: "stale result".into(),
+            },
+        });
+        assert!(state.translated_text.is_empty());
+
+        state.reduce(AppEvent::TranslationFinished {
+            task_id: TranslationTaskId::new(2),
+            result: TranslateResult {
+                text: "current result".into(),
+            },
+        });
+        assert_eq!(state.phase, TranslationPhase::Success);
+        assert_eq!(state.translated_text, "current result");
+    }
+
+    #[test]
+    fn newer_requests_replace_the_current_task() {
+        let mut state = AppState::default();
+        state.reduce(AppEvent::SelectionTranslationRequested);
+
+        assert_eq!(
+            state.reduce(AppEvent::SelectionTranslationRequested),
             vec![
                 AppCommand::ShowPopup,
                 AppCommand::CaptureSelection {
@@ -227,7 +365,7 @@ mod tests {
     #[test]
     fn records_translation_failures() {
         let mut state = AppState::default();
-        state.reduce(AppEvent::TranslateRequested);
+        state.reduce(AppEvent::SelectionTranslationRequested);
         state.reduce(AppEvent::TranslationFailed {
             task_id: TranslationTaskId::new(1),
             error: "provider unavailable".into(),
@@ -240,8 +378,8 @@ mod tests {
     #[test]
     fn ignores_results_from_superseded_tasks() {
         let mut state = AppState::default();
-        state.reduce(AppEvent::TranslateRequested);
-        state.reduce(AppEvent::TranslateRequested);
+        state.reduce(AppEvent::SelectionTranslationRequested);
+        state.reduce(AppEvent::SelectionTranslationRequested);
 
         assert!(
             state
@@ -273,8 +411,8 @@ mod tests {
     #[test]
     fn ignores_stale_capture_and_failure_events() {
         let mut state = AppState::default();
-        state.reduce(AppEvent::TranslateRequested);
-        state.reduce(AppEvent::TranslateRequested);
+        state.reduce(AppEvent::SelectionTranslationRequested);
+        state.reduce(AppEvent::SelectionTranslationRequested);
 
         assert!(
             state
