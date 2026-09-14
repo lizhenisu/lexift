@@ -465,6 +465,8 @@ Lexift 获取 Selection
 
 ### M3.1 Windows Global Hotkey
 
+状态：✅ 已完成
+
 实现：
 
 ```text
@@ -495,7 +497,15 @@ Platform
 AppEvent::SelectionTranslationRequested
 ```
 
+Windows Production 通过 `RegisterHotKey(None, ...)` 注册 `Alt+X`，使用 `MOD_ALT |
+MOD_NOREPEAT`，并在独立的阻塞式 `GetMessageW` 线程接收 `WM_HOTKEY`。注册过程通过握手
+同步报告冲突；失败只记录 warning，不阻止输入翻译或应用启动。`WindowsHotkeyPort` 在
+Drop 时向 listener 投递 `WM_QUIT`、注销快捷键并 join 线程。当前 Windows capability 为
+`hotkey = Some`、`selection = None`；`m1-demo` 和非 Windows 均不装配该 Adapter。
+
 ### M3.2 Windows Selection
+
+状态：← 当前阶段
 
 Selection 采用多级策略：
 
@@ -816,6 +826,7 @@ M2 完成后：
 
 ```text
 Global Hotkey
+    ✅
     ↓
 Windows Selection
     ↓

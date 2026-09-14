@@ -24,6 +24,11 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         let controller = Arc::clone(&controller);
         move |event| controller.dispatch(event)
     });
+    if let Some(hotkey) = &services.hotkey
+        && let Err(error) = hotkey.register_translate_hotkey(controller.translate_hotkey_handler())
+    {
+        tracing::warn!(%error, "global translate hotkey is unavailable");
+    }
     controller.dispatch(lexift_core::AppEvent::Started);
 
     let result = ui.run().map_err(Into::into);

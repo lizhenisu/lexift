@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use lexift_core::{
     AppCommand, AppEvent, AppState, TranslationTaskId,
-    ports::{selection::SelectionPort, translator::TranslatorPort},
+    ports::{hotkey::HotkeyHandler, selection::SelectionPort, translator::TranslatorPort},
 };
 use tokio::runtime::Handle;
 
@@ -72,6 +72,11 @@ impl AppController {
         for command in commands {
             self.execute(command);
         }
+    }
+
+    pub(crate) fn translate_hotkey_handler(self: &Arc<Self>) -> HotkeyHandler {
+        let controller = Arc::clone(self);
+        Arc::new(move || controller.dispatch(AppEvent::SelectionTranslationRequested))
     }
 
     fn execute(self: &Arc<Self>, command: AppCommand) {
@@ -236,6 +241,34 @@ mod tests {
         ));
 
         controller.dispatch(AppEvent::SelectionTranslationRequested);
+
+        let state = state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(state.phase, TranslationPhase::Error);
+        assert_eq!(state.error_message, "Selection capability is not available");
+        assert!(view.popup_shown.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn translate_hotkey_dispatches_the_selection_flow() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("test runtime should start");
+        let providers = lexift_translate::ProviderRegistry::with_mock();
+        let state = Arc::new(Mutex::new(AppState::default()));
+        let view = Arc::new(RecordingView::default());
+        let controller = Arc::new(AppController::new(
+            runtime.handle().clone(),
+            Arc::clone(&state),
+            None,
+            providers.default_translator(),
+            view.clone(),
+        ));
+
+        controller.translate_hotkey_handler()();
 
         let state = state
             .lock()

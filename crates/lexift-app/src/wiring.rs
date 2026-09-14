@@ -2,12 +2,14 @@ use std::sync::{Arc, Mutex};
 
 use lexift_core::{
     AppState,
-    ports::{selection::SelectionPort, translator::TranslatorPort},
+    ports::{hotkey::HotkeyPort, selection::SelectionPort, translator::TranslatorPort},
 };
 use tokio::runtime::{Builder, Runtime};
 
 /// Owns the concrete adapters assembled by the application composition root.
 pub(crate) struct AppServices {
+    // Rust drops fields in declaration order; stop callbacks before tearing down the runtime.
+    pub(crate) hotkey: Option<Arc<dyn HotkeyPort>>,
     pub(crate) runtime: Runtime,
     pub(crate) state: Arc<Mutex<AppState>>,
     pub(crate) selection: Option<Arc<dyn SelectionPort>>,
@@ -37,6 +39,7 @@ impl AppServices {
         translators: lexift_translate::ProviderRegistry,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let selection = platform.selection();
+        let hotkey = platform.hotkey();
         let translator = translators.default_translator();
         let runtime = Builder::new_multi_thread()
             .worker_threads(2)
@@ -45,6 +48,7 @@ impl AppServices {
             .build()?;
 
         Ok(Self {
+            hotkey,
             runtime,
             state: Arc::new(Mutex::new(AppState::new(settings.settings))),
             selection,
@@ -77,6 +81,8 @@ mod tests {
         .expect("selection must be optional during M2");
 
         assert!(services.selection.is_none());
+        #[cfg(target_os = "windows")]
+        assert!(services.hotkey.is_some());
     }
 
     #[cfg(not(feature = "m1-demo"))]
