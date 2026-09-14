@@ -410,20 +410,18 @@ Core 因此可以在不启动 GUI、不调用真实系统 API、不访问真实�
 允许的核心依赖关系：
 
 ```text
-                          lexift-app
-                ┌────────────┼────────────┐
-                ▼            ▼            ▼
-          lexift-ui   lexift-platform  lexift-translate
-                │            │            │
-                │            ▼            │
-                │      lexift-config      │
-                │            │            │
-                └────────────┼────────────┘
-                             ▼
+                         lexift-app
+       ┌────────────┬────────────┬────────────┬────────────┬────────────────────┐
+       ▼            ▼            ▼            ▼            ▼
+  lexift-ui  lexift-platform lexift-translate lexift-config lexift-observability
+       │            │            │            │
+       └────────────┴────────────┴────────────┘
+                              │
+                              ▼
                          lexift-core
-
-lexift-app ──────> lexift-observability
 ```
+
+其中 `lexift-observability` 保持独立，由 `lexift-app` 负责初始化；`lexift-ui`、`lexift-platform`、`lexift-translate`、`lexift-config` 都只向 `lexift-core` 收敛，外围 Adapter 之间互不依赖。
 
 更严格地说：
 
@@ -437,7 +435,7 @@ lexift-app ──────> lexift-observability
 | `lexift-observability` | 无 |
 | `lexift-app` | 全部 |
 
-注意：`lexift-platform` 与 `lexift-config` 在架构上仍是并列 Adapter。安全凭证由 Platform 负责，普通配置由 Config 负责；二者不应通过直接 crate 依赖耦合。
+注意：`lexift-platform` 与 `lexift-config` 在架构上是并列 Adapter。安全凭证由 Platform 负责，普通配置由 Config 负责；二者不应通过直接 crate 依赖耦合。
 
 ## 7. 禁止依赖
 
@@ -454,10 +452,13 @@ ui        -> translate
 ui        -> config
 
 platform  -> translate
+platform  -> config
 translate -> platform
+translate -> config
 
 config    -> ui
 config    -> platform
+config    -> translate
 ```
 
 如果确实出现跨模块协作需求，应优先检查是否需要：
