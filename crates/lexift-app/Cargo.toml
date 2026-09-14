@@ -3,6 +3,10 @@ name = "lexift-app"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+m1-demo = ["lexift-platform/mock", "lexift-translate/mock"]
+
 [dependencies]
 lexift-core.workspace = true
 lexift-ui.workspace = true
@@ -12,3 +16,7 @@ lexift-config.workspace = true
 lexift-observability.workspace = true
 tracing.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+lexift-platform = { workspace = true, features = ["mock"] }
+lexift-translate = { workspace = true, features = ["mock"] }

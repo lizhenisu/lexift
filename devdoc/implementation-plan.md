@@ -86,6 +86,8 @@ M2 的核心目的不是完成“完整翻译软件”，而是独立验证：
 
 ### M2.1 清理 M1 Mock 边界
 
+状态：✅ 已完成
+
 当前 Mock 不再作为默认 Production Adapter。
 
 调整目标：
@@ -107,6 +109,8 @@ lexift-translate
 - `PlatformCapabilities::new()` 不再隐式等价于 Mock Platform
 - `ProviderRegistry::new()` 不再隐式注册 Mock 为生产默认 Provider
 - Composition Root 明确决定使用真实实现还是 Mock
+
+当前实现通过 Cargo feature `m1-demo` 显式启用 Mock；默认构建使用 Production 容器，并在真实 Adapter 尚未配置时返回明确错误，不会静默回退到 Mock。
 
 ### M2.2 引入 Translation Task ID
 
@@ -767,7 +771,7 @@ Linux Wayland
 当前从 M1 进入 M2，实际开发顺序固定为：
 
 ```text
-① Mock / Production Adapter 分离
+① Mock / Production Adapter 分离 ✅
         ↓
 ② TranslationTaskId
         ↓

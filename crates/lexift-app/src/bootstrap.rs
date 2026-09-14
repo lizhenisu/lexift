@@ -6,7 +6,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     lexift_observability::init();
     lifecycle::on_start();
 
-    let services = AppServices::new()?;
+    let services = AppServices::for_current_build()?;
     let initial_state = services
         .state
         .lock()

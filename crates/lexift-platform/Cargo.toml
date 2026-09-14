@@ -3,5 +3,9 @@ name = "lexift-platform"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+mock = []
+
 [dependencies]
 lexift-core.workspace = true

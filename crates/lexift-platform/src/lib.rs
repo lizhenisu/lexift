@@ -1,4 +1,5 @@
 pub mod capabilities;
+#[cfg(feature = "mock")]
 mod mock;
 
 #[cfg(target_os = "linux")]

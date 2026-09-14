@@ -166,15 +166,19 @@ mod tests {
             .enable_all()
             .build()
             .expect("test runtime should start");
-        let platform = lexift_platform::PlatformCapabilities::new();
-        let providers = lexift_translate::ProviderRegistry::new();
+        let platform = lexift_platform::PlatformCapabilities::mock();
+        let providers = lexift_translate::ProviderRegistry::with_mock();
         let state = Arc::new(Mutex::new(AppState::default()));
         let view = Arc::new(RecordingView::default());
         let controller = Arc::new(AppController::new(
             runtime.handle().clone(),
             Arc::clone(&state),
-            platform.selection(),
-            providers.default_translator(),
+            platform
+                .selection()
+                .expect("mock platform should provide selection"),
+            providers
+                .default_translator()
+                .expect("mock registry should provide a translator"),
             view.clone(),
         ));
 

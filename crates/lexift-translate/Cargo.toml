@@ -3,6 +3,10 @@ name = "lexift-translate"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+mock = ["dep:tokio"]
+
 [dependencies]
 lexift-core.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, optional = true }
