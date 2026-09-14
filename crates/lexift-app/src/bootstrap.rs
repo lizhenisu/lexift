@@ -12,7 +12,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    let ui = lexift_ui::Ui::new(&initial_state)?;
+    let ui = lexift_ui::Ui::new(&initial_state, cfg!(feature = "m1-demo"))?;
     let controller = Arc::new(AppController::new(
         services.runtime.handle().clone(),
         Arc::clone(&services.state),

@@ -85,7 +85,9 @@ UI Result
 未来可支持：
 
 - Google Translate
-- DeepL
+- DeepL API（当前已实现）
+- DeepL Web（未来 Experimental Adapter）
+- DLX / DeepLX（未来 Optional Adapter）
 - Bing
 - OpenAI
 - Gemini
@@ -93,6 +95,9 @@ UI Result
 - 其他在线或本地翻译服务
 
 统一抽象后，Core 和 UI 不直接依赖具体 Provider。
+
+DeepL API、DeepL Web 与 DLX 使用独立 `TranslatorPort` Adapter，各自维护认证、协议和
+错误边界。Adapter 之间不隐式 fallback；未来如需 fallback，由上层显式路由策略决定。
 
 可进一步支持多 Provider 并行翻译：
 

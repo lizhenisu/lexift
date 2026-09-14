@@ -9,7 +9,7 @@ use lexift_core::{
 use crate::http;
 #[cfg(feature = "mock")]
 use crate::mock::MockTranslator;
-use crate::providers::deepl::DeepLApiTranslator;
+use crate::providers::deepl_api::DeepLApiTranslator;
 
 /// Translation providers selected by the application composition root.
 pub struct ProviderRegistry {

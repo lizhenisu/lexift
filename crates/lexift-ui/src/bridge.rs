@@ -11,9 +11,13 @@ pub struct Ui {
 }
 
 impl Ui {
-    pub fn new(initial_state: &AppState) -> Result<Self, slint::PlatformError> {
+    pub fn new(
+        initial_state: &AppState,
+        show_selection_demo: bool,
+    ) -> Result<Self, slint::PlatformError> {
         let main = AppWindow::new()?;
         let popup = TranslationPopup::new()?;
+        main.set_show_selection_demo(show_selection_demo);
         binding::apply(&main, &popup, mapper::view_state(initial_state));
         Ok(Self { main, popup })
     }

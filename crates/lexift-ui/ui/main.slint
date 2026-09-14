@@ -40,6 +40,7 @@ export component AppWindow inherits Window {
     in property <string> target-language: "";
     in property <string> translated-text: "";
     in property <string> error-text: "";
+    in property <bool> show-selection-demo: false;
     callback selection-translation-requested();
     callback input-translation-requested(string);
 
@@ -101,6 +102,7 @@ export component AppWindow inherits Window {
 
             ActionButton {
                 width: 220px;
+                visible: root.show-selection-demo;
                 label: "Translate selection (demo)";
                 clicked => { root.selection-translation-requested(); }
             }

@@ -2,7 +2,7 @@
 
 ## 1. 当前状态
 
-Lexift 已完成 **M1 — Translation Vertical Slice**。
+Lexift 已完成 **M2 — Real Input Translation**。
 
 当前已经具备：
 
@@ -18,6 +18,9 @@ Lexift 已完成 **M1 — Translation Vertical Slice**。
 - 后台翻译任务完成后回到 Slint UI
 - Translation Popup
 - M1 纵向链路测试
+- DeepL Official API Adapter
+- 不访问公网的 HTTP Adapter 集成测试
+- GitHub CI
 
 当前项目已经从“架构骨架阶段”进入“真实产品能力实现阶段”。
 
@@ -37,10 +40,11 @@ M1  Architecture + Mock Vertical Slice
         │
         ▼
 M2  Real Input Translation
- ← 当前阶段
+ ✅ 已完成
         │
         ▼
 M3  Windows Global Selection
+ ← 当前阶段
         │
         ▼
 M4  Desktop Integration
@@ -366,11 +370,15 @@ Adapter；`:fx` Key 使用 Free Endpoint，其余 Key 使用 Pro Endpoint。Prov
 
 ### M2.8 Real Translation Hardening
 
-状态：待开始
+状态：✅ 已完成
 
-在真实 Provider 链路上完善网络错误 UX、Provider unavailable、连续请求和并发过期结果
-验证，并清理 Production / Demo UI。M2 阶段继续通过 `LEXIFT_DEEPL_AUTH_KEY` 临时注入
-Credential；系统级 Secret Storage 留到 Desktop Integration 阶段。
+官方 Adapter 已重命名为 `deepl_api`，并明确与未来 DeepL Web、DLX Adapter 分离。
+中文映射区分 `ZH-HANS` 与 `ZH-HANT`。localhost HTTP 测试覆盖请求协议、成功响应、
+403、429、456、5xx、Malformed JSON、空响应、超时、连接失败和真实 HTTP 并发下的
+stale result；默认测试不访问公网。Production UI 隐藏 Selection Demo，`m1-demo` 继续
+使用 Mock Selection 与 Mock Translator。GitHub CI 执行格式、Clippy 和 Workspace 测试。
+M2 阶段继续通过 `LEXIFT_DEEPL_AUTH_KEY` 临时注入 Credential；系统级 Secret Storage
+留到 Desktop Integration 阶段。
 
 ---
 
@@ -799,9 +807,9 @@ Linux Wayland
         ↓
 ⑦ DeepL Translator + Environment Credential ✅
         ↓
-⑧ Real Translation Hardening
+⑧ Real Translation Hardening ✅
         ↓
-M2 验收
+M2 验收 ✅
 ```
 
 M2 完成后：
