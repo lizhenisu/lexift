@@ -10,7 +10,7 @@ use tokio::runtime::{Builder, Runtime};
 pub(crate) struct AppServices {
     pub(crate) runtime: Runtime,
     pub(crate) state: Arc<Mutex<AppState>>,
-    pub(crate) selection: Arc<dyn SelectionPort>,
+    pub(crate) selection: Option<Arc<dyn SelectionPort>>,
     pub(crate) translator: Arc<dyn TranslatorPort>,
     _settings: lexift_config::AppConfig,
 }
@@ -29,11 +29,15 @@ impl AppServices {
         #[cfg(feature = "m1-demo")]
         let translators = lexift_translate::ProviderRegistry::with_mock();
 
-        let selection = platform.selection().ok_or_else(|| {
-            lexift_core::Error::new(
-                "no production selection adapter is configured; use --features m1-demo for the M1 demo",
-            )
-        })?;
+        Self::from_capabilities(settings, platform, translators)
+    }
+
+    fn from_capabilities(
+        settings: lexift_config::AppConfig,
+        platform: lexift_platform::PlatformCapabilities,
+        translators: lexift_translate::ProviderRegistry,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let selection = platform.selection();
         let translator = translators.default_translator().ok_or_else(|| {
             lexift_core::Error::new(
                 "no production translator is configured; use --features m1-demo for the M1 demo",
@@ -52,5 +56,22 @@ impl AppServices {
             translator,
             _settings: settings,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn services_allow_a_translator_without_selection() {
+        let services = AppServices::from_capabilities(
+            lexift_config::AppConfig::default(),
+            lexift_platform::PlatformCapabilities::new(),
+            lexift_translate::ProviderRegistry::with_mock(),
+        )
+        .expect("selection must be optional during M2");
+
+        assert!(services.selection.is_none());
     }
 }

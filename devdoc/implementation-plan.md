@@ -110,7 +110,13 @@ lexift-translate
 - `ProviderRegistry::new()` 不再隐式注册 Mock 为生产默认 Provider
 - Composition Root 明确决定使用真实实现还是 Mock
 
-当前实现通过 Cargo feature `m1-demo` 显式启用 Mock；默认构建使用 Production 容器，并在真实 Adapter 尚未配置时返回明确错误，不会静默回退到 Mock。
+当前实现通过 Cargo feature `m1-demo` 显式启用 Mock；默认构建使用 Production 容器，不会静默回退到 Mock。Selection 作为可选 Capability，在对应操作触发时才检查；尚未配置真实 Translator 时由非 Mock 的错误 Adapter 拒绝翻译，因此不会阻止应用启动或产生假译文。
+
+#### M2.1.1 Optional Selection Capability
+
+状态：✅ 已完成
+
+`SelectionPort` 是按需 Capability。缺少 Selection 只会使划词操作进入 Error 状态，不影响应用启动和后续输入翻译链路。
 
 ### M2.2 引入 Translation Task ID
 

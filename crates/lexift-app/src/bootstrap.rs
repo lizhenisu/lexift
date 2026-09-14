@@ -16,7 +16,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let controller = Arc::new(AppController::new(
         services.runtime.handle().clone(),
         Arc::clone(&services.state),
-        Arc::clone(&services.selection),
+        services.selection.clone(),
         Arc::clone(&services.translator),
         Arc::new(ui.handle()),
     ));

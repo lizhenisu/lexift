@@ -35,7 +35,7 @@ impl ViewPort for lexift_ui::UiHandle {
 pub(crate) struct AppController {
     runtime: Handle,
     state: Arc<Mutex<AppState>>,
-    selection: Arc<dyn SelectionPort>,
+    selection: Option<Arc<dyn SelectionPort>>,
     translator: Arc<dyn TranslatorPort>,
     ui: Arc<dyn ViewPort>,
 }
@@ -44,7 +44,7 @@ impl AppController {
     pub(crate) fn new(
         runtime: Handle,
         state: Arc<Mutex<AppState>>,
-        selection: Arc<dyn SelectionPort>,
+        selection: Option<Arc<dyn SelectionPort>>,
         translator: Arc<dyn TranslatorPort>,
         ui: Arc<dyn ViewPort>,
     ) -> Self {
@@ -85,8 +85,13 @@ impl AppController {
     }
 
     fn capture_selection(self: &Arc<Self>) {
+        let Some(selection) = self.selection.clone() else {
+            self.dispatch(AppEvent::TranslationFailed(
+                "Selection capability is not available".into(),
+            ));
+            return;
+        };
         let controller = Arc::clone(self);
-        let selection = Arc::clone(&self.selection);
         self.runtime.spawn(async move {
             let result = tokio::task::spawn_blocking(move || selection.selected_text()).await;
             match result {
@@ -160,6 +165,56 @@ mod tests {
     }
 
     #[test]
+    fn constructs_without_selection_capability() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("test runtime should start");
+        let providers = lexift_translate::ProviderRegistry::with_mock();
+
+        let _controller = AppController::new(
+            runtime.handle().clone(),
+            Arc::new(Mutex::new(AppState::default())),
+            None,
+            providers
+                .default_translator()
+                .expect("mock registry should provide a translator"),
+            Arc::new(RecordingView::default()),
+        );
+    }
+
+    #[test]
+    fn missing_selection_only_fails_the_requested_operation() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("test runtime should start");
+        let providers = lexift_translate::ProviderRegistry::with_mock();
+        let state = Arc::new(Mutex::new(AppState::default()));
+        let view = Arc::new(RecordingView::default());
+        let controller = Arc::new(AppController::new(
+            runtime.handle().clone(),
+            Arc::clone(&state),
+            None,
+            providers
+                .default_translator()
+                .expect("mock registry should provide a translator"),
+            view.clone(),
+        ));
+
+        controller.dispatch(AppEvent::TranslateRequested);
+
+        let state = state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(state.phase, TranslationPhase::Error);
+        assert_eq!(state.error_message, "Selection capability is not available");
+        assert!(view.popup_shown.load(Ordering::SeqCst));
+    }
+
+    #[test]
     fn runs_mock_translation_without_blocking_the_caller() {
         let runtime = Builder::new_multi_thread()
             .worker_threads(2)
@@ -173,9 +228,7 @@ mod tests {
         let controller = Arc::new(AppController::new(
             runtime.handle().clone(),
             Arc::clone(&state),
-            platform
-                .selection()
-                .expect("mock platform should provide selection"),
+            platform.selection(),
             providers
                 .default_translator()
                 .expect("mock registry should provide a translator"),
