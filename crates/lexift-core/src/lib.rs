@@ -7,6 +7,7 @@ pub mod state;
 pub mod usecases;
 
 pub use command::AppCommand;
+pub use domain::translation::TranslationTaskId;
 pub use error::{Error, Result};
 pub use event::AppEvent;
 pub use state::{AppState, TranslationPhase};

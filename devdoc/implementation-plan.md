@@ -120,6 +120,8 @@ lexift-translate
 
 ### M2.2 引入 Translation Task ID
 
+状态：✅ 已完成
+
 增加翻译任务身份：
 
 ```rust
@@ -779,7 +781,7 @@ Linux Wayland
 ```text
 ① Mock / Production Adapter 分离 ✅
         ↓
-② TranslationTaskId
+② TranslationTaskId ✅
         ↓
 ③ Settings.target_language 接入 Core
         ↓

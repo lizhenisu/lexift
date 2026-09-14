@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use lexift_core::{
-    AppCommand, AppEvent, AppState,
+    AppCommand, AppEvent, AppState, TranslationTaskId,
     ports::{selection::SelectionPort, translator::TranslatorPort},
 };
 use tokio::runtime::Handle;
@@ -76,19 +76,20 @@ impl AppController {
 
     fn execute(self: &Arc<Self>, command: AppCommand) {
         match command {
-            AppCommand::CaptureSelection => self.capture_selection(),
-            AppCommand::Translate(request) => self.translate(request),
+            AppCommand::CaptureSelection { task_id } => self.capture_selection(task_id),
+            AppCommand::Translate { task_id, request } => self.translate(task_id, request),
             AppCommand::ShowPopup => self.ui.show_popup(),
             AppCommand::HidePopup => self.ui.hide_popup(),
             AppCommand::Exit => self.ui.quit(),
         }
     }
 
-    fn capture_selection(self: &Arc<Self>) {
+    fn capture_selection(self: &Arc<Self>, task_id: TranslationTaskId) {
         let Some(selection) = self.selection.clone() else {
-            self.dispatch(AppEvent::TranslationFailed(
-                "Selection capability is not available".into(),
-            ));
+            self.dispatch(AppEvent::TranslationFailed {
+                task_id,
+                error: "Selection capability is not available".into(),
+            });
             return;
         };
         let controller = Arc::clone(self);
@@ -96,32 +97,46 @@ impl AppController {
             let result = tokio::task::spawn_blocking(move || selection.selected_text()).await;
             match result {
                 Ok(Ok(Some(selection))) => {
-                    controller.dispatch(AppEvent::SelectionCaptured(selection));
+                    controller.dispatch(AppEvent::SelectionCaptured { task_id, selection });
                 }
-                Ok(Ok(None)) => controller.dispatch(AppEvent::TranslationFailed(
-                    "No selected text was found".into(),
-                )),
+                Ok(Ok(None)) => controller.dispatch(AppEvent::TranslationFailed {
+                    task_id,
+                    error: "No selected text was found".into(),
+                }),
                 Ok(Err(error)) => {
-                    controller.dispatch(AppEvent::TranslationFailed(error.to_string()));
+                    controller.dispatch(AppEvent::TranslationFailed {
+                        task_id,
+                        error: error.to_string(),
+                    });
                 }
-                Err(error) => controller.dispatch(AppEvent::TranslationFailed(format!(
-                    "Selection worker failed: {error}"
-                ))),
+                Err(error) => controller.dispatch(AppEvent::TranslationFailed {
+                    task_id,
+                    error: format!("Selection worker failed: {error}"),
+                }),
             }
         });
     }
 
-    fn translate(self: &Arc<Self>, request: lexift_core::domain::translation::TranslateRequest) {
-        self.dispatch(AppEvent::TranslationStarted);
+    fn translate(
+        self: &Arc<Self>,
+        task_id: TranslationTaskId,
+        request: lexift_core::domain::translation::TranslateRequest,
+    ) {
+        self.dispatch(AppEvent::TranslationStarted { task_id });
         let controller = Arc::clone(self);
         let translator = Arc::clone(&self.translator);
         self.runtime.spawn(async move {
             match lexift_core::usecases::translate_input::execute(translator.as_ref(), request)
                 .await
             {
-                Ok(result) => controller.dispatch(AppEvent::TranslationFinished(result)),
+                Ok(result) => {
+                    controller.dispatch(AppEvent::TranslationFinished { task_id, result });
+                }
                 Err(error) => {
-                    controller.dispatch(AppEvent::TranslationFailed(error.to_string()));
+                    controller.dispatch(AppEvent::TranslationFailed {
+                        task_id,
+                        error: error.to_string(),
+                    });
                 }
             }
         });
@@ -136,7 +151,11 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use lexift_core::TranslationPhase;
+    use lexift_core::{
+        TranslationPhase,
+        domain::translation::{TranslateRequest, TranslateResult},
+        ports::translator::TranslationFuture,
+    };
     use tokio::runtime::Builder;
 
     use super::*;
@@ -162,6 +181,22 @@ mod tests {
         fn hide_popup(&self) {}
 
         fn quit(&self) {}
+    }
+
+    struct ReorderingTranslator;
+
+    impl TranslatorPort for ReorderingTranslator {
+        fn translate(&self, request: TranslateRequest) -> TranslationFuture<'_> {
+            Box::pin(async move {
+                let delay = if request.text == "old request" {
+                    100
+                } else {
+                    10
+                };
+                tokio::time::sleep(Duration::from_millis(delay)).await;
+                Ok(TranslateResult { text: request.text })
+            })
+        }
     }
 
     #[test]
@@ -275,5 +310,47 @@ mod tests {
             "你好，世界"
         );
         assert!(view.popup_shown.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn late_result_does_not_overwrite_the_newest_translation() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("test runtime should start");
+        let mut initial_state = AppState::default();
+        initial_state.reduce(AppEvent::TranslateRequested);
+        initial_state.reduce(AppEvent::TranslateRequested);
+        let state = Arc::new(Mutex::new(initial_state));
+        let controller = Arc::new(AppController::new(
+            runtime.handle().clone(),
+            Arc::clone(&state),
+            None,
+            Arc::new(ReorderingTranslator),
+            Arc::new(RecordingView::default()),
+        ));
+
+        controller.translate(
+            TranslationTaskId::new(1),
+            TranslateRequest {
+                text: "old request".into(),
+                target_language: lexift_core::domain::language::Language("zh-CN".into()),
+            },
+        );
+        controller.translate(
+            TranslationTaskId::new(2),
+            TranslateRequest {
+                text: "new request".into(),
+                target_language: lexift_core::domain::language::Language("zh-CN".into()),
+            },
+        );
+
+        thread::sleep(Duration::from_millis(200));
+        let state = state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(state.phase, TranslationPhase::Success);
+        assert_eq!(state.translated_text, "new request");
     }
 }
