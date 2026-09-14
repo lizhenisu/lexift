@@ -72,14 +72,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn services_allow_a_translator_without_selection() {
+    fn services_accept_the_platform_selection_capability() {
         let services = AppServices::from_capabilities(
             lexift_config::AppConfig::default(),
             lexift_platform::PlatformCapabilities::new(),
             lexift_translate::ProviderRegistry::with_mock(),
         )
-        .expect("selection must be optional during M2");
+        .expect("platform capabilities should compose into application services");
 
+        #[cfg(target_os = "windows")]
+        assert!(services.selection.is_some());
+        #[cfg(not(target_os = "windows"))]
         assert!(services.selection.is_none());
         #[cfg(target_os = "windows")]
         assert!(services.hotkey.is_some());

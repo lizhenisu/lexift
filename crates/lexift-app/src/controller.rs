@@ -91,7 +91,7 @@ impl AppController {
 
     fn capture_selection(self: &Arc<Self>, task_id: TranslationTaskId) {
         let Some(selection) = self.selection.clone() else {
-            self.dispatch(AppEvent::TranslationFailed {
+            self.dispatch(AppEvent::SelectionCaptureFailed {
                 task_id,
                 error: "Selection capability is not available".into(),
             });
@@ -104,17 +104,17 @@ impl AppController {
                 Ok(Ok(Some(selection))) => {
                     controller.dispatch(AppEvent::SelectionCaptured { task_id, selection });
                 }
-                Ok(Ok(None)) => controller.dispatch(AppEvent::TranslationFailed {
+                Ok(Ok(None)) => controller.dispatch(AppEvent::SelectionCaptureFailed {
                     task_id,
                     error: "No selected text was found".into(),
                 }),
                 Ok(Err(error)) => {
-                    controller.dispatch(AppEvent::TranslationFailed {
+                    controller.dispatch(AppEvent::SelectionCaptureFailed {
                         task_id,
                         error: error.to_string(),
                     });
                 }
-                Err(error) => controller.dispatch(AppEvent::TranslationFailed {
+                Err(error) => controller.dispatch(AppEvent::SelectionCaptureFailed {
                     task_id,
                     error: format!("Selection worker failed: {error}"),
                 }),

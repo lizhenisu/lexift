@@ -54,13 +54,24 @@ impl AppState {
             AppEvent::InputTranslationRequested { text } => self.request_input_translation(text),
             AppEvent::SelectionCaptured { task_id, selection } if self.is_current_task(task_id) => {
                 self.source_text = selection.text.clone();
-                vec![AppCommand::Translate {
-                    task_id,
-                    request: TranslateRequest {
-                        text: selection.text,
-                        target_language: self.settings.target_language.clone(),
+                vec![
+                    AppCommand::ShowPopup,
+                    AppCommand::Translate {
+                        task_id,
+                        request: TranslateRequest {
+                            text: selection.text,
+                            target_language: self.settings.target_language.clone(),
+                        },
                     },
-                }]
+                ]
+            }
+            AppEvent::SelectionCaptureFailed { task_id, error }
+                if self.is_current_task(task_id) =>
+            {
+                self.phase = TranslationPhase::Error;
+                self.error_message = error;
+                self.current_translation_task = None;
+                vec![AppCommand::ShowPopup]
             }
             AppEvent::TranslationStarted { task_id } if self.is_current_task(task_id) => {
                 self.phase = TranslationPhase::Translating;
@@ -80,6 +91,7 @@ impl AppState {
                 Vec::new()
             }
             AppEvent::SelectionCaptured { .. }
+            | AppEvent::SelectionCaptureFailed { .. }
             | AppEvent::TranslationStarted { .. }
             | AppEvent::TranslationFinished { .. }
             | AppEvent::TranslationFailed { .. } => Vec::new(),
@@ -96,10 +108,7 @@ impl AppState {
         let task_id = self.begin_translation_task();
         self.phase = TranslationPhase::Capturing;
         self.source_text.clear();
-        vec![
-            AppCommand::ShowPopup,
-            AppCommand::CaptureSelection { task_id },
-        ]
+        vec![AppCommand::CaptureSelection { task_id }]
     }
 
     fn request_input_translation(&mut self, text: String) -> Vec<AppCommand> {
@@ -159,12 +168,9 @@ mod tests {
 
         assert_eq!(
             state.reduce(AppEvent::SelectionTranslationRequested),
-            vec![
-                AppCommand::ShowPopup,
-                AppCommand::CaptureSelection {
-                    task_id: TranslationTaskId::new(1),
-                },
-            ]
+            vec![AppCommand::CaptureSelection {
+                task_id: TranslationTaskId::new(1),
+            }]
         );
         assert_eq!(state.phase, TranslationPhase::Capturing);
         assert_eq!(
@@ -181,13 +187,16 @@ mod tests {
         });
         assert_eq!(
             commands,
-            vec![AppCommand::Translate {
-                task_id: TranslationTaskId::new(1),
-                request: TranslateRequest {
-                    text: "Hello world".into(),
-                    target_language: Language("zh-CN".into()),
+            vec![
+                AppCommand::ShowPopup,
+                AppCommand::Translate {
+                    task_id: TranslationTaskId::new(1),
+                    request: TranslateRequest {
+                        text: "Hello world".into(),
+                        target_language: Language("zh-CN".into()),
+                    },
                 },
-            }]
+            ]
         );
 
         state.reduce(AppEvent::TranslationStarted {
@@ -222,13 +231,16 @@ mod tests {
                     anchor: None,
                 },
             }),
-            vec![AppCommand::Translate {
-                task_id: TranslationTaskId::new(1),
-                request: TranslateRequest {
-                    text: "Hello world".into(),
-                    target_language: Language("de".into()),
+            vec![
+                AppCommand::ShowPopup,
+                AppCommand::Translate {
+                    task_id: TranslationTaskId::new(1),
+                    request: TranslateRequest {
+                        text: "Hello world".into(),
+                        target_language: Language("de".into()),
+                    },
                 },
-            }]
+            ]
         );
     }
 
@@ -348,12 +360,9 @@ mod tests {
 
         assert_eq!(
             state.reduce(AppEvent::SelectionTranslationRequested),
-            vec![
-                AppCommand::ShowPopup,
-                AppCommand::CaptureSelection {
-                    task_id: TranslationTaskId::new(2),
-                },
-            ]
+            vec![AppCommand::CaptureSelection {
+                task_id: TranslationTaskId::new(2),
+            }]
         );
         assert_eq!(state.phase, TranslationPhase::Capturing);
         assert_eq!(
@@ -373,6 +382,41 @@ mod tests {
 
         assert_eq!(state.phase, TranslationPhase::Error);
         assert_eq!(state.error_message, "provider unavailable");
+    }
+
+    #[test]
+    fn selection_capture_failure_opens_the_popup_with_an_error() {
+        let mut state = AppState::default();
+        state.reduce(AppEvent::SelectionTranslationRequested);
+
+        assert_eq!(
+            state.reduce(AppEvent::SelectionCaptureFailed {
+                task_id: TranslationTaskId::new(1),
+                error: "No selected text was found".into(),
+            }),
+            vec![AppCommand::ShowPopup]
+        );
+        assert_eq!(state.phase, TranslationPhase::Error);
+        assert_eq!(state.current_translation_task, None);
+        assert_eq!(state.error_message, "No selected text was found");
+    }
+
+    #[test]
+    fn input_translation_failure_does_not_open_the_selection_popup() {
+        let mut state = AppState::default();
+        state.reduce(AppEvent::InputTranslationRequested {
+            text: "Hello".into(),
+        });
+
+        assert!(
+            state
+                .reduce(AppEvent::TranslationFailed {
+                    task_id: TranslationTaskId::new(1),
+                    error: "provider unavailable".into(),
+                })
+                .is_empty()
+        );
+        assert_eq!(state.phase, TranslationPhase::Error);
     }
 
     #[test]
@@ -428,6 +472,10 @@ mod tests {
         state.reduce(AppEvent::TranslationFailed {
             task_id: TranslationTaskId::new(1),
             error: "stale error".into(),
+        });
+        state.reduce(AppEvent::SelectionCaptureFailed {
+            task_id: TranslationTaskId::new(1),
+            error: "stale capture error".into(),
         });
 
         assert_eq!(state.phase, TranslationPhase::Capturing);

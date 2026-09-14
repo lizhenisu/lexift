@@ -501,25 +501,35 @@ Windows Production 通过 `RegisterHotKey(None, ...)` 注册 `Alt+X`，使用 `M
 MOD_NOREPEAT`，并在独立的阻塞式 `GetMessageW` 线程接收 `WM_HOTKEY`。注册过程通过握手
 同步报告冲突；失败只记录 warning，不阻止输入翻译或应用启动。`WindowsHotkeyPort` 在
 Drop 时向 listener 投递 `WM_QUIT`、注销快捷键并 join 线程。当前 Windows capability 为
-`hotkey = Some`、`selection = None`；`m1-demo` 和非 Windows 均不装配该 Adapter。
+`hotkey = Some`；`m1-demo` 和非 Windows 均不装配该 Adapter。
 
-### M3.2 Windows Selection
+### M3.2 Windows UI Automation Selection
+
+状态：✅ 已完成
+
+Windows Production 已装配 `WindowsSelectionPort`。划词请求先在现有
+`spawn_blocking` worker 上捕获 Selection，成功或失败后才显示 Popup，避免 Popup 抢走
+前台应用焦点。捕获失败通过独立的 `SelectionCaptureFailed` 事件进入 Error 状态，不影响
+输入翻译的错误行为。
+
+每次捕获都在调用线程初始化 MTA COM apartment，并创建 `CUIAutomation8` client。Adapter
+从 focused element 开始，在 Control View 中最多向上查找 8 层 `TextPattern`，读取并按原顺序
+合并有效 selection ranges。正常不支持或空选择返回 `None`，COM 和 provider 异常转换为稳定
+的 Core Error。Windows capability 现在为：
+
+```text
+hotkey    = Some(WindowsHotkeyPort)
+selection = Some(WindowsSelectionPort)
+```
+
+本阶段只实现 UI Automation，`Selection.anchor` 保持 `None`；未加入剪贴板模拟、定位矩形或
+应用特判。
+
+### M3.3 Clipboard Selection Fallback
 
 状态：← 当前阶段
 
-Selection 采用多级策略：
-
-```text
-Strategy 1
-Windows UI Automation
-
-        ↓ fail
-
-Strategy 2
-Clipboard fallback
-```
-
-推荐设计：
+在 UI Automation 返回无有效 Selection 时，使用 Clipboard fallback：
 
 ```text
 WindowsSelectionProvider
@@ -536,8 +546,6 @@ Core 仍然只调用：
 ```text
 SelectionPort
 ```
-
-### M3.3 Selection 验证范围
 
 至少验证：
 

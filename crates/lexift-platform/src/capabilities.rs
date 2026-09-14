@@ -15,6 +15,9 @@ impl PlatformCapabilities {
     /// Creates a production capability set without implicit development adapters.
     pub fn new() -> Self {
         Self {
+            #[cfg(target_os = "windows")]
+            selection: Some(Arc::new(crate::windows::WindowsSelectionPort::new())),
+            #[cfg(not(target_os = "windows"))]
             selection: None,
             #[cfg(target_os = "windows")]
             hotkey: Some(Arc::new(crate::windows::WindowsHotkeyPort::new())),
@@ -51,16 +54,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn production_capabilities_do_not_install_mock_selection() {
+    fn production_capabilities_match_the_current_platform() {
+        #[cfg(target_os = "windows")]
+        assert!(PlatformCapabilities::new().selection().is_some());
+        #[cfg(not(target_os = "windows"))]
         assert!(PlatformCapabilities::new().selection().is_none());
     }
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn windows_production_exposes_hotkey_without_selection() {
+    fn windows_production_exposes_hotkey_and_selection() {
         let capabilities = PlatformCapabilities::new();
         assert!(capabilities.hotkey().is_some());
-        assert!(capabilities.selection().is_none());
+        assert!(capabilities.selection().is_some());
     }
 
     #[cfg(not(target_os = "windows"))]
