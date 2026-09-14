@@ -12,7 +12,6 @@ pub(crate) struct AppServices {
     pub(crate) state: Arc<Mutex<AppState>>,
     pub(crate) selection: Option<Arc<dyn SelectionPort>>,
     pub(crate) translator: Arc<dyn TranslatorPort>,
-    _settings: lexift_config::AppConfig,
 }
 
 impl AppServices {
@@ -51,10 +50,9 @@ impl AppServices {
 
         Ok(Self {
             runtime,
-            state: Arc::new(Mutex::new(AppState::default())),
+            state: Arc::new(Mutex::new(AppState::new(settings.settings))),
             selection,
             translator,
-            _settings: settings,
         })
     }
 }
@@ -73,5 +71,27 @@ mod tests {
         .expect("selection must be optional during M2");
 
         assert!(services.selection.is_none());
+    }
+
+    #[test]
+    fn injects_configured_settings_into_core_state() {
+        let target_language = lexift_core::domain::language::Language("ja".into());
+        let services = AppServices::from_capabilities(
+            lexift_config::AppConfig {
+                settings: lexift_core::domain::settings::Settings {
+                    target_language: target_language.clone(),
+                },
+                ..Default::default()
+            },
+            lexift_platform::PlatformCapabilities::new(),
+            lexift_translate::ProviderRegistry::with_mock(),
+        )
+        .expect("configured settings should initialize app state");
+
+        let state = services
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(state.settings.target_language, target_language);
     }
 }

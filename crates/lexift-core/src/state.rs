@@ -1,7 +1,7 @@
 use crate::{
     AppCommand, AppEvent,
     domain::{
-        language::Language,
+        settings::Settings,
         translation::{TranslateRequest, TranslationTaskId},
     },
 };
@@ -16,17 +16,36 @@ pub enum TranslationPhase {
     Error,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppState {
     pub phase: TranslationPhase,
     pub current_translation_task: Option<TranslationTaskId>,
+    pub settings: Settings,
     pub source_text: String,
     pub translated_text: String,
     pub error_message: String,
     next_translation_task: u64,
 }
 
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new(Settings::default())
+    }
+}
+
 impl AppState {
+    pub fn new(settings: Settings) -> Self {
+        Self {
+            phase: TranslationPhase::Idle,
+            current_translation_task: None,
+            settings,
+            source_text: String::new(),
+            translated_text: String::new(),
+            error_message: String::new(),
+            next_translation_task: 0,
+        }
+    }
+
     /// Applies a domain event and returns the capabilities the app must execute.
     pub fn reduce(&mut self, event: AppEvent) -> Vec<AppCommand> {
         match event {
@@ -38,7 +57,7 @@ impl AppState {
                     task_id,
                     request: TranslateRequest {
                         text: selection.text,
-                        target_language: Language("zh-CN".into()),
+                        target_language: self.settings.target_language.clone(),
                     },
                 }]
             }
@@ -101,7 +120,9 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{geometry::Point, selection::Selection, translation::TranslateResult};
+    use crate::domain::{
+        geometry::Point, language::Language, selection::Selection, translation::TranslateResult,
+    };
 
     #[test]
     fn reduces_the_translation_vertical_slice() {
@@ -155,6 +176,31 @@ mod tests {
         assert_eq!(state.current_translation_task, None);
         assert_eq!(state.source_text, "Hello world");
         assert_eq!(state.translated_text, "你好，世界");
+    }
+
+    #[test]
+    fn uses_the_current_target_language_for_translation_requests() {
+        let mut state = AppState::new(Settings {
+            target_language: Language("de".into()),
+        });
+        state.reduce(AppEvent::TranslateRequested);
+
+        assert_eq!(
+            state.reduce(AppEvent::SelectionCaptured {
+                task_id: TranslationTaskId::new(1),
+                selection: Selection {
+                    text: "Hello world".into(),
+                    anchor: None,
+                },
+            }),
+            vec![AppCommand::Translate {
+                task_id: TranslationTaskId::new(1),
+                request: TranslateRequest {
+                    text: "Hello world".into(),
+                    target_language: Language("de".into()),
+                },
+            }]
+        );
     }
 
     #[test]

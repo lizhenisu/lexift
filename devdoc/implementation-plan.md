@@ -178,6 +178,8 @@ A 后返回
 
 ### M2.3 Settings 真正进入 Core
 
+状态：✅ 已完成
+
 当前已经存在：
 
 ```text
@@ -210,6 +212,9 @@ TranslateRequest
 - `AppState` 或应用上下文能够获取当前 Settings
 - TranslateRequest 从当前用户设置获取目标语言
 - 后续 UI 修改目标语言时无需修改 Provider 实现
+
+当前实现由 Composition Root 将 `AppConfig.settings` 注入 `AppState`，Core 创建
+`TranslateRequest` 时读取当前 `Settings.target_language`，不再硬编码目标语言。
 
 ### M2.4 实现输入翻译
 
@@ -783,7 +788,7 @@ Linux Wayland
         ↓
 ② TranslationTaskId ✅
         ↓
-③ Settings.target_language 接入 Core
+③ Settings.target_language 接入 Core ✅
         ↓
 ④ Input Translation Event / Use Case
         ↓
