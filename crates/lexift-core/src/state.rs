@@ -10,6 +10,7 @@ use crate::{
 pub enum TranslationPhase {
     #[default]
     Idle,
+    NoSelection,
     Capturing,
     Translating,
     Success,
@@ -65,6 +66,14 @@ impl AppState {
                     },
                 ]
             }
+            AppEvent::SelectionCaptureEmpty { task_id } if self.is_current_task(task_id) => {
+                self.phase = TranslationPhase::NoSelection;
+                self.current_translation_task = None;
+                self.source_text.clear();
+                self.translated_text.clear();
+                self.error_message.clear();
+                Vec::new()
+            }
             AppEvent::SelectionCaptureFailed { task_id, error }
                 if self.is_current_task(task_id) =>
             {
@@ -91,6 +100,7 @@ impl AppState {
                 Vec::new()
             }
             AppEvent::SelectionCaptured { .. }
+            | AppEvent::SelectionCaptureEmpty { .. }
             | AppEvent::SelectionCaptureFailed { .. }
             | AppEvent::TranslationStarted { .. }
             | AppEvent::TranslationFinished { .. }
@@ -399,6 +409,23 @@ mod tests {
         assert_eq!(state.phase, TranslationPhase::Error);
         assert_eq!(state.current_translation_task, None);
         assert_eq!(state.error_message, "No selected text was found");
+    }
+
+    #[test]
+    fn empty_selection_returns_to_idle_without_showing_the_popup() {
+        let mut state = AppState::default();
+        state.reduce(AppEvent::SelectionTranslationRequested);
+
+        assert!(
+            state
+                .reduce(AppEvent::SelectionCaptureEmpty {
+                    task_id: TranslationTaskId::new(1),
+                })
+                .is_empty()
+        );
+        assert_eq!(state.phase, TranslationPhase::NoSelection);
+        assert_eq!(state.current_translation_task, None);
+        assert!(state.error_message.is_empty());
     }
 
     #[test]

@@ -14,6 +14,9 @@ pub enum AppEvent {
         task_id: TranslationTaskId,
         selection: Selection,
     },
+    SelectionCaptureEmpty {
+        task_id: TranslationTaskId,
+    },
     SelectionCaptureFailed {
         task_id: TranslationTaskId,
         error: String,

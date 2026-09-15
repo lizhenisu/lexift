@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 use lexift_core::{
     AppCommand, AppEvent, AppState, TranslationTaskId,
@@ -38,6 +41,7 @@ pub(crate) struct AppController {
     selection: Option<Arc<dyn SelectionPort>>,
     translator: Arc<dyn TranslatorPort>,
     ui: Arc<dyn ViewPort>,
+    selection_capture_in_flight: AtomicBool,
 }
 
 impl AppController {
@@ -54,17 +58,41 @@ impl AppController {
             selection,
             translator,
             ui,
+            selection_capture_in_flight: AtomicBool::new(false),
         }
     }
 
     pub(crate) fn dispatch(self: &Arc<Self>, event: AppEvent) {
-        tracing::debug!(?event, "dispatching application event");
+        if matches!(event, AppEvent::SelectionTranslationRequested)
+            && self
+                .selection_capture_in_flight
+                .swap(true, Ordering::AcqRel)
+        {
+            tracing::debug!("selection capture is already running; ignoring repeated request");
+            return;
+        }
+        if matches!(
+            event,
+            AppEvent::SelectionCaptured { .. }
+                | AppEvent::SelectionCaptureEmpty { .. }
+                | AppEvent::SelectionCaptureFailed { .. }
+        ) {
+            self.selection_capture_in_flight
+                .store(false, Ordering::Release);
+        }
+        tracing::debug!(event = event_name(&event), "dispatching application event");
         let (snapshot, commands) = {
             let mut state = self
                 .state
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             let commands = state.reduce(event);
+            tracing::debug!(
+                task_id = ?state.current_translation_task,
+                phase = ?state.phase,
+                command_count = commands.len(),
+                "application transition completed"
+            );
             (state.clone(), commands)
         };
         self.ui.update(snapshot);
@@ -90,6 +118,7 @@ impl AppController {
     }
 
     fn capture_selection(self: &Arc<Self>, task_id: TranslationTaskId) {
+        tracing::debug!(?task_id, "selection capture started");
         let Some(selection) = self.selection.clone() else {
             self.dispatch(AppEvent::SelectionCaptureFailed {
                 task_id,
@@ -104,10 +133,7 @@ impl AppController {
                 Ok(Ok(Some(selection))) => {
                     controller.dispatch(AppEvent::SelectionCaptured { task_id, selection });
                 }
-                Ok(Ok(None)) => controller.dispatch(AppEvent::SelectionCaptureFailed {
-                    task_id,
-                    error: "No selected text was found".into(),
-                }),
+                Ok(Ok(None)) => controller.dispatch(AppEvent::SelectionCaptureEmpty { task_id }),
                 Ok(Err(error)) => {
                     controller.dispatch(AppEvent::SelectionCaptureFailed {
                         task_id,
@@ -127,6 +153,7 @@ impl AppController {
         task_id: TranslationTaskId,
         request: lexift_core::domain::translation::TranslateRequest,
     ) {
+        tracing::debug!(?task_id, "translation request started");
         self.dispatch(AppEvent::TranslationStarted { task_id });
         let controller = Arc::clone(self);
         let translator = Arc::clone(&self.translator);
@@ -135,6 +162,7 @@ impl AppController {
                 .await
             {
                 Ok(result) => {
+                    tracing::debug!(?task_id, "translation request finished");
                     controller.dispatch(AppEvent::TranslationFinished { task_id, result });
                 }
                 Err(error) => {
@@ -148,10 +176,26 @@ impl AppController {
     }
 }
 
+fn event_name(event: &AppEvent) -> &'static str {
+    match event {
+        AppEvent::Started => "started",
+        AppEvent::SelectionTranslationRequested => "selection_translation_requested",
+        AppEvent::InputTranslationRequested { .. } => "input_translation_requested",
+        AppEvent::SelectionCaptured { .. } => "selection_captured",
+        AppEvent::SelectionCaptureEmpty { .. } => "selection_capture_empty",
+        AppEvent::SelectionCaptureFailed { .. } => "selection_capture_failed",
+        AppEvent::TranslationStarted { .. } => "translation_started",
+        AppEvent::TranslationFinished { .. } => "translation_finished",
+        AppEvent::TranslationFailed { .. } => "translation_failed",
+        AppEvent::PopupHidden => "popup_hidden",
+        AppEvent::ExitRequested => "exit_requested",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
-        sync::atomic::{AtomicBool, Ordering},
+        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
         thread,
         time::{Duration, Instant},
     };
@@ -189,6 +233,87 @@ mod tests {
     }
 
     struct ReorderingTranslator;
+
+    struct CountingSelection {
+        calls: AtomicUsize,
+    }
+
+    struct EmptySelection;
+
+    struct SequentialSelection(AtomicUsize);
+
+    impl SelectionPort for SequentialSelection {
+        fn selected_text(
+            &self,
+        ) -> lexift_core::Result<Option<lexift_core::domain::selection::Selection>> {
+            let text = if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+                "old request"
+            } else {
+                "new request"
+            };
+            Ok(Some(lexift_core::domain::selection::Selection {
+                text: text.into(),
+                anchor: None,
+            }))
+        }
+    }
+
+    #[test]
+    fn second_hotkey_during_translation_captures_and_displays_new_selection() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let state = Arc::new(Mutex::new(AppState::default()));
+        let selection = Arc::new(SequentialSelection(AtomicUsize::new(0)));
+        let controller = Arc::new(AppController::new(
+            runtime.handle().clone(),
+            state.clone(),
+            Some(selection.clone()),
+            Arc::new(ReorderingTranslator),
+            Arc::new(RecordingView::default()),
+        ));
+        let hotkey = controller.translate_hotkey_handler();
+        hotkey();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while state.lock().unwrap().phase != TranslationPhase::Translating {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        }
+        hotkey();
+        while state.lock().unwrap().translated_text != "new request" {
+            assert!(Instant::now() < deadline, "second selection did not finish");
+            thread::sleep(Duration::from_millis(1));
+        }
+        // Allow the intentionally slower first request to finish too.
+        thread::sleep(Duration::from_millis(150));
+        let final_state = state.lock().unwrap();
+        assert_eq!(selection.0.load(Ordering::SeqCst), 2);
+        assert_eq!(final_state.source_text, "new request");
+        assert_eq!(final_state.translated_text, "new request");
+    }
+
+    impl SelectionPort for CountingSelection {
+        fn selected_text(
+            &self,
+        ) -> lexift_core::Result<Option<lexift_core::domain::selection::Selection>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(80));
+            Ok(Some(lexift_core::domain::selection::Selection {
+                text: "Hello world".into(),
+                anchor: None,
+            }))
+        }
+    }
+
+    impl SelectionPort for EmptySelection {
+        fn selected_text(
+            &self,
+        ) -> lexift_core::Result<Option<lexift_core::domain::selection::Selection>> {
+            Ok(None)
+        }
+    }
 
     impl TranslatorPort for ReorderingTranslator {
         fn translate(&self, request: TranslateRequest) -> TranslationFuture<'_> {
@@ -276,6 +401,70 @@ mod tests {
         assert_eq!(state.phase, TranslationPhase::Error);
         assert_eq!(state.error_message, "Selection capability is not available");
         assert!(view.popup_shown.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn repeated_hotkey_while_capturing_does_not_start_another_capture() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("test runtime should start");
+        let providers = lexift_translate::ProviderRegistry::with_mock();
+        let state = Arc::new(Mutex::new(AppState::default()));
+        let selection = Arc::new(CountingSelection {
+            calls: AtomicUsize::new(0),
+        });
+        let controller = Arc::new(AppController::new(
+            runtime.handle().clone(),
+            Arc::clone(&state),
+            Some(selection.clone()),
+            providers.default_translator(),
+            Arc::new(RecordingView::default()),
+        ));
+        let hotkey = controller.translate_hotkey_handler();
+
+        hotkey();
+        hotkey();
+        thread::sleep(Duration::from_millis(200));
+
+        assert_eq!(selection.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn empty_selection_does_not_open_an_error_popup() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("test runtime should start");
+        let providers = lexift_translate::ProviderRegistry::with_mock();
+        let state = Arc::new(Mutex::new(AppState::default()));
+        let view = Arc::new(RecordingView::default());
+        let controller = Arc::new(AppController::new(
+            runtime.handle().clone(),
+            Arc::clone(&state),
+            Some(Arc::new(EmptySelection)),
+            providers.default_translator(),
+            view.clone(),
+        ));
+
+        controller.translate_hotkey_handler()();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            if state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .phase
+                == TranslationPhase::NoSelection
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "selection capture timed out");
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        assert!(!view.popup_shown.load(Ordering::SeqCst));
     }
 
     #[test]

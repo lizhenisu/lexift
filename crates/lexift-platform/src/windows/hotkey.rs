@@ -150,6 +150,7 @@ fn forward_translate_message(message: u32, hotkey_id: usize, handler: &HotkeyHan
     if message != WM_HOTKEY || hotkey_id != TRANSLATE_HOTKEY_ID as usize {
         return false;
     }
+    tracing::debug!("translate hotkey received");
     let _ = catch_unwind(AssertUnwindSafe(|| handler()));
     true
 }

@@ -17,6 +17,13 @@ use windows::{
 
 const MAX_PARENT_DEPTH: usize = 8;
 
+#[derive(Debug, Default)]
+struct SelectionCaptureMetrics {
+    uia_latency_ms: u128,
+    clipboard_latency_ms: Option<u128>,
+    total_capture_ms: u128,
+}
+
 /// Reads selected text from the foreground Windows application through UI Automation.
 pub(crate) struct WindowsSelectionPort;
 
@@ -29,12 +36,24 @@ impl WindowsSelectionPort {
 impl SelectionPort for WindowsSelectionPort {
     fn selected_text(&self) -> Result<Option<Selection>> {
         let started_at = Instant::now();
-        let result = capture_with_fallback(capture_with_uia(), || {
-            super::clipboard_selection::capture_selected_text()
+        let uia_started_at = Instant::now();
+        let uia_result = capture_with_uia();
+        let mut metrics = SelectionCaptureMetrics {
+            uia_latency_ms: uia_started_at.elapsed().as_millis(),
+            ..Default::default()
+        };
+        let result = capture_with_fallback(uia_result, || {
+            let clipboard_started_at = Instant::now();
+            let result = super::clipboard_selection::capture_selected_text();
+            metrics.clipboard_latency_ms = Some(clipboard_started_at.elapsed().as_millis());
+            result
         });
+        metrics.total_capture_ms = started_at.elapsed().as_millis();
 
         tracing::debug!(
-            elapsed_ms = started_at.elapsed().as_millis(),
+            uia_latency_ms = metrics.uia_latency_ms,
+            clipboard_latency_ms = metrics.clipboard_latency_ms,
+            total_capture_ms = metrics.total_capture_ms,
             success = result.is_ok(),
             "Windows selection capture finished"
         );

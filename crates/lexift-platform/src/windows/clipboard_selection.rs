@@ -60,7 +60,15 @@ where
     F: FnOnce() -> Result<()>,
 {
     let _apartment = OleApartment::initialize()?;
-    wait_for_trigger_keys_release()?;
+    if !wait_for_trigger_keys_release(any_trigger_key_is_down, thread::sleep) {
+        // Holding the shortcut is normal user input. Do not inject Ctrl+C
+        // while modifiers are held, or touch the clipboard on this path.
+        tracing::debug!(
+            strategy = "clipboard",
+            "Selection copy skipped: trigger keys remain held"
+        );
+        return Ok(None);
+    }
 
     let snapshot = ClipboardSnapshot::capture()?;
     let before_copy = snapshot.sequence;
@@ -300,15 +308,20 @@ impl Drop for ClipboardTransaction {
     }
 }
 
-fn wait_for_trigger_keys_release() -> Result<()> {
-    let deadline = Instant::now() + KEY_RELEASE_TIMEOUT;
-    while any_trigger_key_is_down() {
-        if Instant::now() >= deadline {
-            return Err(Error::new("Selection shortcut keys are still pressed"));
+fn wait_for_trigger_keys_release(
+    mut keys_down: impl FnMut() -> bool,
+    mut sleep: impl FnMut(Duration),
+) -> bool {
+    let mut remaining = KEY_RELEASE_TIMEOUT;
+    while keys_down() {
+        if remaining.is_zero() {
+            return false;
         }
-        thread::sleep(POLL_INTERVAL);
+        let interval = remaining.min(POLL_INTERVAL);
+        sleep(interval);
+        remaining -= interval;
     }
-    Ok(())
+    true
 }
 
 fn any_trigger_key_is_down() -> bool {
@@ -473,6 +486,31 @@ fn normalize_clipboard_text(text: String) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn held_shortcut_skips_copy_after_bounded_wait() {
+        let mut waited = std::time::Duration::ZERO;
+        assert!(!super::wait_for_trigger_keys_release(
+            || true,
+            |delay| waited += delay
+        ));
+        assert_eq!(waited, super::KEY_RELEASE_TIMEOUT);
+    }
+
+    #[test]
+    fn released_shortcut_can_proceed_without_waiting_again() {
+        let mut states = [true, true, false].into_iter();
+        let mut waits = 0;
+        assert!(super::wait_for_trigger_keys_release(
+            || states.next().unwrap(),
+            |_| waits += 1,
+        ));
+        assert_eq!(waits, 2);
+        assert!(super::wait_for_trigger_keys_release(
+            || false,
+            |_| panic!("unexpected wait")
+        ));
+    }
+
     use super::{
         RestoreAction, clipboard_sequence_changed, normalize_clipboard_text, restore_action,
     };

@@ -13,6 +13,7 @@ pub(crate) fn view_state(state: &AppState) -> UiState {
     UiState {
         status: match state.phase {
             TranslationPhase::Idle => "Idle",
+            TranslationPhase::NoSelection => "No selection",
             TranslationPhase::Capturing => "Capturing selection…",
             TranslationPhase::Translating => "Translating…",
             TranslationPhase::Success => "Translation complete",
@@ -49,6 +50,7 @@ mod tests {
     fn maps_translation_phases_and_content() {
         let cases = [
             (TranslationPhase::Idle, "Idle", false),
+            (TranslationPhase::NoSelection, "No selection", false),
             (TranslationPhase::Capturing, "Capturing selection…", true),
             (TranslationPhase::Translating, "Translating…", true),
             (TranslationPhase::Success, "Translation complete", false),

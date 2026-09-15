@@ -617,6 +617,23 @@ guard 会在剪贴板再次变化时放弃旧快照，用户的新内容不会�
 仍会在 sequence guard 允许的前提下重试。原剪贴板为空时通过 `OleSetClipboard(None)`
 恢复空状态。`SendInput` 部分失败会补发 `C Up` 和 `Ctrl Up`，避免残留按键状态。
 
+### M3.4 Windows Selection Compatibility & End-to-End Hardening
+
+状态：✅ 核心验收通过；部分兼容性覆盖待补，可进入 M4
+
+Selection capture 现在记录 `uia_latency_ms`、`clipboard_latency_ms` 和
+`total_capture_ms`，且事件日志只记录事件类型，不再通过 `Debug` 输出事件载荷。无选区使用
+独立的 `SelectionCaptureEmpty` 事件回到 `NoSelection` 状态，不弹错误 Popup。Controller
+对 Selection capture 实施单飞门控，捕获尚未结束时重复 `Alt+X` 不会启动第二个 UIA 或
+Clipboard transaction。
+
+兼容记录和复测步骤见 `devdoc/windows-selection-compatibility.md`。当前环境检测到 Chrome
+153.0.8010.37、Edge 153.0.4234.32、VS Code 1.137.0、Notepad 和 Word
+16.0.20326.20144；Telegram、Discord 和独立 PDF Reader 未发现。真实 DeepL Provider
+测试已通过。用户已验证上述已安装应用及浏览器 PDF 的划词、焦点保护与错误恢复；
+A → B 重叠翻译和长按 Alt 空选区复测通过。剪贴板恢复沿用 M3.3.1 与本轮测试记录。
+未安装应用及逐应用策略、延迟仍待补，不阻塞 M4，也不视为全矩阵验收完成。
+
 ---
 
 ## 6. M3 验收标准
