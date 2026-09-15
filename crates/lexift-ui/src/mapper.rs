@@ -7,6 +7,8 @@ pub(crate) struct UiState {
     pub source: String,
     pub translated: String,
     pub error: String,
+    pub settings_saving: bool,
+    pub settings_error: String,
 }
 
 pub(crate) fn view_state(state: &AppState) -> UiState {
@@ -28,6 +30,8 @@ pub(crate) fn view_state(state: &AppState) -> UiState {
         source: state.source_text.clone(),
         translated: state.translated_text.clone(),
         error: state.error_message.clone(),
+        settings_saving: state.settings_saving,
+        settings_error: state.settings_error_message.clone(),
     }
 }
 
@@ -44,6 +48,7 @@ mod tests {
         });
 
         assert_eq!(view_state(&state).target_language, "ja");
+        assert!(!view_state(&state).settings_saving);
     }
 
     #[test]
@@ -69,5 +74,16 @@ mod tests {
             assert_eq!(mapped.translated, "translated");
             assert_eq!(mapped.error, "error");
         }
+    }
+
+    #[test]
+    fn maps_settings_persistence_state_separately() {
+        let mut state = AppState::default();
+        state.settings_saving = true;
+        state.settings_error_message = "save failed".into();
+        let mapped = view_state(&state);
+        assert!(mapped.settings_saving);
+        assert_eq!(mapped.settings_error, "save failed");
+        assert!(mapped.error.is_empty());
     }
 }

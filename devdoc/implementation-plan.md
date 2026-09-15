@@ -218,8 +218,8 @@ TranslateRequest
 - TranslateRequest 从当前用户设置获取目标语言
 - 后续 UI 修改目标语言时无需修改 Provider 实现
 
-当前实现由 Composition Root 将 `AppConfig.settings` 注入 `AppState`，Core 创建
-`TranslateRequest` 时读取当前 `Settings.target_language`，不再硬编码目标语言。
+当前实现由 Composition Root 通过 `SettingsStore` 加载并注入 `AppState`，Core 创建
+`TranslateRequest` 时读取 committed `Settings.target_language`，不再硬编码目标语言。
 
 ### M2.4 实现输入翻译
 
@@ -800,28 +800,39 @@ Lexift
 
 下一步：**M4.3 — Settings & Persistence**。
 
-### Settings
+### M4.3 Settings & Persistence
 
-第一版至少：
+状态：✅ 实现完成，等待桌面人工验收
+
+Settings Window 第一版只开放 Target Language，提供 12 个 Lexift canonical language code。
+窗口内选择属于 UI draft；Cancel 或关闭窗口会丢弃 draft，每次打开都从 Core 的 committed
+Settings 重新同步。Save 通过 `SettingsSaveRequested → PersistSettings` 进入 Controller，磁盘写入
+由 Tokio `spawn_blocking` 执行。只有 Store 保存成功后，`SettingsSaved` 才更新
+`AppState.settings` 并关闭窗口；失败会保留旧设置，在设置窗口独立显示错误，不改变翻译状态。
+
+Production 使用 `FileSettingsStore` 从操作系统用户配置目录加载设置。在 Windows 上路径为：
 
 ```text
-Target Language
-Global Hotkey
-Translation Provider
-Theme
+%APPDATA%\Lexift\config.toml
 ```
 
-真正连接：
+当前磁盘 schema 为：
 
-```text
-Slint Settings
-    ↓
-Core
-    ↓
-SettingsStore
-    ↓
-lexift-config
+```toml
+schema_version = 1
+
+[settings]
+target_language = "zh-CN"
 ```
+
+配置文件不存在时使用默认值且不主动创建；解析、权限或未来版本错误会记录 warn 并继续启动，
+也不会自动覆盖原文件。用户主动保存时创建父目录，并通过原子替换提交完整 TOML。Core 不依赖
+serde/TOML，配置文件不保存 Secret；DeepL credential 继续由 `LEXIFT_DEEPL_AUTH_KEY` 提供。
+
+Main Window 与 Windows Tray 的 Settings 入口共享同一 Core event。`m1-demo` 和自动测试使用
+内存或临时目录 Store，不访问真实用户配置目录。
+
+下一步：**M4.4 — Secure Credential Store**。
 
 ### Credential Store
 

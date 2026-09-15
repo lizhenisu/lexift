@@ -2,6 +2,7 @@ import { Colors } from "design/colors.slint";
 import { Spacing } from "design/spacing.slint";
 import { Typography } from "design/typography.slint";
 export { TranslationPopup } from "popup.slint";
+export { LanguageMenuWindow, SettingsWindow } from "settings.slint";
 
 component ActionButton inherits Rectangle {
     in property <string> label;
@@ -43,17 +44,26 @@ export component AppWindow inherits Window {
     in property <bool> show-selection-demo: false;
     callback selection-translation-requested();
     callback input-translation-requested(string);
+    callback settings-window-requested();
 
     VerticalLayout {
         padding: Spacing.large;
         spacing: Spacing.medium;
 
-        Text {
-            text: "Lexift";
-            color: Colors.foreground;
-            font-size: Typography.title-size;
-            font-weight: 700;
-            horizontal-alignment: left;
+        HorizontalLayout {
+            Text {
+                text: "Lexift";
+                color: Colors.foreground;
+                font-size: Typography.title-size;
+                font-weight: 700;
+                horizontal-alignment: left;
+            }
+
+            ActionButton {
+                width: 96px;
+                label: "Settings";
+                clicked => { root.settings-window-requested(); }
+            }
         }
 
         HorizontalLayout {

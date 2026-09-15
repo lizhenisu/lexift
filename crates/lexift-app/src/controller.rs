@@ -5,11 +5,15 @@ use std::sync::{
 
 use lexift_core::{
     AppCommand, AppEvent, AppState, TranslationTaskId,
-    domain::geometry::{Point, Rect},
+    domain::{
+        geometry::{Point, Rect},
+        settings::Settings,
+    },
     ports::{
         hotkey::HotkeyHandler,
         screen::ScreenPort,
         selection::SelectionPort,
+        settings::SettingsStore,
         translator::TranslatorPort,
         tray::{TrayAction, TrayHandler},
     },
@@ -21,6 +25,8 @@ pub(crate) trait ViewPort: Send + Sync {
     fn show_popup(&self, anchor: Option<Point>, work_area: Option<Rect>);
     fn hide_popup(&self);
     fn show_main_window(&self);
+    fn show_settings_window(&self, settings: Settings);
+    fn hide_settings_window(&self);
     fn quit(&self);
 }
 
@@ -41,6 +47,14 @@ impl ViewPort for lexift_ui::UiHandle {
         self.show_main_window();
     }
 
+    fn show_settings_window(&self, settings: Settings) {
+        self.show_settings_window(settings);
+    }
+
+    fn hide_settings_window(&self) {
+        self.hide_settings_window();
+    }
+
     fn quit(&self) {
         self.quit();
     }
@@ -53,6 +67,7 @@ pub(crate) struct AppController {
     selection: Option<Arc<dyn SelectionPort>>,
     screen: Option<Arc<dyn ScreenPort>>,
     translator: Arc<dyn TranslatorPort>,
+    settings_store: Arc<dyn SettingsStore>,
     ui: Arc<dyn ViewPort>,
     selection_capture_in_flight: AtomicBool,
 }
@@ -64,6 +79,7 @@ impl AppController {
         selection: Option<Arc<dyn SelectionPort>>,
         screen: Option<Arc<dyn ScreenPort>>,
         translator: Arc<dyn TranslatorPort>,
+        settings_store: Arc<dyn SettingsStore>,
         ui: Arc<dyn ViewPort>,
     ) -> Self {
         Self {
@@ -72,6 +88,7 @@ impl AppController {
             selection,
             screen,
             translator,
+            settings_store,
             ui,
             selection_capture_in_flight: AtomicBool::new(false),
         }
@@ -134,8 +151,37 @@ impl AppController {
             AppCommand::ShowPopup { anchor } => self.show_popup(anchor),
             AppCommand::HidePopup => self.ui.hide_popup(),
             AppCommand::ShowMainWindow => self.ui.show_main_window(),
+            AppCommand::ShowSettingsWindow => {
+                let settings = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .settings
+                    .clone();
+                self.ui.show_settings_window(settings);
+            }
+            AppCommand::HideSettingsWindow => self.ui.hide_settings_window(),
+            AppCommand::PersistSettings { settings } => self.persist_settings(settings),
             AppCommand::Exit => self.ui.quit(),
         }
+    }
+
+    fn persist_settings(self: &Arc<Self>, settings: Settings) {
+        let store = Arc::clone(&self.settings_store);
+        let controller = Arc::clone(self);
+        self.runtime.spawn(async move {
+            let settings_to_save = settings.clone();
+            let result = tokio::task::spawn_blocking(move || store.save(&settings_to_save)).await;
+            match result {
+                Ok(Ok(())) => controller.dispatch(AppEvent::SettingsSaved { settings }),
+                Ok(Err(error)) => controller.dispatch(AppEvent::SettingsSaveFailed {
+                    error: error.to_string(),
+                }),
+                Err(error) => controller.dispatch(AppEvent::SettingsSaveFailed {
+                    error: format!("Settings worker failed: {error}"),
+                }),
+            }
+        });
     }
 
     fn show_popup(&self, selection_anchor: Option<Point>) {
@@ -234,6 +280,10 @@ fn event_name(event: &AppEvent) -> &'static str {
         AppEvent::TranslationFailed { .. } => "translation_failed",
         AppEvent::PopupHidden => "popup_hidden",
         AppEvent::MainWindowRequested => "main_window_requested",
+        AppEvent::SettingsWindowRequested => "settings_window_requested",
+        AppEvent::SettingsSaveRequested { .. } => "settings_save_requested",
+        AppEvent::SettingsSaved { .. } => "settings_saved",
+        AppEvent::SettingsSaveFailed { .. } => "settings_save_failed",
         AppEvent::ExitRequested => "exit_requested",
     }
 }
@@ -241,6 +291,7 @@ fn event_name(event: &AppEvent) -> &'static str {
 fn tray_event(action: TrayAction) -> AppEvent {
     match action {
         TrayAction::OpenMainWindow => AppEvent::MainWindowRequested,
+        TrayAction::OpenSettings => AppEvent::SettingsWindowRequested,
         TrayAction::Quit => AppEvent::ExitRequested,
     }
 }
@@ -268,6 +319,9 @@ mod tests {
         popup_shown: AtomicBool,
         main_window_shown: AtomicBool,
         popup_context: Mutex<Option<(Option<Point>, Option<Rect>)>>,
+        settings_window_shown: AtomicBool,
+        settings_window_hidden: AtomicBool,
+        shown_settings: Mutex<Option<Settings>>,
     }
 
     impl ViewPort for RecordingView {
@@ -292,10 +346,50 @@ mod tests {
             self.main_window_shown.store(true, Ordering::SeqCst);
         }
 
+        fn show_settings_window(&self, settings: Settings) {
+            *self
+                .shown_settings
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(settings);
+            self.settings_window_shown.store(true, Ordering::SeqCst);
+        }
+
+        fn hide_settings_window(&self) {
+            self.settings_window_hidden.store(true, Ordering::SeqCst);
+        }
+
         fn quit(&self) {}
     }
 
     struct ReorderingTranslator;
+
+    #[derive(Default)]
+    struct RecordingSettingsStore {
+        saved: Mutex<Vec<Settings>>,
+        failure: Option<String>,
+        save_thread: Mutex<Option<thread::ThreadId>>,
+    }
+
+    impl SettingsStore for RecordingSettingsStore {
+        fn load(&self) -> lexift_core::Result<Settings> {
+            Ok(Settings::default())
+        }
+
+        fn save(&self, settings: &Settings) -> lexift_core::Result<()> {
+            *self
+                .save_thread
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(thread::current().id());
+            if let Some(error) = &self.failure {
+                return Err(lexift_core::Error::new(error.clone()));
+            }
+            self.saved
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push(settings.clone());
+            Ok(())
+        }
+    }
 
     struct CountingSelection {
         calls: AtomicUsize,
@@ -351,6 +445,7 @@ mod tests {
             Some(selection.clone()),
             None,
             Arc::new(ReorderingTranslator),
+            Arc::new(RecordingSettingsStore::default()),
             Arc::new(RecordingView::default()),
         ));
         let hotkey = controller.translate_hotkey_handler();
@@ -428,6 +523,7 @@ mod tests {
                 work_area,
             })),
             Arc::new(ReorderingTranslator),
+            Arc::new(RecordingSettingsStore::default()),
             view.clone(),
         );
 
@@ -459,6 +555,7 @@ mod tests {
             None,
             Some(Arc::new(MockScreen { cursor, work_area })),
             Arc::new(ReorderingTranslator),
+            Arc::new(RecordingSettingsStore::default()),
             view.clone(),
         );
 
@@ -488,6 +585,7 @@ mod tests {
             None,
             None,
             providers.default_translator(),
+            Arc::new(RecordingSettingsStore::default()),
             Arc::new(RecordingView::default()),
         );
     }
@@ -508,6 +606,7 @@ mod tests {
             None,
             None,
             providers.default_translator(),
+            Arc::new(RecordingSettingsStore::default()),
             view.clone(),
         ));
 
@@ -537,6 +636,7 @@ mod tests {
             None,
             None,
             providers.default_translator(),
+            Arc::new(RecordingSettingsStore::default()),
             view.clone(),
         ));
 
@@ -568,6 +668,7 @@ mod tests {
             Some(selection.clone()),
             None,
             providers.default_translator(),
+            Arc::new(RecordingSettingsStore::default()),
             Arc::new(RecordingView::default()),
         ));
         let hotkey = controller.translate_hotkey_handler();
@@ -595,6 +696,7 @@ mod tests {
             Some(Arc::new(EmptySelection)),
             None,
             providers.default_translator(),
+            Arc::new(RecordingSettingsStore::default()),
             view.clone(),
         ));
 
@@ -633,6 +735,7 @@ mod tests {
             platform.selection(),
             None,
             providers.default_translator(),
+            Arc::new(RecordingSettingsStore::default()),
             view.clone(),
         ));
 
@@ -693,6 +796,7 @@ mod tests {
             None,
             None,
             providers.default_translator(),
+            Arc::new(RecordingSettingsStore::default()),
             Arc::new(RecordingView::default()),
         ));
 
@@ -737,6 +841,7 @@ mod tests {
             None,
             None,
             Arc::new(ReorderingTranslator),
+            Arc::new(RecordingSettingsStore::default()),
             Arc::new(RecordingView::default()),
         ));
 
@@ -769,6 +874,10 @@ mod tests {
             tray_event(TrayAction::OpenMainWindow),
             AppEvent::MainWindowRequested
         );
+        assert_eq!(
+            tray_event(TrayAction::OpenSettings),
+            AppEvent::SettingsWindowRequested
+        );
         assert_eq!(tray_event(TrayAction::Quit), AppEvent::ExitRequested);
     }
 
@@ -782,11 +891,125 @@ mod tests {
             None,
             None,
             Arc::new(ReorderingTranslator),
+            Arc::new(RecordingSettingsStore::default()),
             view.clone(),
         ));
 
         controller.dispatch(AppEvent::MainWindowRequested);
 
         assert!(view.main_window_shown.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn settings_window_receives_committed_settings() {
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        let committed = Settings {
+            target_language: lexift_core::domain::language::Language("fr".into()),
+        };
+        let view = Arc::new(RecordingView::default());
+        let controller = Arc::new(AppController::new(
+            runtime.handle().clone(),
+            Arc::new(Mutex::new(AppState::new(committed.clone()))),
+            None,
+            None,
+            Arc::new(ReorderingTranslator),
+            Arc::new(RecordingSettingsStore::default()),
+            view.clone(),
+        ));
+
+        controller.dispatch(AppEvent::SettingsWindowRequested);
+
+        assert_eq!(
+            *view
+                .shown_settings
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            Some(committed)
+        );
+    }
+
+    #[test]
+    fn successful_settings_save_commits_from_a_blocking_worker() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let state = Arc::new(Mutex::new(AppState::default()));
+        let view = Arc::new(RecordingView::default());
+        let store = Arc::new(RecordingSettingsStore::default());
+        let controller = Arc::new(AppController::new(
+            runtime.handle().clone(),
+            Arc::clone(&state),
+            None,
+            None,
+            Arc::new(ReorderingTranslator),
+            store.clone(),
+            view.clone(),
+        ));
+        let requested = Settings {
+            target_language: lexift_core::domain::language::Language("ja".into()),
+        };
+        let caller_thread = thread::current().id();
+
+        controller.dispatch(AppEvent::SettingsSaveRequested {
+            settings: requested.clone(),
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while state.lock().unwrap().settings != requested {
+            assert!(Instant::now() < deadline, "settings save timed out");
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(*store.saved.lock().unwrap(), vec![requested]);
+        assert_ne!(*store.save_thread.lock().unwrap(), Some(caller_thread));
+        assert!(view.settings_window_hidden.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn failed_settings_save_keeps_committed_state_and_window_open() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let committed = Settings {
+            target_language: lexift_core::domain::language::Language("de".into()),
+        };
+        let state = Arc::new(Mutex::new(AppState::new(committed.clone())));
+        let view = Arc::new(RecordingView::default());
+        let store = Arc::new(RecordingSettingsStore {
+            failure: Some("Could not save settings".into()),
+            ..Default::default()
+        });
+        let controller = Arc::new(AppController::new(
+            runtime.handle().clone(),
+            Arc::clone(&state),
+            None,
+            None,
+            Arc::new(ReorderingTranslator),
+            store,
+            view.clone(),
+        ));
+
+        controller.dispatch(AppEvent::SettingsSaveRequested {
+            settings: Settings {
+                target_language: lexift_core::domain::language::Language("fr".into()),
+            },
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let state = state.lock().unwrap();
+            if !state.settings_saving {
+                assert_eq!(state.settings, committed);
+                assert_eq!(state.settings_error_message, "Could not save settings");
+                break;
+            }
+            drop(state);
+            assert!(Instant::now() < deadline, "settings failure timed out");
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!view.settings_window_hidden.load(Ordering::SeqCst));
     }
 }

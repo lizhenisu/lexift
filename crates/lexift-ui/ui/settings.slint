@@ -1,5 +1,250 @@
+import { Colors } from "design/colors.slint";
+import { Spacing } from "design/spacing.slint";
+import { Typography } from "design/typography.slint";
+
+component SettingsButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    width: 104px;
+    height: 40px;
+    border-radius: 20px;
+    border-width: primary ? 0px : 1px;
+    border-color: Colors.outline;
+    background: !enabled ? Colors.outline : primary ? Colors.primary : Colors.surface;
+
+    Text {
+        text: root.label;
+        color: !root.enabled ? Colors.secondary-foreground : root.primary ? Colors.surface : Colors.primary;
+        font-size: Typography.body-size;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
 export component SettingsWindow inherits Window {
     title: "Lexift Settings";
-    width: 640px;
-    height: 480px;
+    width: 520px;
+    height: 340px;
+    background: Colors.background;
+
+    in-out property <int> draft-target-index: 0;
+    in property <bool> settings-saving: false;
+    in property <string> settings-error-text: "";
+    in-out property <bool> language-menu-open: false;
+    private property <[string]> language-labels: [
+        "简体中文", "繁體中文", "English (US)", "English (UK)",
+        "日本語", "한국어", "Deutsch", "Français", "Español",
+        "Italiano", "Português", "Português (Brasil)"
+    ];
+    callback save-requested(string);
+    callback cancel-requested();
+    callback language-menu-requested(float, float, float, float, float, float);
+
+    function language-code(index: int) -> string {
+        return index == 0 ? "zh-CN"
+            : index == 1 ? "zh-TW"
+            : index == 2 ? "en-US"
+            : index == 3 ? "en-GB"
+            : index == 4 ? "ja"
+            : index == 5 ? "ko"
+            : index == 6 ? "de"
+            : index == 7 ? "fr"
+            : index == 8 ? "es"
+            : index == 9 ? "it"
+            : index == 10 ? "pt-PT"
+            : "pt-BR";
+    }
+
+    VerticalLayout {
+        padding: Spacing.large;
+        spacing: Spacing.medium;
+
+        Text {
+            text: "Lexift Settings";
+            color: Colors.foreground;
+            font-size: Typography.title-size;
+            font-weight: 700;
+        }
+
+        Text {
+            text: "Translation";
+            color: Colors.secondary-foreground;
+            font-size: Typography.body-size;
+            font-weight: 700;
+        }
+
+        VerticalLayout {
+            spacing: Spacing.small;
+
+            Text {
+                text: "Target language";
+                color: Colors.foreground;
+                font-size: Typography.body-size;
+            }
+
+            language-selector := Rectangle {
+                height: 40px;
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: Colors.outline;
+                background: Colors.surface;
+
+                Text {
+                    x: Spacing.medium;
+                    width: parent.width - 2 * Spacing.medium - 24px;
+                    text: root.language-labels[root.draft-target-index];
+                    color: Colors.foreground;
+                    font-size: Typography.body-size;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                Path {
+                    x: parent.width - Spacing.medium - 16px;
+                    y: (parent.height - 8px) / 2;
+                    width: 16px;
+                    height: 8px;
+                    viewbox-width: 16;
+                    viewbox-height: 8;
+                    stroke: Colors.secondary-foreground;
+                    stroke-width: 1.5px;
+
+                    MoveTo {
+                        x: 1;
+                        y: root.language-menu-open ? 7 : 1;
+                    }
+
+                    LineTo {
+                        x: 8;
+                        y: root.language-menu-open ? 1 : 7;
+                    }
+
+                    LineTo {
+                        x: 15;
+                        y: root.language-menu-open ? 7 : 1;
+                    }
+                }
+
+                TouchArea {
+                    enabled: !root.settings-saving;
+                    clicked => {
+                        root.language-menu-requested(
+                            language-selector.absolute-position.x / 1px,
+                            language-selector.absolute-position.y / 1px,
+                            language-selector.width / 1px,
+                            language-selector.height / 1px,
+                            self.mouse-x / 1px,
+                            self.mouse-y / 1px
+                        );
+                    }
+                }
+            }
+        }
+
+        if root.settings-error-text != "": Text {
+            text: root.settings-error-text;
+            color: Colors.error;
+            font-size: Typography.body-size;
+            wrap: word-wrap;
+        }
+
+        Rectangle { vertical-stretch: 1; }
+
+        HorizontalLayout {
+            spacing: Spacing.small;
+            alignment: end;
+
+            SettingsButton {
+                label: "Cancel";
+                enabled: !root.settings-saving;
+                clicked => { root.cancel-requested(); }
+            }
+
+            SettingsButton {
+                primary: true;
+                label: root.settings-saving ? "Saving…" : "Save";
+                enabled: !root.settings-saving;
+                clicked => { root.save-requested(root.language-code(root.draft-target-index)); }
+            }
+        }
+    }
+
+}
+
+export component LanguageMenuWindow inherits Window {
+    title: "Lexift Languages";
+    width: 456px;
+    height: 242px;
+    no-frame: true;
+    always-on-top: true;
+    background: Colors.surface;
+
+    in-out property <int> selected-index: 0;
+    in-out property <length> scroll-y: 0px;
+    private property <[string]> language-labels: [
+        "简体中文", "繁體中文", "English (US)", "English (UK)",
+        "日本語", "한국어", "Deutsch", "Français", "Español",
+        "Italiano", "Português", "Português (Brasil)"
+    ];
+    callback selected(int);
+    callback request-focus();
+    callback dismissed();
+
+    request-focus => { menu-focus.focus(); }
+
+    menu-focus := FocusScope {
+        focus-changed-event => {
+            if (!self.has-focus) {
+                root.dismissed();
+            }
+        }
+
+        Rectangle {
+            clip: true;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: Colors.outline;
+            background: Colors.surface;
+
+            Flickable {
+                width: 100%;
+                height: 100%;
+                viewport-height: root.language-labels.length * 40px;
+                viewport-y <=> root.scroll-y;
+
+                for option[index] in root.language-labels: option-row := Rectangle {
+                    y: index * 40px;
+                    width: root.width;
+                    height: 40px;
+                    background: index == root.selected-index
+                        ? Colors.primary-container
+                        : option-touch.has-hover ? Colors.background : Colors.surface;
+
+                    Text {
+                        x: Spacing.medium;
+                        width: parent.width - 2 * Spacing.medium;
+                        text: option;
+                        color: Colors.foreground;
+                        font-size: Typography.body-size;
+                        font-weight: 400;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    option-touch := TouchArea {
+                        clicked => { root.selected(index); }
+                    }
+                }
+            }
+        }
+    }
 }

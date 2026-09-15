@@ -1,9 +1,12 @@
 use std::sync::{Arc, Mutex};
 
+#[cfg(any(not(feature = "m1-demo"), test))]
+use lexift_core::Error;
 use lexift_core::{
     AppState,
+    domain::settings::Settings,
     ports::{
-        hotkey::HotkeyPort, screen::ScreenPort, selection::SelectionPort,
+        hotkey::HotkeyPort, screen::ScreenPort, selection::SelectionPort, settings::SettingsStore,
         translator::TranslatorPort, tray::TrayPort,
     },
 };
@@ -16,6 +19,7 @@ pub(crate) struct AppServices {
     pub(crate) hotkey: Option<Arc<dyn HotkeyPort>>,
     pub(crate) runtime: Runtime,
     pub(crate) state: Arc<Mutex<AppState>>,
+    pub(crate) settings_store: Arc<dyn SettingsStore>,
     pub(crate) selection: Option<Arc<dyn SelectionPort>>,
     pub(crate) screen: Option<Arc<dyn ScreenPort>>,
     pub(crate) translator: Arc<dyn TranslatorPort>,
@@ -23,7 +27,18 @@ pub(crate) struct AppServices {
 
 impl AppServices {
     pub(crate) fn for_current_build() -> Result<Self, Box<dyn std::error::Error>> {
-        let settings = lexift_config::load()?;
+        #[cfg(not(feature = "m1-demo"))]
+        let settings_store: Arc<dyn SettingsStore> =
+            match lexift_config::FileSettingsStore::for_current_user() {
+                Ok(store) => Arc::new(store),
+                Err(error) => {
+                    tracing::warn!(%error, "settings storage is unavailable; using defaults");
+                    Arc::new(UnavailableSettingsStore(error.to_string()))
+                }
+            };
+        #[cfg(feature = "m1-demo")]
+        let settings_store: Arc<dyn SettingsStore> = Arc::new(EphemeralSettingsStore::default());
+        let settings = load_settings_or_default(settings_store.as_ref());
 
         #[cfg(not(feature = "m1-demo"))]
         let platform = lexift_platform::PlatformCapabilities::new();
@@ -35,11 +50,12 @@ impl AppServices {
         #[cfg(feature = "m1-demo")]
         let translators = lexift_translate::ProviderRegistry::with_mock();
 
-        Self::from_capabilities(settings, platform, translators)
+        Self::from_capabilities(settings, settings_store, platform, translators)
     }
 
     fn from_capabilities(
-        settings: lexift_config::AppConfig,
+        settings: Settings,
+        settings_store: Arc<dyn SettingsStore>,
         platform: lexift_platform::PlatformCapabilities,
         translators: lexift_translate::ProviderRegistry,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -58,11 +74,59 @@ impl AppServices {
             tray,
             hotkey,
             runtime,
-            state: Arc::new(Mutex::new(AppState::new(settings.settings))),
+            state: Arc::new(Mutex::new(AppState::new(settings))),
+            settings_store,
             selection,
             screen,
             translator,
         })
+    }
+}
+
+#[cfg(any(feature = "m1-demo", test))]
+#[derive(Default)]
+struct EphemeralSettingsStore(Mutex<Settings>);
+
+#[cfg(any(feature = "m1-demo", test))]
+impl SettingsStore for EphemeralSettingsStore {
+    fn load(&self) -> lexift_core::Result<Settings> {
+        Ok(self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone())
+    }
+
+    fn save(&self, settings: &Settings) -> lexift_core::Result<()> {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = settings.clone();
+        Ok(())
+    }
+}
+
+fn load_settings_or_default(store: &dyn SettingsStore) -> Settings {
+    match store.load() {
+        Ok(settings) => settings,
+        Err(error) => {
+            tracing::warn!(%error, "settings could not be loaded; using defaults without overwriting the file");
+            Settings::default()
+        }
+    }
+}
+
+#[cfg(not(feature = "m1-demo"))]
+struct UnavailableSettingsStore(String);
+
+#[cfg(not(feature = "m1-demo"))]
+impl SettingsStore for UnavailableSettingsStore {
+    fn load(&self) -> lexift_core::Result<Settings> {
+        Ok(Settings::default())
+    }
+
+    fn save(&self, _settings: &Settings) -> lexift_core::Result<()> {
+        Err(Error::new(self.0.clone()))
     }
 }
 
@@ -80,10 +144,27 @@ fn production_translators(
 mod tests {
     use super::*;
 
+    struct FailingLoadStore;
+
+    impl SettingsStore for FailingLoadStore {
+        fn load(&self) -> lexift_core::Result<Settings> {
+            Err(Error::new("malformed settings fixture"))
+        }
+
+        fn save(&self, _settings: &Settings) -> lexift_core::Result<()> {
+            panic!("startup fallback must not overwrite an unreadable settings file")
+        }
+    }
+
+    fn settings_store() -> Arc<dyn SettingsStore> {
+        Arc::new(EphemeralSettingsStore::default())
+    }
+
     #[test]
     fn services_accept_the_platform_selection_capability() {
         let services = AppServices::from_capabilities(
-            lexift_config::AppConfig::default(),
+            Settings::default(),
+            settings_store(),
             lexift_platform::PlatformCapabilities::new(),
             lexift_translate::ProviderRegistry::with_mock(),
         )
@@ -104,7 +185,8 @@ mod tests {
     #[test]
     fn services_construct_without_tray_capability() {
         let services = AppServices::from_capabilities(
-            lexift_config::AppConfig::default(),
+            Settings::default(),
+            settings_store(),
             lexift_platform::PlatformCapabilities::mock(),
             lexift_translate::ProviderRegistry::with_mock(),
         )
@@ -129,12 +211,10 @@ mod tests {
     fn injects_configured_settings_into_core_state() {
         let target_language = lexift_core::domain::language::Language("ja".into());
         let services = AppServices::from_capabilities(
-            lexift_config::AppConfig {
-                settings: lexift_core::domain::settings::Settings {
-                    target_language: target_language.clone(),
-                },
-                ..Default::default()
+            Settings {
+                target_language: target_language.clone(),
             },
+            settings_store(),
             lexift_platform::PlatformCapabilities::new(),
             lexift_translate::ProviderRegistry::with_mock(),
         )
@@ -145,5 +225,13 @@ mod tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         assert_eq!(state.settings.target_language, target_language);
+    }
+
+    #[test]
+    fn unreadable_settings_use_defaults_without_saving() {
+        assert_eq!(
+            load_settings_or_default(&FailingLoadStore),
+            Settings::default()
+        );
     }
 }

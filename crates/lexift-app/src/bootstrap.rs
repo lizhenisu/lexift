@@ -25,12 +25,24 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         services.selection.clone(),
         services.screen.clone(),
         Arc::clone(&services.translator),
+        Arc::clone(&services.settings_store),
         Arc::new(ui.handle()),
     ));
-    ui.on_event({
-        let controller = Arc::clone(&controller);
-        move |event| controller.dispatch(event)
-    });
+    ui.on_event(
+        {
+            let controller = Arc::clone(&controller);
+            move |event| controller.dispatch(event)
+        },
+        {
+            let screen = services.screen.clone();
+            move || {
+                let screen = screen.as_ref()?;
+                let cursor = screen.cursor_position().ok()?;
+                let work_area = screen.work_area_for_point(cursor).ok()?;
+                Some((cursor, work_area))
+            }
+        },
+    );
     if let Some(hotkey) = &services.hotkey
         && let Err(error) = hotkey.register_translate_hotkey(controller.translate_hotkey_handler())
     {

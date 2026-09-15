@@ -1,5 +1,6 @@
 use crate::domain::{
     geometry::Point,
+    settings::Settings,
     translation::{TranslateRequest, TranslationTaskId},
 };
 
@@ -17,5 +18,10 @@ pub enum AppCommand {
     },
     HidePopup,
     ShowMainWindow,
+    ShowSettingsWindow,
+    HideSettingsWindow,
+    PersistSettings {
+        settings: Settings,
+    },
     Exit,
 }

@@ -1,5 +1,6 @@
 use crate::domain::{
     selection::Selection,
+    settings::Settings,
     translation::{TranslateResult, TranslationTaskId},
 };
 
@@ -34,5 +35,15 @@ pub enum AppEvent {
     },
     PopupHidden,
     MainWindowRequested,
+    SettingsWindowRequested,
+    SettingsSaveRequested {
+        settings: Settings,
+    },
+    SettingsSaved {
+        settings: Settings,
+    },
+    SettingsSaveFailed {
+        error: String,
+    },
     ExitRequested,
 }

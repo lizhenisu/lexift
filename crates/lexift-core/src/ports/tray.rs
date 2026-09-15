@@ -5,6 +5,7 @@ use crate::Result;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayAction {
     OpenMainWindow,
+    OpenSettings,
     Quit,
 }
 

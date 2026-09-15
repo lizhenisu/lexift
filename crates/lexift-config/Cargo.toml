@@ -5,3 +5,11 @@ edition.workspace = true
 
 [dependencies]
 lexift-core.workspace = true
+atomic-write-file.workspace = true
+dirs.workspace = true
+serde.workspace = true
+toml.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"

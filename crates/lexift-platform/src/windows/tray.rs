@@ -37,7 +37,8 @@ use windows::{
 const TRAY_ICON_ID: u32 = 1;
 const TRAY_CALLBACK_MESSAGE: u32 = WM_APP + 1;
 const OPEN_COMMAND_ID: usize = 1;
-const QUIT_COMMAND_ID: usize = 2;
+const SETTINGS_COMMAND_ID: usize = 2;
+const QUIT_COMMAND_ID: usize = 3;
 const NIN_KEYSELECT: u32 = NIN_SELECT + 1;
 
 thread_local! {
@@ -282,6 +283,7 @@ fn show_context_menu(state: &TrayWindowState) {
     let _menu = TrayMenu(menu);
     let built = unsafe {
         AppendMenuW(menu, MF_STRING, OPEN_COMMAND_ID, w!("Open Lexift"))
+            .and_then(|_| AppendMenuW(menu, MF_STRING, SETTINGS_COMMAND_ID, w!("Settings")))
             .and_then(|_| AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null()))
             .and_then(|_| AppendMenuW(menu, MF_STRING, QUIT_COMMAND_ID, w!("Quit")))
             .and_then(|_| SetMenuDefaultItem(menu, OPEN_COMMAND_ID as u32, 0))
@@ -348,6 +350,7 @@ impl Drop for MenuSession<'_> {
 fn action_for_command(command: usize) -> Option<TrayAction> {
     match command {
         OPEN_COMMAND_ID => Some(TrayAction::OpenMainWindow),
+        SETTINGS_COMMAND_ID => Some(TrayAction::OpenSettings),
         QUIT_COMMAND_ID => Some(TrayAction::Quit),
         _ => None,
     }
@@ -462,6 +465,10 @@ mod tests {
             Some(TrayAction::OpenMainWindow)
         );
         assert_eq!(action_for_command(QUIT_COMMAND_ID), Some(TrayAction::Quit));
+        assert_eq!(
+            action_for_command(SETTINGS_COMMAND_ID),
+            Some(TrayAction::OpenSettings)
+        );
         assert_eq!(action_for_command(999), None);
     }
 

@@ -23,6 +23,8 @@ lexift-translate = { path = "crates/lexift-translate" }
 lexift-config = { path = "crates/lexift-config" }
 lexift-observability = { path = "crates/lexift-observability" }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "system-proxy"] }
+atomic-write-file = "0.3.1"
+dirs = "7.0.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 slint = { version = "1.17.1", default-features = false, features = [
@@ -35,4 +37,5 @@ slint-build = "1.17.1"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.20"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "time"] }
+toml = "1.1.6"
 windows = "0.62.2"

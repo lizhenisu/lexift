@@ -25,6 +25,8 @@ pub struct AppState {
     pub source_text: String,
     pub translated_text: String,
     pub error_message: String,
+    pub settings_saving: bool,
+    pub settings_error_message: String,
     next_translation_task: u64,
 }
 
@@ -43,6 +45,8 @@ impl AppState {
             source_text: String::new(),
             translated_text: String::new(),
             error_message: String::new(),
+            settings_saving: false,
+            settings_error_message: String::new(),
             next_translation_task: 0,
         }
     }
@@ -112,6 +116,27 @@ impl AppState {
                 vec![AppCommand::HidePopup]
             }
             AppEvent::MainWindowRequested => vec![AppCommand::ShowMainWindow],
+            AppEvent::SettingsWindowRequested => {
+                self.settings_error_message.clear();
+                vec![AppCommand::ShowSettingsWindow]
+            }
+            AppEvent::SettingsSaveRequested { settings } if !self.settings_saving => {
+                self.settings_saving = true;
+                self.settings_error_message.clear();
+                vec![AppCommand::PersistSettings { settings }]
+            }
+            AppEvent::SettingsSaveRequested { .. } => Vec::new(),
+            AppEvent::SettingsSaved { settings } => {
+                self.settings = settings;
+                self.settings_saving = false;
+                self.settings_error_message.clear();
+                vec![AppCommand::HideSettingsWindow]
+            }
+            AppEvent::SettingsSaveFailed { error } => {
+                self.settings_saving = false;
+                self.settings_error_message = error;
+                Vec::new()
+            }
             AppEvent::ExitRequested => vec![AppCommand::Exit],
         }
     }
@@ -520,5 +545,66 @@ mod tests {
             state.reduce(AppEvent::MainWindowRequested),
             vec![AppCommand::ShowMainWindow]
         );
+    }
+
+    #[test]
+    fn settings_window_request_produces_show_command() {
+        let mut state = AppState::default();
+        assert_eq!(
+            state.reduce(AppEvent::SettingsWindowRequested),
+            vec![AppCommand::ShowSettingsWindow]
+        );
+    }
+
+    #[test]
+    fn settings_save_persists_before_committing() {
+        let mut state = AppState::default();
+        let requested = Settings {
+            target_language: Language("ja".into()),
+        };
+        assert_eq!(
+            state.reduce(AppEvent::SettingsSaveRequested {
+                settings: requested.clone(),
+            }),
+            vec![AppCommand::PersistSettings {
+                settings: requested.clone(),
+            }]
+        );
+        assert!(state.settings_saving);
+        assert_eq!(state.settings, Settings::default());
+
+        assert_eq!(
+            state.reduce(AppEvent::SettingsSaved {
+                settings: requested.clone(),
+            }),
+            vec![AppCommand::HideSettingsWindow]
+        );
+        assert_eq!(state.settings, requested);
+        assert!(!state.settings_saving);
+    }
+
+    #[test]
+    fn settings_save_failure_preserves_committed_settings() {
+        let committed = Settings {
+            target_language: Language("de".into()),
+        };
+        let mut state = AppState::new(committed.clone());
+        state.reduce(AppEvent::SettingsSaveRequested {
+            settings: Settings {
+                target_language: Language("fr".into()),
+            },
+        });
+
+        assert!(
+            state
+                .reduce(AppEvent::SettingsSaveFailed {
+                    error: "Could not save settings".into(),
+                })
+                .is_empty()
+        );
+        assert_eq!(state.settings, committed);
+        assert!(!state.settings_saving);
+        assert_eq!(state.settings_error_message, "Could not save settings");
+        assert_eq!(state.phase, TranslationPhase::Idle);
     }
 }
