@@ -802,7 +802,9 @@ Lexift
 
 ### M4.3 Settings & Persistence
 
-状态：✅ 实现完成，等待桌面人工验收
+状态：✅ 实现与桌面人工验收通过
+
+2026-09-15 用户完成桌面人工验收，确认 Settings 与 Target Language 持久化链路可用。
 
 Settings Window 第一版只开放 Target Language，提供 12 个 Lexift canonical language code。
 窗口内选择属于 UI draft；Cancel 或关闭窗口会丢弃 draft，每次打开都从 Core 的 committed
