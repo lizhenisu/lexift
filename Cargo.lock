@@ -2631,6 +2631,7 @@ name = "lexift-platform"
 version = "0.1.0"
 dependencies = [
  "lexift-core",
+ "raw-window-handle",
  "tracing",
  "windows",
 ]
@@ -2653,6 +2654,7 @@ dependencies = [
  "lexift-core",
  "slint",
  "slint-build",
+ "tracing",
 ]
 
 [[package]]
@@ -4691,6 +4693,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "pin-weak",
+ "raw-window-handle",
  "slint-macros",
  "unicode-segmentation",
  "vtable",

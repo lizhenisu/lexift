@@ -10,6 +10,7 @@ mock = []
 [dependencies]
 lexift-core.workspace = true
 tracing.workspace = true
+raw-window-handle = "0.6"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { workspace = true, features = [

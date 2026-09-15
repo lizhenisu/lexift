@@ -44,10 +44,11 @@ M2  Real Input Translation
         │
         ▼
 M3  Windows Global Selection
- ← 当前阶段
+ ✅ 核心验收通过
         │
         ▼
 M4  Desktop Integration
+ ← 当前阶段
         │
         ▼
 V0.1
@@ -697,9 +698,30 @@ Startup / Shutdown
 Error UX
 ```
 
-### Popup
+### M4.1 Popup Positioning
 
-实现：
+状态：✅ 已完成，桌面验收通过
+
+2026-09-15 用户完成单屏位置、多显示器及不同缩放测试，确认 Popup 始终位于鼠标附近，
+各位置均符合预期。测试另发现 Popup 偶尔被其他应用遮挡；现通过 Slint
+`always-on-top: true` 将翻译 Popup 设为置顶窗口。同日用户复测确认 Popup 不再被遮挡，
+原应用输入焦点正常。
+
+后续复测：无选区时隐藏旧 Popup 已通过；点击关闭后持续按 Alt、重复按 X 出现翻译与
+无选区交替的问题。现为 Popup 增加 Windows `WS_EX_NOACTIVATE`，关闭按钮通过
+`PopupHidden` 同步 Core 状态，并在重新显示前应用非激活策略。用户复测确认关闭后重开、
+持续按 Alt 重复按 X 的交替消失问题已解决。
+
+Windows Selection capture 开始时通过 `GetCursorPos` 保存物理屏幕 Anchor；Anchor 获取失败
+不会影响文字捕获。App 通过可选 `ScreenPort` 使用 `MonitorFromPoint` 和
+`GetMonitorInfoW.rcWork` 取得目标显示器工作区，再把定位上下文交给 UI。非 Windows 或屏幕
+能力失败时仍按窗口系统默认位置显示。
+
+Slint 在 `show()` 前读取 Popup 的物理尺寸，优先放在 Anchor 右下方；空间不足时分别翻转到
+左侧或上方，最后按工作区边距约束。算法保留虚拟屏幕负坐标，并以纯测试覆盖四个方向、
+窗口过大和左侧副屏。`SelectionCaptureEmpty` 继续进入 `NoSelection`，不会显示 Popup。
+
+定位链路：
 
 ```text
 Selection.anchor
@@ -719,6 +741,8 @@ Popup 不遮挡原文
 ```
 
 Popup 逐渐成为 Lexift 的核心 UI。
+
+下一步：**M4.2 — System Tray & Background Lifecycle**。
 
 ### Tray
 

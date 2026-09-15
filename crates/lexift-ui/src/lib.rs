@@ -1,6 +1,7 @@
 mod binding;
 mod bridge;
 mod mapper;
+mod placement;
 
 slint::include_modules!();
 

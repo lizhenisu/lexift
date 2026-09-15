@@ -12,11 +12,16 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    let ui = lexift_ui::Ui::new(&initial_state, cfg!(feature = "m1-demo"))?;
+    let ui = lexift_ui::Ui::new(&initial_state, cfg!(feature = "m1-demo"), |window| {
+        if let Err(error) = lexift_platform::configure_translation_popup(&window.window_handle()) {
+            tracing::warn!(%error, "popup activation policy is unavailable");
+        }
+    })?;
     let controller = Arc::new(AppController::new(
         services.runtime.handle().clone(),
         Arc::clone(&services.state),
         services.selection.clone(),
+        services.screen.clone(),
         Arc::clone(&services.translator),
         Arc::new(ui.handle()),
     ));

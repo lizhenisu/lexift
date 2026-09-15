@@ -5,13 +5,17 @@ use std::sync::{
 
 use lexift_core::{
     AppCommand, AppEvent, AppState, TranslationTaskId,
-    ports::{hotkey::HotkeyHandler, selection::SelectionPort, translator::TranslatorPort},
+    domain::geometry::{Point, Rect},
+    ports::{
+        hotkey::HotkeyHandler, screen::ScreenPort, selection::SelectionPort,
+        translator::TranslatorPort,
+    },
 };
 use tokio::runtime::Handle;
 
 pub(crate) trait ViewPort: Send + Sync {
     fn update(&self, state: AppState);
-    fn show_popup(&self);
+    fn show_popup(&self, anchor: Option<Point>, work_area: Option<Rect>);
     fn hide_popup(&self);
     fn quit(&self);
 }
@@ -21,8 +25,8 @@ impl ViewPort for lexift_ui::UiHandle {
         self.update(state);
     }
 
-    fn show_popup(&self) {
-        self.show_popup();
+    fn show_popup(&self, anchor: Option<Point>, work_area: Option<Rect>) {
+        self.show_popup(anchor, work_area);
     }
 
     fn hide_popup(&self) {
@@ -39,6 +43,7 @@ pub(crate) struct AppController {
     runtime: Handle,
     state: Arc<Mutex<AppState>>,
     selection: Option<Arc<dyn SelectionPort>>,
+    screen: Option<Arc<dyn ScreenPort>>,
     translator: Arc<dyn TranslatorPort>,
     ui: Arc<dyn ViewPort>,
     selection_capture_in_flight: AtomicBool,
@@ -49,6 +54,7 @@ impl AppController {
         runtime: Handle,
         state: Arc<Mutex<AppState>>,
         selection: Option<Arc<dyn SelectionPort>>,
+        screen: Option<Arc<dyn ScreenPort>>,
         translator: Arc<dyn TranslatorPort>,
         ui: Arc<dyn ViewPort>,
     ) -> Self {
@@ -56,6 +62,7 @@ impl AppController {
             runtime,
             state,
             selection,
+            screen,
             translator,
             ui,
             selection_capture_in_flight: AtomicBool::new(false),
@@ -111,10 +118,34 @@ impl AppController {
         match command {
             AppCommand::CaptureSelection { task_id } => self.capture_selection(task_id),
             AppCommand::Translate { task_id, request } => self.translate(task_id, request),
-            AppCommand::ShowPopup => self.ui.show_popup(),
+            AppCommand::ShowPopup { anchor } => self.show_popup(anchor),
             AppCommand::HidePopup => self.ui.hide_popup(),
             AppCommand::Exit => self.ui.quit(),
         }
+    }
+
+    fn show_popup(&self, selection_anchor: Option<Point>) {
+        let Some(screen) = &self.screen else {
+            self.ui.show_popup(None, None);
+            return;
+        };
+
+        let anchor = selection_anchor.or_else(|| match screen.cursor_position() {
+            Ok(point) => Some(point),
+            Err(error) => {
+                tracing::warn!(%error, "popup cursor fallback is unavailable");
+                None
+            }
+        });
+        let work_area = anchor.and_then(|point| match screen.work_area_for_point(point) {
+            Ok(area) => Some(area),
+            Err(error) => {
+                tracing::warn!(%error, "popup monitor work area is unavailable");
+                None
+            }
+        });
+
+        self.ui.show_popup(anchor, work_area);
     }
 
     fn capture_selection(self: &Arc<Self>, task_id: TranslationTaskId) {
@@ -213,6 +244,7 @@ mod tests {
     struct RecordingView {
         states: Mutex<Vec<AppState>>,
         popup_shown: AtomicBool,
+        popup_context: Mutex<Option<(Option<Point>, Option<Rect>)>>,
     }
 
     impl ViewPort for RecordingView {
@@ -223,7 +255,11 @@ mod tests {
                 .push(state);
         }
 
-        fn show_popup(&self) {
+        fn show_popup(&self, anchor: Option<Point>, work_area: Option<Rect>) {
+            *self
+                .popup_context
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((anchor, work_area));
             self.popup_shown.store(true, Ordering::SeqCst);
         }
 
@@ -239,6 +275,21 @@ mod tests {
     }
 
     struct EmptySelection;
+
+    struct MockScreen {
+        cursor: Point,
+        work_area: Rect,
+    }
+
+    impl ScreenPort for MockScreen {
+        fn cursor_position(&self) -> lexift_core::Result<Point> {
+            Ok(self.cursor)
+        }
+
+        fn work_area_for_point(&self, _point: Point) -> lexift_core::Result<Rect> {
+            Ok(self.work_area)
+        }
+    }
 
     struct SequentialSelection(AtomicUsize);
 
@@ -271,6 +322,7 @@ mod tests {
             runtime.handle().clone(),
             state.clone(),
             Some(selection.clone()),
+            None,
             Arc::new(ReorderingTranslator),
             Arc::new(RecordingView::default()),
         ));
@@ -330,6 +382,71 @@ mod tests {
     }
 
     #[test]
+    fn popup_receives_selection_anchor_and_its_monitor_work_area() {
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        let anchor = Point { x: -640, y: 320 };
+        let work_area = Rect {
+            left: -1920,
+            top: 0,
+            right: 0,
+            bottom: 1040,
+        };
+        let view = Arc::new(RecordingView::default());
+        let controller = AppController::new(
+            runtime.handle().clone(),
+            Arc::new(Mutex::new(AppState::default())),
+            None,
+            Some(Arc::new(MockScreen {
+                cursor: Point { x: 10, y: 20 },
+                work_area,
+            })),
+            Arc::new(ReorderingTranslator),
+            view.clone(),
+        );
+
+        controller.show_popup(Some(anchor));
+
+        assert_eq!(
+            *view
+                .popup_context
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            Some((Some(anchor), Some(work_area)))
+        );
+    }
+
+    #[test]
+    fn popup_uses_current_cursor_when_selection_has_no_anchor() {
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        let cursor = Point { x: 800, y: 450 };
+        let work_area = Rect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1040,
+        };
+        let view = Arc::new(RecordingView::default());
+        let controller = AppController::new(
+            runtime.handle().clone(),
+            Arc::new(Mutex::new(AppState::default())),
+            None,
+            Some(Arc::new(MockScreen { cursor, work_area })),
+            Arc::new(ReorderingTranslator),
+            view.clone(),
+        );
+
+        controller.show_popup(None);
+
+        assert_eq!(
+            *view
+                .popup_context
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            Some((Some(cursor), Some(work_area)))
+        );
+    }
+
+    #[test]
     fn constructs_without_selection_capability() {
         let runtime = Builder::new_multi_thread()
             .worker_threads(1)
@@ -341,6 +458,7 @@ mod tests {
         let _controller = AppController::new(
             runtime.handle().clone(),
             Arc::new(Mutex::new(AppState::default())),
+            None,
             None,
             providers.default_translator(),
             Arc::new(RecordingView::default()),
@@ -360,6 +478,7 @@ mod tests {
         let controller = Arc::new(AppController::new(
             runtime.handle().clone(),
             Arc::clone(&state),
+            None,
             None,
             providers.default_translator(),
             view.clone(),
@@ -388,6 +507,7 @@ mod tests {
         let controller = Arc::new(AppController::new(
             runtime.handle().clone(),
             Arc::clone(&state),
+            None,
             None,
             providers.default_translator(),
             view.clone(),
@@ -419,6 +539,7 @@ mod tests {
             runtime.handle().clone(),
             Arc::clone(&state),
             Some(selection.clone()),
+            None,
             providers.default_translator(),
             Arc::new(RecordingView::default()),
         ));
@@ -445,6 +566,7 @@ mod tests {
             runtime.handle().clone(),
             Arc::clone(&state),
             Some(Arc::new(EmptySelection)),
+            None,
             providers.default_translator(),
             view.clone(),
         ));
@@ -482,6 +604,7 @@ mod tests {
             runtime.handle().clone(),
             Arc::clone(&state),
             platform.selection(),
+            None,
             providers.default_translator(),
             view.clone(),
         ));
@@ -541,6 +664,7 @@ mod tests {
             runtime.handle().clone(),
             Arc::clone(&state),
             None,
+            None,
             providers.default_translator(),
             Arc::new(RecordingView::default()),
         ));
@@ -583,6 +707,7 @@ mod tests {
         let controller = Arc::new(AppController::new(
             runtime.handle().clone(),
             Arc::clone(&state),
+            None,
             None,
             Arc::new(ReorderingTranslator),
             Arc::new(RecordingView::default()),

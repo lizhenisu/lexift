@@ -1,4 +1,7 @@
-use crate::domain::translation::{TranslateRequest, TranslationTaskId};
+use crate::domain::{
+    geometry::Point,
+    translation::{TranslateRequest, TranslationTaskId},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppCommand {
@@ -9,7 +12,9 @@ pub enum AppCommand {
         task_id: TranslationTaskId,
         request: TranslateRequest,
     },
-    ShowPopup,
+    ShowPopup {
+        anchor: Option<Point>,
+    },
     HidePopup,
     Exit,
 }

@@ -36,6 +36,7 @@ impl WindowsSelectionPort {
 impl SelectionPort for WindowsSelectionPort {
     fn selected_text(&self) -> Result<Option<Selection>> {
         let started_at = Instant::now();
+        let anchor = super::screen::cursor_position().ok();
         let uia_started_at = Instant::now();
         let uia_result = capture_with_uia();
         let mut metrics = SelectionCaptureMetrics {
@@ -58,7 +59,7 @@ impl SelectionPort for WindowsSelectionPort {
             "Windows selection capture finished"
         );
 
-        result.map(|text| text.map(|text| Selection { text, anchor: None }))
+        result.map(|text| text.map(|text| Selection { text, anchor }))
     }
 }
 

@@ -2,7 +2,10 @@ use std::sync::{Arc, Mutex};
 
 use lexift_core::{
     AppState,
-    ports::{hotkey::HotkeyPort, selection::SelectionPort, translator::TranslatorPort},
+    ports::{
+        hotkey::HotkeyPort, screen::ScreenPort, selection::SelectionPort,
+        translator::TranslatorPort,
+    },
 };
 use tokio::runtime::{Builder, Runtime};
 
@@ -13,6 +16,7 @@ pub(crate) struct AppServices {
     pub(crate) runtime: Runtime,
     pub(crate) state: Arc<Mutex<AppState>>,
     pub(crate) selection: Option<Arc<dyn SelectionPort>>,
+    pub(crate) screen: Option<Arc<dyn ScreenPort>>,
     pub(crate) translator: Arc<dyn TranslatorPort>,
 }
 
@@ -40,6 +44,7 @@ impl AppServices {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let selection = platform.selection();
         let hotkey = platform.hotkey();
+        let screen = platform.screen();
         let translator = translators.default_translator();
         let runtime = Builder::new_multi_thread()
             .worker_threads(2)
@@ -52,6 +57,7 @@ impl AppServices {
             runtime,
             state: Arc::new(Mutex::new(AppState::new(settings.settings))),
             selection,
+            screen,
             translator,
         })
     }
@@ -86,6 +92,8 @@ mod tests {
         assert!(services.selection.is_none());
         #[cfg(target_os = "windows")]
         assert!(services.hotkey.is_some());
+        #[cfg(target_os = "windows")]
+        assert!(services.screen.is_some());
     }
 
     #[cfg(not(feature = "m1-demo"))]

@@ -54,9 +54,10 @@ impl AppState {
             AppEvent::SelectionTranslationRequested => self.request_selection_translation(),
             AppEvent::InputTranslationRequested { text } => self.request_input_translation(text),
             AppEvent::SelectionCaptured { task_id, selection } if self.is_current_task(task_id) => {
+                let anchor = selection.anchor;
                 self.source_text = selection.text.clone();
                 vec![
-                    AppCommand::ShowPopup,
+                    AppCommand::ShowPopup { anchor },
                     AppCommand::Translate {
                         task_id,
                         request: TranslateRequest {
@@ -72,7 +73,7 @@ impl AppState {
                 self.source_text.clear();
                 self.translated_text.clear();
                 self.error_message.clear();
-                Vec::new()
+                vec![AppCommand::HidePopup]
             }
             AppEvent::SelectionCaptureFailed { task_id, error }
                 if self.is_current_task(task_id) =>
@@ -80,7 +81,7 @@ impl AppState {
                 self.phase = TranslationPhase::Error;
                 self.error_message = error;
                 self.current_translation_task = None;
-                vec![AppCommand::ShowPopup]
+                vec![AppCommand::ShowPopup { anchor: None }]
             }
             AppEvent::TranslationStarted { task_id } if self.is_current_task(task_id) => {
                 self.phase = TranslationPhase::Translating;
@@ -198,7 +199,9 @@ mod tests {
         assert_eq!(
             commands,
             vec![
-                AppCommand::ShowPopup,
+                AppCommand::ShowPopup {
+                    anchor: Some(Point { x: 10, y: 20 }),
+                },
                 AppCommand::Translate {
                     task_id: TranslationTaskId::new(1),
                     request: TranslateRequest {
@@ -242,7 +245,7 @@ mod tests {
                 },
             }),
             vec![
-                AppCommand::ShowPopup,
+                AppCommand::ShowPopup { anchor: None },
                 AppCommand::Translate {
                     task_id: TranslationTaskId::new(1),
                     request: TranslateRequest {
@@ -404,7 +407,7 @@ mod tests {
                 task_id: TranslationTaskId::new(1),
                 error: "No selected text was found".into(),
             }),
-            vec![AppCommand::ShowPopup]
+            vec![AppCommand::ShowPopup { anchor: None }]
         );
         assert_eq!(state.phase, TranslationPhase::Error);
         assert_eq!(state.current_translation_task, None);
@@ -412,16 +415,15 @@ mod tests {
     }
 
     #[test]
-    fn empty_selection_returns_to_idle_without_showing_the_popup() {
+    fn empty_selection_hides_the_previous_popup() {
         let mut state = AppState::default();
         state.reduce(AppEvent::SelectionTranslationRequested);
 
-        assert!(
-            state
-                .reduce(AppEvent::SelectionCaptureEmpty {
-                    task_id: TranslationTaskId::new(1),
-                })
-                .is_empty()
+        assert_eq!(
+            state.reduce(AppEvent::SelectionCaptureEmpty {
+                task_id: TranslationTaskId::new(1),
+            }),
+            vec![AppCommand::HidePopup]
         );
         assert_eq!(state.phase, TranslationPhase::NoSelection);
         assert_eq!(state.current_translation_task, None);
