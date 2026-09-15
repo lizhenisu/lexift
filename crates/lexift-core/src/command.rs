@@ -16,5 +16,6 @@ pub enum AppCommand {
         anchor: Option<Point>,
     },
     HidePopup,
+    ShowMainWindow,
     Exit,
 }

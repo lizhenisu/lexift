@@ -7,8 +7,11 @@ use lexift_core::{
     AppCommand, AppEvent, AppState, TranslationTaskId,
     domain::geometry::{Point, Rect},
     ports::{
-        hotkey::HotkeyHandler, screen::ScreenPort, selection::SelectionPort,
+        hotkey::HotkeyHandler,
+        screen::ScreenPort,
+        selection::SelectionPort,
         translator::TranslatorPort,
+        tray::{TrayAction, TrayHandler},
     },
 };
 use tokio::runtime::Handle;
@@ -17,6 +20,7 @@ pub(crate) trait ViewPort: Send + Sync {
     fn update(&self, state: AppState);
     fn show_popup(&self, anchor: Option<Point>, work_area: Option<Rect>);
     fn hide_popup(&self);
+    fn show_main_window(&self);
     fn quit(&self);
 }
 
@@ -31,6 +35,10 @@ impl ViewPort for lexift_ui::UiHandle {
 
     fn hide_popup(&self) {
         self.hide_popup();
+    }
+
+    fn show_main_window(&self) {
+        self.show_main_window();
     }
 
     fn quit(&self) {
@@ -114,12 +122,18 @@ impl AppController {
         Arc::new(move || controller.dispatch(AppEvent::SelectionTranslationRequested))
     }
 
+    pub(crate) fn tray_handler(self: &Arc<Self>) -> TrayHandler {
+        let controller = Arc::clone(self);
+        Arc::new(move |action| controller.dispatch(tray_event(action)))
+    }
+
     fn execute(self: &Arc<Self>, command: AppCommand) {
         match command {
             AppCommand::CaptureSelection { task_id } => self.capture_selection(task_id),
             AppCommand::Translate { task_id, request } => self.translate(task_id, request),
             AppCommand::ShowPopup { anchor } => self.show_popup(anchor),
             AppCommand::HidePopup => self.ui.hide_popup(),
+            AppCommand::ShowMainWindow => self.ui.show_main_window(),
             AppCommand::Exit => self.ui.quit(),
         }
     }
@@ -219,7 +233,15 @@ fn event_name(event: &AppEvent) -> &'static str {
         AppEvent::TranslationFinished { .. } => "translation_finished",
         AppEvent::TranslationFailed { .. } => "translation_failed",
         AppEvent::PopupHidden => "popup_hidden",
+        AppEvent::MainWindowRequested => "main_window_requested",
         AppEvent::ExitRequested => "exit_requested",
+    }
+}
+
+fn tray_event(action: TrayAction) -> AppEvent {
+    match action {
+        TrayAction::OpenMainWindow => AppEvent::MainWindowRequested,
+        TrayAction::Quit => AppEvent::ExitRequested,
     }
 }
 
@@ -244,6 +266,7 @@ mod tests {
     struct RecordingView {
         states: Mutex<Vec<AppState>>,
         popup_shown: AtomicBool,
+        main_window_shown: AtomicBool,
         popup_context: Mutex<Option<(Option<Point>, Option<Rect>)>>,
     }
 
@@ -264,6 +287,10 @@ mod tests {
         }
 
         fn hide_popup(&self) {}
+
+        fn show_main_window(&self) {
+            self.main_window_shown.store(true, Ordering::SeqCst);
+        }
 
         fn quit(&self) {}
     }
@@ -734,5 +761,32 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         assert_eq!(state.phase, TranslationPhase::Success);
         assert_eq!(state.translated_text, "new request");
+    }
+
+    #[test]
+    fn tray_actions_map_to_core_events() {
+        assert_eq!(
+            tray_event(TrayAction::OpenMainWindow),
+            AppEvent::MainWindowRequested
+        );
+        assert_eq!(tray_event(TrayAction::Quit), AppEvent::ExitRequested);
+    }
+
+    #[test]
+    fn main_window_command_reaches_the_view() {
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        let view = Arc::new(RecordingView::default());
+        let controller = Arc::new(AppController::new(
+            runtime.handle().clone(),
+            Arc::new(Mutex::new(AppState::default())),
+            None,
+            None,
+            Arc::new(ReorderingTranslator),
+            view.clone(),
+        ));
+
+        controller.dispatch(AppEvent::MainWindowRequested);
+
+        assert!(view.main_window_shown.load(Ordering::SeqCst));
     }
 }

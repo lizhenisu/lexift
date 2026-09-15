@@ -111,6 +111,7 @@ impl AppState {
                 self.current_translation_task = None;
                 vec![AppCommand::HidePopup]
             }
+            AppEvent::MainWindowRequested => vec![AppCommand::ShowMainWindow],
             AppEvent::ExitRequested => vec![AppCommand::Exit],
         }
     }
@@ -510,5 +511,14 @@ mod tests {
         assert_eq!(state.phase, TranslationPhase::Capturing);
         assert!(state.source_text.is_empty());
         assert!(state.error_message.is_empty());
+    }
+
+    #[test]
+    fn main_window_request_produces_show_command() {
+        let mut state = AppState::default();
+        assert_eq!(
+            state.reduce(AppEvent::MainWindowRequested),
+            vec![AppCommand::ShowMainWindow]
+        );
     }
 }

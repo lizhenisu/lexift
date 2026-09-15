@@ -4,7 +4,7 @@ use lexift_core::{
     AppState,
     ports::{
         hotkey::HotkeyPort, screen::ScreenPort, selection::SelectionPort,
-        translator::TranslatorPort,
+        translator::TranslatorPort, tray::TrayPort,
     },
 };
 use tokio::runtime::{Builder, Runtime};
@@ -12,6 +12,7 @@ use tokio::runtime::{Builder, Runtime};
 /// Owns the concrete adapters assembled by the application composition root.
 pub(crate) struct AppServices {
     // Rust drops fields in declaration order; stop callbacks before tearing down the runtime.
+    pub(crate) tray: Option<Arc<dyn TrayPort>>,
     pub(crate) hotkey: Option<Arc<dyn HotkeyPort>>,
     pub(crate) runtime: Runtime,
     pub(crate) state: Arc<Mutex<AppState>>,
@@ -45,6 +46,7 @@ impl AppServices {
         let selection = platform.selection();
         let hotkey = platform.hotkey();
         let screen = platform.screen();
+        let tray = platform.tray();
         let translator = translators.default_translator();
         let runtime = Builder::new_multi_thread()
             .worker_threads(2)
@@ -53,6 +55,7 @@ impl AppServices {
             .build()?;
 
         Ok(Self {
+            tray,
             hotkey,
             runtime,
             state: Arc::new(Mutex::new(AppState::new(settings.settings))),
@@ -94,6 +97,20 @@ mod tests {
         assert!(services.hotkey.is_some());
         #[cfg(target_os = "windows")]
         assert!(services.screen.is_some());
+        #[cfg(target_os = "windows")]
+        assert!(services.tray.is_some());
+    }
+
+    #[test]
+    fn services_construct_without_tray_capability() {
+        let services = AppServices::from_capabilities(
+            lexift_config::AppConfig::default(),
+            lexift_platform::PlatformCapabilities::mock(),
+            lexift_translate::ProviderRegistry::with_mock(),
+        )
+        .expect("an unavailable tray must not prevent application construction");
+
+        assert!(services.tray.is_none());
     }
 
     #[cfg(not(feature = "m1-demo"))]

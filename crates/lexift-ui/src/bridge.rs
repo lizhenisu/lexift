@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{cell::Cell, rc::Rc};
 
 use lexift_core::{
     AppEvent, AppState,
@@ -15,6 +15,7 @@ pub struct Ui {
     main: AppWindow,
     popup: TranslationPopup,
     prepare_popup: fn(&slint::Window),
+    background_mode: Rc<Cell<bool>>,
 }
 
 impl Ui {
@@ -31,6 +32,7 @@ impl Ui {
             main,
             popup,
             prepare_popup,
+            background_mode: Rc::new(Cell::new(false)),
         })
     }
 
@@ -44,6 +46,20 @@ impl Ui {
 
     pub fn on_event(&self, handler: impl Fn(AppEvent) + 'static) {
         let handler = Rc::new(handler);
+        let main = self.main.as_weak();
+        let background_mode = Rc::clone(&self.background_mode);
+        let main_close_handler = Rc::clone(&handler);
+        self.main.window().on_close_requested(move || {
+            match close_policy(background_mode.get()) {
+                MainWindowClosePolicy::HideToTray => {
+                    if let Some(main) = main.upgrade() {
+                        let _ = main.hide();
+                    }
+                }
+                MainWindowClosePolicy::Exit => main_close_handler(AppEvent::ExitRequested),
+            }
+            slint::CloseRequestResponse::KeepWindowShown
+        });
         let close_handler = Rc::clone(&handler);
         self.popup.window().on_close_requested(move || {
             close_handler(AppEvent::PopupHidden);
@@ -60,8 +76,15 @@ impl Ui {
         });
     }
 
+    pub fn set_background_mode(&self, enabled: bool) {
+        self.background_mode.set(enabled);
+    }
+
     pub fn run(&self) -> Result<(), slint::PlatformError> {
-        self.main.run()
+        self.main.show()?;
+        slint::run_event_loop_until_quit()?;
+        let _ = self.popup.hide();
+        self.main.hide()
     }
 }
 
@@ -136,9 +159,46 @@ impl UiHandle {
         });
     }
 
+    pub fn show_main_window(&self) {
+        let main = self.main.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(main) = main.upgrade() {
+                if main.window().is_minimized() {
+                    main.window().set_minimized(false);
+                }
+                let _ = main.show();
+            }
+        });
+    }
+
     pub fn quit(&self) {
         let _ = slint::invoke_from_event_loop(|| {
             let _ = slint::quit_event_loop();
         });
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MainWindowClosePolicy {
+    HideToTray,
+    Exit,
+}
+
+fn close_policy(tray_registered: bool) -> MainWindowClosePolicy {
+    if tray_registered {
+        MainWindowClosePolicy::HideToTray
+    } else {
+        MainWindowClosePolicy::Exit
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MainWindowClosePolicy, close_policy};
+
+    #[test]
+    fn main_window_only_hides_when_tray_registration_succeeded() {
+        assert_eq!(close_policy(true), MainWindowClosePolicy::HideToTray);
+        assert_eq!(close_policy(false), MainWindowClosePolicy::Exit);
     }
 }

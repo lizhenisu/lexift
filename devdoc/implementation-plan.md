@@ -744,7 +744,36 @@ Popup 逐渐成为 Lexift 的核心 UI。
 
 下一步：**M4.2 — System Tray & Background Lifecycle**。
 
-### Tray
+### M4.2 System Tray & Background Lifecycle
+
+状态：✅ 实现与人工验收通过
+
+2026-09-15 用户复测：关闭主窗口后托盘保留，左键恢复主窗口且输入内容保留；
+Explorer 重启后图标恢复，Alt+X 翻译正常。修复悬停提示缺失与右键菜单闪烁后，
+用户再次确认：悬停提示正常、右键菜单稳定显示且点击外部正常关闭、
+Open Lexift 与 Quit 正常，Quit 后进程消失。M4.2 人工验收通过。
+
+修复包含 Version 4 的 NIF_SHOWTIP，仅处理
+NIN_SELECT/NIN_KEYSELECT/WM_CONTEXTMENU，增加菜单重入保护，
+并在执行菜单动作前完成 NIM_SETFOCUS。自动测试覆盖旧通知过滤和重入释放。
+
+Windows Production 现在装配可选 `WindowsTrayPort`。Adapter 在独立 Win32 message thread
+创建隐藏窗口，通过 `Shell_NotifyIconW` 注册通知区域图标并阻塞在 `GetMessageW`，不使用轮询。
+左键激活与右键菜单的 `Open Lexift` 映射为 `MainWindowRequested → ShowMainWindow`；`Quit`
+复用 `ExitRequested → Exit → quit_event_loop`。右键菜单使用 `SetForegroundWindow`、
+`TrackPopupMenu`、`WM_NULL` 和 `NIM_SETFOCUS` 维护原生菜单焦点。
+
+主窗口改用 `run_event_loop_until_quit`。托盘注册成功后，关闭主窗口只隐藏同一个 Slint
+实例，Hotkey 和后台翻译继续运行；注册失败或平台无 Tray capability 时，关闭主窗口仍正常
+退出，避免产生无法找回的后台进程。Tray Open 会恢复隐藏或最小化的主窗口，不影响 Popup。
+
+Tray thread 通过注册握手报告 `NIM_ADD` 和 `NIM_SETVERSION` 的结果。Drop 时先删除图标，
+再销毁隐藏窗口、注销 window class 并 join thread。收到 `TaskbarCreated` 后重新添加图标，
+用于恢复 Explorer 重启清除的通知区域状态。当前使用系统 `IDI_APPLICATION`，正式图标留到
+M4.6 Packaging。
+
+原生注册与关闭冒烟测试、菜单 command 映射、Core reducer、Controller View 调用、托盘失败
+降级和关闭策略均有自动化覆盖。
 
 Lexift 应采用：
 
@@ -768,6 +797,8 @@ Lexift
 ```
 
 后续再增加 Clipboard Mode 等能力。
+
+下一步：**M4.3 — Settings & Persistence**。
 
 ### Settings
 

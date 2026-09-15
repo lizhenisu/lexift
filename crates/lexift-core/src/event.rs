@@ -33,5 +33,6 @@ pub enum AppEvent {
         error: String,
     },
     PopupHidden,
+    MainWindowRequested,
     ExitRequested,
 }

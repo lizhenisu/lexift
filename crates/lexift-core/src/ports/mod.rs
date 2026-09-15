@@ -5,3 +5,4 @@ pub mod screen;
 pub mod selection;
 pub mod settings;
 pub mod translator;
+pub mod tray;
