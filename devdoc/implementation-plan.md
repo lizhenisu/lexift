@@ -942,7 +942,7 @@ Settings Window 使用统一凭证字段。未配置时显示密码输入框和 
 
 #### M4.4.1 可查看、复制和编辑的 Credential 字段
 
-状态：✅ 实现完成，等待桌面人工验收
+状态：✅ 实现完成并通过桌面人工验收
 
 四个操作图标采用 Google Material Outlined 的 24×24 矢量几何路径，不依赖 Material Symbols
 字体或 Unicode 字符。界面按 Design Tokens 统一为 32×32 操作区域、20×20 图标和 16px 圆形
@@ -986,6 +986,10 @@ DeepL Adapter，请求结束后释放；DeepL Adapter 本身不知道 Credential
 再次隐藏 Key，复制后出现 `Copied` 且能粘贴完整 Key，编辑的 Save/Cancel 正常，Remove 后条目
 消失；明文在失焦、Settings 关闭或 30 秒后清除。最后检查 config.toml、AppState 和日志均不含
 Key。
+
+完成验证包括默认与 `m1-demo` Workspace 测试、全 Workspace Clippy、Windows Credential Manager
+临时凭证写入/读取/删除集成测试，以及配置持久化与 Secret 脱敏测试。生产启动和翻译链路不读取
+环境变量；`LEXIFT_DEEPL_AUTH_KEY` 仅保留给显式忽略、需要人工运行的 DeepL 网络适配器测试。
 
 下一步：**M4.5 — Runtime Configuration**。
 
