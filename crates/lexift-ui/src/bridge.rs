@@ -1,4 +1,12 @@
-use std::{cell::Cell, rc::Rc};
+use std::{
+    cell::Cell,
+    rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
+};
 
 use lexift_core::{
     AppEvent, AppState,
@@ -14,15 +22,26 @@ use crate::{
     AppWindow, LanguageMenuWindow, SettingsWindow, TranslationPopup, binding, mapper, placement,
 };
 
+type ArmWindowContext = Arc<dyn Fn(&slint::Window, &slint::Window) -> bool + Send + Sync>;
+type DisarmWindowContext = Arc<dyn Fn() + Send + Sync>;
+
 const POPUP_GAP_PX: i32 = 12;
 const WORK_AREA_MARGIN_PX: i32 = 8;
+const LANGUAGE_MENU_STABILIZATION: Duration = Duration::from_millis(120);
+const LANGUAGE_MENU_MONITOR_INTERVAL: Duration = Duration::from_millis(75);
 
 pub struct Ui {
     main: AppWindow,
     popup: TranslationPopup,
     settings: SettingsWindow,
     language_menu: LanguageMenuWindow,
-    prepare_popup: fn(&slint::Window),
+    prepare_passive_window: fn(&slint::Window) -> bool,
+    prepare_interactive_window: fn(&slint::Window) -> bool,
+    set_transient_window_owner: fn(&slint::Window, &slint::Window) -> bool,
+    arm_window_context: ArmWindowContext,
+    disarm_window_context: DisarmWindowContext,
+    language_menu_monitor: Rc<slint::Timer>,
+    language_menu_generation: Arc<AtomicU64>,
     background_mode: Rc<Cell<bool>>,
 }
 
@@ -30,7 +49,11 @@ impl Ui {
     pub fn new(
         initial_state: &AppState,
         show_selection_demo: bool,
-        prepare_popup: fn(&slint::Window),
+        prepare_passive_window: fn(&slint::Window) -> bool,
+        prepare_interactive_window: fn(&slint::Window) -> bool,
+        set_transient_window_owner: fn(&slint::Window, &slint::Window) -> bool,
+        arm_window_context: ArmWindowContext,
+        disarm_window_context: DisarmWindowContext,
     ) -> Result<Self, slint::PlatformError> {
         let main = AppWindow::new()?;
         let popup = TranslationPopup::new()?;
@@ -43,7 +66,13 @@ impl Ui {
             popup,
             settings,
             language_menu,
-            prepare_popup,
+            prepare_passive_window,
+            prepare_interactive_window,
+            set_transient_window_owner,
+            arm_window_context,
+            disarm_window_context,
+            language_menu_monitor: Rc::new(slint::Timer::default()),
+            language_menu_generation: Arc::new(AtomicU64::new(0)),
             background_mode: Rc::new(Cell::new(false)),
         })
     }
@@ -54,7 +83,9 @@ impl Ui {
             popup: self.popup.as_weak(),
             settings: self.settings.as_weak(),
             language_menu: self.language_menu.as_weak(),
-            prepare_popup: self.prepare_popup,
+            prepare_passive_window: self.prepare_passive_window,
+            language_menu_generation: Arc::clone(&self.language_menu_generation),
+            disarm_window_context: Arc::clone(&self.disarm_window_context),
         }
     }
 
@@ -85,29 +116,56 @@ impl Ui {
         });
         let settings = self.settings.as_weak();
         let language_menu = self.language_menu.as_weak();
+        let language_menu_monitor = Rc::clone(&self.language_menu_monitor);
+        let language_menu_generation = Arc::clone(&self.language_menu_generation);
+        let disarm_window_context = Arc::clone(&self.disarm_window_context);
         self.settings.window().on_close_requested(move || {
+            close_language_menu(
+                &settings,
+                &language_menu,
+                &language_menu_monitor,
+                &language_menu_generation,
+                &disarm_window_context,
+                LanguageMenuCloseReason::WindowClosed,
+            );
             if let Some(settings) = settings.upgrade() {
-                settings.set_language_menu_open(false);
                 let _ = settings.hide();
-            }
-            if let Some(language_menu) = language_menu.upgrade() {
-                let _ = language_menu.hide();
             }
             slint::CloseRequestResponse::KeepWindowShown
         });
         let settings = self.settings.as_weak();
         let language_menu = self.language_menu.as_weak();
+        let language_menu_monitor = Rc::clone(&self.language_menu_monitor);
+        let language_menu_generation = Arc::clone(&self.language_menu_generation);
+        let disarm_window_context = Arc::clone(&self.disarm_window_context);
         self.settings.on_cancel_requested(move || {
+            close_language_menu(
+                &settings,
+                &language_menu,
+                &language_menu_monitor,
+                &language_menu_generation,
+                &disarm_window_context,
+                LanguageMenuCloseReason::Cancelled,
+            );
             if let Some(settings) = settings.upgrade() {
-                settings.set_language_menu_open(false);
                 let _ = settings.hide();
             }
-            if let Some(language_menu) = language_menu.upgrade() {
-                let _ = language_menu.hide();
-            }
         });
+        let settings = self.settings.as_weak();
+        let language_menu = self.language_menu.as_weak();
+        let language_menu_monitor = Rc::clone(&self.language_menu_monitor);
+        let language_menu_generation = Arc::clone(&self.language_menu_generation);
+        let disarm_window_context = Arc::clone(&self.disarm_window_context);
         let settings_handler = Rc::clone(&handler);
         self.settings.on_save_requested(move |target_language| {
+            close_language_menu(
+                &settings,
+                &language_menu,
+                &language_menu_monitor,
+                &language_menu_generation,
+                &disarm_window_context,
+                LanguageMenuCloseReason::Saved,
+            );
             settings_handler(AppEvent::SettingsSaveRequested {
                 settings: Settings {
                     target_language: Language(target_language.to_string()),
@@ -116,6 +174,12 @@ impl Ui {
         });
         let settings = self.settings.as_weak();
         let language_menu = self.language_menu.as_weak();
+        let language_menu_monitor = Rc::clone(&self.language_menu_monitor);
+        let language_menu_generation = Arc::clone(&self.language_menu_generation);
+        let arm_window_context = Arc::clone(&self.arm_window_context);
+        let disarm_window_context = Arc::clone(&self.disarm_window_context);
+        let prepare_interactive_window = self.prepare_interactive_window;
+        let set_transient_window_owner = self.set_transient_window_owner;
         self.settings.on_language_menu_requested(
             move |selector_x, selector_y, selector_width, selector_height, pointer_x, pointer_y| {
                 let (Some(settings), Some(language_menu)) =
@@ -124,10 +188,21 @@ impl Ui {
                     return;
                 };
                 if settings.get_language_menu_open() {
-                    settings.set_language_menu_open(false);
-                    let _ = language_menu.hide();
+                    close_language_menu(
+                        &settings.as_weak(),
+                        &language_menu.as_weak(),
+                        &language_menu_monitor,
+                        &language_menu_generation,
+                        &disarm_window_context,
+                        LanguageMenuCloseReason::OutsideClick,
+                    );
                     return;
                 }
+                let opening_generation = begin_language_menu_opening(
+                    &settings,
+                    &language_menu_monitor,
+                    &language_menu_generation,
+                );
                 let scale = settings.window().scale_factor();
                 let window_position = settings.window().position();
                 let current_screen = screen_context();
@@ -160,32 +235,200 @@ impl Ui {
                     geometry.width as u32,
                     geometry.height as u32,
                 ));
-                if language_menu.show().is_ok() {
-                    settings.set_language_menu_open(true);
-                    language_menu.invoke_request_focus();
+                if !set_transient_window_owner(language_menu.window(), settings.window())
+                    || !prepare_interactive_window(language_menu.window())
+                {
+                    close_language_menu(
+                        &settings.as_weak(),
+                        &language_menu.as_weak(),
+                        &language_menu_monitor,
+                        &language_menu_generation,
+                        &disarm_window_context,
+                        LanguageMenuCloseReason::SetupFailed,
+                    );
+                    return;
+                }
+                if language_menu.show().is_ok()
+                    && set_transient_window_owner(language_menu.window(), settings.window())
+                    && prepare_interactive_window(language_menu.window())
+                {
+                    let initial_position = settings.window().position();
+                    let settings_for_monitor = settings.as_weak();
+                    let language_menu_for_monitor = language_menu.as_weak();
+                    let monitor_for_callback = Rc::downgrade(&language_menu_monitor);
+                    let generation_for_callback = Arc::clone(&language_menu_generation);
+                    let arm_context_for_callback = Arc::clone(&arm_window_context);
+                    let disarm_context_for_callback = Arc::clone(&disarm_window_context);
+                    slint::Timer::single_shot(LANGUAGE_MENU_STABILIZATION, move || {
+                        if !language_menu_session_is_current(
+                            &generation_for_callback,
+                            opening_generation,
+                        ) {
+                            return;
+                        }
+                        let (Some(settings), Some(language_menu), Some(monitor)) = (
+                            settings_for_monitor.upgrade(),
+                            language_menu_for_monitor.upgrade(),
+                            monitor_for_callback.upgrade(),
+                        ) else {
+                            generation_for_callback.fetch_add(1, Ordering::SeqCst);
+                            return;
+                        };
+                        let current_position = settings.window().position();
+                        let decision = language_menu_opening_decision(
+                            settings.get_language_menu_open(),
+                            language_menu.window().is_visible(),
+                            (initial_position.x, initial_position.y),
+                            (current_position.x, current_position.y),
+                            settings.window().is_visible(),
+                            settings.window().is_minimized(),
+                        );
+                        match decision {
+                            LanguageMenuMonitorDecision::Continue => {
+                                if !arm_context_for_callback(
+                                    settings.window(),
+                                    language_menu.window(),
+                                ) {
+                                    close_language_menu(
+                                        &settings_for_monitor,
+                                        &language_menu_for_monitor,
+                                        &monitor,
+                                        &generation_for_callback,
+                                        &disarm_context_for_callback,
+                                        LanguageMenuCloseReason::SetupFailed,
+                                    );
+                                    return;
+                                }
+                                settings.set_language_menu_dismiss_armed(true);
+                            }
+                            LanguageMenuMonitorDecision::Stop => {
+                                monitor.stop();
+                                return;
+                            }
+                            LanguageMenuMonitorDecision::Close(reason) => {
+                                close_language_menu(
+                                    &settings_for_monitor,
+                                    &language_menu_for_monitor,
+                                    &monitor,
+                                    &generation_for_callback,
+                                    &disarm_context_for_callback,
+                                    reason,
+                                );
+                                return;
+                            }
+                        }
+
+                        let settings_for_tick = settings_for_monitor.clone();
+                        let language_menu_for_tick = language_menu_for_monitor.clone();
+                        let monitor_for_tick = Rc::downgrade(&monitor);
+                        let generation_for_tick = Arc::clone(&generation_for_callback);
+                        let disarm_context_for_tick = Arc::clone(&disarm_context_for_callback);
+                        monitor.start(
+                            slint::TimerMode::Repeated,
+                            LANGUAGE_MENU_MONITOR_INTERVAL,
+                            move || {
+                                let Some(monitor) = monitor_for_tick.upgrade() else {
+                                    return;
+                                };
+                                if !language_menu_session_is_current(
+                                    &generation_for_tick,
+                                    opening_generation,
+                                ) {
+                                    monitor.stop();
+                                    return;
+                                }
+                                let (Some(settings), Some(language_menu)) = (
+                                    settings_for_tick.upgrade(),
+                                    language_menu_for_tick.upgrade(),
+                                ) else {
+                                    monitor.stop();
+                                    return;
+                                };
+                                let current_position = settings.window().position();
+                                match language_menu_monitor_decision(
+                                    settings.get_language_menu_open(),
+                                    language_menu.window().is_visible(),
+                                    (initial_position.x, initial_position.y),
+                                    (current_position.x, current_position.y),
+                                    settings.window().is_visible(),
+                                    settings.window().is_minimized(),
+                                ) {
+                                    LanguageMenuMonitorDecision::Continue => {}
+                                    LanguageMenuMonitorDecision::Stop => monitor.stop(),
+                                    LanguageMenuMonitorDecision::Close(reason) => {
+                                        close_language_menu(
+                                            &settings_for_tick,
+                                            &language_menu_for_tick,
+                                            &monitor,
+                                            &generation_for_tick,
+                                            &disarm_context_for_tick,
+                                            reason,
+                                        );
+                                    }
+                                }
+                            },
+                        );
+                    });
+                } else {
+                    close_language_menu(
+                        &settings.as_weak(),
+                        &language_menu.as_weak(),
+                        &language_menu_monitor,
+                        &language_menu_generation,
+                        &disarm_window_context,
+                        LanguageMenuCloseReason::SetupFailed,
+                    );
                 }
             },
         );
         let settings = self.settings.as_weak();
         let language_menu = self.language_menu.as_weak();
-        self.language_menu.on_selected(move |index| {
-            if let Some(settings) = settings.upgrade() {
-                settings.set_draft_target_index(index);
-                settings.set_language_menu_open(false);
-            }
-            if let Some(language_menu) = language_menu.upgrade() {
-                let _ = language_menu.hide();
-            }
+        let language_menu_monitor = Rc::clone(&self.language_menu_monitor);
+        let language_menu_generation = Arc::clone(&self.language_menu_generation);
+        let disarm_window_context = Arc::clone(&self.disarm_window_context);
+        self.settings.on_language_menu_dismiss_requested(move || {
+            close_language_menu(
+                &settings,
+                &language_menu,
+                &language_menu_monitor,
+                &language_menu_generation,
+                &disarm_window_context,
+                LanguageMenuCloseReason::OutsideClick,
+            );
         });
         let settings = self.settings.as_weak();
         let language_menu = self.language_menu.as_weak();
-        self.language_menu.on_dismissed(move || {
+        let language_menu_monitor = Rc::clone(&self.language_menu_monitor);
+        let language_menu_generation = Arc::clone(&self.language_menu_generation);
+        let disarm_window_context = Arc::clone(&self.disarm_window_context);
+        self.settings
+            .on_language_menu_external_dismiss_requested(move || {
+                close_language_menu(
+                    &settings,
+                    &language_menu,
+                    &language_menu_monitor,
+                    &language_menu_generation,
+                    &disarm_window_context,
+                    LanguageMenuCloseReason::ExternalInteraction,
+                );
+            });
+        let settings = self.settings.as_weak();
+        let language_menu = self.language_menu.as_weak();
+        let language_menu_monitor = Rc::clone(&self.language_menu_monitor);
+        let language_menu_generation = Arc::clone(&self.language_menu_generation);
+        let disarm_window_context = Arc::clone(&self.disarm_window_context);
+        self.language_menu.on_selected(move |index| {
             if let Some(settings) = settings.upgrade() {
-                settings.set_language_menu_open(false);
+                settings.set_draft_target_index(index);
             }
-            if let Some(language_menu) = language_menu.upgrade() {
-                let _ = language_menu.hide();
-            }
+            close_language_menu(
+                &settings,
+                &language_menu,
+                &language_menu_monitor,
+                &language_menu_generation,
+                &disarm_window_context,
+                LanguageMenuCloseReason::ValueSelected,
+            );
         });
         let selection_handler = Rc::clone(&handler);
         self.main.on_selection_translation_requested(move || {
@@ -211,10 +454,133 @@ impl Ui {
         self.main.show()?;
         slint::run_event_loop_until_quit()?;
         let _ = self.popup.hide();
+        close_language_menu(
+            &self.settings.as_weak(),
+            &self.language_menu.as_weak(),
+            &self.language_menu_monitor,
+            &self.language_menu_generation,
+            &self.disarm_window_context,
+            LanguageMenuCloseReason::WindowClosed,
+        );
         let _ = self.settings.hide();
-        let _ = self.language_menu.hide();
         self.main.hide()
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LanguageMenuMonitorDecision {
+    Continue,
+    Close(LanguageMenuCloseReason),
+    Stop,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LanguageMenuCloseReason {
+    Cancelled,
+    ExternalInteraction,
+    MenuHidden,
+    OwnerHidden,
+    OwnerMinimized,
+    OwnerMoved,
+    OutsideClick,
+    Saved,
+    SetupFailed,
+    ValueSelected,
+    WindowClosed,
+}
+
+fn begin_language_menu_opening(
+    settings: &SettingsWindow,
+    monitor: &slint::Timer,
+    generation: &AtomicU64,
+) -> u64 {
+    monitor.stop();
+    let generation = generation.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+    settings.set_language_menu_open(true);
+    settings.set_language_menu_dismiss_armed(false);
+    generation
+}
+
+fn close_language_menu(
+    settings: &slint::Weak<SettingsWindow>,
+    language_menu: &slint::Weak<LanguageMenuWindow>,
+    monitor: &slint::Timer,
+    generation: &AtomicU64,
+    disarm_window_context: &DisarmWindowContext,
+    reason: LanguageMenuCloseReason,
+) {
+    monitor.stop();
+    disarm_window_context();
+    reset_language_menu_state(settings, language_menu, generation, reason);
+}
+
+fn reset_language_menu_state(
+    settings: &slint::Weak<SettingsWindow>,
+    language_menu: &slint::Weak<LanguageMenuWindow>,
+    generation: &AtomicU64,
+    reason: LanguageMenuCloseReason,
+) {
+    generation.fetch_add(1, Ordering::SeqCst);
+    let mut was_open = false;
+    if let Some(settings) = settings.upgrade() {
+        was_open = settings.get_language_menu_open();
+        settings.set_language_menu_open(false);
+        settings.set_language_menu_dismiss_armed(false);
+    }
+    if let Some(language_menu) = language_menu.upgrade() {
+        let _ = language_menu.hide();
+    }
+    if was_open {
+        tracing::debug!(reason = ?reason, "language menu closed");
+    }
+}
+
+fn language_menu_session_is_current(generation: &AtomicU64, expected_generation: u64) -> bool {
+    generation.load(Ordering::SeqCst) == expected_generation
+}
+
+fn language_menu_monitor_decision(
+    menu_open: bool,
+    menu_visible: bool,
+    initial_position: (i32, i32),
+    current_position: (i32, i32),
+    settings_visible: bool,
+    settings_minimized: bool,
+) -> LanguageMenuMonitorDecision {
+    language_menu_opening_decision(
+        menu_open,
+        menu_visible,
+        initial_position,
+        current_position,
+        settings_visible,
+        settings_minimized,
+    )
+}
+
+fn language_menu_opening_decision(
+    menu_open: bool,
+    menu_visible: bool,
+    initial_position: (i32, i32),
+    current_position: (i32, i32),
+    settings_visible: bool,
+    settings_minimized: bool,
+) -> LanguageMenuMonitorDecision {
+    if !menu_open {
+        return LanguageMenuMonitorDecision::Stop;
+    }
+    if !menu_visible {
+        return LanguageMenuMonitorDecision::Close(LanguageMenuCloseReason::MenuHidden);
+    }
+    if initial_position != current_position {
+        return LanguageMenuMonitorDecision::Close(LanguageMenuCloseReason::OwnerMoved);
+    }
+    if !settings_visible {
+        return LanguageMenuMonitorDecision::Close(LanguageMenuCloseReason::OwnerHidden);
+    }
+    if settings_minimized {
+        return LanguageMenuMonitorDecision::Close(LanguageMenuCloseReason::OwnerMinimized);
+    }
+    LanguageMenuMonitorDecision::Continue
 }
 
 #[derive(Clone)]
@@ -223,10 +589,22 @@ pub struct UiHandle {
     popup: slint::Weak<TranslationPopup>,
     settings: slint::Weak<SettingsWindow>,
     language_menu: slint::Weak<LanguageMenuWindow>,
-    prepare_popup: fn(&slint::Window),
+    prepare_passive_window: fn(&slint::Window) -> bool,
+    language_menu_generation: Arc<AtomicU64>,
+    disarm_window_context: DisarmWindowContext,
 }
 
 impl UiHandle {
+    /// Queues closure of an open language menu after native external interaction.
+    pub fn dismiss_language_menu(&self) {
+        let settings = self.settings.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(settings) = settings.upgrade() {
+                settings.invoke_language_menu_external_dismiss_requested();
+            }
+        });
+    }
+
     /// Queues state rendering on the Slint event-loop thread.
     pub fn update(&self, state: AppState) {
         let main = self.main.clone();
@@ -244,10 +622,12 @@ impl UiHandle {
 
     pub fn show_popup(&self, anchor: Option<Point>, work_area: Option<Rect>) {
         let popup = self.popup.clone();
-        let prepare_popup = self.prepare_popup;
+        let prepare_passive_window = self.prepare_passive_window;
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(popup) = popup.upgrade() {
-                prepare_popup(popup.window());
+                if !prepare_passive_window(popup.window()) {
+                    return;
+                }
                 // Restore before positioning: Windows restores the previous normal bounds
                 // when leaving the minimized state, overriding an earlier position update.
                 if popup.window().is_minimized() {
@@ -275,10 +655,11 @@ impl UiHandle {
                 }
                 // Repeated selection requests only update an already visible popup.
                 // Avoid native show/activation side effects on the source application's focus.
-                if !popup.window().is_visible() {
-                    let _ = popup.show();
-                    // Some backends only create the native handle when first shown.
-                    prepare_popup(popup.window());
+                if !popup.window().is_visible()
+                    && popup.show().is_ok()
+                    && !prepare_passive_window(popup.window())
+                {
+                    let _ = popup.hide();
                 }
             }
         });
@@ -295,7 +676,18 @@ impl UiHandle {
 
     pub fn show_main_window(&self) {
         let main = self.main.clone();
+        let settings = self.settings.clone();
+        let language_menu = self.language_menu.clone();
+        let language_menu_generation = Arc::clone(&self.language_menu_generation);
+        let disarm_window_context = Arc::clone(&self.disarm_window_context);
         let _ = slint::invoke_from_event_loop(move || {
+            reset_language_menu_state(
+                &settings,
+                &language_menu,
+                &language_menu_generation,
+                LanguageMenuCloseReason::ExternalInteraction,
+            );
+            disarm_window_context();
             if let Some(main) = main.upgrade() {
                 if main.window().is_minimized() {
                     main.window().set_minimized(false);
@@ -308,17 +700,22 @@ impl UiHandle {
     pub fn show_settings_window(&self, settings: Settings) {
         let window = self.settings.clone();
         let language_menu = self.language_menu.clone();
+        let language_menu_generation = Arc::clone(&self.language_menu_generation);
+        let disarm_window_context = Arc::clone(&self.disarm_window_context);
         let _ = slint::invoke_from_event_loop(move || {
+            reset_language_menu_state(
+                &window,
+                &language_menu,
+                &language_menu_generation,
+                LanguageMenuCloseReason::Cancelled,
+            );
+            disarm_window_context();
             if let Some(window) = window.upgrade() {
-                window.set_language_menu_open(false);
                 window.set_draft_target_index(language_index(&settings.target_language));
                 if window.window().is_minimized() {
                     window.window().set_minimized(false);
                 }
                 let _ = window.show();
-            }
-            if let Some(language_menu) = language_menu.upgrade() {
-                let _ = language_menu.hide();
             }
         });
     }
@@ -326,13 +723,18 @@ impl UiHandle {
     pub fn hide_settings_window(&self) {
         let settings = self.settings.clone();
         let language_menu = self.language_menu.clone();
+        let language_menu_generation = Arc::clone(&self.language_menu_generation);
+        let disarm_window_context = Arc::clone(&self.disarm_window_context);
         let _ = slint::invoke_from_event_loop(move || {
+            reset_language_menu_state(
+                &settings,
+                &language_menu,
+                &language_menu_generation,
+                LanguageMenuCloseReason::WindowClosed,
+            );
+            disarm_window_context();
             if let Some(settings) = settings.upgrade() {
-                settings.set_language_menu_open(false);
                 let _ = settings.hide();
-            }
-            if let Some(language_menu) = language_menu.upgrade() {
-                let _ = language_menu.hide();
             }
         });
     }
@@ -429,9 +831,65 @@ mod tests {
     };
 
     use super::{
-        LanguageMenuGeometry, MainWindowClosePolicy, close_policy, language_index,
-        language_menu_geometry,
+        LanguageMenuCloseReason, LanguageMenuGeometry, LanguageMenuMonitorDecision,
+        MainWindowClosePolicy, close_policy, language_index, language_menu_geometry,
+        language_menu_monitor_decision, language_menu_opening_decision,
+        language_menu_session_is_current,
     };
+
+    #[test]
+    fn stale_language_menu_generation_cannot_affect_the_current_session() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        let generation = AtomicU64::new(7);
+        assert!(language_menu_session_is_current(&generation, 7));
+        generation.fetch_add(1, Ordering::SeqCst);
+        assert!(!language_menu_session_is_current(&generation, 7));
+    }
+
+    #[test]
+    fn language_menu_opening_does_not_depend_on_foreground_context() {
+        assert_eq!(
+            language_menu_opening_decision(true, true, (10, 20), (10, 20), true, false,),
+            LanguageMenuMonitorDecision::Continue
+        );
+    }
+
+    #[test]
+    fn language_menu_stays_open_while_settings_remains_available_and_stationary() {
+        assert_eq!(
+            language_menu_monitor_decision(true, true, (10, 20), (10, 20), true, false),
+            LanguageMenuMonitorDecision::Continue
+        );
+    }
+
+    #[test]
+    fn language_menu_closes_when_settings_moves_or_loses_availability() {
+        assert_eq!(
+            language_menu_monitor_decision(true, true, (10, 20), (11, 20), true, false),
+            LanguageMenuMonitorDecision::Close(LanguageMenuCloseReason::OwnerMoved)
+        );
+        assert_eq!(
+            language_menu_monitor_decision(true, true, (10, 20), (10, 20), false, false),
+            LanguageMenuMonitorDecision::Close(LanguageMenuCloseReason::OwnerHidden)
+        );
+        assert_eq!(
+            language_menu_monitor_decision(true, true, (10, 20), (10, 20), true, true),
+            LanguageMenuMonitorDecision::Close(LanguageMenuCloseReason::OwnerMinimized)
+        );
+    }
+
+    #[test]
+    fn closed_or_hidden_language_menu_stops_monitoring() {
+        assert_eq!(
+            language_menu_monitor_decision(false, true, (10, 20), (10, 20), true, false),
+            LanguageMenuMonitorDecision::Stop
+        );
+        assert_eq!(
+            language_menu_monitor_decision(true, false, (10, 20), (10, 20), true, false),
+            LanguageMenuMonitorDecision::Close(LanguageMenuCloseReason::MenuHidden)
+        );
+    }
 
     #[test]
     fn main_window_only_hides_when_tray_registration_succeeded() {

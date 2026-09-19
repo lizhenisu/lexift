@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use lexift_core::ports::tray::{TrayHandler, TrayPort};
 
@@ -14,11 +14,69 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    let ui = lexift_ui::Ui::new(&initial_state, cfg!(feature = "m1-demo"), |window| {
-        if let Err(error) = lexift_platform::configure_translation_popup(&window.window_handle()) {
-            tracing::warn!(%error, "popup activation policy is unavailable");
-        }
-    })?;
+    let ui_handle_slot = Arc::new(OnceLock::<lexift_ui::UiHandle>::new());
+    let dismiss_handle_slot = Arc::clone(&ui_handle_slot);
+    let window_context_monitor =
+        match lexift_platform::WindowContextMonitor::new(Arc::new(move || {
+            if let Some(handle) = dismiss_handle_slot.get() {
+                handle.dismiss_language_menu();
+            }
+        })) {
+            Ok(monitor) => Some(Arc::new(monitor)),
+            Err(error) => {
+                tracing::warn!(%error, "window context monitor is unavailable");
+                None
+            }
+        };
+    let monitor_for_arm = window_context_monitor.clone();
+    let monitor_for_disarm = window_context_monitor.clone();
+    let ui = lexift_ui::Ui::new(
+        &initial_state,
+        cfg!(feature = "m1-demo"),
+        |window| match lexift_platform::configure_passive_tool_window(&window.window_handle()) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!(%error, "passive window activation policy is unavailable");
+                false
+            }
+        },
+        |window| match lexift_platform::configure_interactive_tool_window(&window.window_handle()) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!(%error, "interactive tool window policy is unavailable");
+                false
+            }
+        },
+        |child, owner| match lexift_platform::set_transient_window_owner(
+            &child.window_handle(),
+            &owner.window_handle(),
+        ) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!(%error, "transient window owner is unavailable");
+                false
+            }
+        },
+        Arc::new(move |owner, transient| {
+            monitor_for_arm.as_ref().is_none_or(|monitor| {
+                let owner_handle = owner.window_handle();
+                let transient_handle = transient.window_handle();
+                match monitor.arm_context(&[&owner_handle, &transient_handle]) {
+                    Ok(()) => true,
+                    Err(error) => {
+                        tracing::warn!(%error, "window context monitor could not be armed");
+                        false
+                    }
+                }
+            })
+        }),
+        Arc::new(move || {
+            if let Some(monitor) = &monitor_for_disarm {
+                monitor.disarm();
+            }
+        }),
+    )?;
+    let _ = ui_handle_slot.set(ui.handle());
     let controller = Arc::new(AppController::new(
         services.runtime.handle().clone(),
         Arc::clone(&services.state),

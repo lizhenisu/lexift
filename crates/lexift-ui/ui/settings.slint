@@ -40,6 +40,7 @@ export component SettingsWindow inherits Window {
     in property <bool> settings-saving: false;
     in property <string> settings-error-text: "";
     in-out property <bool> language-menu-open: false;
+    in-out property <bool> language-menu-dismiss-armed: false;
     private property <[string]> language-labels: [
         "简体中文", "繁體中文", "English (US)", "English (UK)",
         "日本語", "한국어", "Deutsch", "Français", "Español",
@@ -48,6 +49,8 @@ export component SettingsWindow inherits Window {
     callback save-requested(string);
     callback cancel-requested();
     callback language-menu-requested(float, float, float, float, float, float);
+    callback language-menu-dismiss-requested();
+    callback language-menu-external-dismiss-requested();
 
     function language-code(index: int) -> string {
         return index == 0 ? "zh-CN"
@@ -178,6 +181,13 @@ export component SettingsWindow inherits Window {
         }
     }
 
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        z: 90;
+        enabled: root.language-menu-open && root.language-menu-dismiss-armed;
+        clicked => { root.language-menu-dismiss-requested(); }
+    }
 }
 
 export component LanguageMenuWindow inherits Window {
@@ -196,53 +206,41 @@ export component LanguageMenuWindow inherits Window {
         "Italiano", "Português", "Português (Brasil)"
     ];
     callback selected(int);
-    callback request-focus();
-    callback dismissed();
 
-    request-focus => { menu-focus.focus(); }
+    Rectangle {
+        clip: true;
+        border-radius: 4px;
+        border-width: 1px;
+        border-color: Colors.outline;
+        background: Colors.surface;
 
-    menu-focus := FocusScope {
-        focus-changed-event => {
-            if (!self.has-focus) {
-                root.dismissed();
-            }
-        }
+        Flickable {
+            width: 100%;
+            height: 100%;
+            viewport-height: root.language-labels.length * 40px;
+            viewport-y <=> root.scroll-y;
 
-        Rectangle {
-            clip: true;
-            border-radius: 4px;
-            border-width: 1px;
-            border-color: Colors.outline;
-            background: Colors.surface;
+            for option[index] in root.language-labels: option-row := Rectangle {
+                y: index * 40px;
+                width: root.width;
+                height: 40px;
+                background: index == root.selected-index
+                    ? Colors.primary-container
+                    : option-touch.has-hover ? Colors.background : Colors.surface;
 
-            Flickable {
-                width: 100%;
-                height: 100%;
-                viewport-height: root.language-labels.length * 40px;
-                viewport-y <=> root.scroll-y;
+                Text {
+                    x: Spacing.medium;
+                    width: parent.width - 2 * Spacing.medium;
+                    text: option;
+                    color: Colors.foreground;
+                    font-size: Typography.body-size;
+                    font-weight: 400;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
 
-                for option[index] in root.language-labels: option-row := Rectangle {
-                    y: index * 40px;
-                    width: root.width;
-                    height: 40px;
-                    background: index == root.selected-index
-                        ? Colors.primary-container
-                        : option-touch.has-hover ? Colors.background : Colors.surface;
-
-                    Text {
-                        x: Spacing.medium;
-                        width: parent.width - 2 * Spacing.medium;
-                        text: option;
-                        color: Colors.foreground;
-                        font-size: Typography.body-size;
-                        font-weight: 400;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-
-                    option-touch := TouchArea {
-                        clicked => { root.selected(index); }
-                    }
+                option-touch := TouchArea {
+                    clicked => { root.selected(index); }
                 }
             }
         }
