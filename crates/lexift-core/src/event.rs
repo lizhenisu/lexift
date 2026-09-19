@@ -3,6 +3,7 @@ use crate::domain::{
     settings::Settings,
     translation::{TranslateResult, TranslationTaskId},
 };
+use crate::ports::credential::{CredentialAccessPurpose, CredentialSecret};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppEvent {
@@ -43,6 +44,30 @@ pub enum AppEvent {
         settings: Settings,
     },
     SettingsSaveFailed {
+        error: String,
+    },
+    CredentialSaveRequested {
+        secret: CredentialSecret,
+    },
+    CredentialSaved {
+        credential_id: String,
+    },
+    CredentialSaveFailed {
+        error: String,
+    },
+    CredentialRemoveRequested,
+    CredentialRemoved,
+    CredentialRemoveFailed {
+        error: String,
+    },
+    CredentialAccessRequested {
+        purpose: CredentialAccessPurpose,
+        generation: u64,
+    },
+    CredentialAccessSucceeded {
+        purpose: CredentialAccessPurpose,
+    },
+    CredentialAccessFailed {
         error: String,
     },
     ExitRequested,

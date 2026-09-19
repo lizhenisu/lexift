@@ -1,5 +1,5 @@
 use std::sync::{
-    Arc, Mutex,
+    Arc, Mutex, RwLock,
     atomic::{AtomicBool, Ordering},
 };
 
@@ -10,6 +10,11 @@ use lexift_core::{
         settings::Settings,
     },
     ports::{
+        clipboard::ClipboardPort,
+        credential::{
+            CredentialAccessPurpose, CredentialError, CredentialErrorKind, CredentialSecret,
+            CredentialStore,
+        },
         hotkey::HotkeyHandler,
         screen::ScreenPort,
         selection::SelectionPort,
@@ -27,6 +32,14 @@ pub(crate) trait ViewPort: Send + Sync {
     fn show_main_window(&self);
     fn show_settings_window(&self, settings: Settings);
     fn hide_settings_window(&self);
+    fn clear_credential_draft(&self);
+    fn present_credential_secret(
+        &self,
+        purpose: CredentialAccessPurpose,
+        generation: u64,
+        secret: CredentialSecret,
+    );
+    fn show_credential_copied(&self, generation: u64);
     fn quit(&self);
 }
 
@@ -55,6 +68,23 @@ impl ViewPort for lexift_ui::UiHandle {
         self.hide_settings_window();
     }
 
+    fn clear_credential_draft(&self) {
+        self.clear_credential_draft();
+    }
+
+    fn present_credential_secret(
+        &self,
+        purpose: CredentialAccessPurpose,
+        generation: u64,
+        secret: CredentialSecret,
+    ) {
+        self.present_credential_secret(purpose, generation, secret);
+    }
+
+    fn show_credential_copied(&self, generation: u64) {
+        self.show_credential_copied(generation);
+    }
+
     fn quit(&self) {
         self.quit();
     }
@@ -68,6 +98,9 @@ pub(crate) struct AppController {
     screen: Option<Arc<dyn ScreenPort>>,
     translator: Arc<dyn TranslatorPort>,
     settings_store: Arc<dyn SettingsStore>,
+    credential_store: Option<Arc<dyn CredentialStore>>,
+    credential_reference: Option<Arc<RwLock<Option<String>>>>,
+    clipboard: Option<Arc<dyn ClipboardPort>>,
     ui: Arc<dyn ViewPort>,
     selection_capture_in_flight: AtomicBool,
 }
@@ -89,9 +122,24 @@ impl AppController {
             screen,
             translator,
             settings_store,
+            credential_store: None,
+            credential_reference: None,
+            clipboard: None,
             ui,
             selection_capture_in_flight: AtomicBool::new(false),
         }
+    }
+
+    pub(crate) fn with_credential_management(
+        mut self,
+        store: Arc<dyn CredentialStore>,
+        credential_reference: Arc<RwLock<Option<String>>>,
+        clipboard: Option<Arc<dyn ClipboardPort>>,
+    ) -> Self {
+        self.credential_store = Some(store);
+        self.credential_reference = Some(credential_reference);
+        self.clipboard = clipboard;
+        self
     }
 
     pub(crate) fn dispatch(self: &Arc<Self>, event: AppEvent) {
@@ -162,8 +210,180 @@ impl AppController {
             }
             AppCommand::HideSettingsWindow => self.ui.hide_settings_window(),
             AppCommand::PersistSettings { settings } => self.persist_settings(settings),
+            AppCommand::PersistCredential {
+                credential_id,
+                secret,
+            } => self.persist_credential(credential_id, secret),
+            AppCommand::RemoveCredential { credential_id } => self.remove_credential(credential_id),
+            AppCommand::AccessCredential {
+                credential_id,
+                purpose,
+                generation,
+            } => self.access_credential(credential_id, purpose, generation),
+            AppCommand::ClearCredentialDraft => self.ui.clear_credential_draft(),
             AppCommand::Exit => self.ui.quit(),
         }
+    }
+
+    fn access_credential(
+        self: &Arc<Self>,
+        credential_id: String,
+        purpose: CredentialAccessPurpose,
+        generation: u64,
+    ) {
+        let Some(store) = self.credential_store.clone() else {
+            self.dispatch(AppEvent::CredentialAccessFailed {
+                error: "Secure credential storage is unavailable".into(),
+            });
+            return;
+        };
+        let clipboard = self.clipboard.clone();
+        let controller = Arc::clone(self);
+        self.runtime.spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let secret = store
+                    .get(&credential_id)
+                    .map_err(credential_error_message)?
+                    .ok_or_else(|| "Stored DeepL API key is missing".to_owned())?;
+                let secret = CredentialSecret::new(secret);
+                if purpose == CredentialAccessPurpose::Copy {
+                    let clipboard =
+                        clipboard.ok_or_else(|| "System clipboard is unavailable".to_owned())?;
+                    clipboard
+                        .write_text(secret.expose())
+                        .map_err(|error| format!("Could not copy DeepL API key: {error}"))?;
+                    Ok(None)
+                } else {
+                    Ok(Some(secret))
+                }
+            })
+            .await;
+            match result {
+                Ok(Ok(Some(secret))) => {
+                    controller
+                        .ui
+                        .present_credential_secret(purpose, generation, secret);
+                    controller.dispatch(AppEvent::CredentialAccessSucceeded { purpose });
+                }
+                Ok(Ok(None)) => {
+                    controller.ui.show_credential_copied(generation);
+                    controller.dispatch(AppEvent::CredentialAccessSucceeded { purpose });
+                }
+                Ok(Err(error)) => controller.dispatch(AppEvent::CredentialAccessFailed { error }),
+                Err(_) => controller.dispatch(AppEvent::CredentialAccessFailed {
+                    error: "Credential worker failed".into(),
+                }),
+            }
+        });
+    }
+
+    fn persist_credential(self: &Arc<Self>, credential_id: String, secret: CredentialSecret) {
+        let Some(store) = self.credential_store.clone() else {
+            self.dispatch(AppEvent::CredentialSaveFailed {
+                error: "Secure credential storage is unavailable".into(),
+            });
+            return;
+        };
+        let Some(reference) = self.credential_reference.clone() else {
+            self.dispatch(AppEvent::CredentialSaveFailed {
+                error: "Secure credential storage is unavailable".into(),
+            });
+            return;
+        };
+        let settings_store = Arc::clone(&self.settings_store);
+        let mut settings = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .settings
+            .clone();
+        settings.deepl_credential_id = Some(credential_id.clone());
+        let controller = Arc::clone(self);
+        self.runtime.spawn(async move {
+            let id_for_worker = credential_id.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                let previous = store
+                    .get(&id_for_worker)
+                    .map_err(credential_error_message)?;
+                store
+                    .set(&id_for_worker, secret.expose())
+                    .map_err(credential_error_message)?;
+                if let Err(error) = settings_store.save(&settings) {
+                    restore_credential(store.as_ref(), &id_for_worker, previous.as_deref());
+                    return Err(format!("Could not save credential reference: {error}"));
+                }
+                Ok(())
+            })
+            .await;
+            match result {
+                Ok(Ok(())) => {
+                    *reference
+                        .write()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                        Some(credential_id.clone());
+                    controller.dispatch(AppEvent::CredentialSaved { credential_id });
+                }
+                Ok(Err(error)) => controller.dispatch(AppEvent::CredentialSaveFailed { error }),
+                Err(_) => controller.dispatch(AppEvent::CredentialSaveFailed {
+                    error: "Credential worker failed".into(),
+                }),
+            }
+        });
+    }
+
+    fn remove_credential(self: &Arc<Self>, credential_id: String) {
+        let Some(store) = self.credential_store.clone() else {
+            self.dispatch(AppEvent::CredentialRemoveFailed {
+                error: "Secure credential storage is unavailable".into(),
+            });
+            return;
+        };
+        let Some(reference) = self.credential_reference.clone() else {
+            self.dispatch(AppEvent::CredentialRemoveFailed {
+                error: "Secure credential storage is unavailable".into(),
+            });
+            return;
+        };
+        let settings_store = Arc::clone(&self.settings_store);
+        let mut settings = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .settings
+            .clone();
+        settings.deepl_credential_id = None;
+        let controller = Arc::clone(self);
+        self.runtime.spawn(async move {
+            let id_for_worker = credential_id;
+            let result = tokio::task::spawn_blocking(move || {
+                let previous = store
+                    .get(&id_for_worker)
+                    .map_err(credential_error_message)?;
+                if previous.is_some() {
+                    store
+                        .delete(&id_for_worker)
+                        .map_err(credential_error_message)?;
+                }
+                if let Err(error) = settings_store.save(&settings) {
+                    restore_credential(store.as_ref(), &id_for_worker, previous.as_deref());
+                    return Err(format!("Could not remove credential reference: {error}"));
+                }
+                Ok(())
+            })
+            .await;
+            match result {
+                Ok(Ok(())) => {
+                    *reference
+                        .write()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+                    controller.dispatch(AppEvent::CredentialRemoved);
+                }
+                Ok(Err(error)) => controller.dispatch(AppEvent::CredentialRemoveFailed { error }),
+                Err(_) => controller.dispatch(AppEvent::CredentialRemoveFailed {
+                    error: "Credential worker failed".into(),
+                }),
+            }
+        });
     }
 
     fn persist_settings(self: &Arc<Self>, settings: Settings) {
@@ -284,7 +504,47 @@ fn event_name(event: &AppEvent) -> &'static str {
         AppEvent::SettingsSaveRequested { .. } => "settings_save_requested",
         AppEvent::SettingsSaved { .. } => "settings_saved",
         AppEvent::SettingsSaveFailed { .. } => "settings_save_failed",
+        AppEvent::CredentialSaveRequested { .. } => "credential_save_requested",
+        AppEvent::CredentialSaved { .. } => "credential_saved",
+        AppEvent::CredentialSaveFailed { .. } => "credential_save_failed",
+        AppEvent::CredentialRemoveRequested => "credential_remove_requested",
+        AppEvent::CredentialRemoved => "credential_removed",
+        AppEvent::CredentialRemoveFailed { .. } => "credential_remove_failed",
+        AppEvent::CredentialAccessRequested { purpose, .. } => match purpose {
+            CredentialAccessPurpose::Reveal => "credential_reveal_requested",
+            CredentialAccessPurpose::Edit => "credential_edit_requested",
+            CredentialAccessPurpose::Copy => "credential_copy_requested",
+        },
+        AppEvent::CredentialAccessSucceeded { purpose } => match purpose {
+            CredentialAccessPurpose::Reveal => "credential_reveal_succeeded",
+            CredentialAccessPurpose::Edit => "credential_edit_succeeded",
+            CredentialAccessPurpose::Copy => "credential_copy_succeeded",
+        },
+        AppEvent::CredentialAccessFailed { .. } => "credential_access_failed",
         AppEvent::ExitRequested => "exit_requested",
+    }
+}
+
+fn credential_error_message(error: CredentialError) -> String {
+    match error.kind() {
+        CredentialErrorKind::Missing => "Credential does not exist",
+        CredentialErrorKind::PermissionDenied => "Credential access was denied",
+        CredentialErrorKind::PlatformFailure => "Secure credential storage is unavailable",
+        CredentialErrorKind::InvalidFormat => "Credential value is invalid",
+    }
+    .into()
+}
+
+fn restore_credential(store: &dyn CredentialStore, id: &str, previous: Option<&str>) {
+    let result = match previous {
+        Some(secret) => store.set(id, secret),
+        None => match store.delete(id) {
+            Err(error) if error.kind() == CredentialErrorKind::Missing => Ok(()),
+            result => result,
+        },
+    };
+    if let Err(error) = result {
+        tracing::warn!(kind = ?error.kind(), "credential rollback failed");
     }
 }
 
@@ -299,6 +559,7 @@ fn tray_event(action: TrayAction) -> AppEvent {
 #[cfg(test)]
 mod tests {
     use std::{
+        collections::HashMap,
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
         thread,
         time::{Duration, Instant},
@@ -322,6 +583,9 @@ mod tests {
         settings_window_shown: AtomicBool,
         settings_window_hidden: AtomicBool,
         shown_settings: Mutex<Option<Settings>>,
+        credential_draft_cleared: AtomicBool,
+        presented_secret: Mutex<Option<(CredentialAccessPurpose, u64, String)>>,
+        copied_generation: Mutex<Option<u64>>,
     }
 
     impl ViewPort for RecordingView {
@@ -358,6 +622,24 @@ mod tests {
             self.settings_window_hidden.store(true, Ordering::SeqCst);
         }
 
+        fn clear_credential_draft(&self) {
+            self.credential_draft_cleared.store(true, Ordering::SeqCst);
+        }
+
+        fn present_credential_secret(
+            &self,
+            purpose: CredentialAccessPurpose,
+            generation: u64,
+            secret: CredentialSecret,
+        ) {
+            *self.presented_secret.lock().unwrap() =
+                Some((purpose, generation, secret.into_inner()));
+        }
+
+        fn show_credential_copied(&self, generation: u64) {
+            *self.copied_generation.lock().unwrap() = Some(generation);
+        }
+
         fn quit(&self) {}
     }
 
@@ -387,6 +669,86 @@ mod tests {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .push(settings.clone());
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingCredentialStore {
+        values: Mutex<HashMap<String, String>>,
+        fail_get: AtomicBool,
+        fail_set: AtomicBool,
+        fail_delete: AtomicBool,
+    }
+
+    impl CredentialStore for RecordingCredentialStore {
+        fn get(
+            &self,
+            id: &str,
+        ) -> lexift_core::ports::credential::CredentialResult<Option<String>> {
+            if self.fail_get.load(Ordering::SeqCst) {
+                return Err(CredentialError::new(
+                    CredentialErrorKind::PermissionDenied,
+                    "fixture get failure",
+                ));
+            }
+            Ok(self
+                .values
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .get(id)
+                .cloned())
+        }
+
+        fn set(
+            &self,
+            id: &str,
+            secret: &str,
+        ) -> lexift_core::ports::credential::CredentialResult<()> {
+            if self.fail_set.load(Ordering::SeqCst) {
+                return Err(CredentialError::new(
+                    CredentialErrorKind::PlatformFailure,
+                    "fixture set failure",
+                ));
+            }
+            self.values
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(id.into(), secret.into());
+            Ok(())
+        }
+
+        fn delete(&self, id: &str) -> lexift_core::ports::credential::CredentialResult<()> {
+            if self.fail_delete.load(Ordering::SeqCst) {
+                return Err(CredentialError::new(
+                    CredentialErrorKind::PermissionDenied,
+                    "fixture delete failure",
+                ));
+            }
+            self.values
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(id);
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingClipboard {
+        text: Mutex<Option<String>>,
+        fail_write: AtomicBool,
+    }
+
+    impl ClipboardPort for RecordingClipboard {
+        fn read_text(&self) -> lexift_core::Result<Option<String>> {
+            Ok(self.text.lock().unwrap().clone())
+        }
+
+        fn write_text(&self, text: &str) -> lexift_core::Result<()> {
+            if self.fail_write.load(Ordering::SeqCst) {
+                return Err(lexift_core::Error::new("fixture clipboard failure"));
+            }
+            *self.text.lock().unwrap() = Some(text.into());
             Ok(())
         }
     }
@@ -905,6 +1267,7 @@ mod tests {
         let runtime = Builder::new_current_thread().enable_all().build().unwrap();
         let committed = Settings {
             target_language: lexift_core::domain::language::Language("fr".into()),
+            ..Settings::default()
         };
         let view = Arc::new(RecordingView::default());
         let controller = Arc::new(AppController::new(
@@ -949,6 +1312,7 @@ mod tests {
         ));
         let requested = Settings {
             target_language: lexift_core::domain::language::Language("ja".into()),
+            ..Settings::default()
         };
         let caller_thread = thread::current().id();
 
@@ -975,6 +1339,7 @@ mod tests {
             .unwrap();
         let committed = Settings {
             target_language: lexift_core::domain::language::Language("de".into()),
+            ..Settings::default()
         };
         let state = Arc::new(Mutex::new(AppState::new(committed.clone())));
         let view = Arc::new(RecordingView::default());
@@ -995,6 +1360,7 @@ mod tests {
         controller.dispatch(AppEvent::SettingsSaveRequested {
             settings: Settings {
                 target_language: lexift_core::domain::language::Language("fr".into()),
+                ..Settings::default()
             },
         });
 
@@ -1011,5 +1377,347 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         }
         assert!(!view.settings_window_hidden.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn credential_save_persists_secret_reference_and_updates_runtime() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let state = Arc::new(Mutex::new(AppState::default()));
+        let view = Arc::new(RecordingView::default());
+        let settings_store = Arc::new(RecordingSettingsStore::default());
+        let credential_store = Arc::new(RecordingCredentialStore::default());
+        let reference = Arc::new(RwLock::new(None));
+        let controller = Arc::new(
+            AppController::new(
+                runtime.handle().clone(),
+                Arc::clone(&state),
+                None,
+                None,
+                Arc::new(ReorderingTranslator),
+                settings_store.clone(),
+                view.clone(),
+            )
+            .with_credential_management(
+                credential_store.clone(),
+                Arc::clone(&reference),
+                None,
+            ),
+        );
+
+        controller.dispatch(AppEvent::CredentialSaveRequested {
+            secret: CredentialSecret::new("private-key"),
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !state.lock().unwrap().credential_configured {
+            assert!(Instant::now() < deadline, "credential save timed out");
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            credential_store.get("deepl-primary").unwrap().as_deref(),
+            Some("private-key")
+        );
+        assert_eq!(reference.read().unwrap().as_deref(), Some("deepl-primary"));
+        let saved = settings_store.saved.lock().unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(
+            saved[0].deepl_credential_id.as_deref(),
+            Some("deepl-primary")
+        );
+        assert!(view.credential_draft_cleared.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn credential_delete_failure_preserves_state_and_reference() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let settings = Settings {
+            deepl_credential_id: Some("deepl-primary".into()),
+            ..Settings::default()
+        };
+        let state = Arc::new(Mutex::new(AppState::with_credential_status(settings, true)));
+        let credential_store = Arc::new(RecordingCredentialStore::default());
+        credential_store
+            .set("deepl-primary", "private-key")
+            .unwrap();
+        credential_store.fail_delete.store(true, Ordering::SeqCst);
+        let reference = Arc::new(RwLock::new(Some("deepl-primary".into())));
+        let controller = Arc::new(
+            AppController::new(
+                runtime.handle().clone(),
+                Arc::clone(&state),
+                None,
+                None,
+                Arc::new(ReorderingTranslator),
+                Arc::new(RecordingSettingsStore::default()),
+                Arc::new(RecordingView::default()),
+            )
+            .with_credential_management(
+                credential_store.clone(),
+                Arc::clone(&reference),
+                None,
+            ),
+        );
+
+        controller.dispatch(AppEvent::CredentialRemoveRequested);
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let snapshot = state.lock().unwrap();
+            if !snapshot.credential_busy {
+                assert!(snapshot.credential_configured);
+                assert_eq!(
+                    snapshot.settings.deepl_credential_id.as_deref(),
+                    Some("deepl-primary")
+                );
+                assert_eq!(
+                    snapshot.credential_error_message,
+                    "Credential access was denied"
+                );
+                break;
+            }
+            drop(snapshot);
+            assert!(
+                Instant::now() < deadline,
+                "credential delete failure timed out"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(reference.read().unwrap().as_deref(), Some("deepl-primary"));
+        assert_eq!(
+            credential_store.get("deepl-primary").unwrap().as_deref(),
+            Some("private-key")
+        );
+    }
+
+    #[test]
+    fn credential_save_failure_does_not_commit_reference_or_status() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let state = Arc::new(Mutex::new(AppState::default()));
+        let credential_store = Arc::new(RecordingCredentialStore::default());
+        credential_store.fail_set.store(true, Ordering::SeqCst);
+        let reference = Arc::new(RwLock::new(None));
+        let controller = Arc::new(
+            AppController::new(
+                runtime.handle().clone(),
+                Arc::clone(&state),
+                None,
+                None,
+                Arc::new(ReorderingTranslator),
+                Arc::new(RecordingSettingsStore::default()),
+                Arc::new(RecordingView::default()),
+            )
+            .with_credential_management(
+                credential_store.clone(),
+                Arc::clone(&reference),
+                None,
+            ),
+        );
+
+        controller.dispatch(AppEvent::CredentialSaveRequested {
+            secret: CredentialSecret::new("private-key"),
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let snapshot = state.lock().unwrap();
+            if !snapshot.credential_busy {
+                assert!(!snapshot.credential_configured);
+                assert_eq!(snapshot.settings.deepl_credential_id, None);
+                assert_eq!(
+                    snapshot.credential_error_message,
+                    "Secure credential storage is unavailable"
+                );
+                break;
+            }
+            drop(snapshot);
+            assert!(
+                Instant::now() < deadline,
+                "credential save failure timed out"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(*reference.read().unwrap(), None);
+        assert_eq!(credential_store.get("deepl-primary").unwrap(), None);
+    }
+
+    #[test]
+    fn credential_reveal_and_edit_deliver_one_time_secret_to_the_view() {
+        for purpose in [
+            CredentialAccessPurpose::Reveal,
+            CredentialAccessPurpose::Edit,
+        ] {
+            let runtime = Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .unwrap();
+            let settings = Settings {
+                deepl_credential_id: Some("deepl-primary".into()),
+                ..Settings::default()
+            };
+            let state = Arc::new(Mutex::new(AppState::with_credential_status(settings, true)));
+            let view = Arc::new(RecordingView::default());
+            let store = Arc::new(RecordingCredentialStore::default());
+            store.set("deepl-primary", "private-key").unwrap();
+            let controller = Arc::new(
+                AppController::new(
+                    runtime.handle().clone(),
+                    Arc::clone(&state),
+                    None,
+                    None,
+                    Arc::new(ReorderingTranslator),
+                    Arc::new(RecordingSettingsStore::default()),
+                    view.clone(),
+                )
+                .with_credential_management(
+                    store,
+                    Arc::new(RwLock::new(Some("deepl-primary".into()))),
+                    None,
+                ),
+            );
+
+            controller.dispatch(AppEvent::CredentialAccessRequested {
+                purpose,
+                generation: 17,
+            });
+
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                if let Some(presented) = view.presented_secret.lock().unwrap().clone() {
+                    assert_eq!(presented, (purpose, 17, "private-key".into()));
+                    break;
+                }
+                assert!(Instant::now() < deadline, "credential access timed out");
+                thread::sleep(Duration::from_millis(5));
+            }
+            assert!(!state.lock().unwrap().credential_busy);
+            assert!(!format!("{:?}", state.lock().unwrap().clone()).contains("private-key"));
+        }
+    }
+
+    #[test]
+    fn credential_copy_bypasses_the_view_and_writes_the_clipboard() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let settings = Settings {
+            deepl_credential_id: Some("deepl-primary".into()),
+            ..Settings::default()
+        };
+        let state = Arc::new(Mutex::new(AppState::with_credential_status(settings, true)));
+        let view = Arc::new(RecordingView::default());
+        let store = Arc::new(RecordingCredentialStore::default());
+        store.set("deepl-primary", "private-key").unwrap();
+        let clipboard = Arc::new(RecordingClipboard::default());
+        let controller = Arc::new(
+            AppController::new(
+                runtime.handle().clone(),
+                Arc::clone(&state),
+                None,
+                None,
+                Arc::new(ReorderingTranslator),
+                Arc::new(RecordingSettingsStore::default()),
+                view.clone(),
+            )
+            .with_credential_management(
+                store,
+                Arc::new(RwLock::new(Some("deepl-primary".into()))),
+                Some(clipboard.clone()),
+            ),
+        );
+
+        controller.dispatch(AppEvent::CredentialAccessRequested {
+            purpose: CredentialAccessPurpose::Copy,
+            generation: 23,
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if view.copied_generation.lock().unwrap().as_ref() == Some(&23) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "credential copy timed out");
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            clipboard.text.lock().unwrap().as_deref(),
+            Some("private-key")
+        );
+        assert!(view.presented_secret.lock().unwrap().is_none());
+        assert!(!state.lock().unwrap().credential_busy);
+    }
+
+    #[test]
+    fn credential_copy_failure_is_recoverable_and_does_not_report_success() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let settings = Settings {
+            deepl_credential_id: Some("deepl-primary".into()),
+            ..Settings::default()
+        };
+        let state = Arc::new(Mutex::new(AppState::with_credential_status(settings, true)));
+        let view = Arc::new(RecordingView::default());
+        let store = Arc::new(RecordingCredentialStore::default());
+        store.set("deepl-primary", "private-key").unwrap();
+        let clipboard = Arc::new(RecordingClipboard::default());
+        clipboard.fail_write.store(true, Ordering::SeqCst);
+        let controller = Arc::new(
+            AppController::new(
+                runtime.handle().clone(),
+                Arc::clone(&state),
+                None,
+                None,
+                Arc::new(ReorderingTranslator),
+                Arc::new(RecordingSettingsStore::default()),
+                view.clone(),
+            )
+            .with_credential_management(
+                store,
+                Arc::new(RwLock::new(Some("deepl-primary".into()))),
+                Some(clipboard),
+            ),
+        );
+
+        controller.dispatch(AppEvent::CredentialAccessRequested {
+            purpose: CredentialAccessPurpose::Copy,
+            generation: 24,
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let snapshot = state.lock().unwrap();
+            if !snapshot.credential_busy {
+                assert_eq!(
+                    snapshot.credential_error_message,
+                    "Could not copy DeepL API key: fixture clipboard failure"
+                );
+                break;
+            }
+            drop(snapshot);
+            assert!(
+                Instant::now() < deadline,
+                "credential copy failure timed out"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(view.copied_generation.lock().unwrap().is_none());
+        assert!(view.presented_secret.lock().unwrap().is_none());
     }
 }

@@ -77,15 +77,22 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         }),
     )?;
     let _ = ui_handle_slot.set(ui.handle());
-    let controller = Arc::new(AppController::new(
-        services.runtime.handle().clone(),
-        Arc::clone(&services.state),
-        services.selection.clone(),
-        services.screen.clone(),
-        Arc::clone(&services.translator),
-        Arc::clone(&services.settings_store),
-        Arc::new(ui.handle()),
-    ));
+    let controller = Arc::new(
+        AppController::new(
+            services.runtime.handle().clone(),
+            Arc::clone(&services.state),
+            services.selection.clone(),
+            services.screen.clone(),
+            Arc::clone(&services.translator),
+            Arc::clone(&services.settings_store),
+            Arc::new(ui.handle()),
+        )
+        .with_credential_management(
+            Arc::clone(&services.credential_store),
+            Arc::clone(&services.credential_reference),
+            services.clipboard.clone(),
+        ),
+    );
     ui.on_event(
         {
             let controller = Arc::clone(&controller);

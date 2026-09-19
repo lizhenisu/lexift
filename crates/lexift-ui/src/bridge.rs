@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use lexift_core::ports::credential::{CredentialAccessPurpose, CredentialSecret};
 use lexift_core::{
     AppEvent, AppState,
     domain::{
@@ -29,6 +30,8 @@ const POPUP_GAP_PX: i32 = 12;
 const WORK_AREA_MARGIN_PX: i32 = 8;
 const LANGUAGE_MENU_STABILIZATION: Duration = Duration::from_millis(120);
 const LANGUAGE_MENU_MONITOR_INTERVAL: Duration = Duration::from_millis(75);
+const CREDENTIAL_REVEAL_DURATION: Duration = Duration::from_secs(30);
+const CREDENTIAL_FEEDBACK_DURATION: Duration = Duration::from_secs(2);
 
 pub struct Ui {
     main: AppWindow,
@@ -42,6 +45,7 @@ pub struct Ui {
     disarm_window_context: DisarmWindowContext,
     language_menu_monitor: Rc<slint::Timer>,
     language_menu_generation: Arc<AtomicU64>,
+    credential_generation: Arc<AtomicU64>,
     background_mode: Rc<Cell<bool>>,
 }
 
@@ -73,6 +77,7 @@ impl Ui {
             disarm_window_context,
             language_menu_monitor: Rc::new(slint::Timer::default()),
             language_menu_generation: Arc::new(AtomicU64::new(0)),
+            credential_generation: Arc::new(AtomicU64::new(0)),
             background_mode: Rc::new(Cell::new(false)),
         })
     }
@@ -85,6 +90,7 @@ impl Ui {
             language_menu: self.language_menu.as_weak(),
             prepare_passive_window: self.prepare_passive_window,
             language_menu_generation: Arc::clone(&self.language_menu_generation),
+            credential_generation: Arc::clone(&self.credential_generation),
             disarm_window_context: Arc::clone(&self.disarm_window_context),
         }
     }
@@ -119,6 +125,7 @@ impl Ui {
         let language_menu_monitor = Rc::clone(&self.language_menu_monitor);
         let language_menu_generation = Arc::clone(&self.language_menu_generation);
         let disarm_window_context = Arc::clone(&self.disarm_window_context);
+        let credential_generation = Arc::clone(&self.credential_generation);
         self.settings.window().on_close_requested(move || {
             close_language_menu(
                 &settings,
@@ -129,6 +136,7 @@ impl Ui {
                 LanguageMenuCloseReason::WindowClosed,
             );
             if let Some(settings) = settings.upgrade() {
+                clear_credential_transient(&settings, &credential_generation);
                 let _ = settings.hide();
             }
             slint::CloseRequestResponse::KeepWindowShown
@@ -138,6 +146,7 @@ impl Ui {
         let language_menu_monitor = Rc::clone(&self.language_menu_monitor);
         let language_menu_generation = Arc::clone(&self.language_menu_generation);
         let disarm_window_context = Arc::clone(&self.disarm_window_context);
+        let credential_generation = Arc::clone(&self.credential_generation);
         self.settings.on_cancel_requested(move || {
             close_language_menu(
                 &settings,
@@ -148,6 +157,7 @@ impl Ui {
                 LanguageMenuCloseReason::Cancelled,
             );
             if let Some(settings) = settings.upgrade() {
+                clear_credential_transient(&settings, &credential_generation);
                 let _ = settings.hide();
             }
         });
@@ -157,6 +167,7 @@ impl Ui {
         let language_menu_generation = Arc::clone(&self.language_menu_generation);
         let disarm_window_context = Arc::clone(&self.disarm_window_context);
         let settings_handler = Rc::clone(&handler);
+        let credential_generation = Arc::clone(&self.credential_generation);
         self.settings.on_save_requested(move |target_language| {
             close_language_menu(
                 &settings,
@@ -166,11 +177,69 @@ impl Ui {
                 &disarm_window_context,
                 LanguageMenuCloseReason::Saved,
             );
+            if let Some(settings) = settings.upgrade() {
+                clear_credential_transient(&settings, &credential_generation);
+            }
             settings_handler(AppEvent::SettingsSaveRequested {
                 settings: Settings {
                     target_language: Language(target_language.to_string()),
+                    ..Settings::default()
                 },
             });
+        });
+        let credential_handler = Rc::clone(&handler);
+        self.settings.on_credential_save_requested(move |secret| {
+            credential_handler(AppEvent::CredentialSaveRequested {
+                secret: CredentialSecret::new(secret.to_string()),
+            });
+        });
+        let credential_handler = Rc::clone(&handler);
+        self.settings.on_credential_remove_requested(move || {
+            credential_handler(AppEvent::CredentialRemoveRequested);
+        });
+        let settings = self.settings.as_weak();
+        let credential_generation = Arc::clone(&self.credential_generation);
+        let credential_handler = Rc::clone(&handler);
+        self.settings.on_credential_reveal_requested(move || {
+            let generation = begin_credential_access(&settings, &credential_generation);
+            credential_handler(AppEvent::CredentialAccessRequested {
+                purpose: CredentialAccessPurpose::Reveal,
+                generation,
+            });
+        });
+        let settings = self.settings.as_weak();
+        let credential_generation = Arc::clone(&self.credential_generation);
+        let credential_handler = Rc::clone(&handler);
+        self.settings.on_credential_edit_requested(move || {
+            let generation = begin_credential_access(&settings, &credential_generation);
+            credential_handler(AppEvent::CredentialAccessRequested {
+                purpose: CredentialAccessPurpose::Edit,
+                generation,
+            });
+        });
+        let settings = self.settings.as_weak();
+        let credential_generation = Arc::clone(&self.credential_generation);
+        let credential_handler = Rc::clone(&handler);
+        self.settings.on_credential_copy_requested(move || {
+            let generation = begin_credential_access(&settings, &credential_generation);
+            credential_handler(AppEvent::CredentialAccessRequested {
+                purpose: CredentialAccessPurpose::Copy,
+                generation,
+            });
+        });
+        let settings = self.settings.as_weak();
+        let credential_generation = Arc::clone(&self.credential_generation);
+        self.settings.on_credential_hide_requested(move || {
+            if let Some(settings) = settings.upgrade() {
+                clear_credential_transient(&settings, &credential_generation);
+            }
+        });
+        let settings = self.settings.as_weak();
+        let credential_generation = Arc::clone(&self.credential_generation);
+        self.settings.on_credential_edit_cancel_requested(move || {
+            if let Some(settings) = settings.upgrade() {
+                clear_credential_transient(&settings, &credential_generation);
+            }
         });
         let settings = self.settings.as_weak();
         let language_menu = self.language_menu.as_weak();
@@ -583,6 +652,35 @@ fn language_menu_opening_decision(
     LanguageMenuMonitorDecision::Continue
 }
 
+fn reset_credential_view(settings: &SettingsWindow) {
+    settings.set_credential_draft("".into());
+    settings.set_credential_transient_secret("".into());
+    settings.set_credential_revealed(false);
+    settings.set_credential_editing(false);
+    settings.set_credential_secret_visible(false);
+    settings.set_credential_reveal_dismiss_armed(false);
+    settings.set_credential_feedback("".into());
+    settings.set_credential_request_pending(false);
+}
+
+fn clear_credential_transient(settings: &SettingsWindow, generation: &AtomicU64) {
+    generation.fetch_add(1, Ordering::SeqCst);
+    reset_credential_view(settings);
+}
+
+fn begin_credential_access(settings: &slint::Weak<SettingsWindow>, generation: &AtomicU64) -> u64 {
+    let generation = generation.fetch_add(1, Ordering::SeqCst) + 1;
+    if let Some(settings) = settings.upgrade() {
+        reset_credential_view(&settings);
+        settings.set_credential_request_pending(true);
+    }
+    generation
+}
+
+fn credential_session_is_current(generation: &AtomicU64, expected: u64) -> bool {
+    generation.load(Ordering::SeqCst) == expected
+}
+
 #[derive(Clone)]
 pub struct UiHandle {
     main: slint::Weak<AppWindow>,
@@ -591,6 +689,7 @@ pub struct UiHandle {
     language_menu: slint::Weak<LanguageMenuWindow>,
     prepare_passive_window: fn(&slint::Window) -> bool,
     language_menu_generation: Arc<AtomicU64>,
+    credential_generation: Arc<AtomicU64>,
     disarm_window_context: DisarmWindowContext,
 }
 
@@ -680,6 +779,7 @@ impl UiHandle {
         let language_menu = self.language_menu.clone();
         let language_menu_generation = Arc::clone(&self.language_menu_generation);
         let disarm_window_context = Arc::clone(&self.disarm_window_context);
+        let credential_generation = Arc::clone(&self.credential_generation);
         let _ = slint::invoke_from_event_loop(move || {
             reset_language_menu_state(
                 &settings,
@@ -688,6 +788,9 @@ impl UiHandle {
                 LanguageMenuCloseReason::ExternalInteraction,
             );
             disarm_window_context();
+            if let Some(settings) = settings.upgrade() {
+                clear_credential_transient(&settings, &credential_generation);
+            }
             if let Some(main) = main.upgrade() {
                 if main.window().is_minimized() {
                     main.window().set_minimized(false);
@@ -702,6 +805,7 @@ impl UiHandle {
         let language_menu = self.language_menu.clone();
         let language_menu_generation = Arc::clone(&self.language_menu_generation);
         let disarm_window_context = Arc::clone(&self.disarm_window_context);
+        let credential_generation = Arc::clone(&self.credential_generation);
         let _ = slint::invoke_from_event_loop(move || {
             reset_language_menu_state(
                 &window,
@@ -712,6 +816,7 @@ impl UiHandle {
             disarm_window_context();
             if let Some(window) = window.upgrade() {
                 window.set_draft_target_index(language_index(&settings.target_language));
+                clear_credential_transient(&window, &credential_generation);
                 if window.window().is_minimized() {
                     window.window().set_minimized(false);
                 }
@@ -725,6 +830,7 @@ impl UiHandle {
         let language_menu = self.language_menu.clone();
         let language_menu_generation = Arc::clone(&self.language_menu_generation);
         let disarm_window_context = Arc::clone(&self.disarm_window_context);
+        let credential_generation = Arc::clone(&self.credential_generation);
         let _ = slint::invoke_from_event_loop(move || {
             reset_language_menu_state(
                 &settings,
@@ -734,13 +840,107 @@ impl UiHandle {
             );
             disarm_window_context();
             if let Some(settings) = settings.upgrade() {
+                clear_credential_transient(&settings, &credential_generation);
                 let _ = settings.hide();
             }
         });
     }
 
+    pub fn clear_credential_draft(&self) {
+        let settings = self.settings.clone();
+        let credential_generation = Arc::clone(&self.credential_generation);
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(settings) = settings.upgrade() {
+                clear_credential_transient(&settings, &credential_generation);
+            }
+        });
+    }
+
+    pub fn present_credential_secret(
+        &self,
+        purpose: CredentialAccessPurpose,
+        generation: u64,
+        secret: CredentialSecret,
+    ) {
+        let settings = self.settings.clone();
+        let current_generation = Arc::clone(&self.credential_generation);
+        let _ = slint::invoke_from_event_loop(move || {
+            if !credential_session_is_current(&current_generation, generation) {
+                return;
+            }
+            let Some(settings) = settings.upgrade() else {
+                return;
+            };
+            match purpose {
+                CredentialAccessPurpose::Reveal => {
+                    settings.set_credential_transient_secret(secret.into_inner().into());
+                    settings.set_credential_revealed(true);
+                    settings.set_credential_editing(false);
+                    settings.set_credential_secret_visible(true);
+                    settings.set_credential_reveal_dismiss_armed(false);
+                    settings.invoke_focus_credential_reveal();
+
+                    let settings_for_arm = settings.as_weak();
+                    let generation_for_arm = Arc::clone(&current_generation);
+                    slint::Timer::single_shot(Duration::from_millis(50), move || {
+                        if credential_session_is_current(&generation_for_arm, generation)
+                            && let Some(settings) = settings_for_arm.upgrade()
+                        {
+                            settings.set_credential_reveal_dismiss_armed(true);
+                        }
+                    });
+                    let settings_for_timeout = settings.as_weak();
+                    let generation_for_timeout = Arc::clone(&current_generation);
+                    slint::Timer::single_shot(CREDENTIAL_REVEAL_DURATION, move || {
+                        if credential_session_is_current(&generation_for_timeout, generation)
+                            && let Some(settings) = settings_for_timeout.upgrade()
+                        {
+                            clear_credential_transient(&settings, &generation_for_timeout);
+                        }
+                    });
+                }
+                CredentialAccessPurpose::Edit => {
+                    settings.set_credential_draft(secret.into_inner().into());
+                    settings.set_credential_revealed(false);
+                    settings.set_credential_editing(true);
+                    settings.set_credential_secret_visible(false);
+                    settings.invoke_focus_credential_edit();
+                }
+                CredentialAccessPurpose::Copy => {}
+            }
+        });
+    }
+
+    pub fn show_credential_copied(&self, generation: u64) {
+        let settings = self.settings.clone();
+        let current_generation = Arc::clone(&self.credential_generation);
+        let _ = slint::invoke_from_event_loop(move || {
+            if !credential_session_is_current(&current_generation, generation) {
+                return;
+            }
+            let Some(settings) = settings.upgrade() else {
+                return;
+            };
+            settings.set_credential_feedback("Copied".into());
+            let settings_for_timeout = settings.as_weak();
+            let generation_for_timeout = Arc::clone(&current_generation);
+            slint::Timer::single_shot(CREDENTIAL_FEEDBACK_DURATION, move || {
+                if credential_session_is_current(&generation_for_timeout, generation)
+                    && let Some(settings) = settings_for_timeout.upgrade()
+                {
+                    settings.set_credential_feedback("".into());
+                }
+            });
+        });
+    }
+
     pub fn quit(&self) {
-        let _ = slint::invoke_from_event_loop(|| {
+        let settings = self.settings.clone();
+        let credential_generation = Arc::clone(&self.credential_generation);
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(settings) = settings.upgrade() {
+                clear_credential_transient(&settings, &credential_generation);
+            }
             let _ = slint::quit_event_loop();
         });
     }
@@ -832,8 +1032,8 @@ mod tests {
 
     use super::{
         LanguageMenuCloseReason, LanguageMenuGeometry, LanguageMenuMonitorDecision,
-        MainWindowClosePolicy, close_policy, language_index, language_menu_geometry,
-        language_menu_monitor_decision, language_menu_opening_decision,
+        MainWindowClosePolicy, close_policy, credential_session_is_current, language_index,
+        language_menu_geometry, language_menu_monitor_decision, language_menu_opening_decision,
         language_menu_session_is_current,
     };
 
@@ -845,6 +1045,16 @@ mod tests {
         assert!(language_menu_session_is_current(&generation, 7));
         generation.fetch_add(1, Ordering::SeqCst);
         assert!(!language_menu_session_is_current(&generation, 7));
+    }
+
+    #[test]
+    fn stale_credential_result_cannot_affect_the_current_session() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        let generation = AtomicU64::new(3);
+        assert!(credential_session_is_current(&generation, 3));
+        generation.fetch_add(1, Ordering::SeqCst);
+        assert!(!credential_session_is_current(&generation, 3));
     }
 
     #[test]

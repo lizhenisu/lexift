@@ -27,6 +27,9 @@ pub struct AppState {
     pub error_message: String,
     pub settings_saving: bool,
     pub settings_error_message: String,
+    pub credential_configured: bool,
+    pub credential_busy: bool,
+    pub credential_error_message: String,
     next_translation_task: u64,
 }
 
@@ -47,8 +50,17 @@ impl AppState {
             error_message: String::new(),
             settings_saving: false,
             settings_error_message: String::new(),
+            credential_configured: false,
+            credential_busy: false,
+            credential_error_message: String::new(),
             next_translation_task: 0,
         }
+    }
+
+    pub fn with_credential_status(settings: Settings, credential_configured: bool) -> Self {
+        let mut state = Self::new(settings);
+        state.credential_configured = credential_configured;
+        state
     }
 
     /// Applies a domain event and returns the capabilities the app must execute.
@@ -118,9 +130,13 @@ impl AppState {
             AppEvent::MainWindowRequested => vec![AppCommand::ShowMainWindow],
             AppEvent::SettingsWindowRequested => {
                 self.settings_error_message.clear();
+                self.credential_error_message.clear();
                 vec![AppCommand::ShowSettingsWindow]
             }
-            AppEvent::SettingsSaveRequested { settings } if !self.settings_saving => {
+            AppEvent::SettingsSaveRequested { mut settings }
+                if !self.settings_saving && !self.credential_busy =>
+            {
+                settings.deepl_credential_id = self.settings.deepl_credential_id.clone();
                 self.settings_saving = true;
                 self.settings_error_message.clear();
                 vec![AppCommand::PersistSettings { settings }]
@@ -135,6 +151,87 @@ impl AppState {
             AppEvent::SettingsSaveFailed { error } => {
                 self.settings_saving = false;
                 self.settings_error_message = error;
+                Vec::new()
+            }
+            AppEvent::CredentialSaveRequested { secret }
+                if !self.credential_busy && !self.settings_saving =>
+            {
+                let secret = secret.expose().trim().to_owned();
+                if secret.is_empty() {
+                    self.credential_error_message = "DeepL API key cannot be empty".into();
+                    return Vec::new();
+                }
+                self.credential_busy = true;
+                self.credential_error_message.clear();
+                vec![AppCommand::PersistCredential {
+                    credential_id: "deepl-primary".into(),
+                    secret: crate::ports::credential::CredentialSecret::new(secret),
+                }]
+            }
+            AppEvent::CredentialSaveRequested { .. } => Vec::new(),
+            AppEvent::CredentialSaved { credential_id } => {
+                self.settings.deepl_credential_id = Some(credential_id);
+                self.credential_configured = true;
+                self.credential_busy = false;
+                self.credential_error_message.clear();
+                vec![AppCommand::ClearCredentialDraft]
+            }
+            AppEvent::CredentialSaveFailed { error } => {
+                self.credential_busy = false;
+                self.credential_error_message = error;
+                Vec::new()
+            }
+            AppEvent::CredentialRemoveRequested
+                if !self.credential_busy && !self.settings_saving =>
+            {
+                let Some(credential_id) = self.settings.deepl_credential_id.clone() else {
+                    self.credential_configured = false;
+                    self.credential_error_message.clear();
+                    return Vec::new();
+                };
+                self.credential_busy = true;
+                self.credential_error_message.clear();
+                vec![AppCommand::RemoveCredential { credential_id }]
+            }
+            AppEvent::CredentialRemoveRequested => Vec::new(),
+            AppEvent::CredentialRemoved => {
+                self.settings.deepl_credential_id = None;
+                self.credential_configured = false;
+                self.credential_busy = false;
+                self.credential_error_message.clear();
+                vec![AppCommand::ClearCredentialDraft]
+            }
+            AppEvent::CredentialRemoveFailed { error } => {
+                self.credential_busy = false;
+                self.credential_error_message = error;
+                Vec::new()
+            }
+            AppEvent::CredentialAccessRequested {
+                purpose,
+                generation,
+            } if !self.credential_busy && !self.settings_saving => {
+                let Some(credential_id) = self.settings.deepl_credential_id.clone() else {
+                    self.credential_configured = false;
+                    self.credential_error_message = "DeepL API key is not configured".into();
+                    return Vec::new();
+                };
+                self.credential_busy = true;
+                self.credential_error_message.clear();
+                vec![AppCommand::AccessCredential {
+                    credential_id,
+                    purpose,
+                    generation,
+                }]
+            }
+            AppEvent::CredentialAccessRequested { .. } => Vec::new(),
+            AppEvent::CredentialAccessSucceeded { .. } => {
+                self.credential_busy = false;
+                self.credential_error_message.clear();
+                Vec::new()
+            }
+            AppEvent::CredentialAccessFailed { error } => {
+                self.credential_busy = false;
+                self.credential_error_message = error;
                 Vec::new()
             }
             AppEvent::ExitRequested => vec![AppCommand::Exit],
@@ -259,6 +356,7 @@ mod tests {
     fn uses_the_current_target_language_for_translation_requests() {
         let mut state = AppState::new(Settings {
             target_language: Language("de".into()),
+            ..Settings::default()
         });
         state.reduce(AppEvent::SelectionTranslationRequested);
 
@@ -305,6 +403,7 @@ mod tests {
     fn input_translation_uses_current_settings() {
         let mut state = AppState::new(Settings {
             target_language: Language("ja".into()),
+            ..Settings::default()
         });
 
         let commands = state.reduce(AppEvent::InputTranslationRequested {
@@ -561,6 +660,7 @@ mod tests {
         let mut state = AppState::default();
         let requested = Settings {
             target_language: Language("ja".into()),
+            ..Settings::default()
         };
         assert_eq!(
             state.reduce(AppEvent::SettingsSaveRequested {
@@ -587,11 +687,13 @@ mod tests {
     fn settings_save_failure_preserves_committed_settings() {
         let committed = Settings {
             target_language: Language("de".into()),
+            ..Settings::default()
         };
         let mut state = AppState::new(committed.clone());
         state.reduce(AppEvent::SettingsSaveRequested {
             settings: Settings {
                 target_language: Language("fr".into()),
+                ..Settings::default()
             },
         });
 
@@ -606,5 +708,143 @@ mod tests {
         assert!(!state.settings_saving);
         assert_eq!(state.settings_error_message, "Could not save settings");
         assert_eq!(state.phase, TranslationPhase::Idle);
+    }
+
+    #[test]
+    fn credential_save_exposes_only_status_and_reference() {
+        use crate::ports::credential::CredentialSecret;
+
+        let mut state = AppState::default();
+        let commands = state.reduce(AppEvent::CredentialSaveRequested {
+            secret: CredentialSecret::new("private-key"),
+        });
+        assert_eq!(
+            commands,
+            vec![AppCommand::PersistCredential {
+                credential_id: "deepl-primary".into(),
+                secret: CredentialSecret::new("private-key"),
+            }]
+        );
+        assert!(state.credential_busy);
+        assert!(!state.credential_configured);
+        assert!(!format!("{state:?}").contains("private-key"));
+
+        assert_eq!(
+            state.reduce(AppEvent::CredentialSaved {
+                credential_id: "deepl-primary".into(),
+            }),
+            vec![AppCommand::ClearCredentialDraft]
+        );
+        assert!(state.credential_configured);
+        assert!(!state.credential_busy);
+        assert_eq!(
+            state.settings.deepl_credential_id.as_deref(),
+            Some("deepl-primary")
+        );
+    }
+
+    #[test]
+    fn credential_failures_preserve_committed_status() {
+        use crate::ports::credential::CredentialSecret;
+
+        let settings = Settings {
+            deepl_credential_id: Some("deepl-primary".into()),
+            ..Settings::default()
+        };
+        let mut state = AppState::with_credential_status(settings.clone(), true);
+        state.reduce(AppEvent::CredentialSaveRequested {
+            secret: CredentialSecret::new("replacement"),
+        });
+        state.reduce(AppEvent::CredentialSaveFailed {
+            error: "save failed".into(),
+        });
+        assert_eq!(state.settings, settings);
+        assert!(state.credential_configured);
+        assert!(!state.credential_busy);
+        assert_eq!(state.credential_error_message, "save failed");
+
+        state.reduce(AppEvent::CredentialRemoveRequested);
+        state.reduce(AppEvent::CredentialRemoveFailed {
+            error: "remove failed".into(),
+        });
+        assert_eq!(state.settings, settings);
+        assert!(state.credential_configured);
+        assert!(!state.credential_busy);
+        assert_eq!(state.credential_error_message, "remove failed");
+    }
+
+    #[test]
+    fn credential_remove_clears_only_the_reference_after_success() {
+        let mut state = AppState::with_credential_status(
+            Settings {
+                deepl_credential_id: Some("deepl-primary".into()),
+                ..Settings::default()
+            },
+            true,
+        );
+        assert_eq!(
+            state.reduce(AppEvent::CredentialRemoveRequested),
+            vec![AppCommand::RemoveCredential {
+                credential_id: "deepl-primary".into(),
+            }]
+        );
+        assert_eq!(
+            state.reduce(AppEvent::CredentialRemoved),
+            vec![AppCommand::ClearCredentialDraft]
+        );
+        assert!(!state.credential_configured);
+        assert_eq!(state.settings.deepl_credential_id, None);
+    }
+
+    #[test]
+    fn credential_access_is_a_transient_command_and_never_enters_state() {
+        use crate::ports::credential::CredentialAccessPurpose;
+
+        let mut state = AppState::with_credential_status(
+            Settings {
+                deepl_credential_id: Some("deepl-primary".into()),
+                ..Settings::default()
+            },
+            true,
+        );
+
+        assert_eq!(
+            state.reduce(AppEvent::CredentialAccessRequested {
+                purpose: CredentialAccessPurpose::Reveal,
+                generation: 42,
+            }),
+            vec![AppCommand::AccessCredential {
+                credential_id: "deepl-primary".into(),
+                purpose: CredentialAccessPurpose::Reveal,
+                generation: 42,
+            }]
+        );
+        assert!(state.credential_busy);
+        assert!(!format!("{state:?}").contains("secret"));
+
+        state.reduce(AppEvent::CredentialAccessSucceeded {
+            purpose: CredentialAccessPurpose::Reveal,
+        });
+        assert!(!state.credential_busy);
+    }
+
+    #[test]
+    fn credential_access_without_a_reference_fails_only_that_operation() {
+        use crate::ports::credential::CredentialAccessPurpose;
+
+        let mut state = AppState::default();
+        assert!(
+            state
+                .reduce(AppEvent::CredentialAccessRequested {
+                    purpose: CredentialAccessPurpose::Copy,
+                    generation: 1,
+                })
+                .is_empty()
+        );
+        assert!(!state.credential_busy);
+        assert_eq!(
+            state.credential_error_message,
+            "DeepL API key is not configured"
+        );
     }
 }

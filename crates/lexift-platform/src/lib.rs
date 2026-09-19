@@ -1,4 +1,5 @@
 pub mod capabilities;
+mod credential;
 #[cfg(feature = "mock")]
 mod mock;
 

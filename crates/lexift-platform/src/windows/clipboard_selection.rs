@@ -107,10 +107,10 @@ where
     Ok(selected_text)
 }
 
-struct OleApartment;
+pub(super) struct OleApartment;
 
 impl OleApartment {
-    fn initialize() -> Result<Self> {
+    pub(super) fn initialize() -> Result<Self> {
         unsafe { OleInitialize(None) }
             .map_err(|_| Error::new("Could not initialize Windows clipboard services"))?;
         Ok(Self)
@@ -123,13 +123,13 @@ impl Drop for OleApartment {
     }
 }
 
-struct ClipboardSnapshot {
+pub(super) struct ClipboardSnapshot {
     sequence: u32,
     data: Option<IDataObject>,
 }
 
 impl ClipboardSnapshot {
-    fn capture() -> Result<Self> {
+    pub(super) fn capture() -> Result<Self> {
         for _ in 0..3 {
             let before = unsafe { GetClipboardSequenceNumber() };
             let data = if unsafe { CountClipboardFormats() } == 0 {
@@ -157,7 +157,7 @@ impl ClipboardSnapshot {
         Err(Error::new("Clipboard changed while it was being preserved"))
     }
 
-    fn set_as_clipboard_contents(&self) -> windows::core::Result<()> {
+    pub(super) fn set_as_clipboard_contents(&self) -> windows::core::Result<()> {
         // Restoration intentionally uses the OLE data object. An ownerless
         // OpenClipboard/EmptyClipboard sequence cannot legally restore data
         // with SetClipboardData and also mishandles private/custom formats.
@@ -167,7 +167,7 @@ impl ClipboardSnapshot {
         }
     }
 
-    fn flush(&self) -> Result<()> {
+    pub(super) fn flush(&self) -> Result<()> {
         unsafe { OleFlushClipboard() }.map_err(|error| {
             trace_restore_error("OleFlushClipboard", &error);
             Error::new("Could not finalize clipboard restoration")
@@ -398,7 +398,7 @@ fn wait_for_sequence_change(before: u32) -> Option<u32> {
     }
 }
 
-fn read_unicode_text() -> Result<Option<String>> {
+pub(super) fn read_unicode_text() -> Result<Option<String>> {
     let _clipboard = open_clipboard_with_retry()?;
     if unsafe { IsClipboardFormatAvailable(u32::from(CF_UNICODETEXT.0)) }.is_err() {
         return Ok(None);
@@ -433,7 +433,7 @@ impl Drop for GlobalLockGuard {
     }
 }
 
-struct OpenClipboardGuard;
+pub(super) struct OpenClipboardGuard;
 
 impl Drop for OpenClipboardGuard {
     fn drop(&mut self) {
@@ -441,7 +441,7 @@ impl Drop for OpenClipboardGuard {
     }
 }
 
-fn open_clipboard_with_retry() -> Result<OpenClipboardGuard> {
+pub(super) fn open_clipboard_with_retry() -> Result<OpenClipboardGuard> {
     let deadline = Instant::now() + OPEN_CLIPBOARD_TIMEOUT;
     loop {
         if unsafe { OpenClipboard(None) }.is_ok() {

@@ -4,4 +4,4 @@ mod mock;
 pub mod providers;
 mod registry;
 
-pub use registry::ProviderRegistry;
+pub use registry::{DeepLTranslatorFactory, ProviderRegistry};

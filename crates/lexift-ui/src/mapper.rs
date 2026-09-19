@@ -9,6 +9,9 @@ pub(crate) struct UiState {
     pub error: String,
     pub settings_saving: bool,
     pub settings_error: String,
+    pub credential_configured: bool,
+    pub credential_busy: bool,
+    pub credential_error: String,
 }
 
 pub(crate) fn view_state(state: &AppState) -> UiState {
@@ -32,6 +35,9 @@ pub(crate) fn view_state(state: &AppState) -> UiState {
         error: state.error_message.clone(),
         settings_saving: state.settings_saving,
         settings_error: state.settings_error_message.clone(),
+        credential_configured: state.credential_configured,
+        credential_busy: state.credential_busy,
+        credential_error: state.credential_error_message.clone(),
     }
 }
 
@@ -45,6 +51,7 @@ mod tests {
     fn maps_target_language_from_core_settings() {
         let state = AppState::new(Settings {
             target_language: Language("ja".into()),
+            ..Settings::default()
         });
 
         assert_eq!(view_state(&state).target_language, "ja");
@@ -81,9 +88,15 @@ mod tests {
         let mut state = AppState::default();
         state.settings_saving = true;
         state.settings_error_message = "save failed".into();
+        state.credential_configured = true;
+        state.credential_busy = true;
+        state.credential_error_message = "credential failed".into();
         let mapped = view_state(&state);
         assert!(mapped.settings_saving);
         assert_eq!(mapped.settings_error, "save failed");
+        assert!(mapped.credential_configured);
+        assert!(mapped.credential_busy);
+        assert_eq!(mapped.credential_error, "credential failed");
         assert!(mapped.error.is_empty());
     }
 }

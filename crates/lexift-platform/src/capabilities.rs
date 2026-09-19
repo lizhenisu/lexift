@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use lexift_core::ports::{
-    hotkey::HotkeyPort, screen::ScreenPort, selection::SelectionPort, tray::TrayPort,
+    clipboard::ClipboardPort, credential::CredentialStore, hotkey::HotkeyPort, screen::ScreenPort,
+    selection::SelectionPort, tray::TrayPort,
 };
 
 #[cfg(feature = "mock")]
@@ -13,6 +14,8 @@ pub struct PlatformCapabilities {
     hotkey: Option<Arc<dyn HotkeyPort>>,
     screen: Option<Arc<dyn ScreenPort>>,
     tray: Option<Arc<dyn TrayPort>>,
+    credential_store: Option<Arc<dyn CredentialStore>>,
+    clipboard: Option<Arc<dyn ClipboardPort>>,
 }
 
 impl PlatformCapabilities {
@@ -35,6 +38,14 @@ impl PlatformCapabilities {
             tray: Some(Arc::new(crate::windows::WindowsTrayPort::new())),
             #[cfg(not(target_os = "windows"))]
             tray: None,
+            #[cfg(target_os = "windows")]
+            credential_store: Some(Arc::new(crate::credential::WindowsCredentialStore::new())),
+            #[cfg(not(target_os = "windows"))]
+            credential_store: None,
+            #[cfg(target_os = "windows")]
+            clipboard: Some(Arc::new(crate::windows::WindowsClipboardPort)),
+            #[cfg(not(target_os = "windows"))]
+            clipboard: None,
         }
     }
 
@@ -45,6 +56,8 @@ impl PlatformCapabilities {
             hotkey: None,
             screen: None,
             tray: None,
+            credential_store: None,
+            clipboard: None,
         }
     }
 
@@ -62,6 +75,14 @@ impl PlatformCapabilities {
 
     pub fn tray(&self) -> Option<Arc<dyn TrayPort>> {
         self.tray.as_ref().map(Arc::clone)
+    }
+
+    pub fn credential_store(&self) -> Option<Arc<dyn CredentialStore>> {
+        self.credential_store.as_ref().map(Arc::clone)
+    }
+
+    pub fn clipboard(&self) -> Option<Arc<dyn ClipboardPort>> {
+        self.clipboard.as_ref().map(Arc::clone)
     }
 }
 
@@ -83,12 +104,20 @@ mod tests {
         assert!(PlatformCapabilities::new().screen().is_some());
         #[cfg(target_os = "windows")]
         assert!(PlatformCapabilities::new().tray().is_some());
+        #[cfg(target_os = "windows")]
+        assert!(PlatformCapabilities::new().credential_store().is_some());
+        #[cfg(target_os = "windows")]
+        assert!(PlatformCapabilities::new().clipboard().is_some());
         #[cfg(not(target_os = "windows"))]
         assert!(PlatformCapabilities::new().selection().is_none());
         #[cfg(not(target_os = "windows"))]
         assert!(PlatformCapabilities::new().screen().is_none());
         #[cfg(not(target_os = "windows"))]
         assert!(PlatformCapabilities::new().tray().is_none());
+        #[cfg(not(target_os = "windows"))]
+        assert!(PlatformCapabilities::new().credential_store().is_none());
+        #[cfg(not(target_os = "windows"))]
+        assert!(PlatformCapabilities::new().clipboard().is_none());
     }
 
     #[cfg(target_os = "windows")]
@@ -99,6 +128,8 @@ mod tests {
         assert!(capabilities.selection().is_some());
         assert!(capabilities.screen().is_some());
         assert!(capabilities.tray().is_some());
+        assert!(capabilities.credential_store().is_some());
+        assert!(capabilities.clipboard().is_some());
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -115,5 +146,7 @@ mod tests {
         assert!(capabilities.hotkey().is_none());
         assert!(capabilities.screen().is_none());
         assert!(capabilities.tray().is_none());
+        assert!(capabilities.credential_store().is_none());
+        assert!(capabilities.clipboard().is_none());
     }
 }

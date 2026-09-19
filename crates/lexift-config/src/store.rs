@@ -92,6 +92,7 @@ mod tests {
     fn settings(language: &str) -> Settings {
         Settings {
             target_language: Language(language.into()),
+            ..Settings::default()
         }
     }
 
@@ -103,12 +104,13 @@ mod tests {
     }
 
     #[test]
-    fn save_creates_parent_and_v1_file() {
+    fn save_creates_parent_and_v2_file() {
         let (_directory, store) = fixture();
         store.save(&settings("ja")).unwrap();
         let contents = fs::read_to_string(store.path()).unwrap();
-        assert!(contents.contains("schema_version = 1"));
+        assert!(contents.contains("schema_version = 2"));
         assert!(contents.contains("target_language = \"ja\""));
+        assert!(!contents.contains("deepl"));
     }
 
     #[test]
@@ -119,7 +121,7 @@ mod tests {
     }
 
     #[test]
-    fn current_schema_is_accepted() {
+    fn v1_schema_is_migrated_without_a_credential_reference() {
         let (_directory, store) = fixture();
         fs::create_dir_all(store.path().parent().unwrap()).unwrap();
         fs::write(
@@ -128,6 +130,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(store.load().unwrap(), settings("de"));
+    }
+
+    #[test]
+    fn credential_reference_round_trips_without_a_secret() {
+        let (_directory, store) = fixture();
+        let settings = Settings {
+            target_language: Language("ja".into()),
+            deepl_credential_id: Some("deepl-primary".into()),
+        };
+        store.save(&settings).unwrap();
+        let contents = fs::read_to_string(store.path()).unwrap();
+        assert!(contents.contains("schema_version = 2"));
+        assert!(contents.contains("[credentials]"));
+        assert!(contents.contains("deepl = \"deepl-primary\""));
+        assert!(!contents.contains("api_key"));
+        assert!(!contents.contains("auth_key"));
+        assert_eq!(store.load().unwrap(), settings);
     }
 
     #[test]

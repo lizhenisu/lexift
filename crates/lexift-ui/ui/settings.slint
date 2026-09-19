@@ -1,6 +1,7 @@
 import { Colors } from "design/colors.slint";
 import { Spacing } from "design/spacing.slint";
 import { Typography } from "design/typography.slint";
+import { Metrics } from "design/metrics.slint";
 
 component SettingsButton inherits Rectangle {
     in property <string> label;
@@ -30,15 +31,104 @@ component SettingsButton inherits Rectangle {
     }
 }
 
+component CredentialActionButton inherits Rectangle {
+    in property <int> icon-kind;
+    in property <bool> enabled: true;
+    in property <bool> interactive: true;
+    in property <bool> highlighted: false;
+    in property <bool> pressed: false;
+    callback clicked();
+
+    width: Metrics.icon-button-size;
+    height: Metrics.icon-button-size;
+    border-radius: Metrics.icon-button-radius;
+    opacity: root.enabled ? 1 : Metrics.disabled-opacity;
+    background: root.pressed || (root.interactive && action-touch.pressed)
+        ? Colors.icon-button-pressed
+        : root.highlighted || (root.interactive && action-touch.has-hover)
+            ? Colors.icon-button-hover : transparent;
+
+    if root.icon-kind == 0: Path {
+        x: (parent.width - Metrics.icon-size) / 2;
+        y: (parent.height - Metrics.icon-size) / 2;
+        width: Metrics.icon-size;
+        height: Metrics.icon-size;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: "M12 6.5c3.79 0 7.17 2.13 8.82 5.5-1.65 3.37-5.03 5.5-8.82 5.5S4.83 15.37 3.18 12C4.83 8.63 8.21 6.5 12 6.5M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5C21.27 7.61 17 4.5 12 4.5zM12 9c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3m0-2c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5z";
+        fill: Colors.secondary-foreground;
+    }
+
+    if root.icon-kind == 1: Path {
+        x: (parent.width - Metrics.icon-size) / 2;
+        y: (parent.height - Metrics.icon-size) / 2;
+        width: Metrics.icon-size;
+        height: Metrics.icon-size;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z";
+        fill: Colors.secondary-foreground;
+    }
+
+    if root.icon-kind == 2: Path {
+        x: (parent.width - Metrics.icon-size) / 2;
+        y: (parent.height - Metrics.icon-size) / 2;
+        width: Metrics.icon-size;
+        height: Metrics.icon-size;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: "M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM6.92 19H5v-1.92l9.06-9.06 1.92 1.92L6.92 19zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z";
+        fill: Colors.secondary-foreground;
+    }
+
+    if root.icon-kind == 3: Path {
+        x: (parent.width - Metrics.icon-size) / 2;
+        y: (parent.height - Metrics.icon-size) / 2;
+        width: Metrics.icon-size;
+        height: Metrics.icon-size;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zm2-10h8v10H8V9zm7.5-5-1-1h-5l-1 1H5v2h14V4z";
+        fill: Colors.secondary-foreground;
+    }
+
+    if root.icon-kind == 4: Path {
+        x: (parent.width - Metrics.icon-size) / 2;
+        y: (parent.height - Metrics.icon-size) / 2;
+        width: Metrics.icon-size;
+        height: Metrics.icon-size;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: "M12 6.5c3.79 0 7.17 2.13 8.82 5.5-.59 1.2-1.41 2.27-2.41 3.12l1.41 1.41C21.21 15.32 22.31 13.78 23 12c-1.73-4.39-6-7.5-11-7.5-1.27 0-2.49.2-3.64.57l1.65 1.65c.65-.14 1.31-.22 1.99-.22zM2.71 3.16a.996.996 0 0 0 0 1.41l1.97 1.97C3.06 7.83 1.77 9.7 1 12c1.73 4.39 6 7.5 11 7.5 1.52 0 2.97-.29 4.31-.81l2.72 2.72a.996.996 0 1 0 1.41-1.41L4.12 3.16a.996.996 0 0 0-1.41 0zM12 17.5c-3.79 0-7.17-2.13-8.82-5.5.72-1.47 1.76-2.71 3.03-3.64l2.35 2.35c-.04.21-.06.42-.06.64 0 1.93 1.57 3.5 3.5 3.5.22 0 .43-.02.64-.06l1.55 1.55c-.69.1-1.42.16-2.19.16zm3.46-4.89-4.07-4.07c.2-.03.4-.04.61-.04 1.93 0 3.5 1.57 3.5 3.5 0 .21-.01.41-.04.61z";
+        fill: Colors.secondary-foreground;
+    }
+
+    action-touch := TouchArea {
+        enabled: root.enabled && root.interactive;
+        clicked => { root.clicked(); }
+    }
+}
+
 export component SettingsWindow inherits Window {
     title: "Lexift Settings";
     width: 520px;
-    height: 340px;
+    height: 520px;
     background: Colors.background;
 
     in-out property <int> draft-target-index: 0;
     in property <bool> settings-saving: false;
     in property <string> settings-error-text: "";
+    in property <bool> credential-configured: false;
+    in property <bool> credential-busy: false;
+    in property <string> credential-error-text: "";
+    in-out property <string> credential-draft: "";
+    in-out property <string> credential-transient-secret: "";
+    in-out property <bool> credential-revealed: false;
+    in-out property <bool> credential-editing: false;
+    in-out property <bool> credential-secret-visible: false;
+    in-out property <bool> credential-reveal-dismiss-armed: false;
+    in-out property <string> credential-feedback: "";
+    in-out property <bool> credential-request-pending: false;
     in-out property <bool> language-menu-open: false;
     in-out property <bool> language-menu-dismiss-armed: false;
     private property <[string]> language-labels: [
@@ -48,9 +138,24 @@ export component SettingsWindow inherits Window {
     ];
     callback save-requested(string);
     callback cancel-requested();
+    callback credential-save-requested(string);
+    callback credential-remove-requested();
+    callback credential-reveal-requested();
+    callback credential-edit-requested();
+    callback credential-copy-requested();
+    callback credential-hide-requested();
+    callback credential-edit-cancel-requested();
     callback language-menu-requested(float, float, float, float, float, float);
     callback language-menu-dismiss-requested();
     callback language-menu-external-dismiss-requested();
+
+    public function focus-credential-reveal() {
+        credential-reveal-input.focus();
+    }
+
+    public function focus-credential-edit() {
+        credential-edit-input.focus();
+    }
 
     function language-code(index: int) -> string {
         return index == 0 ? "zh-CN"
@@ -85,7 +190,7 @@ export component SettingsWindow inherits Window {
             font-weight: 700;
         }
 
-        VerticalLayout {
+        credential-section := VerticalLayout {
             spacing: Spacing.small;
 
             Text {
@@ -153,6 +258,233 @@ export component SettingsWindow inherits Window {
             }
         }
 
+        Rectangle {
+            height: 1px;
+            background: Colors.outline;
+        }
+
+        Text {
+            text: "Translation provider";
+            color: Colors.secondary-foreground;
+            font-size: Typography.body-size;
+            font-weight: 700;
+        }
+
+        VerticalLayout {
+            spacing: Spacing.small;
+
+            HorizontalLayout {
+                Text {
+                    text: "DeepL API Key";
+                    color: Colors.foreground;
+                    font-size: Typography.body-size;
+                }
+
+                Text {
+                    text: root.credential-configured ? "Configured" : "Not configured";
+                    color: root.credential-configured ? Colors.primary : Colors.secondary-foreground;
+                    font-size: Typography.body-size;
+                    font-weight: 700;
+                    horizontal-alignment: right;
+                }
+            }
+
+            credential-field := Rectangle {
+                height: 40px;
+                border-radius: 4px;
+                border-width: (credential-reveal-input.has-focus || credential-edit-input.has-focus) ? 2px : 1px;
+                border-color: (credential-reveal-input.has-focus || credential-edit-input.has-focus) ? Colors.primary : Colors.outline;
+                background: Colors.surface;
+
+                field-hover := TouchArea {
+                    enabled: root.credential-configured && !root.credential-editing && !root.credential-revealed && !root.credential-request-pending;
+                    clicked => {
+                        if self.mouse-x >= self.width - 4 * Metrics.icon-button-size - 4px
+                            && self.mouse-x < self.width - 3 * Metrics.icon-button-size - 4px {
+                            root.credential-reveal-requested();
+                        } else if self.mouse-x >= self.width - 3 * Metrics.icon-button-size - 4px
+                            && self.mouse-x < self.width - 2 * Metrics.icon-button-size - 4px {
+                            root.credential-copy-requested();
+                        } else if self.mouse-x >= self.width - 2 * Metrics.icon-button-size - 4px
+                            && self.mouse-x < self.width - Metrics.icon-button-size - 4px {
+                            root.credential-edit-requested();
+                        } else if self.mouse-x >= self.width - Metrics.icon-button-size - 4px
+                            && self.mouse-x < self.width - 4px {
+                            root.credential-remove-requested();
+                        }
+                    }
+                }
+
+                if !root.credential-configured: credential-new-input := TextInput {
+                    x: Spacing.medium;
+                    width: parent.width - 2 * Spacing.medium;
+                    height: parent.height;
+                    text <=> root.credential-draft;
+                    input-type: InputType.password;
+                    enabled: !root.credential-busy && !root.settings-saving;
+                    color: Colors.foreground;
+                    selection-background-color: Colors.primary-container;
+                    selection-foreground-color: Colors.foreground;
+                    font-size: Typography.body-size;
+                    text-cursor-width: 2px;
+                    vertical-alignment: center;
+                    accepted => {
+                        if root.credential-draft != "" && !root.credential-busy && !root.settings-saving {
+                            root.credential-save-requested(root.credential-draft);
+                        }
+                    }
+                }
+
+                if root.credential-configured && !root.credential-editing && !root.credential-revealed: Text {
+                    x: Spacing.medium;
+                    width: parent.width - 2 * Spacing.medium - 4 * Metrics.icon-button-size;
+                    height: parent.height;
+                    text: "••••••••••••••••";
+                    color: Colors.foreground;
+                    font-size: Typography.body-size;
+                    vertical-alignment: center;
+                }
+
+                credential-reveal-input := TextInput {
+                    visible: root.credential-configured && root.credential-revealed && !root.credential-editing;
+                    x: Spacing.medium;
+                    width: parent.width - 2 * Spacing.medium - 34px;
+                    height: parent.height;
+                    text: root.credential-transient-secret;
+                    read-only: true;
+                    color: Colors.foreground;
+                    selection-background-color: Colors.primary-container;
+                    selection-foreground-color: Colors.foreground;
+                    font-size: Typography.body-size;
+                    vertical-alignment: center;
+                    changed has-focus => {
+                        if !self.has-focus && root.credential-revealed && root.credential-reveal-dismiss-armed {
+                            root.credential-hide-requested();
+                        }
+                    }
+                }
+
+                credential-edit-input := TextInput {
+                    visible: root.credential-configured && root.credential-editing;
+                    x: Spacing.medium;
+                    width: parent.width - 2 * Spacing.medium - 34px;
+                    height: parent.height;
+                    text <=> root.credential-draft;
+                    input-type: root.credential-secret-visible ? InputType.text : InputType.password;
+                    enabled: !root.credential-busy && !root.settings-saving;
+                    color: Colors.foreground;
+                    selection-background-color: Colors.primary-container;
+                    selection-foreground-color: Colors.foreground;
+                    font-size: Typography.body-size;
+                    vertical-alignment: center;
+                    accepted => {
+                        if root.credential-draft != "" && !root.credential-busy && !root.settings-saving {
+                            root.credential-save-requested(root.credential-draft);
+                        }
+                    }
+                }
+
+                if root.credential-configured && !root.credential-editing && !root.credential-revealed: HorizontalLayout {
+                    x: parent.width - 4 * Metrics.icon-button-size - 4px;
+                    y: (parent.height - Metrics.icon-button-size) / 2;
+                    width: 4 * Metrics.icon-button-size;
+                    spacing: 0px;
+                    opacity: field-hover.has-hover && !root.credential-request-pending ? 1 : 0;
+
+                    CredentialActionButton {
+                        icon-kind: 0;
+                        interactive: false;
+                        highlighted: field-hover.mouse-x >= credential-field.width - 4 * Metrics.icon-button-size - 4px
+                            && field-hover.mouse-x < credential-field.width - 3 * Metrics.icon-button-size - 4px;
+                        pressed: field-hover.pressed && self.highlighted;
+                    }
+                    CredentialActionButton {
+                        icon-kind: 1;
+                        interactive: false;
+                        highlighted: field-hover.mouse-x >= credential-field.width - 3 * Metrics.icon-button-size - 4px
+                            && field-hover.mouse-x < credential-field.width - 2 * Metrics.icon-button-size - 4px;
+                        pressed: field-hover.pressed && self.highlighted;
+                    }
+                    CredentialActionButton {
+                        icon-kind: 2;
+                        interactive: false;
+                        highlighted: field-hover.mouse-x >= credential-field.width - 2 * Metrics.icon-button-size - 4px
+                            && field-hover.mouse-x < credential-field.width - Metrics.icon-button-size - 4px;
+                        pressed: field-hover.pressed && self.highlighted;
+                    }
+                    CredentialActionButton {
+                        icon-kind: 3;
+                        interactive: false;
+                        highlighted: field-hover.mouse-x >= credential-field.width - Metrics.icon-button-size - 4px
+                            && field-hover.mouse-x < credential-field.width - 4px;
+                        pressed: field-hover.pressed && self.highlighted;
+                    }
+                }
+
+
+                if root.credential-configured && root.credential-request-pending && !root.credential-editing: Text {
+                    x: parent.width - Spacing.medium - 88px;
+                    width: 88px;
+                    height: parent.height;
+                    text: "Loading…";
+                    color: Colors.secondary-foreground;
+                    font-size: Typography.body-size;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+
+                if root.credential-configured && (root.credential-editing || root.credential-revealed): CredentialActionButton {
+                    x: parent.width - Metrics.icon-button-size - 4px;
+                    y: (parent.height - Metrics.icon-button-size) / 2;
+                    icon-kind: root.credential-revealed || root.credential-secret-visible ? 4 : 0;
+                    clicked => {
+                        if root.credential-editing {
+                            root.credential-secret-visible = !root.credential-secret-visible;
+                        } else {
+                            root.credential-hide-requested();
+                        }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: Spacing.small;
+                alignment: end;
+
+                Text {
+                    visible: root.credential-feedback != "";
+                    text: root.credential-feedback;
+                    color: Colors.primary;
+                    font-size: Typography.body-size;
+                    vertical-alignment: center;
+                }
+
+                SettingsButton {
+                    width: 96px;
+                    visible: root.credential-editing;
+                    label: "Cancel";
+                    enabled: !root.credential-busy && !root.settings-saving;
+                    clicked => { root.credential-edit-cancel-requested(); }
+                }
+
+                SettingsButton {
+                    width: 128px;
+                    visible: !root.credential-configured || root.credential-editing;
+                    primary: true;
+                    label: root.credential-busy ? "Working…" : "Save key";
+                    enabled: root.credential-draft != "" && !root.credential-busy && !root.settings-saving;
+                    clicked => { root.credential-save-requested(root.credential-draft); }
+                }
+            }
+        }
+
+        if root.credential-error-text != "": Text {
+            text: root.credential-error-text;
+            color: Colors.error;
+            font-size: Typography.body-size;
+            wrap: word-wrap;
+        }
+
         if root.settings-error-text != "": Text {
             text: root.settings-error-text;
             color: Colors.error;
@@ -168,14 +500,14 @@ export component SettingsWindow inherits Window {
 
             SettingsButton {
                 label: "Cancel";
-                enabled: !root.settings-saving;
+                enabled: !root.settings-saving && !root.credential-busy;
                 clicked => { root.cancel-requested(); }
             }
 
             SettingsButton {
                 primary: true;
                 label: root.settings-saving ? "Saving…" : "Save";
-                enabled: !root.settings-saving;
+                enabled: !root.settings-saving && !root.credential-busy;
                 clicked => { root.save-requested(root.language-code(root.draft-target-index)); }
             }
         }

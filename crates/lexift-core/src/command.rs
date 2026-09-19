@@ -3,6 +3,7 @@ use crate::domain::{
     settings::Settings,
     translation::{TranslateRequest, TranslationTaskId},
 };
+use crate::ports::credential::{CredentialAccessPurpose, CredentialSecret};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppCommand {
@@ -23,5 +24,18 @@ pub enum AppCommand {
     PersistSettings {
         settings: Settings,
     },
+    PersistCredential {
+        credential_id: String,
+        secret: CredentialSecret,
+    },
+    RemoveCredential {
+        credential_id: String,
+    },
+    AccessCredential {
+        credential_id: String,
+        purpose: CredentialAccessPurpose,
+        generation: u64,
+    },
+    ClearCredentialDraft,
     Exit,
 }

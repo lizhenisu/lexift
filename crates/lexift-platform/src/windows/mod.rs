@@ -1,5 +1,6 @@
 //! Windows-specific platform adapters belong in this module.
 
+mod clipboard;
 mod clipboard_selection;
 mod hotkey;
 mod screen;
@@ -14,3 +15,4 @@ pub(crate) use tray::WindowsTrayPort;
 pub(crate) use window_context::WindowsWindowContextMonitor;
 
 pub(super) mod popup;
+pub(crate) use clipboard::WindowsClipboardPort;

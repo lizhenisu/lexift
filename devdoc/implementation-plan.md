@@ -364,7 +364,7 @@ TranslatorPort
 - Provider-specific Error 转换成统一错误
 - 设置合理的网络 Timeout
 
-当前 Production Composition Root 根据 `LEXIFT_DEEPL_AUTH_KEY` 选择官方 DeepL API
+M2.7 时 Production Composition Root 根据 `LEXIFT_DEEPL_AUTH_KEY` 选择官方 DeepL API
 Adapter；`:fx` Key 使用 Free Endpoint，其余 Key 使用 Pro Endpoint。Provider 复用 M2.6
 共享 Client 配置，语言映射、请求/响应 Schema 和状态码错误映射均留在 Adapter 内。缺少
 或空白 Key 时使用 `UnconfiguredTranslator`，应用仍可启动；`m1-demo` 始终使用 Mock。
@@ -378,8 +378,8 @@ Adapter；`:fx` Key 使用 Free Endpoint，其余 Key 使用 Pro Endpoint。Prov
 403、429、456、5xx、Malformed JSON、空响应、超时、连接失败和真实 HTTP 并发下的
 stale result；默认测试不访问公网。Production UI 隐藏 Selection Demo，`m1-demo` 继续
 使用 Mock Selection 与 Mock Translator。GitHub CI 执行格式、Clippy 和 Workspace 测试。
-M2 阶段继续通过 `LEXIFT_DEEPL_AUTH_KEY` 临时注入 Credential；系统级 Secret Storage
-留到 Desktop Integration 阶段。
+M2 阶段通过 `LEXIFT_DEEPL_AUTH_KEY` 临时注入 Credential；M4.4 已由系统级 Secret Storage
+替代该生产链路。
 
 ---
 
@@ -821,15 +821,19 @@ Production 使用 `FileSettingsStore` 从操作系统用户配置目录加载设
 当前磁盘 schema 为：
 
 ```toml
-schema_version = 1
+schema_version = 2
 
 [settings]
 target_language = "zh-CN"
+
+[credentials]
+deepl = "deepl-primary"
 ```
 
 配置文件不存在时使用默认值且不主动创建；解析、权限或未来版本错误会记录 warn 并继续启动，
 也不会自动覆盖原文件。用户主动保存时创建父目录，并通过原子替换提交完整 TOML。Core 不依赖
-serde/TOML，配置文件不保存 Secret；DeepL credential 继续由 `LEXIFT_DEEPL_AUTH_KEY` 提供。
+serde/TOML，配置文件不保存 Secret；`credentials.deepl` 只保存系统 Credential Store 中
+`Lexift/<credential_id>` 的引用。
 
 Main Window 与 Windows Tray 的 Settings 入口共享同一 Core event。`m1-demo` 和自动测试使用
 内存或临时目录 Store，不访问真实用户配置目录。
@@ -904,36 +908,86 @@ HWND、`GA_ROOT` 和 `GA_ROOTOWNER`。事件目标的任一身份与任一成员
 移动/隐藏/最小化 Settings；选择成功时关闭原因应为 `ValueSelected`，外部点击应为
 `ExternalInteraction`。
 
-下一步：**M4.4 — Secure Credential Store**。
+当前里程碑：**M4.4 — Secure Credential Store**。
 
-### Credential Store
+### M4.4 Secure Credential Store
 
-这一阶段再正式实现：
+状态：✅ 实现完成并通过桌面人工验收
 
-```text
-CredentialStore
+Core 已定义线程安全的 `CredentialStore` Port，以及 `Missing`、`PermissionDenied`、
+`PlatformFailure`、`InvalidFormat` 四类稳定错误。Secret 使用自定义 `CredentialSecret`，其
+`Debug` 始终输出 `[REDACTED]`；AppState 只保存 `credential_configured`、忙碌/错误状态和
+credential reference，不保存 Key。
+
+Windows Adapter 使用 `CredWriteW`、`CredReadW`、`CredDeleteW` 管理 Generic Credential，统一
+target 为 `Lexift/<credential_id>`，当前 DeepL 使用 `Lexift/deepl-primary`。`CredReadW` 的
+native buffer 在复制完成后立即通过 `CredFree` 释放。macOS Keychain 和 Linux Secret Service
+留给对应平台 Adapter 实现。
+
+配置 schema 升级到 v2；v1 文件加载时自动补充空的 credentials section。普通配置只保存：
+
+```toml
+schema_version = 2
+
+[settings]
+target_language = "zh-CN"
+
+[credentials]
+deepl = "deepl-primary"
 ```
 
-平台实现：
+Settings Window 使用统一凭证字段。未配置时显示密码输入框和 Save key；已配置时只显示固定
+全掩码 `••••••••••••••••`，不泄露首尾字符。字段 hover 时提供 Slint `Path` 绘制的查看、复制、
+编辑、删除操作，避免字体图标和平台字体差异。
 
-```text
-Windows
-    Windows Credential Manager
+#### M4.4.1 可查看、复制和编辑的 Credential 字段
 
-macOS
-    Keychain
+状态：✅ 实现完成，等待桌面人工验收
 
-Linux
-    Secret Service
-```
+四个操作图标采用 Google Material Outlined 的 24×24 矢量几何路径，不依赖 Material Symbols
+字体或 Unicode 字符。界面按 Design Tokens 统一为 32×32 操作区域、20×20 图标和 16px 圆形
+状态层；默认颜色使用 secondary foreground，hover 使用 8% state layer，pressed 使用 12%
+state layer。查看状态使用 `visibility` / `visibility_off` 路径切换，Reveal 和 Edit 中的图标均
+反映当前明文可见状态。
 
-普通配置文件只保存：
+Configured idle 状态始终保留四个图标的布局实例，仅通过透明度显示或隐藏。Credential 字段只
+使用一个覆盖全区域的 `TouchArea` 处理 hover、pressed 和点击，并按鼠标横坐标把点击路由到四个
+固定操作区域；此状态下图标组件只负责绘制，不创建独立命中层。Reveal/Edit 状态下需要独立交互
+的眼睛按钮才启用自己的点击区域。
 
-```text
-credential_id
-```
+这是该组件的回归约束：不得根据同一字段的 hover 状态动态创建或销毁操作栏，也不得在字段
+`TouchArea` 上方叠加会截获指针的子 `TouchArea`。前一种实现会让新出现的子组件夺走字段 hover，
+造成操作栏反复出现和消失；后一种实现会让鼠标按下与释放落在不同组件上，导致查看、复制、编辑、
+删除回调无法完成。`credential-request-pending` 继续作为异步操作门闩，generation 继续隔离过期
+读取结果和计时回调。
 
-不保存 Secret。
+查看和编辑由 `CredentialAccessPurpose` 驱动，在 blocking worker 中临时读取 CredentialStore。
+Reveal/Edit 的 Secret 通过一次性 ViewPort 调用送入 Settings，不进入 AppState；Reveal 在字段失焦、
+Settings 隐藏/关闭或 30 秒后清除。Edit 默认保持密码遮罩，Save 复用安全保存事务，Cancel 清除
+draft。Copy 由 AppController 直接组合 CredentialStore 与 `ClipboardPort`，UI 只收到 `Copied`
+反馈，不接收完整 Secret。Windows Clipboard Adapter 使用 `CF_UNICODETEXT`、可移动 Global Memory
+和有限 OpenClipboard 重试；`SetClipboardData` 成功后正确转移内存所有权。
+
+每次临时读取分配 generation。关闭窗口、隐藏明文、取消编辑、保存/删除成功及应用退出都会递增
+generation 并清空 transient secret、draft、明文标志和反馈，过期 worker 结果与超时回调无法覆盖
+新会话。复制是用户明确触发的导出，内容保留在系统剪贴板，不自动覆盖。
+
+首次输入值只作为 UI draft 进入 `CredentialSaveRequested`，保存成功后立即清空。
+保存或删除在 Tokio blocking worker 中执行，并把 Credential Manager 与 config reference 作为
+一个逻辑提交：配置保存失败时恢复原凭证，避免部分提交。
+
+生产翻译不再读取 `LEXIFT_DEEPL_AUTH_KEY`。Composition Root 的 credential-backed translator
+在每次翻译前按当前 reference 临时读取 Secret，用共享 HTTP Client 创建短生命周期的官方
+DeepL Adapter，请求结束后释放；DeepL Adapter 本身不知道 CredentialStore。缺少凭证只让翻译
+不可用，不阻止 Tray、Hotkey 或应用启动。保存或删除凭证后运行时 reference 立即更新。
+
+桌面人工验收需确认保存后 Windows Credential Manager 出现 `Lexift/deepl-primary`、重启后状态
+仍为 Configured 且翻译可用；鼠标在字段和四个图标间移动时操作栏稳定且不闪烁；查看可显示并
+再次隐藏 Key，复制后出现 `Copied` 且能粘贴完整 Key，编辑的 Save/Cancel 正常，Remove 后条目
+消失；明文在失焦、Settings 关闭或 30 秒后清除。最后检查 config.toml、AppState 和日志均不含
+Key。
+
+下一步：**M4.5 — Runtime Configuration**。
 
 ---
 

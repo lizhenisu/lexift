@@ -17,6 +17,24 @@ pub struct ProviderRegistry {
     configured: bool,
 }
 
+/// Reuses one HTTP client while creating short-lived DeepL adapters with caller-owned secrets.
+#[derive(Clone)]
+pub struct DeepLTranslatorFactory {
+    client: reqwest::Client,
+}
+
+impl DeepLTranslatorFactory {
+    pub fn new() -> lexift_core::Result<Self> {
+        Ok(Self {
+            client: http::build_client()?,
+        })
+    }
+
+    pub fn translator(&self, auth_key: String) -> Arc<dyn TranslatorPort> {
+        Arc::new(DeepLApiTranslator::new(self.client.clone(), auth_key))
+    }
+}
+
 impl ProviderRegistry {
     /// Creates a production registry without implicit development providers.
     pub fn new() -> Self {
@@ -28,9 +46,9 @@ impl ProviderRegistry {
 
     /// Creates a production registry backed by the official DeepL API.
     pub fn with_deepl_api(auth_key: String) -> lexift_core::Result<Self> {
-        let client = http::build_client()?;
+        let factory = DeepLTranslatorFactory::new()?;
         Ok(Self {
-            default: Arc::new(DeepLApiTranslator::new(client, auth_key)),
+            default: factory.translator(auth_key),
             configured: true,
         })
     }

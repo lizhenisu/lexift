@@ -17,4 +17,8 @@ pub(crate) fn apply(
     popup.set_error_text(state.error.into());
     settings.set_settings_saving(state.settings_saving);
     settings.set_settings_error_text(state.settings_error.into());
+    settings.set_credential_configured(state.credential_configured);
+    settings.set_credential_busy(state.credential_busy);
+    settings.set_credential_request_pending(state.credential_busy);
+    settings.set_credential_error_text(state.credential_error.into());
 }
