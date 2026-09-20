@@ -1,19 +1,29 @@
 # Lexift
 
-Lexift is a native cross-platform translation application built with Rust and Slint.
+Lexift 是一款使用 Rust 与 Slint 构建的 Windows 桌面划词翻译工具。
 
-Run the production shell without development adapters with:
+## 快速开始
+
+从 GitHub Releases 下载 `exe` 安装包，或下载 portable ZIP 解压后直接运行 `lexift.exe`。
+
+首次使用：
+
+1. 打开 Settings，在 DeepL API key 字段中保存 API Key。
+2. 在任意应用中选中文字。
+3. 按 `Alt + X` 获取并翻译选中内容。
+
+## 开发
 
 ```console
 cargo run
 ```
 
-Run the M1 mock translation demo explicitly with:
+M1 Mock 演示：
 
 ```console
 cargo run --features m1-demo
 ```
 
-The default build does not install mock platform or translation adapters. Until the first real
-provider is implemented, translation attempts return a configuration error while the app remains
-running.
+## 许可证
+
+[GPL-3.0](LICENSE)

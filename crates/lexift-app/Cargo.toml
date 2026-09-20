@@ -2,6 +2,19 @@
 name = "lexift-app"
 version.workspace = true
 edition.workspace = true
+description = "Lexift — Translate Everywhere"
+license.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "lexift"
+path = "src/main.rs"
+
+[package.metadata.winresource]
+ProductName = "Lexift"
+FileDescription = "Lexift — Translate Everywhere"
+OriginalFilename = "lexift.exe"
+LegalCopyright = "Copyright © 2026 Lexift contributors"
 
 [features]
 default = []
@@ -20,3 +33,6 @@ tokio.workspace = true
 [dev-dependencies]
 lexift-platform = { workspace = true, features = ["mock"] }
 lexift-translate = { workspace = true, features = ["mock"] }
+
+[build-dependencies]
+winresource = "0.1.31"

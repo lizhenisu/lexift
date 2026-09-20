@@ -39,7 +39,9 @@ pub(crate) struct AppServices {
 }
 
 impl AppServices {
-    pub(crate) fn for_current_build() -> Result<Self, Box<dyn std::error::Error>> {
+    pub(crate) fn for_current_build(
+        platform: lexift_platform::PlatformCapabilities,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         #[cfg(not(feature = "m1-demo"))]
         let settings_store: Arc<dyn SettingsStore> =
             match lexift_config::FileSettingsStore::for_current_user() {
@@ -52,11 +54,6 @@ impl AppServices {
         #[cfg(feature = "m1-demo")]
         let settings_store: Arc<dyn SettingsStore> = Arc::new(EphemeralSettingsStore::default());
         let settings = load_settings_or_default(settings_store.as_ref());
-
-        #[cfg(not(feature = "m1-demo"))]
-        let platform = lexift_platform::PlatformCapabilities::new();
-        #[cfg(feature = "m1-demo")]
-        let platform = lexift_platform::PlatformCapabilities::mock();
 
         #[cfg(not(feature = "m1-demo"))]
         let credential_store = platform
@@ -96,9 +93,12 @@ impl AppServices {
         let tray = platform.tray();
         let clipboard = platform.clipboard();
         #[cfg(not(feature = "m1-demo"))]
+        let autostart = platform.autostart();
+        #[cfg(not(feature = "m1-demo"))]
         let runtime_manager = Arc::new(RuntimeManager::production(
             settings.runtime_config(),
             hotkey,
+            autostart,
             Arc::clone(&credential_store),
             Arc::clone(&credential_reference),
         )?);

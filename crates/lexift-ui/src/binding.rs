@@ -25,6 +25,9 @@ pub(crate) fn apply(
     if settings.get_draft_provider_id().as_str() != state.provider {
         settings.set_draft_provider_id(state.provider.into());
     }
+    if settings.get_launch_at_login() != state.launch_at_login {
+        settings.set_launch_at_login(state.launch_at_login);
+    }
     if settings.get_target_language_error_text().as_str() != state.target_language_error {
         settings.set_target_language_error_text(state.target_language_error.into());
     }
@@ -33,6 +36,9 @@ pub(crate) fn apply(
     }
     if settings.get_provider_error_text().as_str() != state.provider_error {
         settings.set_provider_error_text(state.provider_error.into());
+    }
+    if settings.get_launch_at_login_error_text().as_str() != state.launch_at_login_error {
+        settings.set_launch_at_login_error_text(state.launch_at_login_error.into());
     }
     if settings.get_credential_configured() != state.credential_configured {
         settings.set_credential_configured(state.credential_configured);

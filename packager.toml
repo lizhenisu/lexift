@@ -1,0 +1,27 @@
+name = "lexift"
+productName = "Lexift"
+version = "0.1.0"
+identifier = "com.lexift.app"
+publisher = "Lexift"
+description = "A fast native desktop translator for Windows"
+homepage = "https://github.com/lizhenisu/lexift"
+licenseFile = "LICENSE"
+copyright = "Copyright (c) 2026 Lexift contributors"
+formats = ["nsis"]
+icons = ["assets/app-icons/lexift.ico"]
+outDir = "dist/installer"
+binariesDir = "target/release"
+binaries = [{ path = "lexift", main = true }]
+
+[nsis]
+template = "packaging/windows/installer.nsi"
+installerIcon = "assets/app-icons/lexift.ico"
+installMode = "currentUser"
+compression = "lzma"
+languages = ["English", "SimpChinese"]
+displayLanguageSelector = false
+appdataPaths = ["$APPDATA\\Lexift", "$LOCALAPPDATA\\Lexift"]
+
+[windows]
+allowDowngrades = false
+digestAlgorithm = "sha256"

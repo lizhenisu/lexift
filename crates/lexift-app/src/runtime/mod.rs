@@ -3,6 +3,7 @@ mod translator_runtime;
 
 use std::sync::{Arc, RwLock};
 
+use lexift_core::ports::autostart::AutostartPort;
 #[cfg(not(feature = "m1-demo"))]
 use lexift_core::ports::credential::CredentialStore;
 #[cfg(any(not(feature = "m1-demo"), test))]
@@ -19,6 +20,7 @@ use hotkey_manager::HotkeyRuntimeManager;
 
 pub(crate) struct RuntimeManager {
     hotkey: HotkeyRuntimeManager,
+    autostart: Option<Arc<dyn AutostartPort>>,
     translator: Arc<TranslatorRuntime>,
     current: RwLock<RuntimeConfig>,
 }
@@ -28,6 +30,7 @@ impl RuntimeManager {
     pub(crate) fn production(
         config: RuntimeConfig,
         hotkey: Option<Arc<dyn HotkeyPort>>,
+        autostart: Option<Arc<dyn AutostartPort>>,
         store: Arc<dyn CredentialStore>,
         credential_reference: Arc<RwLock<Option<String>>>,
     ) -> Result<Self> {
@@ -38,6 +41,7 @@ impl RuntimeManager {
         )?);
         Ok(Self {
             hotkey: HotkeyRuntimeManager::new(hotkey),
+            autostart,
             translator,
             current: RwLock::new(config),
         })
@@ -47,6 +51,7 @@ impl RuntimeManager {
     pub(crate) fn demo(config: RuntimeConfig, translator: Arc<dyn TranslatorPort>) -> Self {
         Self {
             hotkey: HotkeyRuntimeManager::new(None),
+            autostart: None,
             translator: Arc::new(TranslatorRuntime::fixed(config.provider, translator)),
             current: RwLock::new(config),
         }
@@ -60,6 +65,7 @@ impl RuntimeManager {
     ) -> Self {
         Self {
             hotkey: HotkeyRuntimeManager::new(hotkey),
+            autostart: None,
             translator: Arc::new(TranslatorRuntime::fixed(config.provider, translator)),
             current: RwLock::new(config),
         }
@@ -90,6 +96,11 @@ impl RuntimeManager {
                 self.translator.validate(config.provider)?;
                 self.translator.commit(config.provider);
             }
+            SettingsField::LaunchAtLogin => self
+                .autostart
+                .as_ref()
+                .ok_or_else(|| lexift_core::Error::new("Launch at login is unavailable"))?
+                .set_enabled(config.launch_at_login)?,
         }
         let mut current = self
             .current
@@ -99,6 +110,29 @@ impl RuntimeManager {
             SettingsField::TargetLanguage => {}
             SettingsField::Hotkey => current.hotkey = config.hotkey,
             SettingsField::Provider => current.provider = config.provider,
+            SettingsField::LaunchAtLogin => {
+                current.launch_at_login = config.launch_at_login;
+            }
+        }
+        Ok(())
+    }
+
+    /// Repairs a stale startup registration after the executable path changes.
+    pub(crate) fn reconcile_autostart(&self) -> Result<()> {
+        let enabled = self
+            .current
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .launch_at_login;
+        let Some(autostart) = &self.autostart else {
+            return if enabled {
+                Err(lexift_core::Error::new("Launch at login is unavailable"))
+            } else {
+                Ok(())
+            };
+        };
+        if autostart.is_enabled()? != enabled {
+            autostart.set_enabled(enabled)?;
         }
         Ok(())
     }
@@ -106,7 +140,7 @@ impl RuntimeManager {
 
 #[cfg(all(test, not(feature = "m1-demo")))]
 mod tests {
-    use std::sync::{Arc, RwLock};
+    use std::sync::{Arc, Mutex, RwLock};
 
     use lexift_core::{
         Result,
@@ -115,6 +149,7 @@ mod tests {
             settings::SettingsField,
         },
         ports::{
+            autostart::AutostartPort,
             credential::{CredentialResult, CredentialStore},
             hotkey::{HotkeyHandler, HotkeyPort},
         },
@@ -139,6 +174,24 @@ mod tests {
     }
 
     struct AcceptingHotkey;
+
+    #[derive(Default)]
+    struct RecordingAutostart {
+        enabled: Mutex<bool>,
+        writes: Mutex<Vec<bool>>,
+    }
+
+    impl AutostartPort for RecordingAutostart {
+        fn set_enabled(&self, enabled: bool) -> Result<()> {
+            *self.enabled.lock().unwrap() = enabled;
+            self.writes.lock().unwrap().push(enabled);
+            Ok(())
+        }
+
+        fn is_enabled(&self) -> Result<bool> {
+            Ok(*self.enabled.lock().unwrap())
+        }
+    }
 
     impl HotkeyPort for AcceptingHotkey {
         fn register_translate_hotkey(
@@ -167,6 +220,7 @@ mod tests {
         let manager = RuntimeManager::production(
             RuntimeConfig::default(),
             Some(Arc::new(AcceptingHotkey)),
+            None,
             Arc::new(EmptyCredentialStore),
             Arc::new(RwLock::new(None)),
         )
@@ -188,5 +242,46 @@ mod tests {
                 .to_string(),
             "DeepL API key is not configured"
         );
+    }
+
+    #[test]
+    fn launch_at_login_changes_only_the_autostart_capability() {
+        let autostart = Arc::new(RecordingAutostart::default());
+        let manager = RuntimeManager::production(
+            RuntimeConfig::default(),
+            None,
+            Some(autostart.clone()),
+            Arc::new(EmptyCredentialStore),
+            Arc::new(RwLock::new(None)),
+        )
+        .unwrap();
+        let config = RuntimeConfig {
+            launch_at_login: true,
+            ..RuntimeConfig::default()
+        };
+
+        manager.apply(SettingsField::LaunchAtLogin, config).unwrap();
+
+        assert_eq!(*autostart.writes.lock().unwrap(), vec![true]);
+    }
+
+    #[test]
+    fn startup_reconciliation_repairs_a_missing_registration() {
+        let autostart = Arc::new(RecordingAutostart::default());
+        let manager = RuntimeManager::production(
+            RuntimeConfig {
+                launch_at_login: true,
+                ..RuntimeConfig::default()
+            },
+            None,
+            Some(autostart.clone()),
+            Arc::new(EmptyCredentialStore),
+            Arc::new(RwLock::new(None)),
+        )
+        .unwrap();
+
+        manager.reconcile_autostart().unwrap();
+
+        assert_eq!(*autostart.writes.lock().unwrap(), vec![true]);
     }
 }

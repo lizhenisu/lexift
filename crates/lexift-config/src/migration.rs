@@ -2,12 +2,12 @@ use lexift_core::{Error, Result};
 
 use crate::schema::ConfigFile;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub(crate) const CURRENT_SCHEMA_VERSION: u32 = 4;
 
 pub(crate) fn migrate(mut config: ConfigFile) -> Result<ConfigFile> {
     match config.schema_version {
         CURRENT_SCHEMA_VERSION => Ok(config),
-        1 | 2 => {
+        1..=3 => {
             config.schema_version = CURRENT_SCHEMA_VERSION;
             Ok(config)
         }

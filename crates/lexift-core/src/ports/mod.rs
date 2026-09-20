@@ -1,6 +1,8 @@
+pub mod autostart;
 pub mod clipboard;
 pub mod credential;
 pub mod hotkey;
+pub mod instance;
 pub mod screen;
 pub mod selection;
 pub mod settings;

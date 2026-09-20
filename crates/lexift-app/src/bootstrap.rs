@@ -1,14 +1,28 @@
 use std::sync::{Arc, OnceLock};
 
+use lexift_core::ports::instance::InstanceStatus;
 use lexift_core::ports::tray::{TrayHandler, TrayPort};
 
-use crate::{controller::AppController, lifecycle, wiring::AppServices};
+use crate::{StartupMode, controller::AppController, lifecycle, wiring::AppServices};
 
-pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::Error>> {
     lexift_observability::init();
     lifecycle::on_start();
 
-    let services = AppServices::for_current_build()?;
+    #[cfg(not(feature = "m1-demo"))]
+    let platform = lexift_platform::PlatformCapabilities::new();
+    #[cfg(feature = "m1-demo")]
+    let platform = lexift_platform::PlatformCapabilities::mock();
+    let instance = platform.instance();
+    if let Some(instance) = &instance
+        && instance.acquire()? == InstanceStatus::AlreadyRunning
+    {
+        tracing::info!("another Lexift instance was activated");
+        lifecycle::on_exit();
+        return Ok(());
+    }
+
+    let services = AppServices::for_current_build(platform)?;
     let initial_state = services
         .state
         .lock()
@@ -94,6 +108,14 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             services.clipboard.clone(),
         ),
     );
+    if let Some(instance) = &instance {
+        let controller_for_activation = Arc::clone(&controller);
+        if let Err(error) = instance.set_activation_handler(Arc::new(move || {
+            controller_for_activation.dispatch(lexift_core::AppEvent::MainWindowRequested);
+        })) {
+            tracing::warn!(%error, "second-launch activation is unavailable");
+        }
+    }
     ui.on_event(
         {
             let controller = Arc::clone(&controller);
@@ -115,11 +137,16 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     {
         tracing::warn!(%error, "global translate hotkey is unavailable");
     }
+    if let Err(error) = services.runtime_manager.reconcile_autostart() {
+        tracing::warn!(%error, "launch-at-login registration could not be reconciled");
+    }
     let tray_registered = register_tray(services.tray.as_ref(), controller.tray_handler());
     ui.set_background_mode(tray_registered);
     controller.dispatch(lexift_core::AppEvent::Started);
 
-    let result = ui.run().map_err(Into::into);
+    let result = ui
+        .run(startup_mode == StartupMode::Interactive)
+        .map_err(Into::into);
 
     drop(controller);
     drop(ui);

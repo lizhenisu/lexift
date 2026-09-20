@@ -2,6 +2,7 @@
 name = "lexift-config"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 lexift-core.workspace = true

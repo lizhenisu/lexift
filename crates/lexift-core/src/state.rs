@@ -36,6 +36,7 @@ pub struct AppState {
     pub target_language_settings_error: String,
     pub hotkey_settings_error: String,
     pub provider_settings_error: String,
+    pub launch_at_login_settings_error: String,
     pub credential_configured: bool,
     pub credential_busy: bool,
     pub credential_error_message: String,
@@ -68,6 +69,7 @@ impl AppState {
             target_language_settings_error: String::new(),
             hotkey_settings_error: String::new(),
             provider_settings_error: String::new(),
+            launch_at_login_settings_error: String::new(),
             credential_configured: false,
             credential_busy: false,
             credential_error_message: String::new(),
@@ -154,6 +156,7 @@ impl AppState {
                 self.target_language_settings_error.clear();
                 self.hotkey_settings_error.clear();
                 self.provider_settings_error.clear();
+                self.launch_at_login_settings_error.clear();
                 self.credential_error_message.clear();
                 vec![AppCommand::ShowSettingsWindow]
             }
@@ -374,6 +377,7 @@ impl AppState {
             SettingsField::TargetLanguage => self.target_language_settings_error.clear(),
             SettingsField::Hotkey => self.hotkey_settings_error.clear(),
             SettingsField::Provider => self.provider_settings_error.clear(),
+            SettingsField::LaunchAtLogin => self.launch_at_login_settings_error.clear(),
         }
     }
 
@@ -382,6 +386,7 @@ impl AppState {
             SettingsField::TargetLanguage => self.target_language_settings_error = error,
             SettingsField::Hotkey => self.hotkey_settings_error = error,
             SettingsField::Provider => self.provider_settings_error = error,
+            SettingsField::LaunchAtLogin => self.launch_at_login_settings_error = error,
         }
     }
 
@@ -399,6 +404,9 @@ impl AppState {
             }
             SettingsField::Hotkey => self.desired_settings.hotkey = self.settings.hotkey,
             SettingsField::Provider => self.desired_settings.provider = self.settings.provider,
+            SettingsField::LaunchAtLogin => {
+                self.desired_settings.launch_at_login = self.settings.launch_at_login;
+            }
         }
     }
 

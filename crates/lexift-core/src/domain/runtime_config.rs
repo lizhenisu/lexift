@@ -220,6 +220,7 @@ impl FromStr for ProviderConfig {
 pub struct RuntimeConfig {
     pub hotkey: HotkeyConfig,
     pub provider: ProviderConfig,
+    pub launch_at_login: bool,
 }
 
 #[cfg(test)]

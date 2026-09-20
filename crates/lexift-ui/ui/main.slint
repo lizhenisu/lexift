@@ -1,6 +1,7 @@
 import { Colors } from "design/colors.slint";
 import { Spacing } from "design/spacing.slint";
 import { Typography } from "design/typography.slint";
+import { AppAssets } from "design/assets.slint";
 export { TranslationPopup } from "popup.slint";
 export { LanguageMenuWindow, SettingsToastData, SettingsWindow } from "settings.slint";
 
@@ -31,6 +32,7 @@ component ActionButton inherits Rectangle {
 
 export component AppWindow inherits Window {
     title: "Lexift";
+    icon: AppAssets.app-icon;
     width: 560px;
     height: 520px;
     background: Colors.background;

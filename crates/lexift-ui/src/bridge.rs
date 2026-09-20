@@ -178,6 +178,13 @@ impl Ui {
                 });
             }
         });
+        let settings_handler = Rc::clone(&handler);
+        self.settings
+            .on_launch_at_login_change_requested(move |enabled| {
+                settings_handler(AppEvent::SettingsChangeRequested {
+                    change: SettingsChange::LaunchAtLogin(enabled),
+                });
+            });
         let credential_handler = Rc::clone(&handler);
         self.settings.on_credential_save_requested(move |secret| {
             credential_handler(AppEvent::CredentialSaveRequested {
@@ -540,8 +547,10 @@ impl Ui {
         self.background_mode.set(enabled);
     }
 
-    pub fn run(&self) -> Result<(), slint::PlatformError> {
-        self.main.show()?;
+    pub fn run(&self, show_main_window: bool) -> Result<(), slint::PlatformError> {
+        if show_main_window {
+            self.main.show()?;
+        }
         slint::run_event_loop_until_quit()?;
         let _ = self.popup.hide();
         close_language_menu(
@@ -756,6 +765,9 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
         }
         SettingsFeedback::SettingsSaved(SettingsField::Hotkey) => ("Shortcut saved", false),
         SettingsFeedback::SettingsSaved(SettingsField::Provider) => ("Provider saved", false),
+        SettingsFeedback::SettingsSaved(SettingsField::LaunchAtLogin) => {
+            ("Startup preference saved", false)
+        }
         SettingsFeedback::SettingsSaveFailed(SettingsField::TargetLanguage) => {
             ("Target language wasn't saved", true)
         }
@@ -764,6 +776,9 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
         }
         SettingsFeedback::SettingsSaveFailed(SettingsField::Provider) => {
             ("Provider wasn't saved", true)
+        }
+        SettingsFeedback::SettingsSaveFailed(SettingsField::LaunchAtLogin) => {
+            ("Startup preference wasn't saved", true)
         }
         SettingsFeedback::CredentialSaved => ("API key saved", false),
         SettingsFeedback::CredentialRemoved => ("API key removed", false),
@@ -914,6 +929,7 @@ impl UiHandle {
                 window.set_draft_target_index(language_index(&settings.target_language));
                 window.set_draft_hotkey_label(settings.hotkey.to_string().into());
                 window.set_draft_provider_id(settings.provider.id().into());
+                window.set_launch_at_login(settings.launch_at_login);
                 window.set_hotkey_capturing(false);
                 clear_credential_transient(&window, &credential_generation);
                 clear_settings_toasts(&window, &toast_records);

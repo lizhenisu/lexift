@@ -385,8 +385,7 @@ impl Drop for TrayIcon {
 
 fn add_icon(hwnd: HWND) -> Result<NOTIFYICONDATAW> {
     let mut data = notify_data(hwnd);
-    data.hIcon = unsafe { LoadIconW(None, IDI_APPLICATION) }
-        .map_err(|_| Error::new("Could not load the Windows tray icon"))?;
+    data.hIcon = load_tray_icon()?;
     if !unsafe { Shell_NotifyIconW(NIM_ADD, &data) }.as_bool() {
         return Err(Error::new("Could not add the Windows tray icon"));
     }
@@ -398,6 +397,17 @@ fn add_icon(hwnd: HWND) -> Result<NOTIFYICONDATAW> {
         return Err(Error::new("Could not configure the Windows tray icon"));
     }
     Ok(data)
+}
+
+#[allow(clippy::manual_dangling_ptr)]
+fn load_tray_icon() -> Result<windows::Win32::UI::WindowsAndMessaging::HICON> {
+    let module = unsafe { GetModuleHandleW(None) }
+        .map_err(|_| Error::new("Could not get the Windows application module"))?;
+    let instance = windows::Win32::Foundation::HINSTANCE(module.0);
+    // Win32 MAKEINTRESOURCE encodes the numeric resource ID as a pointer value.
+    unsafe { LoadIconW(Some(instance), PCWSTR(1usize as *const u16)) }
+        .or_else(|_| unsafe { LoadIconW(None, IDI_APPLICATION) })
+        .map_err(|_| Error::new("Could not load the embedded Windows tray icon"))
 }
 
 fn notify_data(hwnd: HWND) -> NOTIFYICONDATAW {

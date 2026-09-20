@@ -22,6 +22,8 @@ pub(crate) struct SettingsFile {
     hotkey: HotkeyFile,
     #[serde(default = "default_provider")]
     provider: String,
+    #[serde(default)]
+    launch_at_login: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -69,6 +71,7 @@ impl ConfigFile {
                 target_language: settings.target_language.0.clone(),
                 hotkey: settings.hotkey.into(),
                 provider: settings.provider.id().into(),
+                launch_at_login: settings.launch_at_login,
             },
             credentials: CredentialReferencesFile {
                 deepl: settings.deepl_credential_id.clone(),
@@ -91,6 +94,7 @@ impl ConfigFile {
             target_language: Language(self.settings.target_language),
             hotkey,
             provider: self.settings.provider.parse()?,
+            launch_at_login: self.settings.launch_at_login,
             deepl_credential_id: self.credentials.deepl,
         })
     }

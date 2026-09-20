@@ -821,11 +821,12 @@ Production 使用 `FileSettingsStore` 从操作系统用户配置目录加载设
 当前磁盘 schema 为：
 
 ```toml
-schema_version = 3
+schema_version = 4
 
 [settings]
 target_language = "zh-CN"
 provider = "deepl"
+launch_at_login = false
 
 [settings.hotkey]
 control = false
@@ -932,15 +933,16 @@ target 为 `Lexift/<credential_id>`，当前 DeepL 使用 `Lexift/deepl-primary`
 native buffer 在复制完成后立即通过 `CredFree` 释放。macOS Keychain 和 Linux Secret Service
 留给对应平台 Adapter 实现。
 
-配置 schema 在 M4.5 升级到 v3；v1/v2 文件加载时自动补充 Runtime Configuration 默认值，
-credentials section 仍只保存引用。普通配置只保存：
+配置 schema 在 M4.5 升级到 v3，并在 M4.6 升级到 v4；v1-v3 文件加载时自动补充 Runtime
+Configuration 与 `launch_at_login = false` 默认值，credentials section 仍只保存引用。普通配置只保存：
 
 ```toml
-schema_version = 3
+schema_version = 4
 
 [settings]
 target_language = "zh-CN"
 provider = "deepl"
+launch_at_login = false
 
 [settings.hotkey]
 control = false
@@ -1008,11 +1010,11 @@ Key。
 临时凭证写入/读取/删除集成测试，以及配置持久化与 Secret 脱敏测试。生产启动和翻译链路不读取
 环境变量；`LEXIFT_DEEPL_AUTH_KEY` 仅保留给显式忽略、需要人工运行的 DeepL 网络适配器测试。
 
-当前里程碑：**M4.5 — Runtime Configuration**。
+当前里程碑：**M4.6 — Windows V0.1 Desktop Release**。
 
 ### M4.5 Runtime Configuration
 
-状态：✅ 实现完成，等待桌面人工验收
+状态：✅ 实现完成并通过桌面人工验收
 
 Core 新增独立的 `RuntimeConfig`，包含当前已加载的 `HotkeyConfig` 和 `ProviderConfig`。Settings
 仍表示持久化的用户偏好；`AppState.runtime_config` 表示当前运行实例已经成功应用的配置，两者
@@ -1060,7 +1062,7 @@ Settings、Credential 和 DeepL 翻译链路无回归。
 
 ### M4.5.1 Settings 单项自动保存与 Provider 交互
 
-状态：✅ 实现完成，等待桌面人工验收
+状态：✅ 实现完成并通过桌面人工验收
 
 Settings 以 `SettingsChange` 表达 Target Language、Hotkey 和 Provider 的单项修改。Core 串行执行
 保存事务，忙时保留其他字段请求，同一字段只保留最新值。成功后窗口保持打开；失败时只恢复对应
@@ -1080,7 +1082,7 @@ Credential 查看、复制、编辑、删除及显式保存无回归。
 
 ### M4.5.2 Settings 稳定渲染与独立 Toast 反馈
 
-状态：✅ 实现完成，等待桌面人工验收
+状态：✅ 实现完成并通过桌面人工验收
 
 Settings 保存期间不再创建 `Saving…` 布局项，也不再用全局 busy 状态禁用无关字段。UI 使用
 `desired_settings` 呈现用户的最新选择，并只在 Slint 属性实际变化时写入对应字段。因此保存 API Key
@@ -1100,6 +1102,34 @@ Toast，旧计时器不能影响之后创建的实例。
 桌面人工验收需确认：API Key 保存时 Shortcut 按钮不闪烁；修改 Shortcut、语言或 Provider 时页面
 不移动、不闪烁；保存期间其他字段仍可操作；快速连续完成多项操作时多条 Toast 同时显示、分别按
 时消失并可单独关闭；失败字段回退和就地错误正常。
+
+### M4.6 Windows V0.1 Desktop Release
+
+状态：🚧 实现完成，等待 Release 产物与安装/卸载人工验收
+
+Windows Release 使用 GUI subsystem，嵌入 Lexift 多尺寸图标、应用清单和 PE 版本信息。系统托盘
+复用同一嵌入图标。应用使用命名互斥量保证单实例；第二次启动通过隐藏的原生协调窗口通知已有实例
+打开主窗口，不创建第二套 Runtime、Hotkey 或 Tray。发布脚本覆盖同名安装器后通过定向的 Windows
+Shell 更新通知刷新该文件图标，避免本地反复打包时 Explorer 继续显示旧图标缓存。
+
+Settings 新增 Launch at startup。配置 schema 升级到 v4，旧 v1-v3 自动补充 `false`。Windows
+Adapter 只写入当前用户 Run 注册表项，命令固定为带引号的绝对路径与 `--background`；启动时会校验
+并修复安装路径变化。后台模式创建完整运行时和托盘，但不主动显示主窗口。卸载模板始终删除启动项、
+安装器产品键、卸载项和当前安装路径对应的托盘历史；不扫描或删除其他 Lexift 构建的托盘记录。
+
+卸载确认页的“删除用户数据”默认不选中。未选中时保留 `%APPDATA%\Lexift` 配置、
+`%LOCALAPPDATA%\Lexift` 日志和 Windows Credential Manager 中的 DeepL API Key，确保覆盖安装与升级
+不丢失数据；选中时递归删除两个数据目录并删除 `Lexift/deepl-primary` 凭证。目录或凭证清理失败会
+写入卸载详情并把卸载标记为存在错误，避免静默报告完全清理成功。
+
+NSIS 的目录删除路径固定使用 Windows 反斜杠；隔离验证确认正斜杠路径不会删除目标目录。Release
+验证会拒绝渲染后出现 `$APPDATA/Lexift` 或 `$LOCALAPPDATA/Lexift`。卸载成功回调会对启动项、卸载项
+和产品键执行幂等的最终清理；安装器也只恢复确实包含 `uninstall.exe` 的旧安装路径，无效历史路径会
+被忽略并删除。
+
+Release 日志写入 `%LOCALAPPDATA%\Lexift\logs`，按日滚动并最多保留 5 个文件。发布工程包含
+`packager.toml`、当前用户 NSIS 安装器、portable ZIP、SHA256 校验文件、可选 Authenticode 签名脚本
+及 Tag 驱动的 GitHub Actions 工作流。正式 Tag 和 GitHub Release 仅在 Windows 桌面清单全部通过后创建。
 
 ---
 

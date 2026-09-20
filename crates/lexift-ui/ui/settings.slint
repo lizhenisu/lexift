@@ -1,6 +1,7 @@
 import { Colors } from "design/colors.slint";
 import { Spacing } from "design/spacing.slint";
 import { Typography } from "design/typography.slint";
+import { AppAssets } from "design/assets.slint";
 import { Metrics } from "design/metrics.slint";
 
 component SettingsButton inherits Rectangle {
@@ -28,6 +29,29 @@ component SettingsButton inherits Rectangle {
     TouchArea {
         enabled: root.enabled;
         clicked => { root.clicked(); }
+    }
+}
+
+component SettingsSwitch inherits Rectangle {
+    in property <bool> checked;
+    callback toggled(bool);
+
+    width: 52px;
+    height: 32px;
+    border-radius: 16px;
+    background: root.checked ? Colors.primary : Colors.outline;
+
+    Rectangle {
+        x: root.checked ? parent.width - self.width - 4px : 4px;
+        y: 4px;
+        width: 24px;
+        height: 24px;
+        border-radius: 12px;
+        background: Colors.surface;
+    }
+
+    TouchArea {
+        clicked => { root.toggled(!root.checked); }
     }
 }
 
@@ -180,14 +204,17 @@ export struct SettingsToastData {
 
 export component SettingsWindow inherits Window {
     title: "Lexift Settings";
+    icon: AppAssets.app-icon;
     width: 520px;
-    height: 680px;
+    height: 760px;
     background: Colors.background;
 
     in-out property <int> draft-target-index: 0;
     in property <string> target-language-error-text: "";
     in property <string> hotkey-error-text: "";
     in property <string> provider-error-text: "";
+    in-out property <bool> launch-at-login: false;
+    in property <string> launch-at-login-error-text: "";
     in-out property <string> draft-hotkey-label: "Alt + X";
     in-out property <bool> hotkey-capturing: false;
     in-out property <string> draft-provider-id: "deepl";
@@ -212,6 +239,7 @@ export component SettingsWindow inherits Window {
     ];
     callback hotkey-key-pressed(string, bool, bool, bool, bool) -> string;
     callback hotkey-change-requested(string);
+    callback launch-at-login-change-requested(bool);
     callback credential-save-requested(string);
     callback credential-remove-requested();
     callback credential-reveal-requested();
@@ -398,6 +426,42 @@ export component SettingsWindow inherits Window {
 
         if root.hotkey-error-text != "": Text {
             text: root.hotkey-error-text;
+            color: Colors.error;
+            font-size: Typography.body-size;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            alignment: center;
+
+            VerticalLayout {
+                spacing: 2px;
+
+                Text {
+                    text: "Launch at startup";
+                    color: Colors.foreground;
+                    font-size: Typography.body-size;
+                    font-weight: 700;
+                }
+
+                Text {
+                    text: "Start in the background when you sign in";
+                    color: Colors.secondary-foreground;
+                    font-size: Typography.body-size;
+                }
+            }
+
+            SettingsSwitch {
+                checked: root.launch-at-login;
+                toggled(value) => {
+                    root.launch-at-login = value;
+                    root.launch-at-login-change-requested(value);
+                }
+            }
+        }
+
+        if root.launch-at-login-error-text != "": Text {
+            text: root.launch-at-login-error-text;
             color: Colors.error;
             font-size: Typography.body-size;
             wrap: word-wrap;
@@ -703,6 +767,7 @@ export component SettingsWindow inherits Window {
 
 export component LanguageMenuWindow inherits Window {
     title: "Lexift Languages";
+    icon: AppAssets.app-icon;
     width: 456px;
     height: 242px;
     no-frame: true;

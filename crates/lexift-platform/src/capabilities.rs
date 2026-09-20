@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use lexift_core::ports::{
-    clipboard::ClipboardPort, credential::CredentialStore, hotkey::HotkeyPort, screen::ScreenPort,
-    selection::SelectionPort, tray::TrayPort,
+    autostart::AutostartPort, clipboard::ClipboardPort, credential::CredentialStore,
+    hotkey::HotkeyPort, instance::InstancePort, screen::ScreenPort, selection::SelectionPort,
+    tray::TrayPort,
 };
 
 #[cfg(feature = "mock")]
@@ -16,6 +17,8 @@ pub struct PlatformCapabilities {
     tray: Option<Arc<dyn TrayPort>>,
     credential_store: Option<Arc<dyn CredentialStore>>,
     clipboard: Option<Arc<dyn ClipboardPort>>,
+    autostart: Option<Arc<dyn AutostartPort>>,
+    instance: Option<Arc<dyn InstancePort>>,
 }
 
 impl PlatformCapabilities {
@@ -46,6 +49,16 @@ impl PlatformCapabilities {
             clipboard: Some(Arc::new(crate::windows::WindowsClipboardPort)),
             #[cfg(not(target_os = "windows"))]
             clipboard: None,
+            #[cfg(target_os = "windows")]
+            autostart: crate::windows::WindowsAutostartPort::new()
+                .ok()
+                .map(|port| Arc::new(port) as Arc<dyn AutostartPort>),
+            #[cfg(not(target_os = "windows"))]
+            autostart: None,
+            #[cfg(target_os = "windows")]
+            instance: Some(Arc::new(crate::windows::WindowsInstancePort::new())),
+            #[cfg(not(target_os = "windows"))]
+            instance: None,
         }
     }
 
@@ -58,6 +71,8 @@ impl PlatformCapabilities {
             tray: None,
             credential_store: None,
             clipboard: None,
+            autostart: None,
+            instance: None,
         }
     }
 
@@ -83,6 +98,14 @@ impl PlatformCapabilities {
 
     pub fn clipboard(&self) -> Option<Arc<dyn ClipboardPort>> {
         self.clipboard.as_ref().map(Arc::clone)
+    }
+
+    pub fn autostart(&self) -> Option<Arc<dyn AutostartPort>> {
+        self.autostart.as_ref().map(Arc::clone)
+    }
+
+    pub fn instance(&self) -> Option<Arc<dyn InstancePort>> {
+        self.instance.as_ref().map(Arc::clone)
     }
 }
 
@@ -130,6 +153,8 @@ mod tests {
         assert!(capabilities.tray().is_some());
         assert!(capabilities.credential_store().is_some());
         assert!(capabilities.clipboard().is_some());
+        assert!(capabilities.autostart().is_some());
+        assert!(capabilities.instance().is_some());
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -148,5 +173,7 @@ mod tests {
         assert!(capabilities.tray().is_none());
         assert!(capabilities.credential_store().is_none());
         assert!(capabilities.clipboard().is_none());
+        assert!(capabilities.autostart().is_none());
+        assert!(capabilities.instance().is_none());
     }
 }

@@ -143,6 +143,8 @@ lexift/
             └── performance.rs
 ```
 
+根目录同时包含 `packager.toml`、`packaging/windows/installer.nsi` 与 `scripts/package-release.ps1`，负责生成 Windows 当前用户 NSIS 安装器、portable ZIP 和 SHA256 校验文件；这些发布文件不改变 7 个核心 crate 的依赖方向。
+
 ## 3. 根 Workspace
 
 根 `Cargo.toml` 只作为 Virtual Workspace，不同时承担 package 职责。
