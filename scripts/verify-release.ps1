@@ -25,11 +25,13 @@ if (-not (Test-Path -LiteralPath $RenderedInstallerScript)) {
 
 $installerScript = Get-Content -LiteralPath $RenderedInstallerScript -Raw
 $requiredInstallerFragments = @(
+    'WriteRegStr SHCTX "${UNINSTKEY}" "InstallLocation" "$INSTDIR"',
     'RmDir /r "$APPDATA\Lexift"',
     'IfFileExists "$APPDATA\Lexift"',
     'RmDir /r "$LOCALAPPDATA\Lexift"',
     'IfFileExists "$LOCALAPPDATA\Lexift"',
     'CredDeleteW',
+    '"/DELETEUSERDATA"',
     'Function un.onUninstSuccess',
     'SetErrorLevel 1'
 )
@@ -43,6 +45,10 @@ foreach ($forbidden in @('$APPDATA/Lexift', '$LOCALAPPDATA/Lexift')) {
     if ($installerScript.Contains($forbidden)) {
         throw "Rendered NSIS script contains an unsupported forward-slash path: $forbidden"
     }
+}
+
+if ($installerScript.Contains('"InstallLocation" "$\"$INSTDIR$\""')) {
+    throw "Rendered NSIS script quotes InstallLocation; directory registry values must remain unquoted"
 }
 
 Write-Host "Verified Windows GUI executable metadata for $($item.Name) ($($item.Length) bytes)."

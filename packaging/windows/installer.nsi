@@ -341,6 +341,9 @@ Function un.ConfirmShow
     Pop $DeleteAppDataCheckbox
     SendMessage $HWNDPARENT ${WM_GETFONT} 0 0 $1
     SendMessage $DeleteAppDataCheckbox ${WM_SETFONT} $1 1
+    ${If} $DeleteAppDataCheckboxState == 1
+      SendMessage $DeleteAppDataCheckbox ${BM_SETCHECK} ${BST_CHECKED} 0
+    ${EndIf}
 FunctionEnd
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE un.ConfirmLeave
 Function un.ConfirmLeave
@@ -529,7 +532,9 @@ Section Install
   WriteRegStr SHCTX "${UNINSTKEY}" "DisplayIcon" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\""
   WriteRegStr SHCTX "${UNINSTKEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr SHCTX "${UNINSTKEY}" "Publisher" "${MANUFACTURER}"
-  WriteRegStr SHCTX "${UNINSTKEY}" "InstallLocation" "$\"$INSTDIR$\""
+  ; InstallLocation is a directory value, so keep it unquoted. Consumers commonly
+  ; pass it directly to path APIs, while executable command values remain quoted.
+  WriteRegStr SHCTX "${UNINSTKEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr SHCTX "${UNINSTKEY}" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
   WriteRegDWORD SHCTX "${UNINSTKEY}" "NoModify" "1"
   WriteRegDWORD SHCTX "${UNINSTKEY}" "NoRepair" "1"
@@ -576,8 +581,11 @@ Function un.onInit
 
   {{#if appdata_paths}}
   ; Passive upgrade uninstalls must preserve user data unless the user explicitly
-  ; selected the checkbox on the interactive uninstall confirmation page.
+  ; selected the checkbox or supplied the dedicated validation/automation flag.
   StrCpy $DeleteAppDataCheckboxState 0
+  ${GetOptions} $CMDLINE "/DELETEUSERDATA" $R0
+  IfErrors +2 0
+    StrCpy $DeleteAppDataCheckboxState 1
   {{/if}}
 
   !if "${INSTALLMODE}" == "both"
@@ -709,7 +717,7 @@ Section Uninstall
   ; Remove startup, add/remove-programs and product registry state.
   Call un.RemoveInstallerRegistry
 
-  ; Delete app data
+  ; Delete app data only after an explicit interactive or command-line request.
   {{#if appdata_paths}}
   ${If} $DeleteAppDataCheckboxState == 1
       DetailPrint "Delete user data selected; removing settings, logs and credentials"
