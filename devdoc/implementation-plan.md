@@ -807,10 +807,10 @@ Lexift
 2026-09-15 用户完成桌面人工验收，确认 Settings 与 Target Language 持久化链路可用。
 
 Settings Window 第一版只开放 Target Language，提供 12 个 Lexift canonical language code。
-窗口内选择属于 UI draft；Cancel 或关闭窗口会丢弃 draft，每次打开都从 Core 的 committed
-Settings 重新同步。Save 通过 `SettingsSaveRequested → PersistSettings` 进入 Controller，磁盘写入
-由 Tokio `spawn_blocking` 执行。只有 Store 保存成功后，`SettingsSaved` 才更新
-`AppState.settings` 并关闭窗口；失败会保留旧设置，在设置窗口独立显示错误，不改变翻译状态。
+M4.5.1 起，语言、快捷键与 Provider 改为操作完成后单项保存；页面级 Cancel/Save 已移除。
+Credential 仍通过字段内 Save/Edit Save/Cancel 显式提交，避免逐字符写入系统安全存储。
+磁盘写入由 Tokio `spawn_blocking` 执行；持久化或运行时应用失败会恢复对应字段的旧值并就地
+显示错误，不改变其他设置或翻译状态。
 
 Production 使用 `FileSettingsStore` 从操作系统用户配置目录加载设置。在 Windows 上路径为：
 
@@ -821,10 +821,18 @@ Production 使用 `FileSettingsStore` 从操作系统用户配置目录加载设
 当前磁盘 schema 为：
 
 ```toml
-schema_version = 2
+schema_version = 3
 
 [settings]
 target_language = "zh-CN"
+provider = "deepl"
+
+[settings.hotkey]
+control = false
+alt = true
+shift = false
+meta = false
+key = "X"
 
 [credentials]
 deepl = "deepl-primary"
@@ -924,13 +932,22 @@ target 为 `Lexift/<credential_id>`，当前 DeepL 使用 `Lexift/deepl-primary`
 native buffer 在复制完成后立即通过 `CredFree` 释放。macOS Keychain 和 Linux Secret Service
 留给对应平台 Adapter 实现。
 
-配置 schema 升级到 v2；v1 文件加载时自动补充空的 credentials section。普通配置只保存：
+配置 schema 在 M4.5 升级到 v3；v1/v2 文件加载时自动补充 Runtime Configuration 默认值，
+credentials section 仍只保存引用。普通配置只保存：
 
 ```toml
-schema_version = 2
+schema_version = 3
 
 [settings]
 target_language = "zh-CN"
+provider = "deepl"
+
+[settings.hotkey]
+control = false
+alt = true
+shift = false
+meta = false
+key = "X"
 
 [credentials]
 deepl = "deepl-primary"
@@ -991,7 +1008,98 @@ Key。
 临时凭证写入/读取/删除集成测试，以及配置持久化与 Secret 脱敏测试。生产启动和翻译链路不读取
 环境变量；`LEXIFT_DEEPL_AUTH_KEY` 仅保留给显式忽略、需要人工运行的 DeepL 网络适配器测试。
 
-下一步：**M4.5 — Runtime Configuration**。
+当前里程碑：**M4.5 — Runtime Configuration**。
+
+### M4.5 Runtime Configuration
+
+状态：✅ 实现完成，等待桌面人工验收
+
+Core 新增独立的 `RuntimeConfig`，包含当前已加载的 `HotkeyConfig` 和 `ProviderConfig`。Settings
+仍表示持久化的用户偏好；`AppState.runtime_config` 表示当前运行实例已经成功应用的配置，两者
+只在完整事务成功后一起提交。Runtime 错误写入独立的 `runtime_config_error_message`，不会覆盖
+翻译错误。
+
+设置保存链路调整为：
+
+```text
+SettingsChangeRequested
+  ↓
+PersistSettings
+  ↓
+RuntimeConfigChanged
+  ↓
+RuntimeManager.apply
+  ↓
+RuntimeConfigUpdated / RuntimeConfigUpdateFailed
+```
+
+运行时应用失败时，Controller 会把磁盘设置恢复为此前 committed Settings，Core 保留旧的
+Settings 与 RuntimeConfig，Settings Window 保持打开并显示运行时错误。UI 不直接访问 Hotkey
+或 Translator Adapter。
+
+`HotkeyRuntimeManager` 保存当前配置和事件 handler。Windows Adapter 的动态切换先在新的监听线程
+注册新组合，注册成功后才替换并关闭旧监听线程；系统冲突或注册失败时旧快捷键继续工作。支持
+Ctrl、Alt、Shift、Win 与 A-Z、0-9、F1-F12，至少需要一个修饰键。Settings 使用 FocusScope 捕获
+实际键盘事件，Escape 取消本次捕获。
+
+`TranslatorRuntime` 保存当前 Provider 状态，并在 Provider 修改时检查对应 Credential。当前 Provider
+只有 DeepL，因此 UI 的单选下拉列表只展示 DeepL，不展示尚未实现的选项。翻译请求仍按当前 credential reference
+临时读取 Secret，再由共享 `DeepLTranslatorFactory` 创建短生命周期 Adapter；Provider Adapter
+不持有 CredentialStore。
+
+配置 schema 升级到 v3；v1/v2 自动迁移为 `Alt + X` 与 DeepL。自动测试覆盖 Hotkey 初始注册、
+动态切换、失败保留旧组合、Provider credential validation、Settings 持久化后再应用 Runtime、
+运行时错误隔离及旧 schema 迁移。Windows 原生集成测试也覆盖了真实 `RegisterHotKey` 注册、
+原子替换、旧组合释放、新组合冲突和 Drop 清理。
+
+桌面人工验收需确认：捕获新快捷键后无需重启即可触发划词翻译；旧快捷键立即失效；选择一个
+被系统占用的组合时显示独立错误且旧快捷键仍可用；重启后新组合保持；Selection、Tray、Popup、
+Settings、Credential 和 DeepL 翻译链路无回归。
+
+下一步：**M4.6 — Desktop Release**。
+
+### M4.5.1 Settings 单项自动保存与 Provider 交互
+
+状态：✅ 实现完成，等待桌面人工验收
+
+Settings 以 `SettingsChange` 表达 Target Language、Hotkey 和 Provider 的单项修改。Core 串行执行
+保存事务，忙时保留其他字段请求，同一字段只保留最新值。成功后窗口保持打开；失败时只恢复对应
+字段并显示字段级错误。
+
+Runtime 按修改字段应用能力：Target Language 不访问平台或 Credential；Hotkey 只替换全局快捷键；
+Provider 才验证并切换 Translator。因此未配置 DeepL API Key 时，语言和快捷键仍可正常保存。
+磁盘保存或运行时应用失败继续执行旧设置回滚，旧快捷键与 Provider 保持可用。
+
+Target Language 在选择列表项后保存，Hotkey 在捕获有效组合后保存。Provider 使用与语言列表相同的
+owned transient menu 和外部交互关闭机制；当前菜单只有 DeepL，选择当前值只关闭菜单。DeepL API
+Key 继续使用字段内显式保存，不在输入或失焦时自动写入 Credential Store。
+
+桌面人工验收需确认：无 DeepL Key 时可以修改语言与快捷键；快捷键修改立即生效；Provider 点击可
+稳定展开；失败字段恢复旧值且错误显示在字段附近；关闭 Settings 不撤销已经成功保存的项目；
+Credential 查看、复制、编辑、删除及显式保存无回归。
+
+### M4.5.2 Settings 稳定渲染与独立 Toast 反馈
+
+状态：✅ 实现完成，等待桌面人工验收
+
+Settings 保存期间不再创建 `Saving…` 布局项，也不再用全局 busy 状态禁用无关字段。UI 使用
+`desired_settings` 呈现用户的最新选择，并只在 Slint 属性实际变化时写入对应字段。因此保存 API Key
+不会改变 Shortcut 按钮的视觉状态，修改语言、快捷键或 Provider 也不会触发整页重排或无关控件重绘。
+
+Settings 修改仍由 Core 串行提交；快速修改同一字段时只保留最新期望值。旧事务失败时，如果该字段
+已经有更新请求，则不会用旧 committed 值覆盖用户的新选择。Credential 写操作可以在普通 Settings
+事务执行期间发起，由 Controller 等待当前事务结束后读取最新 committed Settings，再安全地更新
+Credential reference；Secret 不进入 AppState、普通配置或日志。
+
+保存和 Credential 操作结果通过 Settings 顶部悬浮 Toast 展示。每条 Toast 都是独立实例，拥有唯一
+ID、关闭按钮和自己的自动关闭计时器；成功项约 2 秒消失，失败项约 5 秒消失。快速连续操作会同时
+显示多条 Toast，并按垂直阶梯排列；单条手动关闭或计时结束只移除自身，其余 Toast 自动补位。
+Toast 不参与页面布局，失败详情仍保留在对应字段附近。Settings 隐藏、关闭或重新打开时清空现有
+Toast，旧计时器不能影响之后创建的实例。
+
+桌面人工验收需确认：API Key 保存时 Shortcut 按钮不闪烁；修改 Shortcut、语言或 Provider 时页面
+不移动、不闪烁；保存期间其他字段仍可操作；快速连续完成多项操作时多条 Toast 同时显示、分别按
+时消失并可单独关闭；失败字段回退和就地错误正常。
 
 ---
 

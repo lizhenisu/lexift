@@ -1,7 +1,8 @@
 use crate::{
     AppCommand, AppEvent,
     domain::{
-        settings::Settings,
+        runtime_config::RuntimeConfig,
+        settings::{Settings, SettingsChange, SettingsFeedback, SettingsField},
         translation::{TranslateRequest, TranslationTaskId},
     },
 };
@@ -22,15 +23,24 @@ pub struct AppState {
     pub phase: TranslationPhase,
     pub current_translation_task: Option<TranslationTaskId>,
     pub settings: Settings,
+    pub desired_settings: Settings,
+    pub runtime_config: RuntimeConfig,
     pub source_text: String,
     pub translated_text: String,
     pub error_message: String,
     pub settings_saving: bool,
+    pub settings_saving_field: Option<SettingsField>,
+    pub settings_error_field: Option<SettingsField>,
     pub settings_error_message: String,
+    pub runtime_config_error_message: String,
+    pub target_language_settings_error: String,
+    pub hotkey_settings_error: String,
+    pub provider_settings_error: String,
     pub credential_configured: bool,
     pub credential_busy: bool,
     pub credential_error_message: String,
     next_translation_task: u64,
+    queued_settings_changes: Vec<SettingsChange>,
 }
 
 impl Default for AppState {
@@ -44,16 +54,25 @@ impl AppState {
         Self {
             phase: TranslationPhase::Idle,
             current_translation_task: None,
+            runtime_config: settings.runtime_config(),
+            desired_settings: settings.clone(),
             settings,
             source_text: String::new(),
             translated_text: String::new(),
             error_message: String::new(),
             settings_saving: false,
+            settings_saving_field: None,
+            settings_error_field: None,
             settings_error_message: String::new(),
+            runtime_config_error_message: String::new(),
+            target_language_settings_error: String::new(),
+            hotkey_settings_error: String::new(),
+            provider_settings_error: String::new(),
             credential_configured: false,
             credential_busy: false,
             credential_error_message: String::new(),
             next_translation_task: 0,
+            queued_settings_changes: Vec::new(),
         }
     }
 
@@ -130,32 +149,78 @@ impl AppState {
             AppEvent::MainWindowRequested => vec![AppCommand::ShowMainWindow],
             AppEvent::SettingsWindowRequested => {
                 self.settings_error_message.clear();
+                self.runtime_config_error_message.clear();
+                self.settings_error_field = None;
+                self.target_language_settings_error.clear();
+                self.hotkey_settings_error.clear();
+                self.provider_settings_error.clear();
                 self.credential_error_message.clear();
                 vec![AppCommand::ShowSettingsWindow]
             }
-            AppEvent::SettingsSaveRequested { mut settings }
-                if !self.settings_saving && !self.credential_busy =>
-            {
-                settings.deepl_credential_id = self.settings.deepl_credential_id.clone();
-                self.settings_saving = true;
-                self.settings_error_message.clear();
-                vec![AppCommand::PersistSettings { settings }]
+            AppEvent::SettingsChangeRequested { change } => self.request_settings_change(change),
+            AppEvent::RuntimeConfigChanged {
+                settings,
+                config,
+                change,
+            } => {
+                vec![AppCommand::ApplyRuntimeConfig {
+                    previous_settings: self.settings.clone(),
+                    settings,
+                    config,
+                    change,
+                }]
             }
-            AppEvent::SettingsSaveRequested { .. } => Vec::new(),
-            AppEvent::SettingsSaved { settings } => {
+            AppEvent::RuntimeConfigUpdated {
+                settings,
+                config,
+                change,
+            } => {
                 self.settings = settings;
+                self.runtime_config = config;
                 self.settings_saving = false;
+                self.settings_saving_field = None;
                 self.settings_error_message.clear();
-                vec![AppCommand::HideSettingsWindow]
+                self.runtime_config_error_message.clear();
+                self.settings_error_field = None;
+                self.clear_settings_field_error(change.field());
+                let mut commands = vec![AppCommand::ShowSettingsFeedback {
+                    feedback: SettingsFeedback::SettingsSaved(change.field()),
+                }];
+                commands.extend(self.start_next_settings_change());
+                commands
             }
-            AppEvent::SettingsSaveFailed { error } => {
+            AppEvent::RuntimeConfigUpdateFailed { change, error } => {
                 self.settings_saving = false;
-                self.settings_error_message = error;
-                Vec::new()
+                self.settings_saving_field = None;
+                self.runtime_config_error_message = error;
+                self.settings_error_message.clear();
+                self.settings_error_field = Some(change.field());
+                self.set_settings_field_error(
+                    change.field(),
+                    self.runtime_config_error_message.clone(),
+                );
+                self.restore_desired_field_after_failure(change.field());
+                let mut commands = vec![AppCommand::ShowSettingsFeedback {
+                    feedback: SettingsFeedback::SettingsSaveFailed(change.field()),
+                }];
+                commands.extend(self.start_next_settings_change());
+                commands
             }
-            AppEvent::CredentialSaveRequested { secret }
-                if !self.credential_busy && !self.settings_saving =>
-            {
+            AppEvent::SettingsSaveFailed { change, error } => {
+                self.settings_saving = false;
+                self.settings_saving_field = None;
+                self.settings_error_message = error;
+                self.runtime_config_error_message.clear();
+                self.settings_error_field = Some(change.field());
+                self.set_settings_field_error(change.field(), self.settings_error_message.clone());
+                self.restore_desired_field_after_failure(change.field());
+                let mut commands = vec![AppCommand::ShowSettingsFeedback {
+                    feedback: SettingsFeedback::SettingsSaveFailed(change.field()),
+                }];
+                commands.extend(self.start_next_settings_change());
+                commands
+            }
+            AppEvent::CredentialSaveRequested { secret } if !self.credential_busy => {
                 let secret = secret.expose().trim().to_owned();
                 if secret.is_empty() {
                     self.credential_error_message = "DeepL API key cannot be empty".into();
@@ -171,19 +236,30 @@ impl AppState {
             AppEvent::CredentialSaveRequested { .. } => Vec::new(),
             AppEvent::CredentialSaved { credential_id } => {
                 self.settings.deepl_credential_id = Some(credential_id);
+                self.desired_settings.deepl_credential_id =
+                    self.settings.deepl_credential_id.clone();
                 self.credential_configured = true;
                 self.credential_busy = false;
                 self.credential_error_message.clear();
-                vec![AppCommand::ClearCredentialDraft]
+                let mut commands = vec![
+                    AppCommand::ClearCredentialDraft,
+                    AppCommand::ShowSettingsFeedback {
+                        feedback: SettingsFeedback::CredentialSaved,
+                    },
+                ];
+                commands.extend(self.start_next_settings_change());
+                commands
             }
             AppEvent::CredentialSaveFailed { error } => {
                 self.credential_busy = false;
                 self.credential_error_message = error;
-                Vec::new()
+                let mut commands = vec![AppCommand::ShowSettingsFeedback {
+                    feedback: SettingsFeedback::CredentialOperationFailed,
+                }];
+                commands.extend(self.start_next_settings_change());
+                commands
             }
-            AppEvent::CredentialRemoveRequested
-                if !self.credential_busy && !self.settings_saving =>
-            {
+            AppEvent::CredentialRemoveRequested if !self.credential_busy => {
                 let Some(credential_id) = self.settings.deepl_credential_id.clone() else {
                     self.credential_configured = false;
                     self.credential_error_message.clear();
@@ -196,20 +272,32 @@ impl AppState {
             AppEvent::CredentialRemoveRequested => Vec::new(),
             AppEvent::CredentialRemoved => {
                 self.settings.deepl_credential_id = None;
+                self.desired_settings.deepl_credential_id = None;
                 self.credential_configured = false;
                 self.credential_busy = false;
                 self.credential_error_message.clear();
-                vec![AppCommand::ClearCredentialDraft]
+                let mut commands = vec![
+                    AppCommand::ClearCredentialDraft,
+                    AppCommand::ShowSettingsFeedback {
+                        feedback: SettingsFeedback::CredentialRemoved,
+                    },
+                ];
+                commands.extend(self.start_next_settings_change());
+                commands
             }
             AppEvent::CredentialRemoveFailed { error } => {
                 self.credential_busy = false;
                 self.credential_error_message = error;
-                Vec::new()
+                let mut commands = vec![AppCommand::ShowSettingsFeedback {
+                    feedback: SettingsFeedback::CredentialOperationFailed,
+                }];
+                commands.extend(self.start_next_settings_change());
+                commands
             }
             AppEvent::CredentialAccessRequested {
                 purpose,
                 generation,
-            } if !self.credential_busy && !self.settings_saving => {
+            } if !self.credential_busy => {
                 let Some(credential_id) = self.settings.deepl_credential_id.clone() else {
                     self.credential_configured = false;
                     self.credential_error_message = "DeepL API key is not configured".into();
@@ -224,17 +312,93 @@ impl AppState {
                 }]
             }
             AppEvent::CredentialAccessRequested { .. } => Vec::new(),
-            AppEvent::CredentialAccessSucceeded { .. } => {
+            AppEvent::CredentialAccessSucceeded { purpose } => {
                 self.credential_busy = false;
                 self.credential_error_message.clear();
-                Vec::new()
+                let mut commands = Vec::new();
+                if purpose == crate::ports::credential::CredentialAccessPurpose::Copy {
+                    commands.push(AppCommand::ShowSettingsFeedback {
+                        feedback: SettingsFeedback::CredentialCopied,
+                    });
+                }
+                commands.extend(self.start_next_settings_change());
+                commands
             }
             AppEvent::CredentialAccessFailed { error } => {
                 self.credential_busy = false;
                 self.credential_error_message = error;
-                Vec::new()
+                let mut commands = vec![AppCommand::ShowSettingsFeedback {
+                    feedback: SettingsFeedback::CredentialOperationFailed,
+                }];
+                commands.extend(self.start_next_settings_change());
+                commands
             }
             AppEvent::ExitRequested => vec![AppCommand::Exit],
+        }
+    }
+
+    fn request_settings_change(&mut self, change: SettingsChange) -> Vec<AppCommand> {
+        change.apply_to(&mut self.desired_settings);
+        if self.settings_saving || self.credential_busy {
+            self.queued_settings_changes
+                .retain(|queued| queued.field() != change.field());
+            self.queued_settings_changes.push(change);
+            return Vec::new();
+        }
+        self.start_settings_change(change)
+    }
+
+    fn start_settings_change(&mut self, change: SettingsChange) -> Vec<AppCommand> {
+        if change.matches(&self.settings) {
+            return self.start_next_settings_change();
+        }
+        let mut settings = self.settings.clone();
+        change.apply_to(&mut settings);
+        self.settings_saving = true;
+        self.settings_saving_field = Some(change.field());
+        self.settings_error_field = None;
+        self.clear_settings_field_error(change.field());
+        vec![AppCommand::PersistSettings { settings, change }]
+    }
+
+    fn start_next_settings_change(&mut self) -> Vec<AppCommand> {
+        if self.credential_busy || self.queued_settings_changes.is_empty() {
+            return Vec::new();
+        }
+        let change = self.queued_settings_changes.remove(0);
+        self.start_settings_change(change)
+    }
+
+    fn clear_settings_field_error(&mut self, field: SettingsField) {
+        match field {
+            SettingsField::TargetLanguage => self.target_language_settings_error.clear(),
+            SettingsField::Hotkey => self.hotkey_settings_error.clear(),
+            SettingsField::Provider => self.provider_settings_error.clear(),
+        }
+    }
+
+    fn set_settings_field_error(&mut self, field: SettingsField, error: String) {
+        match field {
+            SettingsField::TargetLanguage => self.target_language_settings_error = error,
+            SettingsField::Hotkey => self.hotkey_settings_error = error,
+            SettingsField::Provider => self.provider_settings_error = error,
+        }
+    }
+
+    fn restore_desired_field_after_failure(&mut self, field: SettingsField) {
+        if self
+            .queued_settings_changes
+            .iter()
+            .any(|queued| queued.field() == field)
+        {
+            return;
+        }
+        match field {
+            SettingsField::TargetLanguage => {
+                self.desired_settings.target_language = self.settings.target_language.clone();
+            }
+            SettingsField::Hotkey => self.desired_settings.hotkey = self.settings.hotkey,
+            SettingsField::Provider => self.desired_settings.provider = self.settings.provider,
         }
     }
 
@@ -662,22 +826,39 @@ mod tests {
             target_language: Language("ja".into()),
             ..Settings::default()
         };
+        let change = SettingsChange::TargetLanguage(Language("ja".into()));
         assert_eq!(
-            state.reduce(AppEvent::SettingsSaveRequested {
-                settings: requested.clone(),
+            state.reduce(AppEvent::SettingsChangeRequested {
+                change: change.clone(),
             }),
             vec![AppCommand::PersistSettings {
                 settings: requested.clone(),
+                change: change.clone(),
             }]
         );
         assert!(state.settings_saving);
         assert_eq!(state.settings, Settings::default());
 
+        let config = requested.runtime_config();
+        assert!(matches!(
+            state
+                .reduce(AppEvent::RuntimeConfigChanged {
+                    settings: requested.clone(),
+                    config: config.clone(),
+                    change: change.clone(),
+                })
+                .as_slice(),
+            [AppCommand::ApplyRuntimeConfig { .. }]
+        ));
         assert_eq!(
-            state.reduce(AppEvent::SettingsSaved {
+            state.reduce(AppEvent::RuntimeConfigUpdated {
                 settings: requested.clone(),
+                config,
+                change,
             }),
-            vec![AppCommand::HideSettingsWindow]
+            vec![AppCommand::ShowSettingsFeedback {
+                feedback: SettingsFeedback::SettingsSaved(SettingsField::TargetLanguage),
+            }]
         );
         assert_eq!(state.settings, requested);
         assert!(!state.settings_saving);
@@ -690,24 +871,103 @@ mod tests {
             ..Settings::default()
         };
         let mut state = AppState::new(committed.clone());
-        state.reduce(AppEvent::SettingsSaveRequested {
-            settings: Settings {
-                target_language: Language("fr".into()),
-                ..Settings::default()
-            },
+        let change = SettingsChange::TargetLanguage(Language("fr".into()));
+        state.reduce(AppEvent::SettingsChangeRequested {
+            change: change.clone(),
         });
 
-        assert!(
-            state
-                .reduce(AppEvent::SettingsSaveFailed {
-                    error: "Could not save settings".into(),
-                })
-                .is_empty()
+        assert_eq!(
+            state.reduce(AppEvent::SettingsSaveFailed {
+                change,
+                error: "Could not save settings".into(),
+            }),
+            vec![AppCommand::ShowSettingsFeedback {
+                feedback: SettingsFeedback::SettingsSaveFailed(SettingsField::TargetLanguage),
+            }]
         );
         assert_eq!(state.settings, committed);
         assert!(!state.settings_saving);
         assert_eq!(state.settings_error_message, "Could not save settings");
         assert_eq!(state.phase, TranslationPhase::Idle);
+    }
+
+    #[test]
+    fn settings_changes_queue_and_coalesce_by_field() {
+        use crate::domain::runtime_config::HotkeyConfig;
+
+        let mut state = AppState::default();
+        let language_change = SettingsChange::TargetLanguage(Language("ja".into()));
+        let first_hotkey: HotkeyConfig = "Ctrl + Shift + 7".parse().unwrap();
+        let latest_hotkey: HotkeyConfig = "Alt + Shift + 8".parse().unwrap();
+
+        state.reduce(AppEvent::SettingsChangeRequested {
+            change: language_change.clone(),
+        });
+        assert!(
+            state
+                .reduce(AppEvent::SettingsChangeRequested {
+                    change: SettingsChange::Hotkey(first_hotkey),
+                })
+                .is_empty()
+        );
+        assert!(
+            state
+                .reduce(AppEvent::SettingsChangeRequested {
+                    change: SettingsChange::Hotkey(latest_hotkey),
+                })
+                .is_empty()
+        );
+
+        let mut language_settings = Settings::default();
+        language_change.apply_to(&mut language_settings);
+        let commands = state.reduce(AppEvent::RuntimeConfigUpdated {
+            settings: language_settings.clone(),
+            config: language_settings.runtime_config(),
+            change: language_change,
+        });
+
+        let mut expected = language_settings;
+        expected.hotkey = latest_hotkey;
+        assert_eq!(
+            commands,
+            vec![
+                AppCommand::ShowSettingsFeedback {
+                    feedback: SettingsFeedback::SettingsSaved(SettingsField::TargetLanguage),
+                },
+                AppCommand::PersistSettings {
+                    settings: expected,
+                    change: SettingsChange::Hotkey(latest_hotkey),
+                },
+            ]
+        );
+        assert_eq!(state.settings_saving_field, Some(SettingsField::Hotkey));
+    }
+
+    #[test]
+    fn settings_change_waits_for_an_active_credential_operation() {
+        let mut state = AppState {
+            credential_busy: true,
+            ..AppState::default()
+        };
+        let change = SettingsChange::TargetLanguage(Language("ja".into()));
+
+        assert!(
+            state
+                .reduce(AppEvent::SettingsChangeRequested {
+                    change: change.clone(),
+                })
+                .is_empty()
+        );
+        let commands = state.reduce(AppEvent::CredentialAccessSucceeded {
+            purpose: crate::ports::credential::CredentialAccessPurpose::Reveal,
+        });
+
+        let mut settings = Settings::default();
+        change.apply_to(&mut settings);
+        assert_eq!(
+            commands,
+            vec![AppCommand::PersistSettings { settings, change }]
+        );
     }
 
     #[test]
@@ -733,7 +993,12 @@ mod tests {
             state.reduce(AppEvent::CredentialSaved {
                 credential_id: "deepl-primary".into(),
             }),
-            vec![AppCommand::ClearCredentialDraft]
+            vec![
+                AppCommand::ClearCredentialDraft,
+                AppCommand::ShowSettingsFeedback {
+                    feedback: SettingsFeedback::CredentialSaved,
+                },
+            ]
         );
         assert!(state.credential_configured);
         assert!(!state.credential_busy);
@@ -790,7 +1055,12 @@ mod tests {
         );
         assert_eq!(
             state.reduce(AppEvent::CredentialRemoved),
-            vec![AppCommand::ClearCredentialDraft]
+            vec![
+                AppCommand::ClearCredentialDraft,
+                AppCommand::ShowSettingsFeedback {
+                    feedback: SettingsFeedback::CredentialRemoved,
+                },
+            ]
         );
         assert!(!state.credential_configured);
         assert_eq!(state.settings.deepl_credential_id, None);
@@ -846,5 +1116,77 @@ mod tests {
             state.credential_error_message,
             "DeepL API key is not configured"
         );
+    }
+
+    #[test]
+    fn persisted_settings_are_applied_to_runtime_before_commit() {
+        use crate::domain::runtime_config::HotkeyConfig;
+
+        let mut state = AppState::default();
+        let mut requested = state.settings.clone();
+        requested.hotkey = "Ctrl + Shift + 7".parse::<HotkeyConfig>().unwrap();
+        let change = SettingsChange::Hotkey(requested.hotkey);
+
+        assert_eq!(
+            state.reduce(AppEvent::SettingsChangeRequested {
+                change: change.clone(),
+            }),
+            vec![AppCommand::PersistSettings {
+                settings: requested.clone(),
+                change: change.clone(),
+            }]
+        );
+        let config = requested.runtime_config();
+        assert_eq!(
+            state.reduce(AppEvent::RuntimeConfigChanged {
+                settings: requested.clone(),
+                config: config.clone(),
+                change: change.clone(),
+            }),
+            vec![AppCommand::ApplyRuntimeConfig {
+                settings: requested.clone(),
+                previous_settings: Settings::default(),
+                config: config.clone(),
+                change: change.clone(),
+            }]
+        );
+        assert_eq!(state.settings, Settings::default());
+
+        assert_eq!(
+            state.reduce(AppEvent::RuntimeConfigUpdated {
+                settings: requested.clone(),
+                config: config.clone(),
+                change,
+            }),
+            vec![AppCommand::ShowSettingsFeedback {
+                feedback: SettingsFeedback::SettingsSaved(SettingsField::Hotkey),
+            }]
+        );
+        assert_eq!(state.settings, requested);
+        assert_eq!(state.runtime_config, config);
+        assert!(!state.settings_saving);
+    }
+
+    #[test]
+    fn runtime_configuration_error_is_separate_from_translation_error() {
+        let mut state = AppState {
+            error_message: "translation failed".into(),
+            settings_saving: true,
+            ..AppState::default()
+        };
+        assert_eq!(
+            state.reduce(AppEvent::RuntimeConfigUpdateFailed {
+                change: SettingsChange::Hotkey(
+                    crate::domain::runtime_config::HotkeyConfig::default(),
+                ),
+                error: "hotkey conflict".into(),
+            }),
+            vec![AppCommand::ShowSettingsFeedback {
+                feedback: SettingsFeedback::SettingsSaveFailed(SettingsField::Hotkey),
+            }]
+        );
+        assert_eq!(state.runtime_config_error_message, "hotkey conflict");
+        assert_eq!(state.error_message, "translation failed");
+        assert!(!state.settings_saving);
     }
 }

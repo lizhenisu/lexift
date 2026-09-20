@@ -46,6 +46,11 @@ lexift/
     │       ├── main.rs
     │       ├── bootstrap.rs
     │       ├── wiring.rs
+    │       ├── controller.rs
+    │       ├── runtime/
+    │       │   ├── mod.rs
+    │       │   ├── hotkey_manager.rs
+    │       │   └── translator_runtime.rs
     │       └── lifecycle.rs
     │
     ├── lexift-core/
@@ -58,6 +63,7 @@ lexift/
     │       │   ├── translation.rs
     │       │   ├── language.rs
     │       │   ├── settings.rs
+    │       │   ├── runtime_config.rs
     │       │   └── geometry.rs
     │       ├── ports/
     │       │   ├── mod.rs
@@ -181,6 +187,7 @@ version = "0.1.0"
 - 创建翻译 Provider Registry。
 - 创建 Core 应用实例。
 - 创建并启动 UI。
+- 应用持久化设置到当前 Hotkey 与 Translator Runtime，并负责失败回滚。
 - 管理程序生命周期和退出流程。
 
 禁止：
@@ -190,7 +197,8 @@ version = "0.1.0"
 - 直接实现 Win32/macOS/Wayland 具体能力。
 - 把复杂业务状态放入 `main.rs`。
 
-`main.rs` 应保持轻量，真正的组装逻辑可放入 `bootstrap.rs` / `wiring.rs`。
+`main.rs` 应保持轻量，真正的组装逻辑放入 `bootstrap.rs` / `wiring.rs`；动态 Adapter 生命周期与
+原子切换由 `runtime/` 管理，Controller 只执行 Core 发出的 Runtime Apply 命令。
 
 ### 4.2 `lexift-core`
 
@@ -198,7 +206,7 @@ version = "0.1.0"
 
 职责：
 
-- 领域模型：Selection、Language、TranslateRequest、TranslateResult、Settings 等。
+- 领域模型：Selection、Language、TranslateRequest、TranslateResult、Settings、RuntimeConfig 等。
 - 应用状态：AppState、TranslationState、PopupState 等。
 - 业务事件与命令：AppEvent、AppCommand。
 - Use Case：划词翻译、输入翻译、剪贴板翻译等。

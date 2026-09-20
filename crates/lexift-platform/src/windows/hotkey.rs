@@ -6,13 +6,17 @@ use std::{
 
 use lexift_core::{
     Error, Result,
+    domain::runtime_config::{HotkeyConfig, HotkeyKey},
     ports::hotkey::{HotkeyHandler, HotkeyPort},
 };
 use windows::Win32::{
     Foundation::{LPARAM, WPARAM},
     System::Threading::GetCurrentThreadId,
     UI::{
-        Input::KeyboardAndMouse::{MOD_ALT, MOD_NOREPEAT, RegisterHotKey, UnregisterHotKey},
+        Input::KeyboardAndMouse::{
+            MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, RegisterHotKey,
+            UnregisterHotKey,
+        },
         WindowsAndMessaging::{
             GetMessageW, MSG, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, WM_HOTKEY, WM_QUIT,
         },
@@ -20,8 +24,6 @@ use windows::Win32::{
 };
 
 const TRANSLATE_HOTKEY_ID: i32 = 1;
-const TRANSLATE_VIRTUAL_KEY: u32 = b'X' as u32;
-
 pub(crate) struct WindowsHotkeyPort {
     listener: Mutex<Option<HotkeyListener>>,
 }
@@ -35,39 +37,78 @@ impl WindowsHotkeyPort {
 }
 
 impl HotkeyPort for WindowsHotkeyPort {
-    fn register_translate_hotkey(&self, handler: HotkeyHandler) -> Result<()> {
+    fn register_translate_hotkey(
+        &self,
+        config: HotkeyConfig,
+        handler: HotkeyHandler,
+    ) -> Result<()> {
         let mut listener = self
             .listener
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if listener.is_some() {
-            return Err(Error::new("Alt+X global hotkey is already registered"));
+            return Err(Error::new(
+                "A global translate hotkey is already registered",
+            ));
         }
+        *listener = Some(start_listener(config, handler)?);
+        Ok(())
+    }
 
-        let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
-        let thread = thread::Builder::new()
-            .name("lexift-hotkey".into())
-            .spawn(move || run_listener(handler, ready_sender))
-            .map_err(|_| Error::new("Could not start the global hotkey listener"))?;
+    fn replace_translate_hotkey(&self, config: HotkeyConfig, handler: HotkeyHandler) -> Result<()> {
+        let mut listener = self
+            .listener
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if listener
+            .as_ref()
+            .is_some_and(|current| current.config == config)
+        {
+            return Ok(());
+        }
+        // Register the replacement first. If Windows rejects it, the current listener remains live.
+        let replacement = start_listener(config, handler)?;
+        if let Some(previous) = listener.replace(replacement) {
+            previous.shutdown();
+        }
+        Ok(())
+    }
 
-        match ready_receiver.recv() {
-            Ok(Ok(thread_id)) => {
-                *listener = Some(HotkeyListener {
-                    thread_id,
-                    thread: Some(thread),
-                });
-                Ok(())
-            }
-            Ok(Err(error)) => {
-                let _ = thread.join();
-                Err(error)
-            }
-            Err(_) => {
-                let _ = thread.join();
-                Err(Error::new(
-                    "Global hotkey listener stopped during registration",
-                ))
-            }
+    fn unregister_translate_hotkey(&self) -> Result<()> {
+        let listener = self
+            .listener
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(listener) = listener {
+            listener.shutdown();
+        }
+        Ok(())
+    }
+}
+
+fn start_listener(config: HotkeyConfig, handler: HotkeyHandler) -> Result<HotkeyListener> {
+    let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
+    let thread = thread::Builder::new()
+        .name("lexift-hotkey".into())
+        .spawn(move || run_listener(config, handler, ready_sender))
+        .map_err(|_| Error::new("Could not start the global hotkey listener"))?;
+
+    match ready_receiver.recv() {
+        Ok(Ok(thread_id)) => Ok(HotkeyListener {
+            thread_id,
+            thread: Some(thread),
+            config,
+        }),
+        Ok(Err(error)) => {
+            let _ = thread.join();
+            Err(error)
+        }
+        Err(_) => {
+            let _ = thread.join();
+            Err(Error::new(
+                "Global hotkey listener stopped during registration",
+            ))
         }
     }
 }
@@ -87,6 +128,7 @@ impl Drop for WindowsHotkeyPort {
 struct HotkeyListener {
     thread_id: u32,
     thread: Option<JoinHandle<()>>,
+    config: HotkeyConfig,
 }
 
 impl HotkeyListener {
@@ -100,7 +142,11 @@ impl HotkeyListener {
     }
 }
 
-fn run_listener(handler: HotkeyHandler, ready_sender: mpsc::SyncSender<Result<u32>>) {
+fn run_listener(
+    config: HotkeyConfig,
+    handler: HotkeyHandler,
+    ready_sender: mpsc::SyncSender<Result<u32>>,
+) {
     let mut message = MSG::default();
     unsafe {
         // Creating the queue before the handshake makes shutdown messages reliable.
@@ -111,13 +157,13 @@ fn run_listener(handler: HotkeyHandler, ready_sender: mpsc::SyncSender<Result<u3
         RegisterHotKey(
             None,
             TRANSLATE_HOTKEY_ID,
-            MOD_ALT | MOD_NOREPEAT,
-            TRANSLATE_VIRTUAL_KEY,
+            native_modifiers(config),
+            native_key(config.key),
         )
     };
     if let Err(error) = registration {
         let _ = ready_sender.send(Err(Error::new(format!(
-            "Could not register Alt+X global hotkey: {error}"
+            "Could not register {config} global hotkey: {error}"
         ))));
         return;
     }
@@ -133,6 +179,33 @@ fn run_listener(handler: HotkeyHandler, ready_sender: mpsc::SyncSender<Result<u3
             break;
         }
         forward_translate_message(message.message, message.wParam.0, &handler);
+    }
+}
+
+fn native_modifiers(
+    config: HotkeyConfig,
+) -> windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS {
+    let mut modifiers = MOD_NOREPEAT;
+    if config.modifiers.control {
+        modifiers |= MOD_CONTROL;
+    }
+    if config.modifiers.alt {
+        modifiers |= MOD_ALT;
+    }
+    if config.modifiers.shift {
+        modifiers |= MOD_SHIFT;
+    }
+    if config.modifiers.meta {
+        modifiers |= MOD_WIN;
+    }
+    modifiers
+}
+
+fn native_key(key: HotkeyKey) -> u32 {
+    match key {
+        HotkeyKey::Letter(value) => value as u32,
+        HotkeyKey::Digit(value) => b'0' as u32 + u32::from(value),
+        HotkeyKey::Function(value) => 0x70 + u32::from(value - 1),
     }
 }
 
@@ -185,16 +258,19 @@ mod tests {
         let (triggered_sender, triggered_receiver) = mpsc::sync_channel(1);
         let hotkey = WindowsHotkeyPort::new();
         hotkey
-            .register_translate_hotkey(Arc::new(move || {
-                let _ = triggered_sender.send(());
-            }))
+            .register_translate_hotkey(
+                HotkeyConfig::default(),
+                Arc::new(move || {
+                    let _ = triggered_sender.send(());
+                }),
+            )
             .expect("Alt+X should register for the manual platform test");
         assert_eq!(
             hotkey
-                .register_translate_hotkey(Arc::new(|| {}))
+                .register_translate_hotkey(HotkeyConfig::default(), Arc::new(|| {}))
                 .expect_err("one adapter must not register twice")
                 .to_string(),
-            "Alt+X global hotkey is already registered"
+            "A global translate hotkey is already registered"
         );
 
         let thread_id = hotkey
@@ -218,16 +294,46 @@ mod tests {
             .recv_timeout(Duration::from_secs(1))
             .expect("listener should forward the test hotkey message");
 
+        let replacement: HotkeyConfig = "Ctrl + Shift + F12".parse().unwrap();
+        hotkey
+            .replace_translate_hotkey(replacement, Arc::new(|| {}))
+            .expect("an available replacement hotkey should register atomically");
+        assert_eq!(
+            hotkey
+                .listener
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .as_ref()
+                .map(|listener| listener.config),
+            Some(replacement)
+        );
+
+        let released_old = WindowsHotkeyPort::new();
+        released_old
+            .register_translate_hotkey(HotkeyConfig::default(), Arc::new(|| {}))
+            .expect("replacement should release the old hotkey");
+        drop(released_old);
+
         let conflicting = WindowsHotkeyPort::new();
         assert!(
             conflicting
-                .register_translate_hotkey(Arc::new(|| {}))
+                .register_translate_hotkey(replacement, Arc::new(|| {}))
                 .is_err()
         );
         drop(hotkey);
         conflicting
-            .register_translate_hotkey(Arc::new(|| {}))
-            .expect("dropping the owner should release Alt+X");
+            .register_translate_hotkey(replacement, Arc::new(|| {}))
+            .expect("dropping the owner should release the replacement hotkey");
         drop(conflicting);
+    }
+
+    #[test]
+    fn maps_supported_keys_and_modifiers() {
+        let config: HotkeyConfig = "Ctrl + Shift + F12".parse().unwrap();
+        let modifiers = native_modifiers(config);
+        assert!(modifiers.contains(MOD_CONTROL));
+        assert!(modifiers.contains(MOD_SHIFT));
+        assert!(modifiers.contains(MOD_NOREPEAT));
+        assert_eq!(native_key(config.key), 0x7b);
     }
 }

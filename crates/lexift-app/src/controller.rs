@@ -7,7 +7,8 @@ use lexift_core::{
     AppCommand, AppEvent, AppState, TranslationTaskId,
     domain::{
         geometry::{Point, Rect},
-        settings::Settings,
+        runtime_config::RuntimeConfig,
+        settings::{Settings, SettingsChange, SettingsFeedback},
     },
     ports::{
         clipboard::ClipboardPort,
@@ -23,7 +24,9 @@ use lexift_core::{
         tray::{TrayAction, TrayHandler},
     },
 };
-use tokio::runtime::Handle;
+use tokio::{runtime::Handle, sync::Notify};
+
+use crate::runtime::RuntimeManager;
 
 pub(crate) trait ViewPort: Send + Sync {
     fn update(&self, state: AppState);
@@ -39,7 +42,7 @@ pub(crate) trait ViewPort: Send + Sync {
         generation: u64,
         secret: CredentialSecret,
     );
-    fn show_credential_copied(&self, generation: u64);
+    fn show_settings_feedback(&self, feedback: SettingsFeedback);
     fn quit(&self);
 }
 
@@ -81,8 +84,8 @@ impl ViewPort for lexift_ui::UiHandle {
         self.present_credential_secret(purpose, generation, secret);
     }
 
-    fn show_credential_copied(&self, generation: u64) {
-        self.show_credential_copied(generation);
+    fn show_settings_feedback(&self, feedback: SettingsFeedback) {
+        self.show_settings_feedback(feedback);
     }
 
     fn quit(&self) {
@@ -98,11 +101,13 @@ pub(crate) struct AppController {
     screen: Option<Arc<dyn ScreenPort>>,
     translator: Arc<dyn TranslatorPort>,
     settings_store: Arc<dyn SettingsStore>,
+    runtime_manager: Option<Arc<RuntimeManager>>,
     credential_store: Option<Arc<dyn CredentialStore>>,
     credential_reference: Option<Arc<RwLock<Option<String>>>>,
     clipboard: Option<Arc<dyn ClipboardPort>>,
     ui: Arc<dyn ViewPort>,
     selection_capture_in_flight: AtomicBool,
+    state_changed: Arc<Notify>,
 }
 
 impl AppController {
@@ -122,12 +127,19 @@ impl AppController {
             screen,
             translator,
             settings_store,
+            runtime_manager: None,
             credential_store: None,
             credential_reference: None,
             clipboard: None,
             ui,
             selection_capture_in_flight: AtomicBool::new(false),
+            state_changed: Arc::new(Notify::new()),
         }
+    }
+
+    pub(crate) fn with_runtime_manager(mut self, manager: Arc<RuntimeManager>) -> Self {
+        self.runtime_manager = Some(manager);
+        self
     }
 
     pub(crate) fn with_credential_management(
@@ -175,6 +187,7 @@ impl AppController {
             );
             (state.clone(), commands)
         };
+        self.state_changed.notify_waiters();
         self.ui.update(snapshot);
 
         for command in commands {
@@ -209,7 +222,18 @@ impl AppController {
                 self.ui.show_settings_window(settings);
             }
             AppCommand::HideSettingsWindow => self.ui.hide_settings_window(),
-            AppCommand::PersistSettings { settings } => self.persist_settings(settings),
+            AppCommand::ShowSettingsFeedback { feedback } => {
+                self.ui.show_settings_feedback(feedback)
+            }
+            AppCommand::PersistSettings { settings, change } => {
+                self.persist_settings(settings, change)
+            }
+            AppCommand::ApplyRuntimeConfig {
+                settings,
+                previous_settings,
+                config,
+                change,
+            } => self.apply_runtime_config(settings, previous_settings, config, change),
             AppCommand::PersistCredential {
                 credential_id,
                 secret,
@@ -266,7 +290,6 @@ impl AppController {
                     controller.dispatch(AppEvent::CredentialAccessSucceeded { purpose });
                 }
                 Ok(Ok(None)) => {
-                    controller.ui.show_credential_copied(generation);
                     controller.dispatch(AppEvent::CredentialAccessSucceeded { purpose });
                 }
                 Ok(Err(error)) => controller.dispatch(AppEvent::CredentialAccessFailed { error }),
@@ -291,15 +314,16 @@ impl AppController {
             return;
         };
         let settings_store = Arc::clone(&self.settings_store);
-        let mut settings = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .settings
-            .clone();
-        settings.deepl_credential_id = Some(credential_id.clone());
         let controller = Arc::clone(self);
         self.runtime.spawn(async move {
+            controller.wait_for_settings_idle().await;
+            let mut settings = controller
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .settings
+                .clone();
+            settings.deepl_credential_id = Some(credential_id.clone());
             let id_for_worker = credential_id.clone();
             let result = tokio::task::spawn_blocking(move || {
                 let previous = store
@@ -345,15 +369,16 @@ impl AppController {
             return;
         };
         let settings_store = Arc::clone(&self.settings_store);
-        let mut settings = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .settings
-            .clone();
-        settings.deepl_credential_id = None;
         let controller = Arc::clone(self);
         self.runtime.spawn(async move {
+            controller.wait_for_settings_idle().await;
+            let mut settings = controller
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .settings
+                .clone();
+            settings.deepl_credential_id = None;
             let id_for_worker = credential_id;
             let result = tokio::task::spawn_blocking(move || {
                 let previous = store
@@ -386,20 +411,93 @@ impl AppController {
         });
     }
 
-    fn persist_settings(self: &Arc<Self>, settings: Settings) {
+    fn persist_settings(self: &Arc<Self>, settings: Settings, change: SettingsChange) {
         let store = Arc::clone(&self.settings_store);
         let controller = Arc::clone(self);
         self.runtime.spawn(async move {
             let settings_to_save = settings.clone();
             let result = tokio::task::spawn_blocking(move || store.save(&settings_to_save)).await;
             match result {
-                Ok(Ok(())) => controller.dispatch(AppEvent::SettingsSaved { settings }),
+                Ok(Ok(())) => controller.dispatch(AppEvent::RuntimeConfigChanged {
+                    config: settings.runtime_config(),
+                    settings,
+                    change,
+                }),
                 Ok(Err(error)) => controller.dispatch(AppEvent::SettingsSaveFailed {
+                    change,
                     error: error.to_string(),
                 }),
                 Err(error) => controller.dispatch(AppEvent::SettingsSaveFailed {
+                    change,
                     error: format!("Settings worker failed: {error}"),
                 }),
+            }
+        });
+    }
+
+    async fn wait_for_settings_idle(&self) {
+        loop {
+            let notified = self.state_changed.notified();
+            if !self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .settings_saving
+            {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    fn apply_runtime_config(
+        self: &Arc<Self>,
+        settings: Settings,
+        previous_settings: Settings,
+        config: RuntimeConfig,
+        change: SettingsChange,
+    ) {
+        let manager = self.runtime_manager.clone();
+        let store = Arc::clone(&self.settings_store);
+        let controller = Arc::clone(self);
+        let field = change.field();
+        self.runtime.spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                if let Some(manager) = manager {
+                    manager.apply(field, config.clone())?;
+                }
+                Ok::<_, lexift_core::Error>(config)
+            })
+            .await;
+            match result {
+                Ok(Ok(config)) => controller.dispatch(AppEvent::RuntimeConfigUpdated {
+                    settings,
+                    config,
+                    change,
+                }),
+                Ok(Err(error)) => {
+                    let message = error.to_string();
+                    let rollback =
+                        tokio::task::spawn_blocking(move || store.save(&previous_settings)).await;
+                    if !matches!(rollback, Ok(Ok(()))) {
+                        tracing::warn!("settings rollback failed after runtime apply error");
+                    }
+                    controller.dispatch(AppEvent::RuntimeConfigUpdateFailed {
+                        change,
+                        error: message,
+                    });
+                }
+                Err(error) => {
+                    let rollback =
+                        tokio::task::spawn_blocking(move || store.save(&previous_settings)).await;
+                    if !matches!(rollback, Ok(Ok(()))) {
+                        tracing::warn!("settings rollback failed after runtime worker error");
+                    }
+                    controller.dispatch(AppEvent::RuntimeConfigUpdateFailed {
+                        change,
+                        error: format!("Runtime configuration worker failed: {error}"),
+                    });
+                }
             }
         });
     }
@@ -501,8 +599,10 @@ fn event_name(event: &AppEvent) -> &'static str {
         AppEvent::PopupHidden => "popup_hidden",
         AppEvent::MainWindowRequested => "main_window_requested",
         AppEvent::SettingsWindowRequested => "settings_window_requested",
-        AppEvent::SettingsSaveRequested { .. } => "settings_save_requested",
-        AppEvent::SettingsSaved { .. } => "settings_saved",
+        AppEvent::SettingsChangeRequested { .. } => "settings_change_requested",
+        AppEvent::RuntimeConfigChanged { .. } => "runtime_config_changed",
+        AppEvent::RuntimeConfigUpdated { .. } => "runtime_config_updated",
+        AppEvent::RuntimeConfigUpdateFailed { .. } => "runtime_config_update_failed",
         AppEvent::SettingsSaveFailed { .. } => "settings_save_failed",
         AppEvent::CredentialSaveRequested { .. } => "credential_save_requested",
         AppEvent::CredentialSaved { .. } => "credential_saved",
@@ -567,8 +667,14 @@ mod tests {
 
     use lexift_core::{
         TranslationPhase,
-        domain::translation::{TranslateRequest, TranslateResult},
-        ports::translator::TranslationFuture,
+        domain::{
+            runtime_config::{HotkeyConfig, RuntimeConfig},
+            translation::{TranslateRequest, TranslateResult},
+        },
+        ports::{
+            hotkey::{HotkeyHandler, HotkeyPort},
+            translator::TranslationFuture,
+        },
     };
     use tokio::runtime::Builder;
 
@@ -585,7 +691,7 @@ mod tests {
         shown_settings: Mutex<Option<Settings>>,
         credential_draft_cleared: AtomicBool,
         presented_secret: Mutex<Option<(CredentialAccessPurpose, u64, String)>>,
-        copied_generation: Mutex<Option<u64>>,
+        settings_feedback: Mutex<Vec<SettingsFeedback>>,
     }
 
     impl ViewPort for RecordingView {
@@ -636,8 +742,8 @@ mod tests {
                 Some((purpose, generation, secret.into_inner()));
         }
 
-        fn show_credential_copied(&self, generation: u64) {
-            *self.copied_generation.lock().unwrap() = Some(generation);
+        fn show_settings_feedback(&self, feedback: SettingsFeedback) {
+            self.settings_feedback.lock().unwrap().push(feedback);
         }
 
         fn quit(&self) {}
@@ -669,6 +775,40 @@ mod tests {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .push(settings.clone());
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct RejectingHotkeyPort {
+        active: Mutex<Option<HotkeyConfig>>,
+        rejected: Mutex<Option<HotkeyConfig>>,
+    }
+
+    impl HotkeyPort for RejectingHotkeyPort {
+        fn register_translate_hotkey(
+            &self,
+            config: HotkeyConfig,
+            _handler: HotkeyHandler,
+        ) -> lexift_core::Result<()> {
+            *self.active.lock().unwrap() = Some(config);
+            Ok(())
+        }
+
+        fn replace_translate_hotkey(
+            &self,
+            config: HotkeyConfig,
+            _handler: HotkeyHandler,
+        ) -> lexift_core::Result<()> {
+            if *self.rejected.lock().unwrap() == Some(config) {
+                return Err(lexift_core::Error::new("hotkey conflict"));
+            }
+            *self.active.lock().unwrap() = Some(config);
+            Ok(())
+        }
+
+        fn unregister_translate_hotkey(&self) -> lexift_core::Result<()> {
+            *self.active.lock().unwrap() = None;
             Ok(())
         }
     }
@@ -1316,8 +1456,8 @@ mod tests {
         };
         let caller_thread = thread::current().id();
 
-        controller.dispatch(AppEvent::SettingsSaveRequested {
-            settings: requested.clone(),
+        controller.dispatch(AppEvent::SettingsChangeRequested {
+            change: SettingsChange::TargetLanguage(requested.target_language.clone()),
         });
 
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -1327,7 +1467,7 @@ mod tests {
         }
         assert_eq!(*store.saved.lock().unwrap(), vec![requested]);
         assert_ne!(*store.save_thread.lock().unwrap(), Some(caller_thread));
-        assert!(view.settings_window_hidden.load(Ordering::SeqCst));
+        assert!(!view.settings_window_hidden.load(Ordering::SeqCst));
     }
 
     #[test]
@@ -1357,11 +1497,10 @@ mod tests {
             view.clone(),
         ));
 
-        controller.dispatch(AppEvent::SettingsSaveRequested {
-            settings: Settings {
-                target_language: lexift_core::domain::language::Language("fr".into()),
-                ..Settings::default()
-            },
+        controller.dispatch(AppEvent::SettingsChangeRequested {
+            change: SettingsChange::TargetLanguage(lexift_core::domain::language::Language(
+                "fr".into(),
+            )),
         });
 
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -1376,6 +1515,69 @@ mod tests {
             assert!(Instant::now() < deadline, "settings failure timed out");
             thread::sleep(Duration::from_millis(5));
         }
+        assert!(!view.settings_window_hidden.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn runtime_apply_failure_rolls_back_persistence_and_keeps_the_old_hotkey() {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let state = Arc::new(Mutex::new(AppState::default()));
+        let view = Arc::new(RecordingView::default());
+        let store = Arc::new(RecordingSettingsStore::default());
+        let hotkey = Arc::new(RejectingHotkeyPort::default());
+        let rejected: HotkeyConfig = "Ctrl + Shift + 7".parse().unwrap();
+        *hotkey.rejected.lock().unwrap() = Some(rejected);
+        let manager = Arc::new(crate::runtime::RuntimeManager::testing(
+            RuntimeConfig::default(),
+            Some(hotkey.clone()),
+            Arc::new(ReorderingTranslator),
+        ));
+        manager.start_hotkey(Arc::new(|| {})).unwrap();
+        let controller = Arc::new(
+            AppController::new(
+                runtime.handle().clone(),
+                Arc::clone(&state),
+                None,
+                None,
+                Arc::new(ReorderingTranslator),
+                store.clone(),
+                view.clone(),
+            )
+            .with_runtime_manager(manager),
+        );
+        let requested = Settings {
+            hotkey: rejected,
+            ..Settings::default()
+        };
+
+        controller.dispatch(AppEvent::SettingsChangeRequested {
+            change: SettingsChange::Hotkey(rejected),
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let snapshot = state.lock().unwrap().clone();
+            if !snapshot.settings_saving {
+                assert_eq!(snapshot.settings, Settings::default());
+                assert_eq!(snapshot.runtime_config, RuntimeConfig::default());
+                assert_eq!(snapshot.runtime_config_error_message, "hotkey conflict");
+                break;
+            }
+            assert!(Instant::now() < deadline, "runtime rollback timed out");
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            *store.saved.lock().unwrap(),
+            vec![requested, Settings::default()]
+        );
+        assert_eq!(
+            *hotkey.active.lock().unwrap(),
+            Some(HotkeyConfig::default())
+        );
         assert!(!view.settings_window_hidden.load(Ordering::SeqCst));
     }
 
@@ -1647,7 +1849,12 @@ mod tests {
 
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
-            if view.copied_generation.lock().unwrap().as_ref() == Some(&23) {
+            if view
+                .settings_feedback
+                .lock()
+                .unwrap()
+                .contains(&SettingsFeedback::CredentialCopied)
+            {
                 break;
             }
             assert!(Instant::now() < deadline, "credential copy timed out");
@@ -1717,7 +1924,10 @@ mod tests {
             );
             thread::sleep(Duration::from_millis(5));
         }
-        assert!(view.copied_generation.lock().unwrap().is_none());
+        assert_eq!(
+            *view.settings_feedback.lock().unwrap(),
+            vec![SettingsFeedback::CredentialOperationFailed]
+        );
         assert!(view.presented_secret.lock().unwrap().is_none());
     }
 }

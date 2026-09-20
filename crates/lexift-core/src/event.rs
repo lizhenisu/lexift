@@ -1,6 +1,7 @@
 use crate::domain::{
+    runtime_config::RuntimeConfig,
     selection::Selection,
-    settings::Settings,
+    settings::{Settings, SettingsChange},
     translation::{TranslateResult, TranslationTaskId},
 };
 use crate::ports::credential::{CredentialAccessPurpose, CredentialSecret};
@@ -37,13 +38,25 @@ pub enum AppEvent {
     PopupHidden,
     MainWindowRequested,
     SettingsWindowRequested,
-    SettingsSaveRequested {
-        settings: Settings,
+    SettingsChangeRequested {
+        change: SettingsChange,
     },
-    SettingsSaved {
+    RuntimeConfigChanged {
         settings: Settings,
+        config: RuntimeConfig,
+        change: SettingsChange,
+    },
+    RuntimeConfigUpdated {
+        settings: Settings,
+        config: RuntimeConfig,
+        change: SettingsChange,
+    },
+    RuntimeConfigUpdateFailed {
+        change: SettingsChange,
+        error: String,
     },
     SettingsSaveFailed {
+        change: SettingsChange,
         error: String,
     },
     CredentialSaveRequested {

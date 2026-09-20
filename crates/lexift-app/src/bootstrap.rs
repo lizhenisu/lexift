@@ -87,6 +87,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             Arc::clone(&services.settings_store),
             Arc::new(ui.handle()),
         )
+        .with_runtime_manager(Arc::clone(&services.runtime_manager))
         .with_credential_management(
             Arc::clone(&services.credential_store),
             Arc::clone(&services.credential_reference),
@@ -108,8 +109,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
     );
-    if let Some(hotkey) = &services.hotkey
-        && let Err(error) = hotkey.register_translate_hotkey(controller.translate_hotkey_handler())
+    if let Err(error) = services
+        .runtime_manager
+        .start_hotkey(controller.translate_hotkey_handler())
     {
         tracing::warn!(%error, "global translate hotkey is unavailable");
     }

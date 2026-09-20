@@ -5,15 +5,12 @@ use std::collections::HashMap;
 
 #[cfg(any(not(feature = "m1-demo"), test))]
 use lexift_core::Error;
-#[cfg(not(feature = "m1-demo"))]
-use lexift_core::ports::translator::TranslationFuture;
 use lexift_core::{
     AppState,
     domain::settings::Settings,
     ports::{
         clipboard::ClipboardPort,
         credential::{CredentialError, CredentialErrorKind, CredentialResult, CredentialStore},
-        hotkey::HotkeyPort,
         screen::ScreenPort,
         selection::SelectionPort,
         settings::SettingsStore,
@@ -23,11 +20,13 @@ use lexift_core::{
 };
 use tokio::runtime::{Builder, Runtime};
 
+use crate::runtime::RuntimeManager;
+
 /// Owns the concrete adapters assembled by the application composition root.
 pub(crate) struct AppServices {
     // Rust drops fields in declaration order; stop callbacks before tearing down the runtime.
     pub(crate) tray: Option<Arc<dyn TrayPort>>,
-    pub(crate) hotkey: Option<Arc<dyn HotkeyPort>>,
+    pub(crate) runtime_manager: Arc<RuntimeManager>,
     pub(crate) runtime: Runtime,
     pub(crate) state: Arc<Mutex<AppState>>,
     pub(crate) settings_store: Arc<dyn SettingsStore>,
@@ -72,14 +71,6 @@ impl AppServices {
             settings.deepl_credential_id.as_deref(),
         );
 
-        #[cfg(not(feature = "m1-demo"))]
-        let translator: Arc<dyn TranslatorPort> = Arc::new(CredentialBackedTranslator::new(
-            Arc::clone(&credential_store),
-            Arc::clone(&credential_reference),
-        )?);
-        #[cfg(feature = "m1-demo")]
-        let translator = lexift_translate::ProviderRegistry::with_mock().default_translator();
-
         Self::from_capabilities(
             settings,
             settings_store,
@@ -87,7 +78,6 @@ impl AppServices {
             credential_reference,
             credential_configured,
             platform,
-            translator,
         )
     }
 
@@ -98,13 +88,26 @@ impl AppServices {
         credential_reference: Arc<RwLock<Option<String>>>,
         credential_configured: bool,
         platform: lexift_platform::PlatformCapabilities,
-        translator: Arc<dyn TranslatorPort>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let selection = platform.selection();
+        #[cfg(not(feature = "m1-demo"))]
         let hotkey = platform.hotkey();
         let screen = platform.screen();
         let tray = platform.tray();
         let clipboard = platform.clipboard();
+        #[cfg(not(feature = "m1-demo"))]
+        let runtime_manager = Arc::new(RuntimeManager::production(
+            settings.runtime_config(),
+            hotkey,
+            Arc::clone(&credential_store),
+            Arc::clone(&credential_reference),
+        )?);
+        #[cfg(feature = "m1-demo")]
+        let runtime_manager = Arc::new(RuntimeManager::demo(
+            settings.runtime_config(),
+            lexift_translate::ProviderRegistry::with_mock().default_translator(),
+        ));
+        let translator = runtime_manager.translator();
         let runtime = Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("lexift-worker")
@@ -113,7 +116,7 @@ impl AppServices {
 
         Ok(Self {
             tray,
-            hotkey,
+            runtime_manager,
             runtime,
             state: Arc::new(Mutex::new(AppState::with_credential_status(
                 settings,
@@ -128,69 +131,6 @@ impl AppServices {
             translator,
         })
     }
-}
-
-#[cfg(not(feature = "m1-demo"))]
-struct CredentialBackedTranslator {
-    store: Arc<dyn CredentialStore>,
-    credential_reference: Arc<RwLock<Option<String>>>,
-    factory: lexift_translate::DeepLTranslatorFactory,
-}
-
-#[cfg(not(feature = "m1-demo"))]
-impl CredentialBackedTranslator {
-    fn new(
-        store: Arc<dyn CredentialStore>,
-        credential_reference: Arc<RwLock<Option<String>>>,
-    ) -> lexift_core::Result<Self> {
-        Ok(Self {
-            store,
-            credential_reference,
-            factory: lexift_translate::DeepLTranslatorFactory::new()?,
-        })
-    }
-}
-
-#[cfg(not(feature = "m1-demo"))]
-impl TranslatorPort for CredentialBackedTranslator {
-    fn translate(
-        &self,
-        request: lexift_core::domain::translation::TranslateRequest,
-    ) -> TranslationFuture<'_> {
-        let credential_id = self
-            .credential_reference
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        let translator = credential_id
-            .ok_or_else(|| Error::new("Translation provider is not configured"))
-            .and_then(|credential_id| {
-                self.store
-                    .get(&credential_id)
-                    .map_err(credential_lookup_error)
-                    .and_then(|secret| {
-                        secret.ok_or_else(|| Error::new("Translation credential is missing"))
-                    })
-            })
-            .map(|secret| self.factory.translator(secret));
-        Box::pin(async move {
-            match translator {
-                Ok(translator) => translator.translate(request).await,
-                Err(error) => Err(error),
-            }
-        })
-    }
-}
-
-#[cfg(not(feature = "m1-demo"))]
-fn credential_lookup_error(error: CredentialError) -> Error {
-    let message = match error.kind() {
-        CredentialErrorKind::Missing => "Translation credential is missing",
-        CredentialErrorKind::PermissionDenied => "Credential access was denied",
-        CredentialErrorKind::PlatformFailure => "Credential storage is unavailable",
-        CredentialErrorKind::InvalidFormat => "Stored translation credential is invalid",
-    };
-    Error::new(message)
 }
 
 fn credential_is_configured(store: &dyn CredentialStore, id: Option<&str>) -> bool {
@@ -352,7 +292,6 @@ mod tests {
             Arc::new(RwLock::new(None)),
             false,
             platform,
-            lexift_translate::ProviderRegistry::with_mock().default_translator(),
         )
     }
 
@@ -368,8 +307,6 @@ mod tests {
         assert!(services.selection.is_some());
         #[cfg(not(target_os = "windows"))]
         assert!(services.selection.is_none());
-        #[cfg(target_os = "windows")]
-        assert!(services.hotkey.is_some());
         #[cfg(target_os = "windows")]
         assert!(services.screen.is_some());
         #[cfg(target_os = "windows")]
@@ -404,8 +341,12 @@ mod tests {
 
         let store: Arc<dyn CredentialStore> = Arc::new(EphemeralCredentialStore::default());
         let reference = Arc::new(RwLock::new(Some("deepl-primary".into())));
-        let translator = CredentialBackedTranslator::new(store, reference)
-            .expect("HTTP infrastructure should initialize");
+        let translator = crate::runtime::TranslatorRuntime::credential_backed(
+            lexift_core::domain::runtime_config::ProviderConfig::DeepL,
+            store,
+            reference,
+        )
+        .expect("HTTP infrastructure should initialize");
         let runtime = Builder::new_current_thread().enable_all().build().unwrap();
         let error = runtime
             .block_on(translator.translate(TranslateRequest {

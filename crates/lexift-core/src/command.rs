@@ -1,6 +1,7 @@
 use crate::domain::{
     geometry::Point,
-    settings::Settings,
+    runtime_config::RuntimeConfig,
+    settings::{Settings, SettingsChange, SettingsFeedback},
     translation::{TranslateRequest, TranslationTaskId},
 };
 use crate::ports::credential::{CredentialAccessPurpose, CredentialSecret};
@@ -21,8 +22,18 @@ pub enum AppCommand {
     ShowMainWindow,
     ShowSettingsWindow,
     HideSettingsWindow,
+    ShowSettingsFeedback {
+        feedback: SettingsFeedback,
+    },
     PersistSettings {
         settings: Settings,
+        change: SettingsChange,
+    },
+    ApplyRuntimeConfig {
+        settings: Settings,
+        previous_settings: Settings,
+        config: RuntimeConfig,
+        change: SettingsChange,
     },
     PersistCredential {
         credential_id: String,
