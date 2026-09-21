@@ -252,11 +252,139 @@ export struct SettingsToastData {
     error: bool,
 }
 
+component SettingsCard inherits Rectangle {
+    in property <string> title;
+
+    border-radius: Metrics.settings-card-radius;
+    background: Colors.surface;
+    height: card-layout.preferred-height;
+
+    card-layout := VerticalLayout {
+        x: 0px; y: 0px; width: parent.width;
+        padding: Metrics.settings-card-padding;
+        spacing: Spacing.medium;
+
+        Text {
+            height: 24px;
+            text: root.title;
+            color: Colors.foreground;
+            font-size: Typography.body-size;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+
+        @children
+    }
+}
+
+component SettingsFieldLabel inherits Rectangle {
+    in property <string> label;
+    in property <string> description;
+    in property <string> error-text;
+
+    height: 44px;
+
+    Text {
+        y: 1px;
+        width: parent.width;
+        height: 22px;
+        text: root.label;
+        color: Colors.foreground;
+        font-size: Typography.body-size;
+        font-weight: 600;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Text {
+        y: 24px;
+        width: parent.width;
+        height: 18px;
+        text: root.error-text != "" ? root.error-text : root.description;
+        color: root.error-text != "" ? Colors.error : Colors.secondary-foreground;
+        font-size: 13px;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+component SettingsNavItem inherits Rectangle {
+    in property <string> label;
+    in property <int> icon-kind;
+    in property <bool> selected;
+    in property <bool> expanded;
+    callback activated();
+
+    height: Metrics.settings-nav-item-height;
+    border-radius: 10px;
+    background: root.selected ? Colors.primary-container
+        : nav-touch.pressed ? Colors.icon-button-pressed
+        : nav-touch.has-hover || nav-focus.has-focus ? Colors.icon-button-hover : transparent;
+
+    Path {
+        x: root.expanded ? Spacing.medium : (parent.width - Metrics.icon-size) / 2;
+        y: (parent.height - Metrics.icon-size) / 2;
+        width: Metrics.icon-size;
+        height: Metrics.icon-size;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.icon-kind == 0
+            ? "M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"
+            : "M12.87 15.07 10.33 12.56l.03-.03A17.52 17.52 0 0 0 14.07 6H17V4h-7V2H8v2H1v2h11.17A15.5 15.5 0 0 1 9 11.35 15.4 15.4 0 0 1 6.91 8H4.91A17.5 17.5 0 0 0 7.67 12.56L2.58 17.58 4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7 1.62-4.33L19.12 17h-3.24z";
+        fill: root.selected ? Colors.primary : Colors.secondary-foreground;
+    }
+
+    if root.expanded: Text {
+        x: Spacing.medium + Metrics.icon-size + Spacing.small;
+        width: parent.width - self.x - Spacing.small;
+        height: parent.height;
+        text: root.label;
+        color: root.selected ? Colors.primary : Colors.foreground;
+        font-size: Typography.body-size;
+        font-weight: root.selected ? 700 : 600;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if !root.expanded && nav-touch.has-hover: Rectangle {
+        x: parent.width + Spacing.small;
+        y: (parent.height - 36px) / 2;
+        width: 112px;
+        height: 36px;
+        z: 100;
+        border-radius: 6px;
+        background: Colors.foreground;
+
+        Text {
+            text: root.label;
+            color: Colors.surface;
+            font-size: 13px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    nav-focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == Key.Space {
+                root.activated();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    nav-touch := TouchArea {
+        clicked => {
+            nav-focus.focus();
+            root.activated();
+        }
+    }
+}
+
 export component SettingsWindow inherits Window {
-    title: "Lexift Settings";
-    icon: AppAssets.app-icon;
-    width: 520px;
-    height: 760px;
+    title: "Lexift Settings"; icon: AppAssets.app-icon;
+    preferred-width: 820px; preferred-height: 680px; min-width: 520px; min-height: 520px;
     background: Colors.background;
 
     in-out property <int> draft-target-index: 0;
@@ -283,19 +411,21 @@ export component SettingsWindow inherits Window {
     in-out property <bool> settings-menu-provider-mode: false;
     in-out property <length> settings-menu-scroll-y: 0px;
     in-out property <[SettingsToastData]> toast-items: [];
+    in-out property <int> active-category: 0;
+
+    private property <bool> expanded-navigation: root.width >= Metrics.settings-wide-nav-breakpoint;
+    private property <length> sidebar-width: root.expanded-navigation ? Metrics.settings-sidebar-width : Metrics.settings-sidebar-compact-width;
+    private property <bool> two-column-layout: root.width >= Metrics.settings-two-column-breakpoint;
+    private property <length> page-width: root.width - root.sidebar-width;
     private property <[string]> language-labels: [
-        "简体中文", "繁體中文", "English (US)", "English (UK)",
-        "日本語", "한국어", "Deutsch", "Français", "Español",
-        "Italiano", "Português", "Português (Brasil)"
+        "简体中文", "繁體中文", "English (US)", "English (UK)", "日本語", "한국어",
+        "Deutsch", "Français", "Español", "Italiano", "Português", "Português (Brasil)"
     ];
-    private property <length> settings-menu-anchor-x: root.settings-menu-provider-mode
-        ? provider-selector.absolute-position.x : language-selector.absolute-position.x;
-    private property <length> settings-menu-anchor-y: root.settings-menu-provider-mode
-        ? provider-selector.absolute-position.y : language-selector.absolute-position.y;
-    private property <length> settings-menu-anchor-height: root.settings-menu-provider-mode
-        ? provider-selector.height : language-selector.height;
-    private property <length> settings-menu-anchor-width: root.settings-menu-provider-mode
-        ? provider-selector.width : language-selector.width;
+    private property <length> settings-menu-anchor-x: root.settings-menu-provider-mode ? provider-selector.absolute-position.x : language-selector.absolute-position.x;
+    private property <length> settings-menu-anchor-y: root.settings-menu-provider-mode ? provider-selector.absolute-position.y : language-selector.absolute-position.y;
+    private property <length> settings-menu-anchor-height: root.settings-menu-provider-mode ? provider-selector.height : language-selector.height;
+    private property <length> settings-menu-anchor-width: root.settings-menu-provider-mode ? provider-selector.width : language-selector.width;
+
     callback hotkey-key-pressed(string, bool, bool, bool, bool) -> string;
     callback hotkey-change-requested(string);
     callback launch-at-login-change-requested(bool);
@@ -309,587 +439,287 @@ export component SettingsWindow inherits Window {
     callback settings-menu-selected(int);
     callback toast-dismiss-requested(int);
 
-    public function focus-credential-reveal() {
-        credential-reveal-input.focus();
+    public function focus-credential-reveal() { credential-reveal-input.focus(); }
+    public function focus-credential-edit() { credential-edit-input.focus(); }
+    public function focus-hotkey-capture() { hotkey-capture.focus(); }
+    public function focus-settings-menu() { settings-menu-focus.focus(); }
+    public function close-settings-menu() { settings-menu-open = false; settings-menu-dismiss-armed = false; }
+    public function reset-settings-view() {
+        root.close-settings-menu(); root.hotkey-capturing = false; root.active-category = 0;
+        general-scroll.viewport-y = 0px; translation-scroll.viewport-y = 0px;
+    }
+    function select-category(category: int) {
+        if root.active-category == category { return; }
+        root.close-settings-menu(); root.hotkey-capturing = false;
+        if root.active-category == 1 { root.credential-edit-cancel-requested(); }
+        root.active-category = category;
     }
 
-    public function focus-credential-edit() {
-        credential-edit-input.focus();
+    root-content := Rectangle {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+
+    sidebar := Rectangle {
+        x: 0px; y: 0px; width: root.sidebar-width; height: root-content.height; z: 10; background: Colors.surface;
+        Image {
+            x: root.expanded-navigation ? Spacing.medium : (parent.width - 28px) / 2;
+            y: Spacing.large; width: 28px; height: 28px;
+            source: AppAssets.app-icon; image-fit: contain;
+        }
+        if root.expanded-navigation: Text {
+            x: Spacing.medium + 40px; y: Spacing.large - 6px;
+            width: parent.width - self.x - Spacing.medium; height: 40px;
+            text: "Lexift"; color: Colors.foreground; font-size: 20px; font-weight: 700; vertical-alignment: center;
+        }
+        SettingsNavItem {
+            x: root.expanded-navigation ? Spacing.medium : Spacing.small;
+            y: Spacing.large + 64px; width: parent.width - 2 * self.x;
+            label: "General"; icon-kind: 0; selected: root.active-category == 0; expanded: root.expanded-navigation;
+            activated => { root.select-category(0); }
+        }
+        SettingsNavItem {
+            x: root.expanded-navigation ? Spacing.medium : Spacing.small;
+            y: Spacing.large + 64px + Metrics.settings-nav-item-height + Spacing.small;
+            width: parent.width - 2 * self.x;
+            label: "Translation"; icon-kind: 1; selected: root.active-category == 1; expanded: root.expanded-navigation;
+            activated => { root.select-category(1); }
+        }
+        Rectangle { x: parent.width - 1px; width: 1px; height: parent.height; background: Colors.outline; }
     }
 
-    public function focus-hotkey-capture() {
-        hotkey-capture.focus();
+    main-pane := Rectangle {
+        x: root.sidebar-width; y: 0px; width: root.width - root.sidebar-width; height: root.height;
+        clip: true;
+
+    header := Rectangle {
+        x: 0px; y: 0px; width: main-pane.width; height: Metrics.settings-header-height; z: 5; background: Colors.surface;
+        Text {
+            x: Metrics.settings-page-padding; y: (parent.height - 32px) / 2; height: 32px;
+            text: root.active-category == 0 ? "General" : "Translation";
+            color: Colors.foreground; font-size: 24px; font-weight: 700; vertical-alignment: center;
+        }
+        Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: Colors.outline; }
     }
 
-    public function focus-settings-menu() {
-        settings-menu-focus.focus();
-    }
-
-    public function close-settings-menu() {
-        settings-menu-open = false;
-        settings-menu-dismiss-armed = false;
-    }
-
-    page-scroll := ScrollView {
-        width: 100%;
-        height: 100%;
+    general-scroll := ScrollView {
+        visible: root.active-category == 0;
+        x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
         viewport-width: self.visible-width;
-        viewport-height: max(self.visible-height, settings-content.preferred-height);
-        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-        vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
-        mouse-drag-pan-enabled: true;
-        scrolled => {
-            if (root.settings-menu-open
-                && (root.settings-menu-anchor-y < 0px
-                    || root.settings-menu-anchor-y + root.settings-menu-anchor-height > root.height)) {
-                root.close-settings-menu();
-            }
-        }
+        viewport-height: max(self.visible-height, application-card.y + application-card.height + Metrics.settings-page-padding);
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed; mouse-drag-pan-enabled: true;
+        scrolled => { if root.settings-menu-open && (root.settings-menu-anchor-y < Metrics.settings-header-height || root.settings-menu-anchor-y + root.settings-menu-anchor-height > root.height) { root.close-settings-menu(); } }
 
-      settings-content := VerticalLayout {
-        width: page-scroll.visible-width;
-        height: max(self.preferred-height, page-scroll.visible-height);
-        padding: Spacing.large;
-        spacing: Spacing.medium;
-
-        Text {
-            text: "Lexift Settings";
-            color: Colors.foreground;
-            font-size: Typography.title-size;
-            font-weight: 700;
-        }
-
-        Text {
-            text: "Translation";
-            color: Colors.secondary-foreground;
-            font-size: Typography.body-size;
-            font-weight: 700;
-        }
-
-        credential-section := VerticalLayout {
-            spacing: Spacing.small;
-
-            Text {
-                text: "Target language";
-                color: Colors.foreground;
-                font-size: Typography.body-size;
-            }
-
-            language-selector := Rectangle {
-                height: 40px;
-                border-radius: 4px;
-                border-width: 1px;
-                border-color: Colors.outline;
-                background: Colors.surface;
-
-                Text {
-                    x: Spacing.medium;
-                    width: parent.width - 2 * Spacing.medium - 24px;
-                    text: root.language-labels[root.draft-target-index];
-                    color: Colors.foreground;
-                    font-size: Typography.body-size;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-
-                Path {
-                    x: parent.width - Spacing.medium - 16px;
-                    y: (parent.height - 8px) / 2;
-                    width: 16px;
-                    height: 8px;
-                    viewbox-width: 16;
-                    viewbox-height: 8;
-                    stroke: Colors.secondary-foreground;
-                    stroke-width: 1.5px;
-
-                    MoveTo {
-                        x: 1;
-                        y: root.settings-menu-open ? 7 : 1;
-                    }
-
-                    LineTo {
-                        x: 8;
-                        y: root.settings-menu-open ? 1 : 7;
-                    }
-
-                    LineTo {
-                        x: 15;
-                        y: root.settings-menu-open ? 7 : 1;
-                    }
-                }
-
-                TouchArea {
-                    clicked => {
-                        if (root.settings-menu-open && !root.settings-menu-provider-mode) {
-                            root.close-settings-menu();
-                        } else {
-                            root.settings-menu-provider-mode = false;
-                            root.settings-menu-scroll-y = min(
-                                0px,
-                                max(
-                                    settings-menu.height - root.language-labels.length * 40px,
-                                    settings-menu.height / 2 - (root.draft-target-index + 0.5) * 40px
-                                )
-                            );
-                            root.settings-menu-open = true;
-                            root.settings-menu-dismiss-armed = true;
-                            root.focus-settings-menu();
-                        }
-                    }
-                }
-            }
-
-            if root.target-language-error-text != "": Text {
-                text: root.target-language-error-text;
-                color: Colors.error;
-                font-size: Typography.body-size;
-                wrap: word-wrap;
-            }
-        }
-
-        Rectangle {
-            height: 1px;
-            background: Colors.outline;
-        }
-
-        Text {
-            text: "Shortcut";
-            color: Colors.secondary-foreground;
-            font-size: Typography.body-size;
-            font-weight: 700;
-        }
-
-        HorizontalLayout {
-            spacing: Spacing.small;
-
-            hotkey-field := Rectangle {
-                height: 40px;
-                horizontal-stretch: 1;
-                border-radius: 4px;
-                border-width: root.hotkey-capturing ? 2px : 1px;
-                border-color: root.hotkey-capturing ? Colors.primary : Colors.outline;
-                background: Colors.surface;
-
-                Text {
-                    x: Spacing.medium;
-                    width: parent.width - 2 * Spacing.medium;
-                    text: root.hotkey-capturing ? "Press shortcut…" : root.draft-hotkey-label;
-                    color: root.hotkey-capturing ? Colors.primary : Colors.foreground;
-                    font-size: Typography.body-size;
-                    vertical-alignment: center;
-                }
-
-                hotkey-capture := FocusScope {
-                    key-pressed(event) => {
-                        if event.text == Key.Escape {
-                            root.hotkey-capturing = false;
-                            return accept;
-                        }
-                        let captured = root.hotkey-key-pressed(
-                            event.text,
-                            event.modifiers.control,
-                            event.modifiers.alt,
-                            event.modifiers.shift,
-                            event.modifiers.meta
-                        );
-                        if captured != "" {
-                            root.hotkey-change-requested(captured);
-                            root.draft-hotkey-label = captured;
-                            root.hotkey-capturing = false;
-                        }
-                        return accept;
-                    }
-                }
-            }
-
-            SettingsButton {
-                width: 104px;
-                label: root.hotkey-capturing ? "Cancel" : "Change";
-                clicked => {
-                    root.hotkey-capturing = !root.hotkey-capturing;
-                    if root.hotkey-capturing {
-                        root.focus-hotkey-capture();
-                    }
-                }
-            }
-        }
-
-        if root.hotkey-error-text != "": Text {
-            text: root.hotkey-error-text;
-            color: Colors.error;
-            font-size: Typography.body-size;
-            wrap: word-wrap;
-        }
-
-        HorizontalLayout {
-            alignment: center;
-
+        language-card := SettingsCard {
+            x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
+            width: root.two-column-layout
+                ? (general-scroll.visible-width - 2 * Metrics.settings-page-padding - Metrics.settings-card-gap) / 2
+                : general-scroll.visible-width - 2 * Metrics.settings-page-padding;
+            title: "Language & region";
             VerticalLayout {
-                spacing: 2px;
-
-                Text {
-                    text: "Launch at startup";
-                    color: Colors.foreground;
-                    font-size: Typography.body-size;
-                    font-weight: 700;
-                }
-
-                Text {
-                    text: "Start in the background when you sign in";
-                    color: Colors.secondary-foreground;
-                    font-size: Typography.body-size;
-                }
-            }
-
-            SettingsSwitch {
-                checked: root.launch-at-login;
-                toggled(value) => {
-                    root.launch-at-login = value;
-                    root.launch-at-login-change-requested(value);
-                }
-            }
-        }
-
-        if root.launch-at-login-error-text != "": Text {
-            text: root.launch-at-login-error-text;
-            color: Colors.error;
-            font-size: Typography.body-size;
-            wrap: word-wrap;
-        }
-
-        Rectangle {
-            height: 1px;
-            background: Colors.outline;
-        }
-
-        Text {
-            text: "Translation provider";
-            color: Colors.secondary-foreground;
-            font-size: Typography.body-size;
-            font-weight: 700;
-        }
-
-        VerticalLayout {
-            spacing: Spacing.small;
-
-            Text {
-                text: "Provider";
-                color: Colors.foreground;
-                font-size: Typography.body-size;
-            }
-
-            provider-selector := Rectangle {
-                height: 40px;
-                border-radius: 4px;
-                border-width: 1px;
-                border-color: Colors.outline;
-                background: Colors.surface;
-
-                Text {
-                    x: Spacing.medium;
-                    width: parent.width - 2 * Spacing.medium - 24px;
-                    text: "DeepL";
-                    color: Colors.foreground;
-                    font-size: Typography.body-size;
-                    vertical-alignment: center;
-                }
-
-                Path {
-                    x: parent.width - Spacing.medium - 16px;
-                    y: (parent.height - 8px) / 2;
-                    width: 16px;
-                    height: 8px;
-                    viewbox-width: 16;
-                    viewbox-height: 8;
-                    stroke: Colors.secondary-foreground;
-                    stroke-width: 1.5px;
-                    MoveTo { x: 1; y: root.settings-menu-open && root.settings-menu-provider-mode ? 7 : 1; }
-                    LineTo { x: 8; y: root.settings-menu-open && root.settings-menu-provider-mode ? 1 : 7; }
-                    LineTo { x: 15; y: root.settings-menu-open && root.settings-menu-provider-mode ? 7 : 1; }
-                }
-
-                TouchArea {
-                    clicked => {
-                        if (root.settings-menu-open && root.settings-menu-provider-mode) {
-                            root.close-settings-menu();
-                        } else {
-                            root.settings-menu-provider-mode = true;
-                            root.settings-menu-scroll-y = 0px;
-                            root.settings-menu-open = true;
-                            root.settings-menu-dismiss-armed = true;
-                            root.focus-settings-menu();
-                        }
-                    }
-                }
-            }
-
-            if root.provider-error-text != "": Text {
-                text: root.provider-error-text;
-                color: Colors.error;
-                font-size: Typography.body-size;
-                wrap: word-wrap;
-            }
-
-            HorizontalLayout {
-                Text {
-                    text: "DeepL API Key";
-                    color: Colors.foreground;
-                    font-size: Typography.body-size;
-                }
-
-                Text {
-                    text: root.credential-configured ? "Configured" : "Not configured";
-                    color: root.credential-configured ? Colors.primary : Colors.secondary-foreground;
-                    font-size: Typography.body-size;
-                    font-weight: 700;
-                    horizontal-alignment: right;
-                }
-            }
-
-            credential-field := Rectangle {
-                height: 40px;
-                border-radius: 4px;
-                border-width: (credential-reveal-input.has-focus || credential-edit-input.has-focus) ? 2px : 1px;
-                border-color: (credential-reveal-input.has-focus || credential-edit-input.has-focus) ? Colors.primary : Colors.outline;
-                background: Colors.surface;
-
-                field-hover := TouchArea {
-                    enabled: root.credential-configured && !root.credential-editing && !root.credential-revealed && !root.credential-request-pending;
-                    clicked => {
-                        if self.mouse-x >= self.width - 4 * Metrics.icon-button-size - 4px
-                            && self.mouse-x < self.width - 3 * Metrics.icon-button-size - 4px {
-                            root.credential-reveal-requested();
-                        } else if self.mouse-x >= self.width - 3 * Metrics.icon-button-size - 4px
-                            && self.mouse-x < self.width - 2 * Metrics.icon-button-size - 4px {
-                            root.credential-copy-requested();
-                        } else if self.mouse-x >= self.width - 2 * Metrics.icon-button-size - 4px
-                            && self.mouse-x < self.width - Metrics.icon-button-size - 4px {
-                            root.credential-edit-requested();
-                        } else if self.mouse-x >= self.width - Metrics.icon-button-size - 4px
-                            && self.mouse-x < self.width - 4px {
-                            root.credential-remove-requested();
-                        }
-                    }
-                }
-
-                if !root.credential-configured: credential-new-input := TextInput {
-                    x: Spacing.medium;
-                    width: parent.width - 2 * Spacing.medium;
-                    height: parent.height;
-                    text <=> root.credential-draft;
-                    input-type: InputType.password;
-                    enabled: !root.credential-busy;
-                    color: Colors.foreground;
-                    selection-background-color: Colors.primary-container;
-                    selection-foreground-color: Colors.foreground;
-                    font-size: Typography.body-size;
-                    text-cursor-width: 2px;
-                    vertical-alignment: center;
-                    accepted => {
-                        if root.credential-draft != "" && !root.credential-busy {
-                            root.credential-save-requested(root.credential-draft);
-                        }
-                    }
-                }
-
-                if root.credential-configured && !root.credential-editing && !root.credential-revealed: Text {
-                    x: Spacing.medium;
-                    width: parent.width - 2 * Spacing.medium - 4 * Metrics.icon-button-size;
-                    height: parent.height;
-                    text: "••••••••••••••••";
-                    color: Colors.foreground;
-                    font-size: Typography.body-size;
-                    vertical-alignment: center;
-                }
-
-                credential-reveal-input := TextInput {
-                    visible: root.credential-configured && root.credential-revealed && !root.credential-editing;
-                    x: Spacing.medium;
-                    width: parent.width - 2 * Spacing.medium - 34px;
-                    height: parent.height;
-                    text: root.credential-transient-secret;
-                    read-only: true;
-                    color: Colors.foreground;
-                    selection-background-color: Colors.primary-container;
-                    selection-foreground-color: Colors.foreground;
-                    font-size: Typography.body-size;
-                    vertical-alignment: center;
-                    changed has-focus => {
-                        if !self.has-focus && root.credential-revealed && root.credential-reveal-dismiss-armed {
-                            root.credential-hide-requested();
-                        }
-                    }
-                }
-
-                credential-edit-input := TextInput {
-                    visible: root.credential-configured && root.credential-editing;
-                    x: Spacing.medium;
-                    width: parent.width - 2 * Spacing.medium - 34px;
-                    height: parent.height;
-                    text <=> root.credential-draft;
-                    input-type: root.credential-secret-visible ? InputType.text : InputType.password;
-                    enabled: !root.credential-busy;
-                    color: Colors.foreground;
-                    selection-background-color: Colors.primary-container;
-                    selection-foreground-color: Colors.foreground;
-                    font-size: Typography.body-size;
-                    vertical-alignment: center;
-                    accepted => {
-                        if root.credential-draft != "" && !root.credential-busy {
-                            root.credential-save-requested(root.credential-draft);
-                        }
-                    }
-                }
-
-                if root.credential-configured && !root.credential-editing && !root.credential-revealed: HorizontalLayout {
-                    x: parent.width - 4 * Metrics.icon-button-size - 4px;
-                    y: (parent.height - Metrics.icon-button-size) / 2;
-                    width: 4 * Metrics.icon-button-size;
-                    spacing: 0px;
-                    opacity: field-hover.has-hover && !root.credential-request-pending ? 1 : 0;
-
-                    CredentialActionButton {
-                        icon-kind: 0;
-                        interactive: false;
-                        highlighted: field-hover.mouse-x >= credential-field.width - 4 * Metrics.icon-button-size - 4px
-                            && field-hover.mouse-x < credential-field.width - 3 * Metrics.icon-button-size - 4px;
-                        pressed: field-hover.pressed && self.highlighted;
-                    }
-                    CredentialActionButton {
-                        icon-kind: 1;
-                        interactive: false;
-                        highlighted: field-hover.mouse-x >= credential-field.width - 3 * Metrics.icon-button-size - 4px
-                            && field-hover.mouse-x < credential-field.width - 2 * Metrics.icon-button-size - 4px;
-                        pressed: field-hover.pressed && self.highlighted;
-                    }
-                    CredentialActionButton {
-                        icon-kind: 2;
-                        interactive: false;
-                        highlighted: field-hover.mouse-x >= credential-field.width - 2 * Metrics.icon-button-size - 4px
-                            && field-hover.mouse-x < credential-field.width - Metrics.icon-button-size - 4px;
-                        pressed: field-hover.pressed && self.highlighted;
-                    }
-                    CredentialActionButton {
-                        icon-kind: 3;
-                        interactive: false;
-                        highlighted: field-hover.mouse-x >= credential-field.width - Metrics.icon-button-size - 4px
-                            && field-hover.mouse-x < credential-field.width - 4px;
-                        pressed: field-hover.pressed && self.highlighted;
-                    }
-                }
-
-
-                if root.credential-configured && root.credential-request-pending && !root.credential-editing: Text {
-                    x: parent.width - Spacing.medium - 88px;
-                    width: 88px;
-                    height: parent.height;
-                    text: "Loading…";
-                    color: Colors.secondary-foreground;
-                    font-size: Typography.body-size;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                }
-
-                if root.credential-configured && (root.credential-editing || root.credential-revealed): CredentialActionButton {
-                    x: parent.width - Metrics.icon-button-size - 4px;
-                    y: (parent.height - Metrics.icon-button-size) / 2;
-                    icon-kind: root.credential-revealed || root.credential-secret-visible ? 4 : 0;
-                    clicked => {
-                        if root.credential-editing {
-                            root.credential-secret-visible = !root.credential-secret-visible;
-                        } else {
-                            root.credential-hide-requested();
-                        }
-                    }
-                }
-            }
-
-            HorizontalLayout {
-                height: 40px;
+                width: 100%; horizontal-stretch: 1;
                 spacing: Spacing.small;
-                alignment: end;
-
-                SettingsButton {
-                    width: 96px;
-                    visible: root.credential-editing;
-                    label: "Cancel";
-                    enabled: !root.credential-busy;
-                    clicked => { root.credential-edit-cancel-requested(); }
-                }
-
-                SettingsButton {
-                    width: 128px;
-                    visible: root.credential-editing
-                        || (!root.credential-configured
-                            && (root.credential-draft != "" || root.credential-busy));
-                    primary: true;
-                    label: root.credential-busy ? "Working…" : "Save key";
-                    enabled: root.credential-draft != "" && !root.credential-busy;
-                    clicked => { root.credential-save-requested(root.credential-draft); }
+                SettingsFieldLabel { label: "Target language"; description: "Language used for new translations"; error-text: root.target-language-error-text; }
+                language-selector := Rectangle {
+                    height: 40px; border-radius: 6px; border-width: 1px; border-color: Colors.outline; background: Colors.background;
+                    Text { x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 24px; text: root.language-labels[root.draft-target-index]; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; overflow: elide; }
+                    Path {
+                        x: parent.width - Spacing.medium - 16px; y: (parent.height - 8px) / 2; width: 16px; height: 8px; viewbox-width: 16; viewbox-height: 8; stroke: Colors.secondary-foreground; stroke-width: 1.5px;
+                        MoveTo { x: 1; y: root.settings-menu-open ? 7 : 1; } LineTo { x: 8; y: root.settings-menu-open ? 1 : 7; } LineTo { x: 15; y: root.settings-menu-open ? 7 : 1; }
+                    }
+                    TouchArea { clicked => { root.toggle-language-menu(); } }
                 }
             }
         }
 
-        if root.credential-error-text != "": Text {
-            text: root.credential-error-text;
-            color: Colors.error;
-            font-size: Typography.body-size;
-            wrap: word-wrap;
+        application-card := SettingsCard {
+            x: root.two-column-layout ? language-card.x + language-card.width + Metrics.settings-card-gap : Metrics.settings-page-padding;
+            y: root.two-column-layout ? Metrics.settings-page-padding : language-card.y + language-card.height + Metrics.settings-card-gap;
+            width: language-card.width; title: "Application";
+            VerticalLayout {
+                width: 100%; horizontal-stretch: 1;
+                spacing: Spacing.small;
+                SettingsFieldLabel { label: "Shortcut"; description: root.hotkey-capturing ? "Press a key combination" : "Translate the current selection"; error-text: root.hotkey-error-text; }
+                HorizontalLayout {
+                    width: 100%; height: 40px; spacing: Spacing.small; alignment: center;
+                    hotkey-field := Rectangle {
+                        width: parent.width - 84px - Spacing.small; height: 40px; border-radius: 6px; border-width: root.hotkey-capturing ? 2px : 1px; border-color: root.hotkey-capturing ? Colors.primary : Colors.outline; background: Colors.background;
+                        Text { x: Spacing.medium; width: parent.width - 2 * Spacing.medium; text: root.hotkey-capturing ? "Press shortcut…" : root.draft-hotkey-label; color: root.hotkey-capturing ? Colors.primary : Colors.foreground; font-size: 13px; vertical-alignment: center; overflow: elide; }
+                        hotkey-capture := FocusScope {
+                            key-pressed(event) => {
+                                if event.text == Key.Escape { root.hotkey-capturing = false; return accept; }
+                                let captured = root.hotkey-key-pressed(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta);
+                                if captured != "" { root.hotkey-change-requested(captured); root.draft-hotkey-label = captured; root.hotkey-capturing = false; }
+                                return accept;
+                            }
+                        }
+                    }
+                    SettingsButton { width: 84px; label: root.hotkey-capturing ? "Cancel" : "Change"; clicked => { root.hotkey-capturing = !root.hotkey-capturing; if root.hotkey-capturing { root.focus-hotkey-capture(); } } }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                HorizontalLayout {
+                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
+                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: "Launch at startup"; description: ""; error-text: root.launch-at-login-error-text; }
+                    SettingsSwitch { checked: root.launch-at-login; toggled(value) => { root.launch-at-login = value; root.launch-at-login-change-requested(value); } }
+                }
+            }
+        }
+    }
+    translation-scroll := ScrollView {
+        visible: root.active-category == 1;
+        x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
+        viewport-width: self.visible-width;
+        viewport-height: max(self.visible-height, credential-card.y + credential-card.height + Metrics.settings-page-padding);
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed; mouse-drag-pan-enabled: true;
+        scrolled => { if root.settings-menu-open && (root.settings-menu-anchor-y < Metrics.settings-header-height || root.settings-menu-anchor-y + root.settings-menu-anchor-height > root.height) { root.close-settings-menu(); } }
+
+        provider-card := SettingsCard {
+            x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
+            width: root.two-column-layout
+                ? (translation-scroll.visible-width - 2 * Metrics.settings-page-padding - Metrics.settings-card-gap) / 2
+                : translation-scroll.visible-width - 2 * Metrics.settings-page-padding;
+            title: "Provider";
+            VerticalLayout {
+                width: 100%; horizontal-stretch: 1;
+                spacing: Spacing.small;
+                SettingsFieldLabel { label: "Translation provider"; description: ""; error-text: root.provider-error-text; }
+                provider-selector := Rectangle {
+                    height: 40px; border-radius: 6px; border-width: 1px; border-color: Colors.outline; background: Colors.background;
+                    Text { x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 24px; text: "DeepL"; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
+                    Path {
+                        x: parent.width - Spacing.medium - 16px; y: (parent.height - 8px) / 2; width: 16px; height: 8px; viewbox-width: 16; viewbox-height: 8; stroke: Colors.secondary-foreground; stroke-width: 1.5px;
+                        MoveTo { x: 1; y: root.settings-menu-open && root.settings-menu-provider-mode ? 7 : 1; } LineTo { x: 8; y: root.settings-menu-open && root.settings-menu-provider-mode ? 1 : 7; } LineTo { x: 15; y: root.settings-menu-open && root.settings-menu-provider-mode ? 7 : 1; }
+                    }
+                    TouchArea { clicked => { root.toggle-provider-menu(); } }
+                }
+            }
         }
 
-        Rectangle { vertical-stretch: 1; }
-      }
+        credential-card := SettingsCard {
+            x: root.two-column-layout ? provider-card.x + provider-card.width + Metrics.settings-card-gap : Metrics.settings-page-padding;
+            y: root.two-column-layout ? Metrics.settings-page-padding : provider-card.y + provider-card.height + Metrics.settings-card-gap;
+            width: provider-card.width; title: "Credentials";
+            VerticalLayout {
+                width: 100%; horizontal-stretch: 1;
+                spacing: Spacing.small;
+                HorizontalLayout {
+                    width: 100%; height: 24px;
+                    Text { text: "DeepL API Key"; color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; vertical-alignment: center; }
+                    Text { text: root.credential-configured ? "Configured" : "Not configured"; color: root.credential-configured ? Colors.primary : Colors.secondary-foreground; font-size: 13px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; }
+                }
+
+                credential-field := Rectangle {
+                    height: 40px; border-radius: 6px;
+                    border-width: (credential-reveal-input.has-focus || credential-edit-input.has-focus) ? 2px : 1px;
+                    border-color: (credential-reveal-input.has-focus || credential-edit-input.has-focus) ? Colors.primary : Colors.outline;
+                    background: Colors.background;
+                    field-hover := TouchArea {
+                        enabled: root.credential-configured && !root.credential-editing && !root.credential-revealed && !root.credential-request-pending;
+                        clicked => {
+                            if self.mouse-x >= self.width - 4 * Metrics.icon-button-size - 4px && self.mouse-x < self.width - 3 * Metrics.icon-button-size - 4px { root.credential-reveal-requested(); }
+                            else if self.mouse-x >= self.width - 3 * Metrics.icon-button-size - 4px && self.mouse-x < self.width - 2 * Metrics.icon-button-size - 4px { root.credential-copy-requested(); }
+                            else if self.mouse-x >= self.width - 2 * Metrics.icon-button-size - 4px && self.mouse-x < self.width - Metrics.icon-button-size - 4px { root.credential-edit-requested(); }
+                            else if self.mouse-x >= self.width - Metrics.icon-button-size - 4px && self.mouse-x < self.width - 4px { root.credential-remove-requested(); }
+                        }
+                    }
+                    if !root.credential-configured: credential-new-input := TextInput {
+                        x: Spacing.medium; width: parent.width - 2 * Spacing.medium; height: parent.height; text <=> root.credential-draft; input-type: InputType.password; enabled: !root.credential-busy;
+                        color: Colors.foreground; selection-background-color: Colors.primary-container; selection-foreground-color: Colors.foreground; font-size: Typography.body-size; text-cursor-width: 2px; vertical-alignment: center;
+                        accepted => { if root.credential-draft != "" && !root.credential-busy { root.credential-save-requested(root.credential-draft); } }
+                    }
+                    if root.credential-configured && !root.credential-editing && !root.credential-revealed: Text {
+                        x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 4 * Metrics.icon-button-size; height: parent.height; text: "••••••••••••••••"; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center;
+                    }
+                    credential-reveal-input := TextInput {
+                        visible: root.credential-configured && root.credential-revealed && !root.credential-editing;
+                        x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 34px; height: parent.height; text: root.credential-transient-secret; read-only: true;
+                        color: Colors.foreground; selection-background-color: Colors.primary-container; selection-foreground-color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center;
+                        changed has-focus => { if !self.has-focus && root.credential-revealed && root.credential-reveal-dismiss-armed { root.credential-hide-requested(); } }
+                    }
+                    credential-edit-input := TextInput {
+                        visible: root.credential-configured && root.credential-editing;
+                        x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 34px; height: parent.height; text <=> root.credential-draft;
+                        input-type: root.credential-secret-visible ? InputType.text : InputType.password; enabled: !root.credential-busy;
+                        color: Colors.foreground; selection-background-color: Colors.primary-container; selection-foreground-color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center;
+                        accepted => { if root.credential-draft != "" && !root.credential-busy { root.credential-save-requested(root.credential-draft); } }
+                    }
+                    if root.credential-configured && !root.credential-editing && !root.credential-revealed: HorizontalLayout {
+                        x: parent.width - 4 * Metrics.icon-button-size - 4px; y: (parent.height - Metrics.icon-button-size) / 2; width: 4 * Metrics.icon-button-size; spacing: 0px;
+                        opacity: field-hover.has-hover && !root.credential-request-pending ? 1 : 0;
+                        CredentialActionButton { icon-kind: 0; interactive: false; highlighted: field-hover.mouse-x >= credential-field.width - 4 * Metrics.icon-button-size - 4px && field-hover.mouse-x < credential-field.width - 3 * Metrics.icon-button-size - 4px; pressed: field-hover.pressed && self.highlighted; }
+                        CredentialActionButton { icon-kind: 1; interactive: false; highlighted: field-hover.mouse-x >= credential-field.width - 3 * Metrics.icon-button-size - 4px && field-hover.mouse-x < credential-field.width - 2 * Metrics.icon-button-size - 4px; pressed: field-hover.pressed && self.highlighted; }
+                        CredentialActionButton { icon-kind: 2; interactive: false; highlighted: field-hover.mouse-x >= credential-field.width - 2 * Metrics.icon-button-size - 4px && field-hover.mouse-x < credential-field.width - Metrics.icon-button-size - 4px; pressed: field-hover.pressed && self.highlighted; }
+                        CredentialActionButton { icon-kind: 3; interactive: false; highlighted: field-hover.mouse-x >= credential-field.width - Metrics.icon-button-size - 4px && field-hover.mouse-x < credential-field.width - 4px; pressed: field-hover.pressed && self.highlighted; }
+                    }
+                    if root.credential-configured && root.credential-request-pending && !root.credential-editing: Text {
+                        x: parent.width - Spacing.medium - 88px; width: 88px; height: parent.height; text: "Loading…"; color: Colors.secondary-foreground; font-size: 13px; horizontal-alignment: right; vertical-alignment: center;
+                    }
+                    if root.credential-configured && (root.credential-editing || root.credential-revealed): CredentialActionButton {
+                        x: parent.width - Metrics.icon-button-size - 4px; y: (parent.height - Metrics.icon-button-size) / 2;
+                        icon-kind: root.credential-revealed || root.credential-secret-visible ? 4 : 0;
+                        clicked => { if root.credential-editing { root.credential-secret-visible = !root.credential-secret-visible; } else { root.credential-hide-requested(); } }
+                    }
+                }
+
+                Text { height: 18px; text: root.credential-error-text; color: Colors.error; font-size: 13px; overflow: elide; }
+                HorizontalLayout {
+                    width: 100%; height: 40px; spacing: Spacing.small; alignment: end;
+                    SettingsButton { width: 96px; visible: root.credential-editing; label: "Cancel"; enabled: !root.credential-busy; clicked => { root.credential-edit-cancel-requested(); } }
+                    SettingsButton {
+                        width: 128px; visible: root.credential-editing || (!root.credential-configured && (root.credential-draft != "" || root.credential-busy));
+                        primary: true; label: root.credential-busy ? "Working…" : "Save key"; enabled: root.credential-draft != "" && !root.credential-busy;
+                        clicked => { root.credential-save-requested(root.credential-draft); }
+                    }
+                }
+            }
+        }
     }
+    }
+    }
+    function toggle-language-menu() {
+        if root.settings-menu-open && !root.settings-menu-provider-mode { root.close-settings-menu(); }
+        else {
+            root.settings-menu-provider-mode = false;
+            root.settings-menu-scroll-y = min(0px, max(settings-menu.height - root.language-labels.length * 40px, settings-menu.height / 2 - (root.draft-target-index + 0.5) * 40px));
+            root.settings-menu-open = true; root.settings-menu-dismiss-armed = true; root.focus-settings-menu();
+        }
+    }
+    function toggle-provider-menu() {
+        if root.settings-menu-open && root.settings-menu-provider-mode { root.close-settings-menu(); }
+        else {
+            root.settings-menu-provider-mode = true; root.settings-menu-scroll-y = 0px;
+            root.settings-menu-open = true; root.settings-menu-dismiss-armed = true; root.focus-settings-menu();
+        }
+    }
+
+    overlay := Rectangle {
+        x: 0px; y: 0px; width: root.width; height: root.height; z: 80;
 
     TouchArea {
-        width: 100%;
-        height: 100%;
-        z: 90;
+        x: 0px; y: 0px; width: parent.width; height: parent.height; z: 10;
         enabled: root.settings-menu-open && root.settings-menu-dismiss-armed;
         clicked => { root.close-settings-menu(); }
     }
-
     settings-menu := SettingsSelectMenu {
-        visible: root.settings-menu-open;
-        z: 95;
-        x: root.settings-menu-anchor-x;
-        y: root.settings-menu-anchor-y + root.settings-menu-anchor-height + 2px;
+        visible: root.settings-menu-open; z: 15;
+        x: root.settings-menu-anchor-x; y: root.settings-menu-anchor-y + root.settings-menu-anchor-height + 2px;
         width: root.settings-menu-anchor-width;
-        height: min(
-            (root.settings-menu-provider-mode ? 1 : root.language-labels.length) * 40px,
-            max(0px, root.height - self.y - Spacing.medium)
-        );
+        height: min((root.settings-menu-provider-mode ? 1 : root.language-labels.length) * 40px, max(0px, root.height - self.y - Metrics.settings-page-padding));
         options: root.settings-menu-provider-mode ? ["DeepL"] : root.language-labels;
         selected-index: root.settings-menu-provider-mode ? 0 : root.draft-target-index;
         scroll-y <=> root.settings-menu-scroll-y;
-        selected(index) => {
-            root.settings-menu-selected(index);
-            root.close-settings-menu();
-        }
+        selected(index) => { root.settings-menu-selected(index); root.close-settings-menu(); }
     }
-
     settings-menu-focus := FocusScope {
-        visible: root.settings-menu-open;
-        x: settings-menu.x;
-        y: settings-menu.y;
-        width: settings-menu.width;
-        height: settings-menu.height;
-        z: 96;
+        visible: root.settings-menu-open; x: settings-menu.x; y: settings-menu.y; width: settings-menu.width; height: settings-menu.height; z: 16;
         key-pressed(event) => {
-            if event.text == Key.Escape {
-                root.close-settings-menu();
-                return accept;
-            }
+            if event.text == Key.Escape { root.close-settings-menu(); return accept; }
             return reject;
         }
     }
-
     for toast[index] in root.toast-items: SettingsToast {
-        x: (root.width - self.width) / 2;
-        y: Spacing.medium + index * (Metrics.toast-height + Spacing.small);
-        z: 100;
-        message: toast.message;
-        error: toast.error;
+        x: root.sidebar-width + max(Spacing.medium, (root.page-width - self.width) / 2);
+        y: Spacing.medium + index * (Metrics.toast-height + Spacing.small); z: 30;
+        message: toast.message; error: toast.error;
         dismissed => { root.toast-dismiss-requested(toast.id); }
+    }
     }
 }

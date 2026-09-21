@@ -41,6 +41,8 @@ const WORK_AREA_MARGIN_PX: i32 = 8;
 const CREDENTIAL_REVEAL_DURATION: Duration = Duration::from_secs(30);
 const SETTINGS_TOAST_SUCCESS_DURATION: Duration = Duration::from_secs(2);
 const SETTINGS_TOAST_ERROR_DURATION: Duration = Duration::from_secs(5);
+const SETTINGS_DEFAULT_WIDTH: f32 = 820.0;
+const SETTINGS_DEFAULT_HEIGHT: f32 = 680.0;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SettingsToastRecord {
@@ -71,6 +73,10 @@ impl Ui {
         let main = AppWindow::new()?;
         let popup = TranslationPopup::new()?;
         let settings = SettingsWindow::new()?;
+        settings.window().set_size(slint::LogicalSize::new(
+            SETTINGS_DEFAULT_WIDTH,
+            SETTINGS_DEFAULT_HEIGHT,
+        ));
         main.set_show_selection_demo(show_selection_demo);
         binding::apply(&main, &popup, &settings, mapper::view_state(initial_state));
         Ok(Self {
@@ -129,7 +135,7 @@ impl Ui {
         let toast_records = Arc::clone(&self.toast_records);
         self.settings.window().on_close_requested(move || {
             if let Some(settings) = settings.upgrade() {
-                settings.invoke_close_settings_menu();
+                settings.invoke_reset_settings_view();
                 clear_credential_transient(&settings, &credential_generation);
                 clear_settings_toasts(&settings, &toast_records);
                 let _ = settings.hide();
@@ -483,7 +489,7 @@ impl UiHandle {
         let toast_records = Arc::clone(&self.toast_records);
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(window) = window.upgrade() {
-                window.invoke_close_settings_menu();
+                window.invoke_reset_settings_view();
                 window.set_draft_target_index(language_index(&settings.target_language));
                 window.set_draft_hotkey_label(settings.hotkey.to_string().into());
                 window.set_draft_provider_id(settings.provider.id().into());
@@ -505,7 +511,7 @@ impl UiHandle {
         let toast_records = Arc::clone(&self.toast_records);
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(settings) = settings.upgrade() {
-                settings.invoke_close_settings_menu();
+                settings.invoke_reset_settings_view();
                 clear_credential_transient(&settings, &credential_generation);
                 clear_settings_toasts(&settings, &toast_records);
                 let _ = settings.hide();

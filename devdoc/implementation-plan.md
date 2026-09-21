@@ -868,6 +868,23 @@ Settings 页面本身使用独立 ScrollView。候选列表的位置直接绑定
 独立候选窗口所需的原生 owner、`WindowContextMonitor`、鼠标/前台 Hook、120ms Opening 状态、
 75ms 窗口监测和屏幕坐标计算已经删除。TranslationPopup 仍保留
 `WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW`，其焦点策略不受此次重构影响。
+
+#### Settings 响应式分类面板
+
+2026-09-21 将 Settings 从单列长表单重构为固定侧栏、固定页面标题和分类内容区。默认窗口尺寸为
+820×680，最小尺寸为 520×520；窗口宽度达到 720px 时侧栏显示 Lexift 标识及分类名称，低于
+该宽度时收缩为 64px 图标栏并通过 tooltip 提示名称。
+
+当前分类为 General 和 Translation。General 包含 Language & region、Application 卡片，承载
+目标语言、快捷键和开机启动；Translation 包含 Provider、Credentials 卡片，承载翻译 Provider
+和 DeepL API Key。宽度达到 800px 时卡片双列排列，窄窗口自动切换单列，只有当前分类的内容区
+滚动，侧栏、标题和 Toast 保持固定。
+
+卡片、设置行、侧栏项和 tooltip 使用统一 Design Tokens。候选列表继续使用同一 Settings HWND
+内的覆盖层。切换分类会关闭候选列表与快捷键捕获；离开 Translation 时通过现有 Credential
+清理回调隐藏明文、取消编辑并清空未保存 Secret。关闭或重新打开 Settings 时始终回到 General，
+配置 schema、单项自动保存、错误回退和 Credential Store 边界保持不变。
+
 当前里程碑：**M4.4 — Secure Credential Store**。
 
 ### M4.4 Secure Credential Store
