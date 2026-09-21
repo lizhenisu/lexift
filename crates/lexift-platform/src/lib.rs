@@ -95,3 +95,18 @@ pub fn set_transient_window_owner(
     let _ = (child, owner);
     Ok(())
 }
+
+/// Restores and activates a top-level window after an explicit user request.
+///
+/// Passive windows such as the translation popup must not use this function.
+pub fn activate_user_requested_window(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::popup::activate_user_requested(window)?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = window;
+    Ok(())
+}

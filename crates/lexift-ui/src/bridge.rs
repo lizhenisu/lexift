@@ -28,6 +28,23 @@ use crate::{
 type ArmWindowContext = Arc<dyn Fn(&slint::Window, &slint::Window) -> bool + Send + Sync>;
 type DisarmWindowContext = Arc<dyn Fn() + Send + Sync>;
 
+pub struct WindowLifecycleCallbacks {
+    disarm_window_context: DisarmWindowContext,
+    activate_user_requested_window: fn(&slint::Window) -> bool,
+}
+
+impl WindowLifecycleCallbacks {
+    pub fn new(
+        disarm_window_context: Arc<dyn Fn() + Send + Sync>,
+        activate_user_requested_window: fn(&slint::Window) -> bool,
+    ) -> Self {
+        Self {
+            disarm_window_context,
+            activate_user_requested_window,
+        }
+    }
+}
+
 const POPUP_GAP_PX: i32 = 12;
 const WORK_AREA_MARGIN_PX: i32 = 8;
 const LANGUAGE_MENU_STABILIZATION: Duration = Duration::from_millis(120);
@@ -59,6 +76,7 @@ pub struct Ui {
     toast_next_id: Arc<AtomicU64>,
     toast_records: Arc<Mutex<Vec<SettingsToastRecord>>>,
     background_mode: Rc<Cell<bool>>,
+    activate_user_requested_window: fn(&slint::Window) -> bool,
 }
 
 impl Ui {
@@ -69,7 +87,7 @@ impl Ui {
         prepare_interactive_window: fn(&slint::Window) -> bool,
         set_transient_window_owner: fn(&slint::Window, &slint::Window) -> bool,
         arm_window_context: ArmWindowContext,
-        disarm_window_context: DisarmWindowContext,
+        window_lifecycle: WindowLifecycleCallbacks,
     ) -> Result<Self, slint::PlatformError> {
         let main = AppWindow::new()?;
         let popup = TranslationPopup::new()?;
@@ -86,13 +104,14 @@ impl Ui {
             prepare_interactive_window,
             set_transient_window_owner,
             arm_window_context,
-            disarm_window_context,
+            disarm_window_context: window_lifecycle.disarm_window_context,
             language_menu_monitor: Rc::new(slint::Timer::default()),
             language_menu_generation: Arc::new(AtomicU64::new(0)),
             credential_generation: Arc::new(AtomicU64::new(0)),
             toast_next_id: Arc::new(AtomicU64::new(0)),
             toast_records: Arc::new(Mutex::new(Vec::new())),
             background_mode: Rc::new(Cell::new(false)),
+            activate_user_requested_window: window_lifecycle.activate_user_requested_window,
         })
     }
 
@@ -108,6 +127,7 @@ impl Ui {
             toast_next_id: Arc::clone(&self.toast_next_id),
             toast_records: Arc::clone(&self.toast_records),
             disarm_window_context: Arc::clone(&self.disarm_window_context),
+            activate_user_requested_window: self.activate_user_requested_window,
         }
     }
 
@@ -799,6 +819,7 @@ pub struct UiHandle {
     toast_next_id: Arc<AtomicU64>,
     toast_records: Arc<Mutex<Vec<SettingsToastRecord>>>,
     disarm_window_context: DisarmWindowContext,
+    activate_user_requested_window: fn(&slint::Window) -> bool,
 }
 
 impl UiHandle {
@@ -889,6 +910,7 @@ impl UiHandle {
         let disarm_window_context = Arc::clone(&self.disarm_window_context);
         let credential_generation = Arc::clone(&self.credential_generation);
         let toast_records = Arc::clone(&self.toast_records);
+        let activate_user_requested_window = self.activate_user_requested_window;
         let _ = slint::invoke_from_event_loop(move || {
             reset_language_menu_state(
                 &settings,
@@ -906,6 +928,7 @@ impl UiHandle {
                     main.window().set_minimized(false);
                 }
                 let _ = main.show();
+                activate_user_requested_window(main.window());
             }
         });
     }

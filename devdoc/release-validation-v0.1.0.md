@@ -1,6 +1,6 @@
 # Lexift v0.1.0 Release Candidate Validation
 
-日期：2026-09-20
+日期：2026-09-21
 平台：Windows x86_64
 签名状态：Unsigned（未配置 Windows 代码签名证书）
 
@@ -25,6 +25,8 @@
 - 启动项可从旧路径自动修复为当前安装路径；配置关闭开机启动后 Run 值被移除。
 - Portable 从独立目录和不同 working directory 启动成功，且不会在 portable 目录创建 `config.toml`。
 - 日志保留数量符合最多 5 个文件的约束，隐私模式扫描未发现 API Key、选中文字或 Clipboard 内容。
+- 交互安装由 Windows Explorer 启动，确认物理安装目录和快捷方式均为 `%LOCALAPPDATA%\Lexift`。安装器会拒绝恢复 `AppData\Local\Packages` 下由 MSIX 宿主产生的虚拟历史路径。
+- 桌面快捷方式直接使用 `lexift.exe` 内嵌图标；升级后无需先启动应用即可显示正确图标。
 
 ## 安装、升级与卸载验证
 
@@ -33,15 +35,17 @@
 - `uninstall.exe /S /DELETEUSERDATA` 清除 Roaming、Local、稳定 Credential、Run、Uninstall/Product registry。
 - `/DELETEUSERDATA` 是显式 opt-in；省略时静默卸载和升级卸载继续保留用户数据。交互卸载仍由“删除用户数据”复选框控制。
 
-## 仍需最终人工 Smoke Test
+## 已完成人工 Smoke Test
 
-创建不可变的 `v0.1.0` Tag 前仍需在最终 CI Artifact 上确认：
+- 主窗口关闭后进程、托盘和 Hotkey 继续运行，Tray Open/Quit 可用。
+- 注销并重新登录后主窗口保持隐藏，Tray 与 Hotkey 可用。
+- Chrome、Edge、VS Code、Notepad、Word 和 PDF Reader 的真实选择、翻译、Popup 全链路正常。
+- 文本、图片和文件 Clipboard fallback 后原内容仍可粘贴。
+- Popup 不抢焦点，多显示器与屏幕边缘定位正常。
 
-- 主窗口关闭后进程、托盘和 Hotkey 继续运行，Tray Open/Quit 行为正确。
-- 登录启动后主窗口不显示，Tray 与 Hotkey 可用。
-- Chrome、Edge、VS Code、Notepad、Word 和 PDF Reader 的真实选择、翻译、Popup 全链路。
-- 文本、图片和文件 Clipboard fallback 的桌面恢复行为。
-- Popup 不抢焦点及多显示器/屏幕边缘定位。
-- 从 CI Artifact 安装后完成一轮安装、启动、翻译和卸载。
+## 创建 Tag 前剩余门槛
 
-在这些项目完成前不得创建或推送 `v0.1.0` Tag。
+- 在包含本轮修复的最终 CI Artifact 上确认 Tray Open 会将主窗口提升到其他普通窗口前方。
+- 下载并复核最终 CI Artifact 的校验和、安装路径、快捷方式图标、启动和卸载。
+
+完成以上项目之前不得创建或推送 `v0.1.0` Tag。

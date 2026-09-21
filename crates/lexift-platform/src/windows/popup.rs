@@ -10,6 +10,27 @@ pub(crate) fn configure_interactive(
     configure_extended_style(window, interactive_extended_style)
 }
 
+pub(crate) fn activate_user_requested(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, SW_RESTORE, SetForegroundWindow, ShowWindow,
+    };
+
+    let hwnd = required_hwnd(window)?;
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_RESTORE);
+        BringWindowToTop(hwnd)
+            .map_err(|_| lexift_core::Error::new("Could not raise the requested window"))?;
+        if !SetForegroundWindow(hwnd).as_bool() {
+            return Err(lexift_core::Error::new(
+                "Could not activate the requested window",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn configure_extended_style(
     window: &impl raw_window_handle::HasWindowHandle,
     transform: fn(isize) -> isize,

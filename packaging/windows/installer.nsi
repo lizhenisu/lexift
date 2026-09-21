@@ -495,6 +495,11 @@ Section Install
     File /a "/oname={{this}}" "{{@key}}"
   {{/each}}
 
+  ; Remove standalone icon files used by pre-release installers. Released
+  ; shortcuts resolve the icon from the application executable.
+  Delete "$INSTDIR\lexift.ico"
+  Delete "$INSTDIR\lexift-${VERSION}.ico"
+
   ; Copy external binaries
   {{#each binaries}}
     File /a "/oname={{this}}" "{{@key}}"
@@ -672,6 +677,8 @@ Section Uninstall
   ; Delete the app directory and its content from disk
   ; Copy main executable
   Delete "$INSTDIR\${MAINBINARYNAME}.exe"
+  Delete "$INSTDIR\lexift.ico"
+  Delete "$INSTDIR\lexift-${VERSION}.ico"
 
   ; Delete resources
   {{#each resources}}
@@ -753,6 +760,14 @@ FunctionEnd
 Function RestorePreviousInstallLocation
   ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
   StrCmp $4 "" restore_location_done
+
+  ; Reject an AppContainer-redirected LocalAppData path inherited when a desktop
+  ; installer is launched by an MSIX-packaged host such as Codex.
+  ${StrCase} $5 $4 "L"
+  ${StrLoc} $6 $5 "\appdata\local\packages\" ">"
+  StrCmp $6 "" restore_location_check_files restore_location_stale
+
+  restore_location_check_files:
   IfFileExists "$4\uninstall.exe" restore_location_use restore_location_stale
 
   restore_location_use:
@@ -772,12 +787,22 @@ Function SkipIfPassive
 FunctionEnd
 
 Function CreateDesktopShortcut
-  CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+  Delete "$DESKTOP\${PRODUCTNAME}.lnk"
+  System::Call 'shell32::SHChangeNotify(i 0x00000004, i 0x00001005, w "$DESKTOP\${PRODUCTNAME}.lnk", i 0)'
+  CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe" "" "$INSTDIR\${MAINBINARYNAME}.exe" 0 SW_SHOWNORMAL
   ApplicationID::Set "$DESKTOP\${PRODUCTNAME}.lnk" "${IDENTIFIER}"
+  ; Publish the delete/create pair so Explorer resolves the embedded application
+  ; icon instead of reusing a stale shortcut image-list entry.
+  System::Call 'shell32::SHChangeNotify(i 0x00000002, i 0x00001005, w "$DESKTOP\${PRODUCTNAME}.lnk", i 0)'
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x00001000, i 0, i 0)'
 FunctionEnd
 
 Function CreateStartMenuShortcut
   CreateDirectory "$SMPROGRAMS\$AppStartMenuFolder"
-  CreateShortcut "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+  Delete "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk"
+  System::Call 'shell32::SHChangeNotify(i 0x00000004, i 0x00001005, w "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk", i 0)'
+  CreateShortcut "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe" "" "$INSTDIR\${MAINBINARYNAME}.exe" 0 SW_SHOWNORMAL
   ApplicationID::Set "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk" "${IDENTIFIER}"
+  System::Call 'shell32::SHChangeNotify(i 0x00000002, i 0x00001005, w "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk", i 0)'
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x00001000, i 0, i 0)'
 FunctionEnd

@@ -84,11 +84,21 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 }
             })
         }),
-        Arc::new(move || {
-            if let Some(monitor) = &monitor_for_disarm {
-                monitor.disarm();
-            }
-        }),
+        lexift_ui::WindowLifecycleCallbacks::new(
+            Arc::new(move || {
+                if let Some(monitor) = &monitor_for_disarm {
+                    monitor.disarm();
+                }
+            }),
+            |window| match lexift_platform::activate_user_requested_window(&window.window_handle())
+            {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!(%error, "user-requested window activation failed");
+                    false
+                }
+            },
+        ),
     )?;
     let _ = ui_handle_slot.set(ui.handle());
     let controller = Arc::new(

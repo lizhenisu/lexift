@@ -715,6 +715,7 @@ export component SettingsWindow inherits Window {
             }
 
             HorizontalLayout {
+                height: 40px;
                 spacing: Spacing.small;
                 alignment: end;
 
@@ -728,7 +729,9 @@ export component SettingsWindow inherits Window {
 
                 SettingsButton {
                     width: 128px;
-                    visible: !root.credential-configured || root.credential-editing;
+                    visible: root.credential-editing
+                        || (!root.credential-configured
+                            && (root.credential-draft != "" || root.credential-busy));
                     primary: true;
                     label: root.credential-busy ? "Working…" : "Save key";
                     enabled: root.credential-draft != "" && !root.credential-busy;

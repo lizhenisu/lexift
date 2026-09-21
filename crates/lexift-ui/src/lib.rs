@@ -5,4 +5,4 @@ mod placement;
 
 slint::include_modules!();
 
-pub use bridge::{Ui, UiHandle};
+pub use bridge::{Ui, UiHandle, WindowLifecycleCallbacks};

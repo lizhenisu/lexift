@@ -33,7 +33,15 @@ $requiredInstallerFragments = @(
     'CredDeleteW',
     '"/DELETEUSERDATA"',
     'Function un.onUninstSuccess',
-    'SetErrorLevel 1'
+    'SetErrorLevel 1',
+    'Delete "$INSTDIR\lexift.ico"',
+    'Delete "$INSTDIR\lexift-${VERSION}.ico"',
+    '${StrLoc} $6 $5 "\appdata\local\packages\" ">"',
+    'CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe" "" "$INSTDIR\${MAINBINARYNAME}.exe" 0 SW_SHOWNORMAL',
+    'CreateShortcut "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe" "" "$INSTDIR\${MAINBINARYNAME}.exe" 0 SW_SHOWNORMAL',
+    'SHChangeNotify(i 0x00000004, i 0x00001005',
+    'SHChangeNotify(i 0x00000002, i 0x00001005',
+    'SHChangeNotify(i 0x08000000, i 0x00001000'
 )
 foreach ($fragment in $requiredInstallerFragments) {
     if (-not $installerScript.Contains($fragment)) {
@@ -52,4 +60,4 @@ if ($installerScript.Contains('"InstallLocation" "$\"$INSTDIR$\""')) {
 }
 
 Write-Host "Verified Windows GUI executable metadata for $($item.Name) ($($item.Length) bytes)."
-Write-Host "Verified rendered NSIS uninstall cleanup paths and failure handling."
+Write-Host "Verified rendered NSIS cleanup, shortcut icon, and Shell refresh behavior."
