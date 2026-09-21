@@ -1,10 +1,9 @@
-use lexift_core::{AppState, TranslationPhase};
+use lexift_core::{AppState, TranslationPhase, state::PopupSessionState};
 
 pub(crate) struct UiState {
     pub status: String,
     pub busy: bool,
     pub target_language: String,
-    pub source: String,
     pub translated: String,
     pub error: String,
     pub hotkey: String,
@@ -17,6 +16,27 @@ pub(crate) struct UiState {
     pub credential_configured: bool,
     pub credential_busy: bool,
     pub credential_error: String,
+}
+
+#[derive(Clone)]
+pub(crate) struct PopupUiState {
+    pub session_id: u64,
+    pub status: String,
+    pub busy: bool,
+    pub source: String,
+    pub translated: String,
+    pub error: String,
+    pub target_index: i32,
+    pub target_label: String,
+    pub detected_label: String,
+    pub detected_language: String,
+    pub pinned: bool,
+    pub speaking_source: bool,
+    pub speaking_translation: bool,
+    pub feedback: String,
+    pub feedback_error: bool,
+    pub height: f32,
+    pub source_height: f32,
 }
 
 pub(crate) fn view_state(state: &AppState) -> UiState {
@@ -35,7 +55,6 @@ pub(crate) fn view_state(state: &AppState) -> UiState {
             TranslationPhase::Capturing | TranslationPhase::Translating
         ),
         target_language: state.desired_settings.target_language.0.clone(),
-        source: state.source_text.clone(),
         translated: state.translated_text.clone(),
         error: state.error_message.clone(),
         hotkey: state.desired_settings.hotkey.to_string(),
@@ -49,6 +68,111 @@ pub(crate) fn view_state(state: &AppState) -> UiState {
         credential_busy: state.credential_busy,
         credential_error: state.credential_error_message.clone(),
     }
+}
+
+pub(crate) fn popup_states(state: &AppState) -> Vec<PopupUiState> {
+    state.popup_sessions.iter().map(popup_state).collect()
+}
+
+fn popup_state(session: &PopupSessionState) -> PopupUiState {
+    PopupUiState {
+        session_id: session.id.value(),
+        status: phase_label(session.phase).into(),
+        busy: matches!(
+            session.phase,
+            TranslationPhase::Capturing | TranslationPhase::Translating
+        ),
+        source: session.source_text.clone(),
+        translated: session.translated_text.clone(),
+        error: session.error_message.clone(),
+        target_index: language_index(&session.target_language.0),
+        target_label: language_label(&session.target_language.0).into(),
+        detected_label: session
+            .detected_source_language
+            .as_ref()
+            .map(|language| language_label(&language.0))
+            .unwrap_or("Auto detect")
+            .into(),
+        detected_language: session
+            .detected_source_language
+            .as_ref()
+            .map(|language| language.0.clone())
+            .unwrap_or_default(),
+        pinned: session.pinned,
+        speaking_source: session.speaking_source,
+        speaking_translation: session.speaking_translation,
+        feedback: session.feedback_message.clone(),
+        feedback_error: session.feedback_error,
+        height: popup_height(
+            &session.source_text,
+            &session.translated_text,
+            &session.error_message,
+        ),
+        source_height: source_height(&session.source_text),
+    }
+}
+
+fn phase_label(phase: TranslationPhase) -> &'static str {
+    match phase {
+        TranslationPhase::Idle => "Idle",
+        TranslationPhase::NoSelection => "No selection",
+        TranslationPhase::Capturing => "Capturing selection…",
+        TranslationPhase::Translating => "Translating…",
+        TranslationPhase::Success => "Translation complete",
+        TranslationPhase::Error => "Translation failed",
+    }
+}
+
+pub(crate) fn language_index(language: &str) -> i32 {
+    match language {
+        "zh-CN" => 0,
+        "zh-TW" => 1,
+        "en-US" => 2,
+        "en-GB" => 3,
+        "ja" => 4,
+        "ko" => 5,
+        "de" => 6,
+        "fr" => 7,
+        "es" => 8,
+        "it" => 9,
+        "pt-PT" => 10,
+        "pt-BR" => 11,
+        _ => 0,
+    }
+}
+
+pub(crate) fn language_label(language: &str) -> &'static str {
+    match language {
+        "zh-CN" => "简体中文",
+        "zh-TW" => "繁體中文",
+        "en-US" => "English (US)",
+        "en-GB" => "English (UK)",
+        "ja" => "日本語",
+        "ko" => "한국어",
+        "de" => "Deutsch",
+        "fr" => "Français",
+        "es" => "Español",
+        "it" => "Italiano",
+        "pt-PT" => "Português (Portugal)",
+        "pt-BR" => "Português (Brasil)",
+        _ => "Detected",
+    }
+}
+
+fn popup_height(source: &str, translated: &str, error: &str) -> f32 {
+    let source_lines = (source.chars().count().div_ceil(44)).clamp(1, 5);
+    let result_chars = if error.is_empty() {
+        translated.chars().count()
+    } else {
+        error.chars().count()
+    };
+    let result_lines = result_chars.div_ceil(44).clamp(1, 10);
+    (292 + source_lines * 18 + result_lines * 20).clamp(340, 560) as f32
+}
+
+fn source_height(source: &str) -> f32 {
+    let lines = source.chars().count().div_ceil(44).clamp(1, 4);
+    (86 + lines * 14).min(140) as f32
 }
 
 #[cfg(test)]

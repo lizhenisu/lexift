@@ -14,6 +14,7 @@ use lexift_core::{
         screen::ScreenPort,
         selection::SelectionPort,
         settings::SettingsStore,
+        speech::SpeechPort,
         translator::TranslatorPort,
         tray::TrayPort,
     },
@@ -36,6 +37,7 @@ pub(crate) struct AppServices {
     pub(crate) selection: Option<Arc<dyn SelectionPort>>,
     pub(crate) screen: Option<Arc<dyn ScreenPort>>,
     pub(crate) translator: Arc<dyn TranslatorPort>,
+    pub(crate) speech: Option<Arc<dyn SpeechPort>>,
 }
 
 impl AppServices {
@@ -92,6 +94,7 @@ impl AppServices {
         let screen = platform.screen();
         let tray = platform.tray();
         let clipboard = platform.clipboard();
+        let speech = platform.speech();
         #[cfg(not(feature = "m1-demo"))]
         let autostart = platform.autostart();
         #[cfg(not(feature = "m1-demo"))]
@@ -129,6 +132,7 @@ impl AppServices {
             selection,
             screen,
             translator,
+            speech,
         })
     }
 }

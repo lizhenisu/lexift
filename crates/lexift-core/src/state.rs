@@ -1,9 +1,10 @@
 use crate::{
     AppCommand, AppEvent,
     domain::{
+        language::Language,
         runtime_config::RuntimeConfig,
         settings::{Settings, SettingsChange, SettingsFeedback, SettingsField},
-        translation::{TranslateRequest, TranslationTaskId},
+        translation::{PopupSessionId, TranslateRequest, TranslationTaskId},
     },
 };
 
@@ -16,6 +17,23 @@ pub enum TranslationPhase {
     Translating,
     Success,
     Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PopupSessionState {
+    pub id: PopupSessionId,
+    pub phase: TranslationPhase,
+    pub source_text: String,
+    pub translated_text: String,
+    pub error_message: String,
+    pub target_language: Language,
+    pub detected_source_language: Option<Language>,
+    pub pinned: bool,
+    pub current_translation_task: Option<TranslationTaskId>,
+    pub feedback_message: String,
+    pub feedback_error: bool,
+    pub speaking_source: bool,
+    pub speaking_translation: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,7 +58,10 @@ pub struct AppState {
     pub credential_configured: bool,
     pub credential_busy: bool,
     pub credential_error_message: String,
+    pub popup_sessions: Vec<PopupSessionState>,
+    pub active_popup_session: Option<PopupSessionId>,
     next_translation_task: u64,
+    next_popup_session: u64,
     queued_settings_changes: Vec<SettingsChange>,
 }
 
@@ -73,7 +94,10 @@ impl AppState {
             credential_configured: false,
             credential_busy: false,
             credential_error_message: String::new(),
+            popup_sessions: Vec::new(),
+            active_popup_session: None,
             next_translation_task: 0,
+            next_popup_session: 0,
             queued_settings_changes: Vec::new(),
         }
     }
@@ -93,8 +117,14 @@ impl AppState {
             AppEvent::SelectionCaptured { task_id, selection } if self.is_current_task(task_id) => {
                 let anchor = selection.anchor;
                 self.source_text = selection.text.clone();
+                let session_id = self.prepare_active_popup_session(
+                    selection.text.clone(),
+                    self.settings.target_language.clone(),
+                    TranslationPhase::Translating,
+                    Some(task_id),
+                );
                 vec![
-                    AppCommand::ShowPopup { anchor },
+                    AppCommand::ShowPopup { session_id, anchor },
                     AppCommand::Translate {
                         task_id,
                         request: TranslateRequest {
@@ -110,31 +140,72 @@ impl AppState {
                 self.source_text.clear();
                 self.translated_text.clear();
                 self.error_message.clear();
-                vec![AppCommand::HidePopup]
+                self.take_active_popup()
+                    .map(|session_id| vec![AppCommand::HidePopup { session_id }])
+                    .unwrap_or_default()
             }
             AppEvent::SelectionCaptureFailed { task_id, error }
                 if self.is_current_task(task_id) =>
             {
                 self.phase = TranslationPhase::Error;
-                self.error_message = error;
+                self.error_message = error.clone();
                 self.current_translation_task = None;
-                vec![AppCommand::ShowPopup { anchor: None }]
+                let session_id = self.prepare_active_popup_session(
+                    String::new(),
+                    self.settings.target_language.clone(),
+                    TranslationPhase::Error,
+                    None,
+                );
+                if let Some(session) = self.popup_session_mut(session_id) {
+                    session.error_message = error;
+                }
+                vec![AppCommand::ShowPopup {
+                    session_id,
+                    anchor: None,
+                }]
             }
             AppEvent::TranslationStarted { task_id } if self.is_current_task(task_id) => {
                 self.phase = TranslationPhase::Translating;
+                if let Some(session) = self
+                    .popup_sessions
+                    .iter_mut()
+                    .find(|session| session.current_translation_task == Some(task_id))
+                {
+                    session.phase = TranslationPhase::Translating;
+                }
                 Vec::new()
             }
             AppEvent::TranslationFinished { task_id, result } if self.is_current_task(task_id) => {
                 self.phase = TranslationPhase::Success;
-                self.translated_text = result.text;
+                self.translated_text = result.text.clone();
                 self.error_message.clear();
                 self.current_translation_task = None;
+                if let Some(session) = self
+                    .popup_sessions
+                    .iter_mut()
+                    .find(|session| session.current_translation_task == Some(task_id))
+                {
+                    session.phase = TranslationPhase::Success;
+                    session.translated_text = result.text;
+                    session.detected_source_language = result.detected_source_language;
+                    session.error_message.clear();
+                    session.current_translation_task = None;
+                }
                 Vec::new()
             }
             AppEvent::TranslationFailed { task_id, error } if self.is_current_task(task_id) => {
                 self.phase = TranslationPhase::Error;
-                self.error_message = error;
+                self.error_message = error.clone();
                 self.current_translation_task = None;
+                if let Some(session) = self
+                    .popup_sessions
+                    .iter_mut()
+                    .find(|session| session.current_translation_task == Some(task_id))
+                {
+                    session.phase = TranslationPhase::Error;
+                    session.error_message = error;
+                    session.current_translation_task = None;
+                }
                 Vec::new()
             }
             AppEvent::SelectionCaptured { .. }
@@ -143,10 +214,130 @@ impl AppState {
             | AppEvent::TranslationStarted { .. }
             | AppEvent::TranslationFinished { .. }
             | AppEvent::TranslationFailed { .. } => Vec::new(),
-            AppEvent::PopupHidden => {
-                self.phase = TranslationPhase::Idle;
-                self.current_translation_task = None;
-                vec![AppCommand::HidePopup]
+            AppEvent::PopupTranslationRequested {
+                session_id,
+                text,
+                target_language,
+            } => self.request_popup_translation(session_id, text, target_language),
+            AppEvent::PopupTranslationStarted {
+                session_id,
+                task_id,
+            } => {
+                if let Some(session) = self.popup_session_mut(session_id)
+                    && session.current_translation_task == Some(task_id)
+                {
+                    session.phase = TranslationPhase::Translating;
+                }
+                Vec::new()
+            }
+            AppEvent::PopupTranslationFinished {
+                session_id,
+                task_id,
+                result,
+            } => {
+                if let Some(session) = self.popup_session_mut(session_id)
+                    && session.current_translation_task == Some(task_id)
+                {
+                    session.phase = TranslationPhase::Success;
+                    session.translated_text = result.text;
+                    session.detected_source_language = result.detected_source_language;
+                    session.error_message.clear();
+                    session.current_translation_task = None;
+                }
+                Vec::new()
+            }
+            AppEvent::PopupTranslationFailed {
+                session_id,
+                task_id,
+                error,
+            } => {
+                if let Some(session) = self.popup_session_mut(session_id)
+                    && session.current_translation_task == Some(task_id)
+                {
+                    session.phase = TranslationPhase::Error;
+                    session.error_message = error;
+                    session.current_translation_task = None;
+                }
+                Vec::new()
+            }
+            AppEvent::PopupPinChanged { session_id, pinned } => {
+                let Some(session) = self.popup_session_mut(session_id) else {
+                    return Vec::new();
+                };
+                session.pinned = pinned;
+                if pinned && self.active_popup_session == Some(session_id) {
+                    self.active_popup_session = None;
+                } else if !pinned {
+                    let previous = self
+                        .active_popup_session
+                        .filter(|previous| *previous != session_id);
+                    self.active_popup_session = Some(session_id);
+                    if let Some(previous) = previous {
+                        if let Some(index) = self
+                            .popup_sessions
+                            .iter()
+                            .position(|session| session.id == previous && !session.pinned)
+                        {
+                            self.popup_sessions.remove(index);
+                            return vec![
+                                AppCommand::StopPopupSpeech {
+                                    session_id: previous,
+                                },
+                                AppCommand::HidePopup {
+                                    session_id: previous,
+                                },
+                            ];
+                        }
+                    }
+                }
+                Vec::new()
+            }
+            AppEvent::PopupClosed { session_id } => self.close_popup_session(session_id),
+            AppEvent::PopupCopyRequested { session_id, text } => {
+                if self.popup_session_mut(session_id).is_none() || text.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![AppCommand::CopyPopupText { session_id, text }]
+                }
+            }
+            AppEvent::PopupCopyFinished { session_id, error } => {
+                if let Some(session) = self.popup_session_mut(session_id) {
+                    session.feedback_error = error.is_some();
+                    session.feedback_message = error.unwrap_or_else(|| "Copied".into());
+                }
+                Vec::new()
+            }
+            AppEvent::PopupFeedbackCleared { session_id } => {
+                if let Some(session) = self.popup_session_mut(session_id) {
+                    session.feedback_message.clear();
+                    session.feedback_error = false;
+                }
+                Vec::new()
+            }
+            AppEvent::PopupSpeechRequested {
+                session_id,
+                source,
+                text,
+                language,
+            } => self.request_popup_speech(session_id, source, text, language),
+            AppEvent::PopupSpeechStateChanged {
+                session_id,
+                source,
+                speaking,
+                error,
+            } => {
+                if let Some(session) = self.popup_session_mut(session_id) {
+                    if source {
+                        session.speaking_source = speaking;
+                    } else {
+                        session.speaking_translation = speaking;
+                    }
+                    if let Some(error) = error {
+                        session.feedback_message = error;
+                        session.feedback_error = true;
+                    }
+                }
+                Vec::new()
             }
             AppEvent::MainWindowRequested => vec![AppCommand::ShowMainWindow],
             AppEvent::SettingsWindowRequested => {
@@ -440,6 +631,171 @@ impl AppState {
         }]
     }
 
+    fn request_popup_translation(
+        &mut self,
+        session_id: PopupSessionId,
+        text: String,
+        target_language: Language,
+    ) -> Vec<AppCommand> {
+        let text = text.trim().to_owned();
+        if text.is_empty() {
+            if let Some(session) = self.popup_session_mut(session_id) {
+                session.phase = TranslationPhase::Error;
+                session.error_message = "Translation text cannot be empty".into();
+            }
+            return Vec::new();
+        }
+        if self.popup_session_mut(session_id).is_none() {
+            return Vec::new();
+        }
+
+        let task_id = self.next_task_id();
+        let session = self
+            .popup_session_mut(session_id)
+            .expect("popup session was checked above");
+        session.phase = TranslationPhase::Translating;
+        session.source_text = text.clone();
+        session.target_language = target_language.clone();
+        session.translated_text.clear();
+        session.error_message.clear();
+        session.detected_source_language = None;
+        session.current_translation_task = Some(task_id);
+        vec![AppCommand::TranslatePopup {
+            session_id,
+            task_id,
+            request: TranslateRequest {
+                text,
+                target_language,
+            },
+        }]
+    }
+
+    fn request_popup_speech(
+        &mut self,
+        session_id: PopupSessionId,
+        source: bool,
+        text: String,
+        language: Option<Language>,
+    ) -> Vec<AppCommand> {
+        let text = text.trim().to_owned();
+        let Some(session) = self.popup_session_mut(session_id) else {
+            return Vec::new();
+        };
+        if text.is_empty() {
+            session.feedback_message = "There is no text to read".into();
+            session.feedback_error = true;
+            return Vec::new();
+        }
+        let already_speaking = if source {
+            session.speaking_source
+        } else {
+            session.speaking_translation
+        };
+        if already_speaking {
+            session.speaking_source = false;
+            session.speaking_translation = false;
+            return vec![AppCommand::StopPopupSpeech { session_id }];
+        }
+        for session in &mut self.popup_sessions {
+            session.speaking_source = false;
+            session.speaking_translation = false;
+        }
+        if let Some(session) = self.popup_session_mut(session_id) {
+            session.speaking_source = source;
+            session.speaking_translation = !source;
+        }
+        vec![AppCommand::SpeakPopupText {
+            session_id,
+            source,
+            text,
+            language,
+        }]
+    }
+
+    fn prepare_active_popup_session(
+        &mut self,
+        source_text: String,
+        target_language: Language,
+        phase: TranslationPhase,
+        task_id: Option<TranslationTaskId>,
+    ) -> PopupSessionId {
+        let session_id = self.active_popup_session.filter(|id| {
+            self.popup_sessions
+                .iter()
+                .any(|session| session.id == *id && !session.pinned)
+        });
+        let session_id = session_id.unwrap_or_else(|| {
+            self.next_popup_session = self.next_popup_session.wrapping_add(1);
+            if self.next_popup_session == 0 {
+                self.next_popup_session = 1;
+            }
+            let id = PopupSessionId::new(self.next_popup_session);
+            self.popup_sessions.push(PopupSessionState {
+                id,
+                phase,
+                source_text: String::new(),
+                translated_text: String::new(),
+                error_message: String::new(),
+                target_language: target_language.clone(),
+                detected_source_language: None,
+                pinned: false,
+                current_translation_task: None,
+                feedback_message: String::new(),
+                feedback_error: false,
+                speaking_source: false,
+                speaking_translation: false,
+            });
+            id
+        });
+        self.active_popup_session = Some(session_id);
+        let session = self
+            .popup_session_mut(session_id)
+            .expect("active popup session must exist");
+        session.phase = phase;
+        session.source_text = source_text;
+        session.translated_text.clear();
+        session.error_message.clear();
+        session.target_language = target_language;
+        session.detected_source_language = None;
+        session.current_translation_task = task_id;
+        session.feedback_message.clear();
+        session.feedback_error = false;
+        session.speaking_source = false;
+        session.speaking_translation = false;
+        session_id
+    }
+
+    fn close_popup_session(&mut self, session_id: PopupSessionId) -> Vec<AppCommand> {
+        let Some(index) = self
+            .popup_sessions
+            .iter()
+            .position(|session| session.id == session_id)
+        else {
+            return Vec::new();
+        };
+        self.popup_sessions.remove(index);
+        if self.active_popup_session == Some(session_id) {
+            self.active_popup_session = None;
+        }
+        vec![
+            AppCommand::StopPopupSpeech { session_id },
+            AppCommand::HidePopup { session_id },
+        ]
+    }
+
+    fn take_active_popup(&mut self) -> Option<PopupSessionId> {
+        let session_id = self.active_popup_session.take()?;
+        self.popup_sessions
+            .retain(|session| session.id != session_id);
+        Some(session_id)
+    }
+
+    fn popup_session_mut(&mut self, session_id: PopupSessionId) -> Option<&mut PopupSessionState> {
+        self.popup_sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+    }
+
     fn begin_translation_task(&mut self) -> TranslationTaskId {
         let task_id = self.next_task_id();
         self.current_translation_task = Some(task_id);
@@ -495,6 +851,7 @@ mod tests {
             commands,
             vec![
                 AppCommand::ShowPopup {
+                    session_id: PopupSessionId::new(1),
                     anchor: Some(Point { x: 10, y: 20 }),
                 },
                 AppCommand::Translate {
@@ -516,6 +873,7 @@ mod tests {
             task_id: TranslationTaskId::new(1),
             result: TranslateResult {
                 text: "你好，世界".into(),
+                detected_source_language: None,
             },
         });
         assert_eq!(state.phase, TranslationPhase::Success);
@@ -541,7 +899,10 @@ mod tests {
                 },
             }),
             vec![
-                AppCommand::ShowPopup { anchor: None },
+                AppCommand::ShowPopup {
+                    session_id: PopupSessionId::new(1),
+                    anchor: None
+                },
                 AppCommand::Translate {
                     task_id: TranslationTaskId::new(1),
                     request: TranslateRequest {
@@ -649,6 +1010,7 @@ mod tests {
             task_id: TranslationTaskId::new(1),
             result: TranslateResult {
                 text: "stale result".into(),
+                detected_source_language: None,
             },
         });
         assert!(state.translated_text.is_empty());
@@ -657,6 +1019,7 @@ mod tests {
             task_id: TranslationTaskId::new(2),
             result: TranslateResult {
                 text: "current result".into(),
+                detected_source_language: None,
             },
         });
         assert_eq!(state.phase, TranslationPhase::Success);
@@ -704,7 +1067,10 @@ mod tests {
                 task_id: TranslationTaskId::new(1),
                 error: "No selected text was found".into(),
             }),
-            vec![AppCommand::ShowPopup { anchor: None }]
+            vec![AppCommand::ShowPopup {
+                session_id: PopupSessionId::new(1),
+                anchor: None
+            }]
         );
         assert_eq!(state.phase, TranslationPhase::Error);
         assert_eq!(state.current_translation_task, None);
@@ -712,7 +1078,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_selection_hides_the_previous_popup() {
+    fn empty_selection_without_a_visible_popup_has_nothing_to_hide() {
         let mut state = AppState::default();
         state.reduce(AppEvent::SelectionTranslationRequested);
 
@@ -720,11 +1086,112 @@ mod tests {
             state.reduce(AppEvent::SelectionCaptureEmpty {
                 task_id: TranslationTaskId::new(1),
             }),
-            vec![AppCommand::HidePopup]
+            Vec::<AppCommand>::new()
         );
         assert_eq!(state.phase, TranslationPhase::NoSelection);
         assert_eq!(state.current_translation_task, None);
         assert!(state.error_message.is_empty());
+    }
+
+    fn create_popup_session(state: &mut AppState, text: &str) -> PopupSessionId {
+        state.reduce(AppEvent::SelectionTranslationRequested);
+        let task_id = state.current_translation_task.expect("capture task");
+        state.reduce(AppEvent::SelectionCaptured {
+            task_id,
+            selection: Selection {
+                text: text.into(),
+                anchor: None,
+            },
+        });
+        state.active_popup_session.expect("active popup")
+    }
+
+    #[test]
+    fn reuses_unpinned_session_and_creates_a_new_one_after_pin() {
+        let mut state = AppState::default();
+        let first = create_popup_session(&mut state, "first");
+        let reused = create_popup_session(&mut state, "second");
+        assert_eq!(reused, first);
+        assert_eq!(state.popup_sessions.len(), 1);
+        assert_eq!(state.popup_sessions[0].source_text, "second");
+
+        state.reduce(AppEvent::PopupPinChanged {
+            session_id: first,
+            pinned: true,
+        });
+        let second = create_popup_session(&mut state, "third");
+        assert_ne!(second, first);
+        assert_eq!(state.popup_sessions.len(), 2);
+        assert!(
+            state
+                .popup_sessions
+                .iter()
+                .any(|session| session.id == first && session.pinned)
+        );
+    }
+
+    #[test]
+    fn popup_target_language_is_local_to_the_session() {
+        let mut state = AppState::default();
+        let session_id = create_popup_session(&mut state, "hello");
+        let commands = state.reduce(AppEvent::PopupTranslationRequested {
+            session_id,
+            text: "edited".into(),
+            target_language: Language("ja".into()),
+        });
+
+        assert_eq!(state.settings.target_language, Language("zh-CN".into()));
+        assert_eq!(
+            state.popup_sessions[0].target_language,
+            Language("ja".into())
+        );
+        assert!(matches!(
+            &commands[..],
+            [AppCommand::TranslatePopup { session_id: id, request, .. }]
+                if *id == session_id && request.target_language == Language("ja".into())
+        ));
+    }
+
+    #[test]
+    fn popup_sessions_reject_stale_and_closed_results() {
+        let mut state = AppState::default();
+        let session_id = create_popup_session(&mut state, "hello");
+        state.reduce(AppEvent::PopupTranslationRequested {
+            session_id,
+            text: "first edit".into(),
+            target_language: Language("de".into()),
+        });
+        let stale_task = state.popup_sessions[0]
+            .current_translation_task
+            .expect("first task");
+        state.reduce(AppEvent::PopupTranslationRequested {
+            session_id,
+            text: "second edit".into(),
+            target_language: Language("fr".into()),
+        });
+        let current_task = state.popup_sessions[0]
+            .current_translation_task
+            .expect("second task");
+        state.reduce(AppEvent::PopupTranslationFinished {
+            session_id,
+            task_id: stale_task,
+            result: TranslateResult {
+                text: "stale".into(),
+                detected_source_language: None,
+            },
+        });
+        assert!(state.popup_sessions[0].translated_text.is_empty());
+
+        state.reduce(AppEvent::PopupClosed { session_id });
+        state.reduce(AppEvent::PopupTranslationFinished {
+            session_id,
+            task_id: current_task,
+            result: TranslateResult {
+                text: "late".into(),
+                detected_source_language: None,
+            },
+        });
+        assert!(state.popup_sessions.is_empty());
     }
 
     #[test]
@@ -757,6 +1224,7 @@ mod tests {
                     task_id: TranslationTaskId::new(1),
                     result: TranslateResult {
                         text: "stale result".into(),
+                        detected_source_language: None,
                     },
                 })
                 .is_empty()
@@ -772,6 +1240,7 @@ mod tests {
             task_id: TranslationTaskId::new(2),
             result: TranslateResult {
                 text: "current result".into(),
+                detected_source_language: None,
             },
         });
         assert_eq!(state.phase, TranslationPhase::Success);

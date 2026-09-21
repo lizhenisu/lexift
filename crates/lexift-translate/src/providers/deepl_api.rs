@@ -95,6 +95,10 @@ impl DeepLResponse {
             .ok_or_else(|| Error::new("DeepL returned no translations"))?;
         Ok(TranslateResult {
             text: translation.text,
+            detected_source_language: translation
+                .detected_source_language
+                .as_deref()
+                .map(normalize_detected_language),
         })
     }
 }
@@ -103,7 +107,23 @@ impl DeepLResponse {
 struct DeepLTranslation {
     text: String,
     #[serde(rename = "detected_source_language")]
-    _detected_source_language: Option<String>,
+    detected_source_language: Option<String>,
+}
+
+fn normalize_detected_language(code: &str) -> Language {
+    let code = match code {
+        "EN" => "en-US",
+        "ZH" => "zh-CN",
+        "JA" => "ja",
+        "KO" => "ko",
+        "DE" => "de",
+        "FR" => "fr",
+        "ES" => "es",
+        "IT" => "it",
+        "PT" => "pt-PT",
+        other => return Language(other.to_ascii_lowercase()),
+    };
+    Language(code.into())
 }
 
 fn endpoint_for_auth_key(auth_key: &str) -> &'static str {
@@ -327,9 +347,11 @@ mod tests {
         )
         .expect("valid DeepL response");
 
+        let result = response.into_result().expect("translation result");
+        assert_eq!(result.text, "你好，世界");
         assert_eq!(
-            response.into_result().expect("translation result").text,
-            "你好，世界"
+            result.detected_source_language,
+            Some(Language("en-US".into()))
         );
     }
 
@@ -377,6 +399,10 @@ mod tests {
         let result = translate_through(endpoint, Duration::from_secs(2), request("Hello world"))
             .expect("local translation should succeed");
         assert_eq!(result.text, "你好，世界");
+        assert_eq!(
+            result.detected_source_language,
+            Some(Language("en-US".into()))
+        );
 
         let captured = requests.recv().expect("request should be captured");
         assert!(captured.head.starts_with("POST /v2/translate HTTP/1.1"));

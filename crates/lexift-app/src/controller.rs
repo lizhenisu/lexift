@@ -9,6 +9,7 @@ use lexift_core::{
         geometry::{Point, Rect},
         runtime_config::RuntimeConfig,
         settings::{Settings, SettingsChange, SettingsFeedback},
+        translation::PopupSessionId,
     },
     ports::{
         clipboard::ClipboardPort,
@@ -20,6 +21,7 @@ use lexift_core::{
         screen::ScreenPort,
         selection::SelectionPort,
         settings::SettingsStore,
+        speech::{SpeechPort, SpeechRequest},
         translator::TranslatorPort,
         tray::{TrayAction, TrayHandler},
     },
@@ -30,8 +32,13 @@ use crate::runtime::RuntimeManager;
 
 pub(crate) trait ViewPort: Send + Sync {
     fn update(&self, state: AppState);
-    fn show_popup(&self, anchor: Option<Point>, work_area: Option<Rect>);
-    fn hide_popup(&self);
+    fn show_popup(
+        &self,
+        session_id: PopupSessionId,
+        anchor: Option<Point>,
+        work_area: Option<Rect>,
+    );
+    fn hide_popup(&self, session_id: PopupSessionId);
     fn show_main_window(&self);
     fn show_settings_window(&self, settings: Settings);
     fn hide_settings_window(&self);
@@ -51,12 +58,17 @@ impl ViewPort for lexift_ui::UiHandle {
         self.update(state);
     }
 
-    fn show_popup(&self, anchor: Option<Point>, work_area: Option<Rect>) {
-        self.show_popup(anchor, work_area);
+    fn show_popup(
+        &self,
+        session_id: PopupSessionId,
+        anchor: Option<Point>,
+        work_area: Option<Rect>,
+    ) {
+        self.show_popup(session_id, anchor, work_area);
     }
 
-    fn hide_popup(&self) {
-        self.hide_popup();
+    fn hide_popup(&self, session_id: PopupSessionId) {
+        self.hide_popup(session_id);
     }
 
     fn show_main_window(&self) {
@@ -105,6 +117,7 @@ pub(crate) struct AppController {
     credential_store: Option<Arc<dyn CredentialStore>>,
     credential_reference: Option<Arc<RwLock<Option<String>>>>,
     clipboard: Option<Arc<dyn ClipboardPort>>,
+    speech: Option<Arc<dyn SpeechPort>>,
     ui: Arc<dyn ViewPort>,
     selection_capture_in_flight: AtomicBool,
     state_changed: Arc<Notify>,
@@ -131,6 +144,7 @@ impl AppController {
             credential_store: None,
             credential_reference: None,
             clipboard: None,
+            speech: None,
             ui,
             selection_capture_in_flight: AtomicBool::new(false),
             state_changed: Arc::new(Notify::new()),
@@ -151,6 +165,11 @@ impl AppController {
         self.credential_store = Some(store);
         self.credential_reference = Some(credential_reference);
         self.clipboard = clipboard;
+        self
+    }
+
+    pub(crate) fn with_speech(mut self, speech: Option<Arc<dyn SpeechPort>>) -> Self {
+        self.speech = speech;
         self
     }
 
@@ -209,8 +228,50 @@ impl AppController {
         match command {
             AppCommand::CaptureSelection { task_id } => self.capture_selection(task_id),
             AppCommand::Translate { task_id, request } => self.translate(task_id, request),
-            AppCommand::ShowPopup { anchor } => self.show_popup(anchor),
-            AppCommand::HidePopup => self.ui.hide_popup(),
+            AppCommand::TranslatePopup {
+                session_id,
+                task_id,
+                request,
+            } => self.translate_popup(session_id, task_id, request),
+            AppCommand::ShowPopup { session_id, anchor } => self.show_popup(session_id, anchor),
+            AppCommand::HidePopup { session_id } => self.ui.hide_popup(session_id),
+            AppCommand::CopyPopupText { session_id, text } => {
+                self.copy_popup_text(session_id, text)
+            }
+            AppCommand::SpeakPopupText {
+                session_id,
+                source,
+                text,
+                language,
+            } => {
+                if let Some(speech) = &self.speech {
+                    if let Err(error) = speech.speak(SpeechRequest {
+                        session_id,
+                        source,
+                        text,
+                        language,
+                    }) {
+                        self.dispatch(AppEvent::PopupSpeechStateChanged {
+                            session_id,
+                            source,
+                            speaking: false,
+                            error: Some(error.to_string()),
+                        });
+                    }
+                } else {
+                    self.dispatch(AppEvent::PopupSpeechStateChanged {
+                        session_id,
+                        source,
+                        speaking: false,
+                        error: Some("Speech is unavailable".into()),
+                    });
+                }
+            }
+            AppCommand::StopPopupSpeech { session_id } => {
+                if let Some(speech) = &self.speech {
+                    let _ = speech.stop(session_id);
+                }
+            }
             AppCommand::ShowMainWindow => self.ui.show_main_window(),
             AppCommand::ShowSettingsWindow => {
                 let settings = self
@@ -502,9 +563,9 @@ impl AppController {
         });
     }
 
-    fn show_popup(&self, selection_anchor: Option<Point>) {
+    fn show_popup(&self, session_id: PopupSessionId, selection_anchor: Option<Point>) {
         let Some(screen) = &self.screen else {
-            self.ui.show_popup(None, None);
+            self.ui.show_popup(session_id, None, None);
             return;
         };
 
@@ -523,7 +584,7 @@ impl AppController {
             }
         });
 
-        self.ui.show_popup(anchor, work_area);
+        self.ui.show_popup(session_id, anchor, work_area);
     }
 
     fn capture_selection(self: &Arc<Self>, task_id: TranslationTaskId) {
@@ -583,6 +644,56 @@ impl AppController {
             }
         });
     }
+
+    fn translate_popup(
+        self: &Arc<Self>,
+        session_id: PopupSessionId,
+        task_id: TranslationTaskId,
+        request: lexift_core::domain::translation::TranslateRequest,
+    ) {
+        self.dispatch(AppEvent::PopupTranslationStarted {
+            session_id,
+            task_id,
+        });
+        let controller = Arc::clone(self);
+        let translator = Arc::clone(&self.translator);
+        self.runtime.spawn(async move {
+            match lexift_core::usecases::translate_input::execute(translator.as_ref(), request)
+                .await
+            {
+                Ok(result) => controller.dispatch(AppEvent::PopupTranslationFinished {
+                    session_id,
+                    task_id,
+                    result,
+                }),
+                Err(error) => controller.dispatch(AppEvent::PopupTranslationFailed {
+                    session_id,
+                    task_id,
+                    error: error.to_string(),
+                }),
+            }
+        });
+    }
+
+    fn copy_popup_text(self: &Arc<Self>, session_id: PopupSessionId, text: String) {
+        let Some(clipboard) = self.clipboard.clone() else {
+            self.dispatch(AppEvent::PopupCopyFinished {
+                session_id,
+                error: Some("System clipboard is unavailable".into()),
+            });
+            return;
+        };
+        let controller = Arc::clone(self);
+        self.runtime.spawn(async move {
+            let result = tokio::task::spawn_blocking(move || clipboard.write_text(&text)).await;
+            let error = match result {
+                Ok(Ok(())) => None,
+                Ok(Err(error)) => Some(format!("Could not copy text: {error}")),
+                Err(error) => Some(format!("Clipboard worker failed: {error}")),
+            };
+            controller.dispatch(AppEvent::PopupCopyFinished { session_id, error });
+        });
+    }
 }
 
 fn event_name(event: &AppEvent) -> &'static str {
@@ -596,7 +707,17 @@ fn event_name(event: &AppEvent) -> &'static str {
         AppEvent::TranslationStarted { .. } => "translation_started",
         AppEvent::TranslationFinished { .. } => "translation_finished",
         AppEvent::TranslationFailed { .. } => "translation_failed",
-        AppEvent::PopupHidden => "popup_hidden",
+        AppEvent::PopupTranslationRequested { .. } => "popup_translation_requested",
+        AppEvent::PopupTranslationStarted { .. } => "popup_translation_started",
+        AppEvent::PopupTranslationFinished { .. } => "popup_translation_finished",
+        AppEvent::PopupTranslationFailed { .. } => "popup_translation_failed",
+        AppEvent::PopupPinChanged { .. } => "popup_pin_changed",
+        AppEvent::PopupClosed { .. } => "popup_closed",
+        AppEvent::PopupCopyRequested { .. } => "popup_copy_requested",
+        AppEvent::PopupCopyFinished { .. } => "popup_copy_finished",
+        AppEvent::PopupFeedbackCleared { .. } => "popup_feedback_cleared",
+        AppEvent::PopupSpeechRequested { .. } => "popup_speech_requested",
+        AppEvent::PopupSpeechStateChanged { .. } => "popup_speech_state_changed",
         AppEvent::MainWindowRequested => "main_window_requested",
         AppEvent::SettingsWindowRequested => "settings_window_requested",
         AppEvent::SettingsChangeRequested { .. } => "settings_change_requested",
@@ -702,7 +823,12 @@ mod tests {
                 .push(state);
         }
 
-        fn show_popup(&self, anchor: Option<Point>, work_area: Option<Rect>) {
+        fn show_popup(
+            &self,
+            _session_id: PopupSessionId,
+            anchor: Option<Point>,
+            work_area: Option<Rect>,
+        ) {
             *self
                 .popup_context
                 .lock()
@@ -710,7 +836,7 @@ mod tests {
             self.popup_shown.store(true, Ordering::SeqCst);
         }
 
-        fn hide_popup(&self) {}
+        fn hide_popup(&self, _session_id: PopupSessionId) {}
 
         fn show_main_window(&self) {
             self.main_window_shown.store(true, Ordering::SeqCst);
@@ -1000,7 +1126,10 @@ mod tests {
                     10
                 };
                 tokio::time::sleep(Duration::from_millis(delay)).await;
-                Ok(TranslateResult { text: request.text })
+                Ok(TranslateResult {
+                    text: request.text,
+                    detected_source_language: None,
+                })
             })
         }
     }
@@ -1029,7 +1158,7 @@ mod tests {
             view.clone(),
         );
 
-        controller.show_popup(Some(anchor));
+        controller.show_popup(PopupSessionId::new(1), Some(anchor));
 
         assert_eq!(
             *view
@@ -1061,7 +1190,7 @@ mod tests {
             view.clone(),
         );
 
-        controller.show_popup(None);
+        controller.show_popup(PopupSessionId::new(1), None);
 
         assert_eq!(
             *view

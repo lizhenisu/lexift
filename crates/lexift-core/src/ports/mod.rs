@@ -6,5 +6,6 @@ pub mod instance;
 pub mod screen;
 pub mod selection;
 pub mod settings;
+pub mod speech;
 pub mod translator;
 pub mod tray;

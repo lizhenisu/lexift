@@ -3,7 +3,7 @@ use std::sync::Arc;
 use lexift_core::ports::{
     autostart::AutostartPort, clipboard::ClipboardPort, credential::CredentialStore,
     hotkey::HotkeyPort, instance::InstancePort, screen::ScreenPort, selection::SelectionPort,
-    tray::TrayPort,
+    speech::SpeechPort, tray::TrayPort,
 };
 
 #[cfg(feature = "mock")]
@@ -19,6 +19,7 @@ pub struct PlatformCapabilities {
     clipboard: Option<Arc<dyn ClipboardPort>>,
     autostart: Option<Arc<dyn AutostartPort>>,
     instance: Option<Arc<dyn InstancePort>>,
+    speech: Option<Arc<dyn SpeechPort>>,
 }
 
 impl PlatformCapabilities {
@@ -59,6 +60,10 @@ impl PlatformCapabilities {
             instance: Some(Arc::new(crate::windows::WindowsInstancePort::new())),
             #[cfg(not(target_os = "windows"))]
             instance: None,
+            #[cfg(target_os = "windows")]
+            speech: Some(Arc::new(crate::windows::WindowsSpeechPort::new())),
+            #[cfg(not(target_os = "windows"))]
+            speech: None,
         }
     }
 
@@ -73,6 +78,7 @@ impl PlatformCapabilities {
             clipboard: None,
             autostart: None,
             instance: None,
+            speech: None,
         }
     }
 
@@ -106,6 +112,10 @@ impl PlatformCapabilities {
 
     pub fn instance(&self) -> Option<Arc<dyn InstancePort>> {
         self.instance.as_ref().map(Arc::clone)
+    }
+
+    pub fn speech(&self) -> Option<Arc<dyn SpeechPort>> {
+        self.speech.as_ref().map(Arc::clone)
     }
 }
 

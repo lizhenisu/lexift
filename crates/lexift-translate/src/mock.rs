@@ -15,6 +15,9 @@ impl TranslatorPort for MockTranslator {
             if request.text == "Hello world" {
                 Ok(TranslateResult {
                     text: "你好，世界".into(),
+                    detected_source_language: Some(lexift_core::domain::language::Language(
+                        "en-US".into(),
+                    )),
                 })
             } else {
                 Err(lexift_core::Error::new(

@@ -1,8 +1,9 @@
 use crate::domain::{
+    language::Language,
     runtime_config::RuntimeConfig,
     selection::Selection,
     settings::{Settings, SettingsChange},
-    translation::{TranslateResult, TranslationTaskId},
+    translation::{PopupSessionId, TranslateResult, TranslationTaskId},
 };
 use crate::ports::credential::{CredentialAccessPurpose, CredentialSecret};
 
@@ -35,7 +36,55 @@ pub enum AppEvent {
         task_id: TranslationTaskId,
         error: String,
     },
-    PopupHidden,
+    PopupTranslationRequested {
+        session_id: PopupSessionId,
+        text: String,
+        target_language: Language,
+    },
+    PopupTranslationStarted {
+        session_id: PopupSessionId,
+        task_id: TranslationTaskId,
+    },
+    PopupTranslationFinished {
+        session_id: PopupSessionId,
+        task_id: TranslationTaskId,
+        result: TranslateResult,
+    },
+    PopupTranslationFailed {
+        session_id: PopupSessionId,
+        task_id: TranslationTaskId,
+        error: String,
+    },
+    PopupPinChanged {
+        session_id: PopupSessionId,
+        pinned: bool,
+    },
+    PopupClosed {
+        session_id: PopupSessionId,
+    },
+    PopupCopyRequested {
+        session_id: PopupSessionId,
+        text: String,
+    },
+    PopupCopyFinished {
+        session_id: PopupSessionId,
+        error: Option<String>,
+    },
+    PopupFeedbackCleared {
+        session_id: PopupSessionId,
+    },
+    PopupSpeechRequested {
+        session_id: PopupSessionId,
+        source: bool,
+        text: String,
+        language: Option<Language>,
+    },
+    PopupSpeechStateChanged {
+        session_id: PopupSessionId,
+        source: bool,
+        speaking: bool,
+        error: Option<String>,
+    },
     MainWindowRequested,
     SettingsWindowRequested,
     SettingsChangeRequested {

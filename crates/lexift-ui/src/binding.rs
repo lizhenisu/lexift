@@ -1,20 +1,11 @@
 use crate::{AppWindow, SettingsWindow, TranslationPopup, mapper::UiState};
 
-pub(crate) fn apply(
-    main: &AppWindow,
-    popup: &TranslationPopup,
-    settings: &SettingsWindow,
-    state: UiState,
-) {
+pub(crate) fn apply(main: &AppWindow, settings: &SettingsWindow, state: UiState) {
     main.set_status_text(state.status.clone().into());
     main.set_translation_busy(state.busy);
     main.set_target_language(state.target_language.clone().into());
     main.set_translated_text(state.translated.clone().into());
     main.set_error_text(state.error.clone().into());
-    popup.set_phase_text(state.status.into());
-    popup.set_source_text(state.source.into());
-    popup.set_translated_text(state.translated.into());
-    popup.set_error_text(state.error.into());
     let target_index = language_index(&state.target_language);
     if settings.get_draft_target_index() != target_index {
         settings.set_draft_target_index(target_index);
@@ -52,6 +43,26 @@ pub(crate) fn apply(
     if settings.get_credential_error_text().as_str() != state.credential_error {
         settings.set_credential_error_text(state.credential_error.into());
     }
+}
+
+pub(crate) fn apply_popup(popup: &TranslationPopup, state: &crate::mapper::PopupUiState) {
+    popup.set_session_id(state.session_id as i32);
+    popup.set_phase_text(state.status.clone().into());
+    popup.set_source_text(state.source.clone().into());
+    popup.set_translated_text(state.translated.clone().into());
+    popup.set_error_text(state.error.clone().into());
+    popup.set_target_index(state.target_index);
+    popup.set_target_label(state.target_label.clone().into());
+    popup.set_detected_label(state.detected_label.clone().into());
+    popup.set_detected_language(state.detected_language.clone().into());
+    popup.set_busy(state.busy);
+    popup.set_pinned(state.pinned);
+    popup.set_speaking_source(state.speaking_source);
+    popup.set_speaking_translation(state.speaking_translation);
+    popup.set_feedback_text(state.feedback.clone().into());
+    popup.set_feedback_error(state.feedback_error);
+    popup.set_popup_height(state.height);
+    popup.set_source_card_height(state.source_height);
 }
 
 fn language_index(language: &str) -> i32 {

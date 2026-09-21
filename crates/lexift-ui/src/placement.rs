@@ -6,15 +6,6 @@ pub(crate) enum Side {
     Before,
 }
 
-impl Side {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::After => "after",
-            Self::Before => "before",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PopupPlacement {
     pub(crate) position: Point,

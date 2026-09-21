@@ -32,21 +32,78 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         &initial_state,
         cfg!(feature = "m1-demo"),
         |window| match lexift_platform::configure_passive_tool_window(&window.window_handle()) {
-            Ok(()) => true,
+            Ok(lexift_platform::PassiveToolWindowPreparation::Ready) => {
+                lexift_ui::PassiveWindowPreparation::Ready
+            }
+            Ok(lexift_platform::PassiveToolWindowPreparation::Pending) => {
+                lexift_ui::PassiveWindowPreparation::Pending
+            }
             Err(error) => {
                 tracing::warn!(%error, "passive window activation policy is unavailable");
-                false
+                lexift_ui::PassiveWindowPreparation::Failed
             }
         },
-        lexift_ui::WindowLifecycleCallbacks::new(|window| {
-            match lexift_platform::activate_user_requested_window(&window.window_handle()) {
+        lexift_ui::WindowLifecycleCallbacks::new(
+            |window, sink| match lexift_platform::enable_tool_window_interaction(
+                &window.window_handle(),
+                Box::new(move |event| {
+                    let event = match event {
+                        lexift_platform::PopupPointerEvent::Moved { x, y } => {
+                            lexift_ui::PopupPointerInput::Moved { x, y }
+                        }
+                        lexift_platform::PopupPointerEvent::Exited => {
+                            lexift_ui::PopupPointerInput::Exited
+                        }
+                        lexift_platform::PopupPointerEvent::LeftPressed { x, y } => {
+                            lexift_ui::PopupPointerInput::LeftPressed { x, y }
+                        }
+                        lexift_platform::PopupPointerEvent::LeftReleased { x, y } => {
+                            lexift_ui::PopupPointerInput::LeftReleased { x, y }
+                        }
+                        lexift_platform::PopupPointerEvent::Scrolled {
+                            x,
+                            y,
+                            delta_x,
+                            delta_y,
+                        } => lexift_ui::PopupPointerInput::Scrolled {
+                            x,
+                            y,
+                            delta_x,
+                            delta_y,
+                        },
+                    };
+                    sink(event);
+                }),
+            ) {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!(%error, "tool window interaction could not be enabled");
+                    false
+                }
+            },
+            |window| match lexift_platform::activate_user_requested_window(&window.window_handle())
+            {
                 Ok(()) => true,
                 Err(error) => {
                     tracing::warn!(%error, "user-requested window activation failed");
                     false
                 }
-            }
-        }),
+            },
+            |window| match lexift_platform::begin_window_drag(&window.window_handle()) {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!(%error, "window drag failed");
+                    false
+                }
+            },
+            |window| match lexift_platform::is_foreground_window(&window.window_handle()) {
+                Ok(is_foreground) => is_foreground,
+                Err(error) => {
+                    tracing::warn!(%error, "foreground window check failed");
+                    true
+                }
+            },
+        ),
     )?;
     let controller = Arc::new(
         AppController::new(
@@ -63,8 +120,24 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
             Arc::clone(&services.credential_store),
             Arc::clone(&services.credential_reference),
             services.clipboard.clone(),
-        ),
+        )
+        .with_speech(services.speech.clone()),
     );
+    if let Some(speech) = &services.speech {
+        use lexift_core::ports::speech::SpeechEventHandler;
+        let controller_for_speech = Arc::downgrade(&controller);
+        let handler: SpeechEventHandler = Arc::new(move |event| {
+            if let Some(controller) = controller_for_speech.upgrade() {
+                controller.dispatch(lexift_core::AppEvent::PopupSpeechStateChanged {
+                    session_id: event.session_id,
+                    source: event.source,
+                    speaking: event.speaking,
+                    error: event.error,
+                });
+            }
+        });
+        speech.set_event_handler(handler);
+    }
     if let Some(instance) = &instance {
         let controller_for_activation = Arc::clone(&controller);
         if let Err(error) = instance.set_activation_handler(Arc::new(move || {
