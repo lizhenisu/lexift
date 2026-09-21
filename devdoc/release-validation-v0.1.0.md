@@ -9,7 +9,7 @@
 - `cargo fmt --all -- --check`
 - 默认与 `m1-demo` Workspace Clippy（warnings denied）
 - 默认与 `m1-demo` Workspace tests
-- Windows Credential Manager、autostart、clipboard、hotkey、single-instance、tray 和 window-context ignored integration tests
+- Windows Credential Manager、autostart、clipboard、hotkey、single-instance 和 tray ignored integration tests
 - DeepL 真实 API 成功与无效凭证测试
 - release build、NSIS packaging 与 `scripts/verify-release.ps1`
 - Setup/portable SHA256 与 portable 内容审计
@@ -38,6 +38,7 @@
 ## 已完成人工 Smoke Test
 
 - 主窗口关闭后进程、托盘和 Hotkey 继续运行，Tray Open/Quit 可用。
+- Tray Open 可以将被其他普通窗口遮挡的主窗口恢复并提升到前台。
 - 注销并重新登录后主窗口保持隐藏，Tray 与 Hotkey 可用。
 - Chrome、Edge、VS Code、Notepad、Word 和 PDF Reader 的真实选择、翻译、Popup 全链路正常。
 - 文本、图片和文件 Clipboard fallback 后原内容仍可粘贴。
@@ -45,7 +46,7 @@
 
 ## 创建 Tag 前剩余门槛
 
-- 在包含本轮修复的最终 CI Artifact 上确认 Tray Open 会将主窗口提升到其他普通窗口前方。
-- 下载并复核最终 CI Artifact 的校验和、安装路径、快捷方式图标、启动和卸载。
+- 在包含本轮修复的最终 CI Artifact 上确认 Settings 窗口内语言与 Provider 候选列表在不同窗口高度下正确限制高度和滚动，拖动及缩放时保持同一窗口呈现。
+- 下载并复核新最终 CI Artifact 的校验和、安装路径、快捷方式图标、启动和卸载。
 
 完成以上项目之前不得创建或推送 `v0.1.0` Tag。

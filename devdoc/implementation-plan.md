@@ -847,76 +847,27 @@ serde/TOML，配置文件不保存 Secret；`credentials.deepl` 只保存系统 
 Main Window 与 Windows Tray 的 Settings 入口共享同一 Core event。`m1-demo` 和自动测试使用
 内存或临时目录 Store，不访问真实用户配置目录。
 
-#### LanguageMenu 窗口交互与关闭机制
+#### Settings 候选列表覆盖层
 
-2026-09-19 完成 Windows 语言列表的焦点、外部点击和窗口上下文修复。LanguageMenu 是独立的
-Slint 顶层窗口，用于避免下拉列表被 Settings 窗口边界裁切，并根据屏幕可用区域选择向上或
-向下展开。它属于用户主动打开的交互式 transient window，与只展示结果的 TranslationPopup
-使用不同的激活策略：
+2026-09-21 将 Target Language 与 Provider 候选列表从独立的 `LanguageMenuWindow` 改为
+`SettingsWindow` 内部的共享覆盖组件。列表与 Settings 使用同一个 HWND，拖动、快速晃动和调整
+窗口大小时天然同步，也不会改变 Settings 的激活标题栏或窗口阴影。
 
-```text
-TranslationPopup
-    WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
+候选列表统一从对应选择框下方展开，宽度与选择框一致。实际高度取候选内容高度和窗口底部
+剩余可见高度的较小值；空间不足时保持 40px 行高，通过列表内部 ScrollView 滚动，不再切换
+到窗口上方或越过原生窗口边界。打开语言列表时会将当前选中项滚动到可见区域中部。
 
-LanguageMenu
-    WS_EX_TOOLWINDOW
-    owner = Settings
-    移除 WS_EX_NOACTIVATE
-```
+Settings 页面本身使用独立 ScrollView。候选列表的位置直接绑定选择框的 `absolute-position`，
+页面滚动时保持锚定；选择框离开可见区域时关闭。覆盖层顺序固定为页面内容、外部点击关闭层、
+候选列表和 Toast，避免列表吞掉 Toast、Credential 操作或其他字段事件。
 
-LanguageMenu 不调用 `focus()`；用户从 Settings 主动展开后，允许 Windows 在同一交互上下文内
-激活它。TranslationPopup 仍保持严格的被动窗口行为，不能复用 LanguageMenu 的配置。
+选择项仍先更新 UI 草稿并发送原有单项自动保存事件，再关闭列表。点击列表外区域、Escape、
+隐藏或关闭 Settings 时也会关闭。语言和 Provider 共用同一组件与同一打开状态，不允许同时
+显示多个列表。
 
-语言列表生命周期为：
-
-```text
-Closed
-  ↓ 用户请求展开
-Opening
-  ├── 设置位置、大小和 Settings owner
-  ├── 应用 interactive tool window 样式
-  ├── show 后再次校验 owner 与样式
-  └── 等待 120ms，隔离本次展开点击和原生窗口稳定过程
-  ↓
-Open
-  ├── 启用 Settings 内部的外部点击关闭层
-  ├── arm WindowContextMonitor
-  └── 75ms 本地监测仅检查移动、隐藏、最小化和菜单意外消失
-  ↓
-Closed
-```
-
-每次打开都会生成新的 session generation。关闭、保存、取消或重新打开会使旧的延迟回调和
-定时器失效；所有关闭入口统一停止定时器、disarm 原生监测、清除 UI 状态并隐藏 LanguageMenu。
-选择语言时必须先更新 `draft_target_index`，再以 `ValueSelected` 原因关闭，保证鼠标按下阶段
-不会提前销毁窗口并吞掉 Slint 的选择回调。
-
-外部交互使用 `WindowContextMonitor` 事件驱动检测，不轮询 `GetForegroundWindow()`：
-
-- `WH_MOUSE_LL` 监听 arm 之后发生的真实鼠标按下，用 `WindowFromPoint` 获取事件目标。
-- `EVENT_SYSTEM_FOREGROUND` 覆盖 Alt+Tab 等不经过鼠标的前台切换。
-- 事件回调只做窗口关系分类，通过 `slint::invoke_from_event_loop()` 回到 UI 线程关闭菜单。
-- 监测只在 LanguageMenu 进入 `Open` 后启用，避免将展开列表的同一次点击判为外部交互。
-
-窗口上下文是动态成员集合。当前打开时同时注册 Settings 和 LanguageMenu；每个成员记录自身
-HWND、`GA_ROOT` 和 `GA_ROOTOWNER`。事件目标的任一身份与任一成员相交即属于内部交互，因此
-即使 Slint/Windows 没有为 LanguageMenu 返回预期的 owner chain，点击列表或其子控件也不会
-误触发关闭。点击 Lexift Main Window、桌面或其他应用则属于外部交互，只触发一次 dismiss。
-
-以后新增设置子页、确认框、二级菜单等 transient window 时，应在窗口显示稳定后把它加入同一
-上下文集合，并声明正确 owner。不要改回以下方案：
-
-- 不要用“Lexift 进程是否在前台”判断 Settings 失焦；它无法区分 Main Window 和 Settings。
-- 不要只比较 Settings 的 HWND、`GA_ROOT` 或 `GA_ROOTOWNER`；Slint 顶层窗口关系可能与预期不同。
-- 不要维护 Settings、LanguageMenu、第三个窗口等固定参数白名单；使用动态成员集合扩展。
-- 不要用前台 HWND 定时轮询关闭交互式弹层；窗口创建和激活期间的瞬态状态会导致误关。
-- 不要给需要接收点击的 LanguageMenu 设置 `WS_EX_NOACTIVATE`。
-
-监测日志只记录事件来源、内部/外部分类和关闭原因，不记录语言值或其他用户内容。人工回归应
-覆盖反复展开、连续选择不同语言、点击 Settings 空白处、点击 Main Window、点击桌面、Alt+Tab、
-移动/隐藏/最小化 Settings；选择成功时关闭原因应为 `ValueSelected`，外部点击应为
-`ExternalInteraction`。
-
+独立候选窗口所需的原生 owner、`WindowContextMonitor`、鼠标/前台 Hook、120ms Opening 状态、
+75ms 窗口监测和屏幕坐标计算已经删除。TranslationPopup 仍保留
+`WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW`，其焦点策略不受此次重构影响。
 当前里程碑：**M4.4 — Secure Credential Store**。
 
 ### M4.4 Secure Credential Store

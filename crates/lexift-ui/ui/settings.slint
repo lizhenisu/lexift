@@ -3,6 +3,7 @@ import { Spacing } from "design/spacing.slint";
 import { Typography } from "design/typography.slint";
 import { AppAssets } from "design/assets.slint";
 import { Metrics } from "design/metrics.slint";
+import { ScrollView } from "std-widgets.slint";
 
 component SettingsButton inherits Rectangle {
     in property <string> label;
@@ -196,6 +197,55 @@ component SettingsToast inherits Rectangle {
     }
 }
 
+component SettingsSelectMenu inherits Rectangle {
+    in property <[string]> options;
+    in property <int> selected-index: 0;
+    in-out property <length> scroll-y: 0px;
+    callback selected(int);
+
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Colors.outline;
+    background: Colors.surface;
+    clip: true;
+
+    menu-scroll := ScrollView {
+        width: parent.width;
+        height: parent.height;
+        viewport-width: self.visible-width;
+        viewport-height: root.options.length * 40px;
+        viewport-y <=> root.scroll-y;
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+        vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
+        mouse-drag-pan-enabled: true;
+
+        for option[index] in root.options: option-row := Rectangle {
+            y: index * 40px;
+            width: menu-scroll.visible-width;
+            height: 40px;
+            background: index == root.selected-index
+                ? Colors.primary-container
+                : option-touch.pressed ? Colors.icon-button-pressed
+                : option-touch.has-hover ? Colors.background : Colors.surface;
+
+            Text {
+                x: Spacing.medium;
+                width: parent.width - 2 * Spacing.medium;
+                text: option;
+                color: Colors.foreground;
+                font-size: Typography.body-size;
+                font-weight: 400;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            option-touch := TouchArea {
+                clicked => { root.selected(index); }
+            }
+        }
+    }
+}
+
 export struct SettingsToastData {
     id: int,
     message: string,
@@ -228,15 +278,24 @@ export component SettingsWindow inherits Window {
     in-out property <bool> credential-secret-visible: false;
     in-out property <bool> credential-reveal-dismiss-armed: false;
     in-out property <bool> credential-request-pending: false;
-    in-out property <bool> language-menu-open: false;
-    in-out property <bool> language-menu-dismiss-armed: false;
+    in-out property <bool> settings-menu-open: false;
+    in-out property <bool> settings-menu-dismiss-armed: false;
     in-out property <bool> settings-menu-provider-mode: false;
+    in-out property <length> settings-menu-scroll-y: 0px;
     in-out property <[SettingsToastData]> toast-items: [];
     private property <[string]> language-labels: [
         "简体中文", "繁體中文", "English (US)", "English (UK)",
         "日本語", "한국어", "Deutsch", "Français", "Español",
         "Italiano", "Português", "Português (Brasil)"
     ];
+    private property <length> settings-menu-anchor-x: root.settings-menu-provider-mode
+        ? provider-selector.absolute-position.x : language-selector.absolute-position.x;
+    private property <length> settings-menu-anchor-y: root.settings-menu-provider-mode
+        ? provider-selector.absolute-position.y : language-selector.absolute-position.y;
+    private property <length> settings-menu-anchor-height: root.settings-menu-provider-mode
+        ? provider-selector.height : language-selector.height;
+    private property <length> settings-menu-anchor-width: root.settings-menu-provider-mode
+        ? provider-selector.width : language-selector.width;
     callback hotkey-key-pressed(string, bool, bool, bool, bool) -> string;
     callback hotkey-change-requested(string);
     callback launch-at-login-change-requested(bool);
@@ -247,9 +306,7 @@ export component SettingsWindow inherits Window {
     callback credential-copy-requested();
     callback credential-hide-requested();
     callback credential-edit-cancel-requested();
-    callback language-menu-requested(float, float, float, float, float, float);
-    callback language-menu-dismiss-requested();
-    callback language-menu-external-dismiss-requested();
+    callback settings-menu-selected(int);
     callback toast-dismiss-requested(int);
 
     public function focus-credential-reveal() {
@@ -264,7 +321,34 @@ export component SettingsWindow inherits Window {
         hotkey-capture.focus();
     }
 
-    VerticalLayout {
+    public function focus-settings-menu() {
+        settings-menu-focus.focus();
+    }
+
+    public function close-settings-menu() {
+        settings-menu-open = false;
+        settings-menu-dismiss-armed = false;
+    }
+
+    page-scroll := ScrollView {
+        width: 100%;
+        height: 100%;
+        viewport-width: self.visible-width;
+        viewport-height: max(self.visible-height, settings-content.preferred-height);
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+        vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
+        mouse-drag-pan-enabled: true;
+        scrolled => {
+            if (root.settings-menu-open
+                && (root.settings-menu-anchor-y < 0px
+                    || root.settings-menu-anchor-y + root.settings-menu-anchor-height > root.height)) {
+                root.close-settings-menu();
+            }
+        }
+
+      settings-content := VerticalLayout {
+        width: page-scroll.visible-width;
+        height: max(self.preferred-height, page-scroll.visible-height);
         padding: Spacing.large;
         spacing: Spacing.medium;
 
@@ -320,31 +404,37 @@ export component SettingsWindow inherits Window {
 
                     MoveTo {
                         x: 1;
-                        y: root.language-menu-open ? 7 : 1;
+                        y: root.settings-menu-open ? 7 : 1;
                     }
 
                     LineTo {
                         x: 8;
-                        y: root.language-menu-open ? 1 : 7;
+                        y: root.settings-menu-open ? 1 : 7;
                     }
 
                     LineTo {
                         x: 15;
-                        y: root.language-menu-open ? 7 : 1;
+                        y: root.settings-menu-open ? 7 : 1;
                     }
                 }
 
                 TouchArea {
                     clicked => {
-                        root.settings-menu-provider-mode = false;
-                        root.language-menu-requested(
-                            language-selector.absolute-position.x / 1px,
-                            language-selector.absolute-position.y / 1px,
-                            language-selector.width / 1px,
-                            language-selector.height / 1px,
-                            self.mouse-x / 1px,
-                            self.mouse-y / 1px
-                        );
+                        if (root.settings-menu-open && !root.settings-menu-provider-mode) {
+                            root.close-settings-menu();
+                        } else {
+                            root.settings-menu-provider-mode = false;
+                            root.settings-menu-scroll-y = min(
+                                0px,
+                                max(
+                                    settings-menu.height - root.language-labels.length * 40px,
+                                    settings-menu.height / 2 - (root.draft-target-index + 0.5) * 40px
+                                )
+                            );
+                            root.settings-menu-open = true;
+                            root.settings-menu-dismiss-armed = true;
+                            root.focus-settings-menu();
+                        }
                     }
                 }
             }
@@ -513,22 +603,22 @@ export component SettingsWindow inherits Window {
                     viewbox-height: 8;
                     stroke: Colors.secondary-foreground;
                     stroke-width: 1.5px;
-                    MoveTo { x: 1; y: root.language-menu-open && root.settings-menu-provider-mode ? 7 : 1; }
-                    LineTo { x: 8; y: root.language-menu-open && root.settings-menu-provider-mode ? 1 : 7; }
-                    LineTo { x: 15; y: root.language-menu-open && root.settings-menu-provider-mode ? 7 : 1; }
+                    MoveTo { x: 1; y: root.settings-menu-open && root.settings-menu-provider-mode ? 7 : 1; }
+                    LineTo { x: 8; y: root.settings-menu-open && root.settings-menu-provider-mode ? 1 : 7; }
+                    LineTo { x: 15; y: root.settings-menu-open && root.settings-menu-provider-mode ? 7 : 1; }
                 }
 
                 TouchArea {
                     clicked => {
-                        root.settings-menu-provider-mode = true;
-                        root.language-menu-requested(
-                            provider-selector.absolute-position.x / 1px,
-                            provider-selector.absolute-position.y / 1px,
-                            provider-selector.width / 1px,
-                            provider-selector.height / 1px,
-                            self.mouse-x / 1px,
-                            self.mouse-y / 1px
-                        );
+                        if (root.settings-menu-open && root.settings-menu-provider-mode) {
+                            root.close-settings-menu();
+                        } else {
+                            root.settings-menu-provider-mode = true;
+                            root.settings-menu-scroll-y = 0px;
+                            root.settings-menu-open = true;
+                            root.settings-menu-dismiss-armed = true;
+                            root.focus-settings-menu();
+                        }
                     }
                 }
             }
@@ -748,14 +838,50 @@ export component SettingsWindow inherits Window {
         }
 
         Rectangle { vertical-stretch: 1; }
+      }
     }
 
     TouchArea {
         width: 100%;
         height: 100%;
         z: 90;
-        enabled: root.language-menu-open && root.language-menu-dismiss-armed;
-        clicked => { root.language-menu-dismiss-requested(); }
+        enabled: root.settings-menu-open && root.settings-menu-dismiss-armed;
+        clicked => { root.close-settings-menu(); }
+    }
+
+    settings-menu := SettingsSelectMenu {
+        visible: root.settings-menu-open;
+        z: 95;
+        x: root.settings-menu-anchor-x;
+        y: root.settings-menu-anchor-y + root.settings-menu-anchor-height + 2px;
+        width: root.settings-menu-anchor-width;
+        height: min(
+            (root.settings-menu-provider-mode ? 1 : root.language-labels.length) * 40px,
+            max(0px, root.height - self.y - Spacing.medium)
+        );
+        options: root.settings-menu-provider-mode ? ["DeepL"] : root.language-labels;
+        selected-index: root.settings-menu-provider-mode ? 0 : root.draft-target-index;
+        scroll-y <=> root.settings-menu-scroll-y;
+        selected(index) => {
+            root.settings-menu-selected(index);
+            root.close-settings-menu();
+        }
+    }
+
+    settings-menu-focus := FocusScope {
+        visible: root.settings-menu-open;
+        x: settings-menu.x;
+        y: settings-menu.y;
+        width: settings-menu.width;
+        height: settings-menu.height;
+        z: 96;
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.close-settings-menu();
+                return accept;
+            }
+            return reject;
+        }
     }
 
     for toast[index] in root.toast-items: SettingsToast {
@@ -765,65 +891,5 @@ export component SettingsWindow inherits Window {
         message: toast.message;
         error: toast.error;
         dismissed => { root.toast-dismiss-requested(toast.id); }
-    }
-}
-
-export component LanguageMenuWindow inherits Window {
-    title: "Lexift Languages";
-    icon: AppAssets.app-icon;
-    width: 456px;
-    height: 242px;
-    no-frame: true;
-    always-on-top: true;
-    background: Colors.surface;
-
-    in-out property <int> selected-index: 0;
-    in-out property <bool> provider-mode: false;
-    in-out property <length> scroll-y: 0px;
-    private property <[string]> language-labels: [
-        "简体中文", "繁體中文", "English (US)", "English (UK)",
-        "日本語", "한국어", "Deutsch", "Français", "Español",
-        "Italiano", "Português", "Português (Brasil)"
-    ];
-    private property <[string]> visible-labels: root.provider-mode ? ["DeepL"] : root.language-labels;
-    callback selected(int);
-
-    Rectangle {
-        clip: true;
-        border-radius: 4px;
-        border-width: 1px;
-        border-color: Colors.outline;
-        background: Colors.surface;
-
-        Flickable {
-            width: 100%;
-            height: 100%;
-            viewport-height: root.visible-labels.length * 40px;
-            viewport-y <=> root.scroll-y;
-
-            for option[index] in root.visible-labels: option-row := Rectangle {
-                y: index * 40px;
-                width: root.width;
-                height: 40px;
-                background: index == root.selected-index
-                    ? Colors.primary-container
-                    : option-touch.has-hover ? Colors.background : Colors.surface;
-
-                Text {
-                    x: Spacing.medium;
-                    width: parent.width - 2 * Spacing.medium;
-                    text: option;
-                    color: Colors.foreground;
-                    font-size: Typography.body-size;
-                    font-weight: 400;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-
-                option-touch := TouchArea {
-                    clicked => { root.selected(index); }
-                }
-            }
-        }
     }
 }

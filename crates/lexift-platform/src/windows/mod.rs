@@ -8,7 +8,6 @@ mod instance;
 mod screen;
 mod selection;
 mod tray;
-mod window_context;
 
 pub(crate) use autostart::WindowsAutostartPort;
 pub(crate) use hotkey::WindowsHotkeyPort;
@@ -16,7 +15,6 @@ pub(crate) use instance::WindowsInstancePort;
 pub(crate) use screen::WindowsScreenPort;
 pub(crate) use selection::WindowsSelectionPort;
 pub(crate) use tray::WindowsTrayPort;
-pub(crate) use window_context::WindowsWindowContextMonitor;
 
 pub(super) mod popup;
 pub(crate) use clipboard::WindowsClipboardPort;
