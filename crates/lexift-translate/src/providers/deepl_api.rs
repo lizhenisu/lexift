@@ -48,8 +48,14 @@ impl TranslatorPort for DeepLApiTranslator {
     fn translate(&self, request: TranslateRequest) -> TranslationFuture<'_> {
         Box::pin(async move {
             let target_lang = map_target_language(&request.target_language)?;
+            let source_lang = request
+                .source_language
+                .as_ref()
+                .map(map_source_language)
+                .transpose()?;
             let payload = DeepLTranslateRequest {
                 text: vec![request.text],
+                source_lang,
                 target_lang,
             };
             let response = self
@@ -78,6 +84,8 @@ impl TranslatorPort for DeepLApiTranslator {
 #[derive(Serialize)]
 struct DeepLTranslateRequest {
     text: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_lang: Option<&'static str>,
     target_lang: &'static str,
 }
 
@@ -152,6 +160,26 @@ fn map_target_language(language: &Language) -> Result<&'static str> {
         unsupported => {
             return Err(Error::new(format!(
                 "Unsupported target language: {unsupported}"
+            )));
+        }
+    };
+    Ok(code)
+}
+
+fn map_source_language(language: &Language) -> Result<&'static str> {
+    let code = match language.0.as_str() {
+        "en-US" => "EN",
+        "zh-CN" => "ZH",
+        "ja" => "JA",
+        "ko" => "KO",
+        "de" => "DE",
+        "fr" => "FR",
+        "es" => "ES",
+        "it" => "IT",
+        "pt-PT" => "PT",
+        unsupported => {
+            return Err(Error::new(format!(
+                "Unsupported source language: {unsupported}"
             )));
         }
     };
@@ -307,6 +335,7 @@ mod tests {
     fn request(text: &str) -> TranslateRequest {
         TranslateRequest {
             text: text.into(),
+            source_language: None,
             target_language: Language("zh-CN".into()),
         }
     }
@@ -332,6 +361,33 @@ mod tests {
         let error = map_target_language(&Language("xx-INVALID".into()))
             .expect_err("unknown language should be rejected");
         assert_eq!(error.to_string(), "Unsupported target language: xx-INVALID");
+    }
+
+    #[test]
+    fn maps_popup_source_languages_to_deepl_codes() {
+        for (language, expected) in [
+            ("en-US", "EN"),
+            ("zh-CN", "ZH"),
+            ("ja", "JA"),
+            ("ko", "KO"),
+            ("de", "DE"),
+            ("fr", "FR"),
+            ("es", "ES"),
+            ("it", "IT"),
+            ("pt-PT", "PT"),
+        ] {
+            assert_eq!(
+                map_source_language(&Language(language.into())).expect("supported language"),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_source_languages() {
+        let error = map_source_language(&Language("zh-TW".into()))
+            .expect_err("unsupported source variant should be rejected");
+        assert_eq!(error.to_string(), "Unsupported source language: zh-TW");
     }
 
     #[test]
@@ -412,7 +468,25 @@ mod tests {
         let body: serde_json::Value =
             serde_json::from_str(&captured.body).expect("request body should be JSON");
         assert_eq!(body["text"], serde_json::json!(["Hello world"]));
+        assert!(body.get("source_lang").is_none());
         assert_eq!(body["target_lang"], "ZH-HANS");
+        server.join().expect("test server should finish");
+    }
+
+    #[test]
+    fn serializes_an_explicit_source_language() {
+        let (endpoint, requests, server) = spawn_test_server(1, |_| {
+            json_response(200, r#"{"translations":[{"text":"Hello"}]}"#)
+        });
+        let mut request = request("Hallo");
+        request.source_language = Some(Language("de".into()));
+
+        translate_through(endpoint, Duration::from_secs(2), request)
+            .expect("explicit source translation should succeed");
+        let captured = requests.recv().expect("request should be captured");
+        let body: serde_json::Value =
+            serde_json::from_str(&captured.body).expect("request body should be JSON");
+        assert_eq!(body["source_lang"], "DE");
         server.join().expect("test server should finish");
     }
 
@@ -575,6 +649,7 @@ mod tests {
         let result = runtime
             .block_on(translator.translate(TranslateRequest {
                 text: "Hello world".into(),
+                source_language: None,
                 target_language: Language("zh-CN".into()),
             }))
             .expect("DeepL should translate with a valid credential");

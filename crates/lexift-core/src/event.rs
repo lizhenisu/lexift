@@ -39,6 +39,7 @@ pub enum AppEvent {
     PopupTranslationRequested {
         session_id: PopupSessionId,
         text: String,
+        source_language: Option<Language>,
         target_language: Language,
     },
     PopupTranslationStarted {

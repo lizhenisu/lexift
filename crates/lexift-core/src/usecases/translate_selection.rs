@@ -14,6 +14,7 @@ pub async fn execute(
     };
     let request = crate::domain::translation::TranslateRequest {
         text: selection.text,
+        source_language: None,
         target_language,
     };
     translator.translate(request).await.map(Some)

@@ -71,6 +71,15 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                             delta_x,
                             delta_y,
                         },
+                        lexift_platform::PopupPointerEvent::DismissRequested => {
+                            lexift_ui::PopupPointerInput::DismissRequested
+                        }
+                        lexift_platform::PopupPointerEvent::Resized { width, height } => {
+                            lexift_ui::PopupPointerInput::Resized { width, height }
+                        }
+                        lexift_platform::PopupPointerEvent::ResizeFinished => {
+                            lexift_ui::PopupPointerInput::ResizeFinished
+                        }
                     };
                     sink(event);
                 }),
@@ -96,11 +105,58 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                     false
                 }
             },
-            |window| match lexift_platform::is_foreground_window(&window.window_handle()) {
-                Ok(is_foreground) => is_foreground,
+            |window, edge, bounds| {
+                let edge = match edge {
+                    lexift_ui::PopupResizeEdge::Left => lexift_platform::PopupResizeEdge::Left,
+                    lexift_ui::PopupResizeEdge::Right => lexift_platform::PopupResizeEdge::Right,
+                    lexift_ui::PopupResizeEdge::Top => lexift_platform::PopupResizeEdge::Top,
+                    lexift_ui::PopupResizeEdge::Bottom => lexift_platform::PopupResizeEdge::Bottom,
+                    lexift_ui::PopupResizeEdge::TopLeft => {
+                        lexift_platform::PopupResizeEdge::TopLeft
+                    }
+                    lexift_ui::PopupResizeEdge::TopRight => {
+                        lexift_platform::PopupResizeEdge::TopRight
+                    }
+                    lexift_ui::PopupResizeEdge::BottomLeft => {
+                        lexift_platform::PopupResizeEdge::BottomLeft
+                    }
+                    lexift_ui::PopupResizeEdge::BottomRight => {
+                        lexift_platform::PopupResizeEdge::BottomRight
+                    }
+                };
+                let scale = window.scale_factor().max(f32::EPSILON);
+                let bounds = lexift_platform::PopupResizeBounds {
+                    min_width: (bounds.min_width * scale).round().max(1.0) as u32,
+                    min_height: (bounds.min_height * scale).round().max(1.0) as u32,
+                    max_width: (bounds.max_width * scale).round().max(1.0) as u32,
+                    max_height: (bounds.max_height * scale).round().max(1.0) as u32,
+                };
+                match lexift_platform::begin_window_resize(&window.window_handle(), edge, bounds) {
+                    Ok(started) => started,
+                    Err(error) => {
+                        tracing::warn!(%error, "window resize failed");
+                        false
+                    }
+                }
+            },
+            |window, enabled| match lexift_platform::set_popup_dismissal(
+                &window.window_handle(),
+                enabled,
+            ) {
+                Ok(()) => true,
                 Err(error) => {
-                    tracing::warn!(%error, "foreground window check failed");
-                    true
+                    tracing::warn!(%error, enabled, "popup automatic dismissal could not be updated");
+                    false
+                }
+            },
+            |child, owner| match lexift_platform::attach_tool_window(
+                &child.window_handle(),
+                &owner.window_handle(),
+            ) {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!(%error, "tool window owner could not be attached");
+                    false
                 }
             },
         ),

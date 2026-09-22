@@ -26,6 +26,7 @@ pub struct PopupSessionState {
     pub source_text: String,
     pub translated_text: String,
     pub error_message: String,
+    pub source_language: Option<Language>,
     pub target_language: Language,
     pub detected_source_language: Option<Language>,
     pub pinned: bool,
@@ -129,6 +130,7 @@ impl AppState {
                         task_id,
                         request: TranslateRequest {
                             text: selection.text,
+                            source_language: None,
                             target_language: self.settings.target_language.clone(),
                         },
                     },
@@ -217,8 +219,9 @@ impl AppState {
             AppEvent::PopupTranslationRequested {
                 session_id,
                 text,
+                source_language,
                 target_language,
-            } => self.request_popup_translation(session_id, text, target_language),
+            } => self.request_popup_translation(session_id, text, source_language, target_language),
             AppEvent::PopupTranslationStarted {
                 session_id,
                 task_id,
@@ -626,6 +629,7 @@ impl AppState {
             task_id,
             request: TranslateRequest {
                 text: self.source_text.clone(),
+                source_language: None,
                 target_language: self.settings.target_language.clone(),
             },
         }]
@@ -635,6 +639,7 @@ impl AppState {
         &mut self,
         session_id: PopupSessionId,
         text: String,
+        source_language: Option<Language>,
         target_language: Language,
     ) -> Vec<AppCommand> {
         let text = text.trim().to_owned();
@@ -655,6 +660,7 @@ impl AppState {
             .expect("popup session was checked above");
         session.phase = TranslationPhase::Translating;
         session.source_text = text.clone();
+        session.source_language = source_language.clone();
         session.target_language = target_language.clone();
         session.translated_text.clear();
         session.error_message.clear();
@@ -665,6 +671,7 @@ impl AppState {
             task_id,
             request: TranslateRequest {
                 text,
+                source_language,
                 target_language,
             },
         }]
@@ -736,6 +743,7 @@ impl AppState {
                 source_text: String::new(),
                 translated_text: String::new(),
                 error_message: String::new(),
+                source_language: None,
                 target_language: target_language.clone(),
                 detected_source_language: None,
                 pinned: false,
@@ -755,6 +763,7 @@ impl AppState {
         session.source_text = source_text;
         session.translated_text.clear();
         session.error_message.clear();
+        session.source_language = None;
         session.target_language = target_language;
         session.detected_source_language = None;
         session.current_translation_task = task_id;
@@ -858,6 +867,7 @@ mod tests {
                     task_id: TranslationTaskId::new(1),
                     request: TranslateRequest {
                         text: "Hello world".into(),
+                        source_language: None,
                         target_language: Language("zh-CN".into()),
                     },
                 },
@@ -907,6 +917,7 @@ mod tests {
                     task_id: TranslationTaskId::new(1),
                     request: TranslateRequest {
                         text: "Hello world".into(),
+                        source_language: None,
                         target_language: Language("de".into()),
                     },
                 },
@@ -926,6 +937,7 @@ mod tests {
                 task_id: TranslationTaskId::new(1),
                 request: TranslateRequest {
                     text: "Hello world".into(),
+                    source_language: None,
                     target_language: Language("zh-CN".into()),
                 },
             }]
@@ -1137,6 +1149,7 @@ mod tests {
         let commands = state.reduce(AppEvent::PopupTranslationRequested {
             session_id,
             text: "edited".into(),
+            source_language: None,
             target_language: Language("ja".into()),
         });
 
@@ -1153,12 +1166,71 @@ mod tests {
     }
 
     #[test]
+    fn popup_source_language_is_local_and_resets_for_a_new_selection() {
+        let mut state = AppState::default();
+        let session_id = create_popup_session(&mut state, "hello");
+        let source_language = Language("de".into());
+        let commands = state.reduce(AppEvent::PopupTranslationRequested {
+            session_id,
+            text: "Hallo".into(),
+            source_language: Some(source_language.clone()),
+            target_language: Language("en-US".into()),
+        });
+
+        assert_eq!(
+            state.popup_sessions[0].source_language,
+            Some(source_language.clone())
+        );
+        assert!(matches!(
+            &commands[..],
+            [AppCommand::TranslatePopup { request, .. }]
+                if request.source_language == Some(source_language)
+        ));
+
+        let reused = create_popup_session(&mut state, "bonjour");
+        assert_eq!(reused, session_id);
+        assert_eq!(state.popup_sessions[0].source_language, None);
+    }
+
+    #[test]
+    fn pinned_popup_keeps_its_source_language_when_a_new_session_is_created() {
+        let mut state = AppState::default();
+        let pinned_id = create_popup_session(&mut state, "Hallo");
+        state.reduce(AppEvent::PopupTranslationRequested {
+            session_id: pinned_id,
+            text: "Hallo".into(),
+            source_language: Some(Language("de".into())),
+            target_language: Language("en-US".into()),
+        });
+        state.reduce(AppEvent::PopupPinChanged {
+            session_id: pinned_id,
+            pinned: true,
+        });
+
+        let new_id = create_popup_session(&mut state, "bonjour");
+        assert_ne!(new_id, pinned_id);
+        let pinned = state
+            .popup_sessions
+            .iter()
+            .find(|session| session.id == pinned_id)
+            .expect("pinned session should remain");
+        let active = state
+            .popup_sessions
+            .iter()
+            .find(|session| session.id == new_id)
+            .expect("new active session should exist");
+        assert_eq!(pinned.source_language, Some(Language("de".into())));
+        assert_eq!(active.source_language, None);
+    }
+
+    #[test]
     fn popup_sessions_reject_stale_and_closed_results() {
         let mut state = AppState::default();
         let session_id = create_popup_session(&mut state, "hello");
         state.reduce(AppEvent::PopupTranslationRequested {
             session_id,
             text: "first edit".into(),
+            source_language: None,
             target_language: Language("de".into()),
         });
         let stale_task = state.popup_sessions[0]
@@ -1167,6 +1239,7 @@ mod tests {
         state.reduce(AppEvent::PopupTranslationRequested {
             session_id,
             text: "second edit".into(),
+            source_language: None,
             target_language: Language("fr".into()),
         });
         let current_task = state.popup_sessions[0]

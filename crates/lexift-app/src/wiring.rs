@@ -355,6 +355,7 @@ mod tests {
         let error = runtime
             .block_on(translator.translate(TranslateRequest {
                 text: "Hello".into(),
+                source_language: None,
                 target_language: Language("zh-CN".into()),
             }))
             .expect_err("missing credential must fail only the requested translation");

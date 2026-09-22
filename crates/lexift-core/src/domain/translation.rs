@@ -29,6 +29,8 @@ impl PopupSessionId {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranslateRequest {
     pub text: String,
+    /// `None` lets the translation provider detect the source language.
+    pub source_language: Option<Language>,
     pub target_language: Language,
 }
 

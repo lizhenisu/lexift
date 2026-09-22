@@ -3,6 +3,7 @@ import { Spacing } from "design/spacing.slint";
 import { Typography } from "design/typography.slint";
 import { AppAssets } from "design/assets.slint";
 import { Metrics } from "design/metrics.slint";
+import { AppVerticalScrollBar } from "design/scrollbar.slint";
 import { ScrollView } from "std-widgets.slint";
 
 component SettingsButton inherits Rectangle {
@@ -210,14 +211,15 @@ component SettingsSelectMenu inherits Rectangle {
     clip: true;
 
     menu-scroll := ScrollView {
-        width: parent.width;
+        width: parent.width - 10px;
         height: parent.height;
-        viewport-width: self.visible-width;
-        viewport-height: root.options.length * 40px;
-        viewport-y <=> root.scroll-y;
+        content-width: self.visible-width;
+        content-height: root.options.length * 40px;
+        content-y <=> root.scroll-y;
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-        vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
+        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
         mouse-drag-pan-enabled: true;
+        scrolled => { root.scroll-y = round(root.scroll-y / 4px) * 4px; }
 
         for option[index] in root.options: option-row := Rectangle {
             y: index * 40px;
@@ -233,8 +235,8 @@ component SettingsSelectMenu inherits Rectangle {
                 width: parent.width - 2 * Spacing.medium;
                 text: option;
                 color: Colors.foreground;
-                font-size: Typography.body-size;
-                font-weight: 400;
+                font-size: Typography.menu-size;
+                font-weight: Typography.menu-weight;
                 vertical-alignment: center;
                 overflow: elide;
             }
@@ -243,6 +245,14 @@ component SettingsSelectMenu inherits Rectangle {
                 clicked => { root.selected(index); }
             }
         }
+    }
+    AppVerticalScrollBar {
+        x: parent.width - 12px;
+        y: 2px;
+        height: parent.height - 4px;
+        viewport-height: menu-scroll.visible-height;
+        content-height: menu-scroll.content-height;
+        content-y <=> menu-scroll.content-y;
     }
 }
 
@@ -446,7 +456,7 @@ export component SettingsWindow inherits Window {
     public function close-settings-menu() { settings-menu-open = false; settings-menu-dismiss-armed = false; }
     public function reset-settings-view() {
         root.close-settings-menu(); root.hotkey-capturing = false; root.active-category = 0;
-        general-scroll.viewport-y = 0px; translation-scroll.viewport-y = 0px;
+        general-scroll.content-y = 0px; translation-scroll.content-y = 0px;
     }
     function select-category(category: int) {
         if root.active-category == category { return; }
@@ -503,9 +513,9 @@ export component SettingsWindow inherits Window {
     general-scroll := ScrollView {
         visible: root.active-category == 0;
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
-        viewport-width: self.visible-width;
-        viewport-height: max(self.visible-height, application-card.y + application-card.height + Metrics.settings-page-padding);
-        horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed; mouse-drag-pan-enabled: true;
+        content-width: self.visible-width;
+        content-height: max(self.visible-height, application-card.y + application-card.height + Metrics.settings-page-padding);
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
         scrolled => { if root.settings-menu-open && (root.settings-menu-anchor-y < Metrics.settings-header-height || root.settings-menu-anchor-y + root.settings-menu-anchor-height > root.height) { root.close-settings-menu(); } }
 
         language-card := SettingsCard {
@@ -563,12 +573,21 @@ export component SettingsWindow inherits Window {
             }
         }
     }
+    AppVerticalScrollBar {
+        visible: root.active-category == 0;
+        x: main-pane.width - 14px;
+        y: Metrics.settings-header-height + 4px;
+        height: main-pane.height - Metrics.settings-header-height - 8px;
+        viewport-height: general-scroll.visible-height;
+        content-height: general-scroll.content-height;
+        content-y <=> general-scroll.content-y;
+    }
     translation-scroll := ScrollView {
         visible: root.active-category == 1;
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
-        viewport-width: self.visible-width;
-        viewport-height: max(self.visible-height, credential-card.y + credential-card.height + Metrics.settings-page-padding);
-        horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed; mouse-drag-pan-enabled: true;
+        content-width: self.visible-width;
+        content-height: max(self.visible-height, credential-card.y + credential-card.height + Metrics.settings-page-padding);
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
         scrolled => { if root.settings-menu-open && (root.settings-menu-anchor-y < Metrics.settings-header-height || root.settings-menu-anchor-y + root.settings-menu-anchor-height > root.height) { root.close-settings-menu(); } }
 
         provider-card := SettingsCard {
@@ -672,13 +691,22 @@ export component SettingsWindow inherits Window {
             }
         }
     }
+    AppVerticalScrollBar {
+        visible: root.active-category == 1;
+        x: main-pane.width - 14px;
+        y: Metrics.settings-header-height + 4px;
+        height: main-pane.height - Metrics.settings-header-height - 8px;
+        viewport-height: translation-scroll.visible-height;
+        content-height: translation-scroll.content-height;
+        content-y <=> translation-scroll.content-y;
+    }
     }
     }
     function toggle-language-menu() {
         if root.settings-menu-open && !root.settings-menu-provider-mode { root.close-settings-menu(); }
         else {
             root.settings-menu-provider-mode = false;
-            root.settings-menu-scroll-y = min(0px, max(settings-menu.height - root.language-labels.length * 40px, settings-menu.height / 2 - (root.draft-target-index + 0.5) * 40px));
+            root.settings-menu-scroll-y = round(min(0px, max(settings-menu.height - root.language-labels.length * 40px, settings-menu.height / 2 - (root.draft-target-index + 0.5) * 40px)) / 4px) * 4px;
             root.settings-menu-open = true; root.settings-menu-dismiss-armed = true; root.focus-settings-menu();
         }
     }
@@ -700,9 +728,10 @@ export component SettingsWindow inherits Window {
     }
     settings-menu := SettingsSelectMenu {
         visible: root.settings-menu-open; z: 15;
-        x: root.settings-menu-anchor-x; y: root.settings-menu-anchor-y + root.settings-menu-anchor-height + 2px;
-        width: root.settings-menu-anchor-width;
-        height: min((root.settings-menu-provider-mode ? 1 : root.language-labels.length) * 40px, max(0px, root.height - self.y - Metrics.settings-page-padding));
+        x: round(root.settings-menu-anchor-x / 1px) * 1px;
+        y: round((root.settings-menu-anchor-y + root.settings-menu-anchor-height + 2px) / 1px) * 1px;
+        width: round(root.settings-menu-anchor-width / 1px) * 1px;
+        height: round(min((root.settings-menu-provider-mode ? 1 : root.language-labels.length) * 40px, max(0px, root.height - self.y - Metrics.settings-page-padding)) / 1px) * 1px;
         options: root.settings-menu-provider-mode ? ["DeepL"] : root.language-labels;
         selected-index: root.settings-menu-provider-mode ? 0 : root.draft-target-index;
         scroll-y <=> root.settings-menu-scroll-y;

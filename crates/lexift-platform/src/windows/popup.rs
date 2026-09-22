@@ -1,4 +1,9 @@
-use crate::{PassiveToolWindowPreparation, PopupPointerEvent, PopupPointerHandler};
+use std::{cell::RefCell, collections::HashMap};
+
+use crate::{
+    PassiveToolWindowPreparation, PopupPointerEvent, PopupPointerHandler, PopupResizeBounds,
+    PopupResizeEdge,
+};
 
 pub(crate) fn configure_passive(
     window: &impl raw_window_handle::HasWindowHandle,
@@ -8,7 +13,9 @@ pub(crate) fn configure_passive(
 
     let handle = match window.window_handle() {
         Ok(handle) => handle,
-        Err(HandleError::Unavailable) => return Ok(PassiveToolWindowPreparation::Pending),
+        Err(HandleError::NotSupported | HandleError::Unavailable) => {
+            return Ok(PassiveToolWindowPreparation::Pending);
+        }
         Err(error) => {
             return Err(lexift_core::Error::new(format!(
                 "Window handle is unavailable: {error}"
@@ -33,15 +40,276 @@ pub(crate) fn enable_interaction_without_activation(
     install_pointer_bridge(window, pointer_handler)
 }
 
+pub(crate) fn attach_owner(
+    child: &impl raw_window_handle::HasWindowHandle,
+    owner: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    use windows::Win32::{
+        Foundation::{GetLastError, SetLastError, WIN32_ERROR},
+        UI::WindowsAndMessaging::{GWLP_HWNDPARENT, SetWindowLongPtrW},
+    };
+    let child = required_hwnd(child)?;
+    let owner = required_hwnd(owner)?;
+    unsafe {
+        SetLastError(WIN32_ERROR(0));
+        let previous = SetWindowLongPtrW(child, GWLP_HWNDPARENT, owner.0 as isize);
+        if previous == 0 && GetLastError().0 != 0 {
+            return Err(lexift_core::Error::new(
+                "Could not attach tool window to its owner",
+            ));
+        }
+    }
+    Ok(())
+}
+
 const POPUP_INPUT_SUBCLASS_ID: usize = 0x4C58_4654;
+const POPUP_DISMISS_MESSAGE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 0x4C;
 const WHEEL_DELTA: f32 = 120.0;
 const LOGICAL_SCROLL_PIXELS_PER_NOTCH: f32 = 60.0;
+
+thread_local! {
+    static POPUP_DISMISS_MONITOR: RefCell<Option<PopupDismissMonitor>> = const { RefCell::new(None) };
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PopupDismissWatch {
+    initial_foreground: usize,
+    foreground_changed: bool,
+    dismissal_posted: bool,
+}
+
+struct PopupDismissMonitor {
+    watches: HashMap<usize, PopupDismissWatch>,
+    mouse_hook: windows::Win32::UI::WindowsAndMessaging::HHOOK,
+    foreground_hook: windows::Win32::UI::Accessibility::HWINEVENTHOOK,
+}
+
+impl PopupDismissMonitor {
+    fn install() -> lexift_core::Result<Self> {
+        use windows::Win32::UI::{
+            Accessibility::SetWinEventHook,
+            WindowsAndMessaging::{
+                EVENT_SYSTEM_FOREGROUND, SetWindowsHookExW, WH_MOUSE_LL, WINEVENT_OUTOFCONTEXT,
+            },
+        };
+
+        let mouse_hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(popup_mouse_hook), None, 0) }
+            .map_err(|_| {
+                lexift_core::Error::new("Could not monitor pointer input outside popup")
+            })?;
+        let foreground_hook = unsafe {
+            SetWinEventHook(
+                EVENT_SYSTEM_FOREGROUND,
+                EVENT_SYSTEM_FOREGROUND,
+                None,
+                Some(popup_foreground_hook),
+                0,
+                0,
+                WINEVENT_OUTOFCONTEXT,
+            )
+        };
+        if foreground_hook.0.is_null() {
+            let _ =
+                unsafe { windows::Win32::UI::WindowsAndMessaging::UnhookWindowsHookEx(mouse_hook) };
+            return Err(lexift_core::Error::new(
+                "Could not monitor foreground changes for popup",
+            ));
+        }
+        Ok(Self {
+            watches: HashMap::new(),
+            mouse_hook,
+            foreground_hook,
+        })
+    }
+
+    fn watch(&mut self, hwnd: windows::Win32::Foundation::HWND) {
+        let initial_foreground =
+            hwnd_key(unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() });
+        self.watches.insert(
+            hwnd_key(hwnd),
+            PopupDismissWatch {
+                initial_foreground,
+                foreground_changed: false,
+                dismissal_posted: false,
+            },
+        );
+    }
+
+    fn unwatch(&mut self, hwnd: windows::Win32::Foundation::HWND) {
+        self.watches.remove(&hwnd_key(hwnd));
+    }
+}
+
+impl Drop for PopupDismissMonitor {
+    fn drop(&mut self) {
+        use windows::Win32::UI::{
+            Accessibility::UnhookWinEvent, WindowsAndMessaging::UnhookWindowsHookEx,
+        };
+        if let Err(error) = unsafe { UnhookWindowsHookEx(self.mouse_hook) } {
+            tracing::debug!(%error, "translation popup mouse monitor could not be removed");
+        }
+        if !unsafe { UnhookWinEvent(self.foreground_hook) }.as_bool() {
+            tracing::debug!("translation popup foreground monitor could not be removed");
+        }
+    }
+}
+
+pub(crate) fn set_dismissal(
+    window: &impl raw_window_handle::HasWindowHandle,
+    enabled: bool,
+) -> lexift_core::Result<()> {
+    let hwnd = required_hwnd(window)?;
+    if enabled {
+        POPUP_DISMISS_MONITOR.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if slot.is_none() {
+                *slot = Some(PopupDismissMonitor::install()?);
+            }
+            slot.as_mut()
+                .expect("dismiss monitor was installed")
+                .watch(hwnd);
+            Ok(())
+        })
+    } else {
+        unregister_dismissal_hwnd(hwnd);
+        Ok(())
+    }
+}
+
+fn unregister_dismissal_hwnd(hwnd: windows::Win32::Foundation::HWND) {
+    POPUP_DISMISS_MONITOR.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if let Some(monitor) = slot.as_mut() {
+            monitor.unwatch(hwnd);
+            if monitor.watches.is_empty() {
+                *slot = None;
+            }
+        }
+    });
+}
+
+unsafe extern "system" fn popup_mouse_hook(
+    code: i32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CallNextHookEx, HC_ACTION, MSLLHOOKSTRUCT, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN,
+        WM_XBUTTONDOWN,
+    };
+    if code == HC_ACTION as i32
+        && matches!(
+            wparam.0 as u32,
+            WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN
+        )
+        && lparam.0 != 0
+    {
+        let data = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
+        post_dismissals_for_outside_point(data.pt.x, data.pt.y);
+    }
+    unsafe { CallNextHookEx(None, code, wparam, lparam) }
+}
+
+unsafe extern "system" fn popup_foreground_hook(
+    _hook: windows::Win32::UI::Accessibility::HWINEVENTHOOK,
+    _event: u32,
+    hwnd: windows::Win32::Foundation::HWND,
+    _object_id: i32,
+    _child_id: i32,
+    _event_thread: u32,
+    _event_time: u32,
+) {
+    post_dismissals_for_foreground(hwnd);
+}
+
+fn post_dismissals_for_outside_point(x: i32, y: i32) {
+    use windows::Win32::{Foundation::RECT, UI::WindowsAndMessaging::GetWindowRect};
+    POPUP_DISMISS_MONITOR.with(|slot| {
+        let Ok(mut slot) = slot.try_borrow_mut() else {
+            return;
+        };
+        let Some(monitor) = slot.as_mut() else {
+            return;
+        };
+        for (key, watch) in &mut monitor.watches {
+            if watch.dismissal_posted {
+                continue;
+            }
+            let hwnd = hwnd_from_key(*key);
+            let mut rect = RECT::default();
+            if unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok()
+                && !point_inside_rect(x, y, rect.left, rect.top, rect.right, rect.bottom)
+            {
+                post_dismissal(hwnd, watch);
+            }
+        }
+    });
+}
+
+fn post_dismissals_for_foreground(foreground: windows::Win32::Foundation::HWND) {
+    let foreground = hwnd_key(foreground);
+    POPUP_DISMISS_MONITOR.with(|slot| {
+        let Ok(mut slot) = slot.try_borrow_mut() else {
+            return;
+        };
+        let Some(monitor) = slot.as_mut() else {
+            return;
+        };
+        for (key, watch) in &mut monitor.watches {
+            if watch.dismissal_posted || *key == foreground {
+                if *key == foreground {
+                    watch.foreground_changed = true;
+                }
+                continue;
+            }
+            if should_dismiss_for_foreground(watch, foreground) {
+                post_dismissal(hwnd_from_key(*key), watch);
+            }
+        }
+    });
+}
+
+fn should_dismiss_for_foreground(watch: &mut PopupDismissWatch, foreground: usize) -> bool {
+    if foreground == watch.initial_foreground && !watch.foreground_changed {
+        return false;
+    }
+    watch.foreground_changed = true;
+    true
+}
+
+fn post_dismissal(hwnd: windows::Win32::Foundation::HWND, watch: &mut PopupDismissWatch) {
+    if unsafe {
+        windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+            Some(hwnd),
+            POPUP_DISMISS_MESSAGE,
+            windows::Win32::Foundation::WPARAM(0),
+            windows::Win32::Foundation::LPARAM(0),
+        )
+    }
+    .is_ok()
+    {
+        watch.dismissal_posted = true;
+    }
+}
+
+fn point_inside_rect(x: i32, y: i32, left: i32, top: i32, right: i32, bottom: i32) -> bool {
+    x >= left && x < right && y >= top && y < bottom
+}
+
+fn hwnd_key(hwnd: windows::Win32::Foundation::HWND) -> usize {
+    hwnd.0 as usize
+}
+
+fn hwnd_from_key(key: usize) -> windows::Win32::Foundation::HWND {
+    windows::Win32::Foundation::HWND(key as *mut core::ffi::c_void)
+}
 
 struct PopupInputBridge {
     handler: PopupPointerHandler,
     last_position: (f32, f32),
     pressed: bool,
     tracking_leave: bool,
+    resize_bounds: Option<PopupResizeBounds>,
 }
 
 impl PopupInputBridge {
@@ -51,6 +319,7 @@ impl PopupInputBridge {
             last_position: (0.0, 0.0),
             pressed: false,
             tracking_leave: false,
+            resize_bounds: None,
         }
     }
 
@@ -140,8 +409,9 @@ unsafe extern "system" fn popup_input_subclass(
             },
             Shell::{DefSubclassProc, RemoveWindowSubclass},
             WindowsAndMessaging::{
-                MA_ACTIVATE, RemovePropW, WM_CAPTURECHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP,
-                WM_MOUSEACTIVATE, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY,
+                MA_ACTIVATE, RemovePropW, WM_CAPTURECHANGED, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
+                WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEHWHEEL, WM_MOUSEMOVE,
+                WM_MOUSEWHEEL, WM_NCDESTROY, WM_SIZE,
             },
         },
     };
@@ -152,6 +422,10 @@ unsafe extern "system" fn popup_input_subclass(
     }
     let bridge = unsafe { &mut *(reference_data as *mut PopupInputBridge) };
     match message {
+        POPUP_DISMISS_MESSAGE => {
+            (bridge.handler)(PopupPointerEvent::DismissRequested);
+            return LRESULT(0);
+        }
         WM_MOUSEACTIVATE => {
             activate_for_pointer_input(hwnd);
             return LRESULT(MA_ACTIVATE as isize);
@@ -206,6 +480,26 @@ unsafe extern "system" fn popup_input_subclass(
                 (bridge.handler)(PopupPointerEvent::LeftReleased { x, y });
             }
         }
+        WM_EXITSIZEMOVE => {
+            (bridge.handler)(PopupPointerEvent::ResizeFinished);
+        }
+        WM_GETMINMAXINFO => {
+            if let Some(bounds) = bridge.resize_bounds {
+                let info = unsafe {
+                    &mut *(lparam.0 as *mut windows::Win32::UI::WindowsAndMessaging::MINMAXINFO)
+                };
+                info.ptMinTrackSize.x = bounds.min_width as i32;
+                info.ptMinTrackSize.y = bounds.min_height as i32;
+                info.ptMaxTrackSize.x = bounds.max_width as i32;
+                info.ptMaxTrackSize.y = bounds.max_height as i32;
+                return LRESULT(0);
+            }
+        }
+        WM_SIZE => {
+            let width = (lparam.0 as u16) as f32;
+            let height = ((lparam.0 >> 16) as u16) as f32;
+            (bridge.handler)(PopupPointerEvent::Resized { width, height });
+        }
         WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
             let (screen_x, screen_y) = client_position(lparam.0);
             let mut point = POINT {
@@ -231,6 +525,7 @@ unsafe extern "system" fn popup_input_subclass(
             return LRESULT(0);
         }
         WM_NCDESTROY => {
+            unregister_dismissal_hwnd(hwnd);
             let _ = unsafe { RemoveWindowSubclass(hwnd, Some(popup_input_subclass), subclass_id) };
             let removed = unsafe { RemovePropW(hwnd, w!("Lexift.PopupInputBridge")) };
             if let Ok(HANDLE(pointer)) = removed
@@ -351,6 +646,71 @@ pub(crate) fn begin_drag(
     Ok(())
 }
 
+pub(crate) fn begin_resize(
+    window: &impl raw_window_handle::HasWindowHandle,
+    edge: PopupResizeEdge,
+    bounds: PopupResizeBounds,
+) -> lexift_core::Result<bool> {
+    use windows::Win32::{
+        Foundation::{LPARAM, POINT, WPARAM},
+        UI::{
+            Input::KeyboardAndMouse::{GetAsyncKeyState, ReleaseCapture, VK_LBUTTON},
+            WindowsAndMessaging::{GetCursorPos, PostMessageW, WM_NCLBUTTONDOWN},
+        },
+    };
+    let hwnd = required_hwnd(window)?;
+    set_resize_bounds(hwnd, bounds)?;
+    unsafe {
+        if !async_key_is_pressed(GetAsyncKeyState(VK_LBUTTON.0 as i32)) {
+            return Ok(false);
+        }
+        let mut cursor = POINT::default();
+        GetCursorPos(&mut cursor)
+            .map_err(|_| lexift_core::Error::new("Could not read the pointer position"))?;
+        let hit_test = resize_hit_test(edge);
+        let _ = ReleaseCapture();
+        PostMessageW(
+            Some(hwnd),
+            WM_NCLBUTTONDOWN,
+            WPARAM(hit_test as usize),
+            LPARAM(pack_screen_position(cursor.x, cursor.y)),
+        )
+        .map_err(|_| lexift_core::Error::new("Could not begin resizing the popup window"))?;
+    }
+    Ok(true)
+}
+
+#[cfg(target_os = "windows")]
+fn resize_hit_test(edge: PopupResizeEdge) -> u32 {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT,
+    };
+    match edge {
+        PopupResizeEdge::Left => HTLEFT,
+        PopupResizeEdge::Right => HTRIGHT,
+        PopupResizeEdge::Top => HTTOP,
+        PopupResizeEdge::Bottom => HTBOTTOM,
+        PopupResizeEdge::TopLeft => HTTOPLEFT,
+        PopupResizeEdge::TopRight => HTTOPRIGHT,
+        PopupResizeEdge::BottomLeft => HTBOTTOMLEFT,
+        PopupResizeEdge::BottomRight => HTBOTTOMRIGHT,
+    }
+}
+
+fn set_resize_bounds(
+    hwnd: windows::Win32::Foundation::HWND,
+    bounds: PopupResizeBounds,
+) -> lexift_core::Result<()> {
+    use windows::{Win32::UI::WindowsAndMessaging::GetPropW, core::w};
+    let state = unsafe { GetPropW(hwnd, w!("Lexift.PopupInputBridge")) };
+    if state.0.is_null() {
+        return Err(lexift_core::Error::new("Popup resize state is unavailable"));
+    }
+    let bridge = unsafe { &mut *(state.0 as *mut PopupInputBridge) };
+    bridge.resize_bounds = Some(bounds);
+    Ok(())
+}
+
 fn async_key_is_pressed(state: i16) -> bool {
     state < 0
 }
@@ -359,14 +719,6 @@ fn pack_screen_position(x: i32, y: i32) -> isize {
     let x = x as i16 as u16 as u32;
     let y = y as i16 as u16 as u32;
     ((y << 16) | x) as isize
-}
-
-pub(crate) fn is_foreground(
-    window: &impl raw_window_handle::HasWindowHandle,
-) -> lexift_core::Result<bool> {
-    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-    let hwnd = required_hwnd(window)?;
-    Ok(unsafe { GetForegroundWindow() == hwnd })
 }
 
 fn configure_extended_style(
@@ -448,17 +800,35 @@ fn passive_refresh_flags() -> windows::Win32::UI::WindowsAndMessaging::SET_WINDO
 mod tests {
     use std::{cell::Cell, rc::Rc};
 
-    use crate::PopupPointerEvent;
+    use crate::{PopupPointerEvent, PopupResizeEdge};
 
     use super::{
-        PopupInputBridge, async_key_is_pressed, client_position, configure_passive,
-        interactive_extended_style, pack_screen_position, passive_extended_style,
-        passive_refresh_flags, wheel_delta_physical,
+        PopupDismissWatch, PopupInputBridge, async_key_is_pressed, client_position,
+        configure_passive, interactive_extended_style, pack_screen_position,
+        passive_extended_style, passive_refresh_flags, point_inside_rect, resize_hit_test,
+        should_dismiss_for_foreground, wheel_delta_physical,
     };
     use crate::PassiveToolWindowPreparation;
     use windows::Win32::UI::WindowsAndMessaging::{
+        HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT,
         SWP_FRAMECHANGED, SWP_NOACTIVATE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     };
+
+    #[test]
+    fn resize_edges_map_to_the_matching_windows_hit_tests() {
+        for (edge, expected) in [
+            (PopupResizeEdge::Left, HTLEFT),
+            (PopupResizeEdge::Right, HTRIGHT),
+            (PopupResizeEdge::Top, HTTOP),
+            (PopupResizeEdge::Bottom, HTBOTTOM),
+            (PopupResizeEdge::TopLeft, HTTOPLEFT),
+            (PopupResizeEdge::TopRight, HTTOPRIGHT),
+            (PopupResizeEdge::BottomLeft, HTBOTTOMLEFT),
+            (PopupResizeEdge::BottomRight, HTBOTTOMRIGHT),
+        ] {
+            assert_eq!(resize_hit_test(edge), expected);
+        }
+    }
 
     #[test]
     fn physical_wheel_delta_tracks_window_dpi() {
@@ -495,6 +865,40 @@ mod tests {
     }
 
     #[test]
+    fn popup_bounds_include_edges_except_the_exclusive_bottom_right() {
+        assert!(point_inside_rect(10, 20, 10, 20, 110, 120));
+        assert!(point_inside_rect(109, 119, 10, 20, 110, 120));
+        assert!(!point_inside_rect(110, 119, 10, 20, 110, 120));
+        assert!(!point_inside_rect(109, 120, 10, 20, 110, 120));
+        assert!(!point_inside_rect(-1, 50, 10, 20, 110, 120));
+    }
+
+    #[test]
+    fn initial_foreground_is_ignored_until_a_real_transition() {
+        let mut watch = PopupDismissWatch {
+            initial_foreground: 10,
+            foreground_changed: false,
+            dismissal_posted: false,
+        };
+
+        assert!(!should_dismiss_for_foreground(&mut watch, 10));
+        assert!(!watch.foreground_changed);
+        assert!(should_dismiss_for_foreground(&mut watch, 20));
+        assert!(watch.foreground_changed);
+    }
+
+    #[test]
+    fn returning_to_the_initial_window_after_popup_activation_dismisses() {
+        let mut watch = PopupDismissWatch {
+            initial_foreground: 10,
+            foreground_changed: true,
+            dismissal_posted: false,
+        };
+
+        assert!(should_dismiss_for_foreground(&mut watch, 10));
+    }
+
+    #[test]
     fn unavailable_native_window_is_pending_instead_of_failed() {
         struct UnavailableWindow;
 
@@ -509,6 +913,25 @@ mod tests {
 
         assert_eq!(
             configure_passive(&UnavailableWindow).unwrap(),
+            PassiveToolWindowPreparation::Pending
+        );
+    }
+
+    #[test]
+    fn not_yet_supported_native_window_is_pending_instead_of_failed() {
+        struct NotSupportedWindow;
+
+        impl raw_window_handle::HasWindowHandle for NotSupportedWindow {
+            fn window_handle(
+                &self,
+            ) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError>
+            {
+                Err(raw_window_handle::HandleError::NotSupported)
+            }
+        }
+
+        assert_eq!(
+            configure_passive(&NotSupportedWindow).unwrap(),
             PassiveToolWindowPreparation::Pending
         );
     }

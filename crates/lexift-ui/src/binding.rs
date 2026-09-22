@@ -51,9 +51,11 @@ pub(crate) fn apply_popup(popup: &TranslationPopup, state: &crate::mapper::Popup
     popup.set_source_text(state.source.clone().into());
     popup.set_translated_text(state.translated.clone().into());
     popup.set_error_text(state.error.clone().into());
+    popup.set_source_index(state.source_index);
+    popup.set_source_label(state.source_label.clone().into());
+    popup.set_source_language(state.source_language.clone().into());
     popup.set_target_index(state.target_index);
     popup.set_target_label(state.target_label.clone().into());
-    popup.set_detected_label(state.detected_label.clone().into());
     popup.set_detected_language(state.detected_language.clone().into());
     popup.set_busy(state.busy);
     popup.set_pinned(state.pinned);
@@ -61,8 +63,10 @@ pub(crate) fn apply_popup(popup: &TranslationPopup, state: &crate::mapper::Popup
     popup.set_speaking_translation(state.speaking_translation);
     popup.set_feedback_text(state.feedback.clone().into());
     popup.set_feedback_error(state.feedback_error);
+    popup.set_popup_width(420.0);
     popup.set_popup_height(state.height);
     popup.set_source_card_height(state.source_height);
+    popup.set_resize_min_height(336.0);
 }
 
 fn language_index(language: &str) -> i32 {

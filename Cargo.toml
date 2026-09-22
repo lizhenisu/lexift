@@ -28,13 +28,13 @@ atomic-write-file = "0.3.1"
 dirs = "7.0.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
-slint = { version = "1.17.1", default-features = false, features = [
+slint = { version = "1.18.1", default-features = false, features = [
     "backend-winit",
     "compat-1-2",
     "renderer-femtovg",
     "std",
 ] }
-slint-build = "1.17.1"
+slint-build = "1.18.1"
 tracing = "0.1.41"
 tracing-appender = "0.2.3"
 tracing-subscriber = "0.3.20"

@@ -1,0 +1,77 @@
+import { Colors } from "colors.slint";
+
+// The shared vertical scrollbar used by every scrollable Lexift surface.
+// Keep the resting thumb narrow and expand it only while the pointer is over
+// the control so content remains visually uncluttered.
+export component AppVerticalScrollBar inherits Rectangle {
+    in property <length> viewport-height;
+    in property <length> content-height;
+    in-out property <length> content-y;
+
+    private property <length> max-scroll: max(0px, root.content-height - root.viewport-height);
+    private property <length> thumb-height: max(
+        28px,
+        root.viewport-height * root.viewport-height / max(root.content-height, 1px)
+    );
+    private property <length> thumb-range: max(0px, root.height - root.thumb-height);
+    private property <length> thumb-y: root.max-scroll == 0px
+        ? 0px
+        : -root.content-y / root.max-scroll * root.thumb-range;
+    private property <length> drag-offset: 0px;
+
+    visible: root.max-scroll > 0px;
+    width: 10px;
+
+    function scroll-to-thumb(position: length) {
+        if root.thumb-range > 0px {
+            root.content-y = -max(0px, min(root.thumb-range, position)) / root.thumb-range * root.max-scroll;
+        }
+    }
+
+    Rectangle {
+        x: (parent.width - 2px) / 2;
+        y: 2px;
+        width: 2px;
+        height: max(0px, parent.height - 4px);
+        border-radius: 1px;
+        background: bar-touch.has-hover || bar-touch.pressed
+            ? Colors.scrollbar-track-hover : transparent;
+    }
+
+    thumb := Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: root.thumb-y;
+        width: bar-touch.has-hover || bar-touch.pressed ? 6px : 4px;
+        height: min(root.height, root.thumb-height);
+        border-radius: self.width / 2;
+        background: bar-touch.pressed ? Colors.scrollbar-thumb-pressed
+            : bar-touch.has-hover ? Colors.scrollbar-thumb-hover
+            : Colors.scrollbar-thumb;
+        animate width, background { duration: 100ms; easing: ease-out; }
+    }
+
+    bar-touch := TouchArea {
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                if self.mouse-y >= thumb.y && self.mouse-y <= thumb.y + thumb.height {
+                    root.drag-offset = self.mouse-y - thumb.y;
+                } else {
+                    root.drag-offset = thumb.height / 2;
+                    root.scroll-to-thumb(self.mouse-y - root.drag-offset);
+                }
+            }
+        }
+        moved => {
+            if self.pressed {
+                root.scroll-to-thumb(self.mouse-y - root.drag-offset);
+            }
+        }
+        scroll-event(event) => {
+            if event.delta-y != 0px {
+                root.content-y = max(-root.max-scroll, min(0px, root.content-y + event.delta-y));
+                return accept;
+            }
+            return reject;
+        }
+    }
+}

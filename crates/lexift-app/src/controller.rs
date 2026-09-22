@@ -1480,6 +1480,7 @@ mod tests {
             TranslationTaskId::new(1),
             TranslateRequest {
                 text: "old request".into(),
+                source_language: None,
                 target_language: lexift_core::domain::language::Language("zh-CN".into()),
             },
         );
@@ -1487,6 +1488,7 @@ mod tests {
             TranslationTaskId::new(2),
             TranslateRequest {
                 text: "new request".into(),
+                source_language: None,
                 target_language: lexift_core::domain::language::Language("zh-CN".into()),
             },
         );

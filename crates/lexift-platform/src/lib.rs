@@ -37,6 +37,36 @@ pub enum PopupPointerEvent {
         delta_x: f32,
         delta_y: f32,
     },
+    /// The user continued working outside an unpinned popup.
+    DismissRequested,
+    /// The native client area changed size, in physical pixels.
+    Resized {
+        width: f32,
+        height: f32,
+    },
+    /// The native interactive resize loop ended.
+    ResizeFinished,
+}
+
+/// The edge or corner used to resize a translation popup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PopupResizeEdge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PopupResizeBounds {
+    pub min_width: u32,
+    pub min_height: u32,
+    pub max_width: u32,
+    pub max_height: u32,
 }
 
 pub type PopupPointerHandler = Box<dyn Fn(PopupPointerEvent) + 'static>;
@@ -80,6 +110,37 @@ pub fn enable_tool_window_interaction(
     Ok(())
 }
 
+/// Attaches a tool-window surface to its owning application window.
+pub fn attach_tool_window(
+    child: &impl raw_window_handle::HasWindowHandle,
+    owner: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::popup::attach_owner(child, owner)?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = (child, owner);
+    Ok(())
+}
+
+/// Enables or disables automatic dismissal for a visible tool-window surface.
+///
+/// On Windows this watches pointer presses outside the popup and subsequent foreground-window
+/// changes without intercepting either input path.
+pub fn set_popup_dismissal(
+    window: &impl raw_window_handle::HasWindowHandle,
+    enabled: bool,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::popup::set_dismissal(window, enabled)?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = (window, enabled);
+    Ok(())
+}
+
 /// Restores and activates a top-level window after an explicit user request.
 ///
 /// Passive windows such as the translation popup must not use this function.
@@ -106,15 +167,24 @@ pub fn begin_window_drag(
     Ok(())
 }
 
-/// Reports whether the supplied window currently owns foreground activation.
-pub fn is_foreground_window(
+/// Starts the native system resize operation for a popup source-card handle.
+///
+/// Returns `false` when the initiating left-button press has already ended.
+#[cfg(target_os = "windows")]
+pub fn begin_window_resize(
     window: &impl raw_window_handle::HasWindowHandle,
+    edge: PopupResizeEdge,
+    bounds: PopupResizeBounds,
 ) -> lexift_core::Result<bool> {
-    #[cfg(target_os = "windows")]
-    return windows::popup::is_foreground(window);
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = window;
-        Ok(true)
-    }
+    windows::popup::begin_resize(window, edge, bounds)
+}
+
+/// Reports unsupported native popup resizing on non-Windows platforms.
+#[cfg(not(target_os = "windows"))]
+pub fn begin_window_resize(
+    _window: &impl raw_window_handle::HasWindowHandle,
+    _edge: PopupResizeEdge,
+    _bounds: PopupResizeBounds,
+) -> lexift_core::Result<bool> {
+    Ok(false)
 }

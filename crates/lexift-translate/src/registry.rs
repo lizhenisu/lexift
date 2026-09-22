@@ -104,6 +104,7 @@ mod tests {
         let error = runtime
             .block_on(registry.default_translator().translate(TranslateRequest {
                 text: "Hello world".into(),
+                source_language: None,
                 target_language: lexift_core::domain::language::Language("zh-CN".into()),
             }))
             .expect_err("translation should fail when no provider is configured");

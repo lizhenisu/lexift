@@ -6,6 +6,6 @@ mod placement;
 slint::include_modules!();
 
 pub use bridge::{
-    PassiveWindowPreparation, PopupPointerInput, PopupPointerSink, Ui, UiHandle,
-    WindowLifecycleCallbacks,
+    PassiveWindowPreparation, PopupPointerInput, PopupPointerSink, PopupResizeBounds,
+    PopupResizeEdge, Ui, UiHandle, WindowLifecycleCallbacks,
 };

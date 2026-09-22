@@ -19,10 +19,11 @@ use lexift_core::{
         settings::{Settings, SettingsChange, SettingsFeedback, SettingsField},
     },
 };
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::{
-    AppWindow, SettingsToastData, SettingsWindow, TranslationPopup, binding, mapper, placement,
+    AppWindow, PopupLanguageMenuWindow, SettingsToastData, SettingsWindow, TranslationPopup,
+    binding, mapper, placement,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -46,10 +47,59 @@ pub enum PopupPointerInput {
         delta_x: f32,
         delta_y: f32,
     },
+    DismissRequested,
+    Resized {
+        width: f32,
+        height: f32,
+    },
+    ResizeFinished,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PopupResizeEdge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PopupResizeBounds {
+    pub min_width: f32,
+    pub min_height: f32,
+    pub max_width: f32,
+    pub max_height: f32,
+}
+
+impl PopupResizeEdge {
+    fn from_index(index: i32) -> Option<Self> {
+        Some(match index {
+            0 => Self::Left,
+            1 => Self::Right,
+            2 => Self::Top,
+            3 => Self::Bottom,
+            4 => Self::TopLeft,
+            5 => Self::TopRight,
+            6 => Self::BottomLeft,
+            7 => Self::BottomRight,
+            _ => return None,
+        })
+    }
+
+    fn changes_height(self) -> bool {
+        !matches!(self, Self::Left | Self::Right)
+    }
 }
 
 pub type PopupPointerSink = Rc<dyn Fn(PopupPointerInput)>;
 type CompletePassiveWindowShow = Rc<dyn Fn(&slint::Window, PopupPointerSink) -> bool>;
+type SetPopupDismissal = Rc<dyn Fn(&slint::Window, bool) -> bool>;
+type AttachToolWindow = Rc<dyn Fn(&slint::Window, &slint::Window) -> bool>;
+type BeginWindowResize = Rc<dyn Fn(&slint::Window, PopupResizeEdge, PopupResizeBounds) -> bool>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PassiveWindowPreparation {
@@ -62,7 +112,9 @@ pub struct WindowLifecycleCallbacks {
     complete_passive_window_show: CompletePassiveWindowShow,
     activate_user_requested_window: fn(&slint::Window) -> bool,
     begin_window_drag: fn(&slint::Window) -> bool,
-    is_foreground_window: fn(&slint::Window) -> bool,
+    begin_window_resize: BeginWindowResize,
+    set_popup_dismissal: SetPopupDismissal,
+    attach_tool_window: AttachToolWindow,
 }
 
 impl WindowLifecycleCallbacks {
@@ -70,13 +122,18 @@ impl WindowLifecycleCallbacks {
         complete_passive_window_show: impl Fn(&slint::Window, PopupPointerSink) -> bool + 'static,
         activate_user_requested_window: fn(&slint::Window) -> bool,
         begin_window_drag: fn(&slint::Window) -> bool,
-        is_foreground_window: fn(&slint::Window) -> bool,
+        begin_window_resize: impl Fn(&slint::Window, PopupResizeEdge, PopupResizeBounds) -> bool
+        + 'static,
+        set_popup_dismissal: impl Fn(&slint::Window, bool) -> bool + 'static,
+        attach_tool_window: impl Fn(&slint::Window, &slint::Window) -> bool + 'static,
     ) -> Self {
         Self {
             complete_passive_window_show: Rc::new(complete_passive_window_show),
             activate_user_requested_window,
             begin_window_drag,
-            is_foreground_window,
+            begin_window_resize: Rc::new(begin_window_resize),
+            set_popup_dismissal: Rc::new(set_popup_dismissal),
+            attach_tool_window: Rc::new(attach_tool_window),
         }
     }
 }
@@ -91,6 +148,11 @@ const SETTINGS_DEFAULT_HEIGHT: f32 = 680.0;
 const POPUP_DRAG_FALLBACK_DELAY: Duration = Duration::from_millis(16);
 const POPUP_SHOW_RETRY_DELAY: Duration = Duration::from_millis(16);
 const POPUP_SHOW_TIMEOUT: Duration = Duration::from_secs(1);
+const LANGUAGE_MENU_ROW_HEIGHT: f32 = 40.0;
+const LANGUAGE_MENU_VISIBLE_ROWS: usize = 10;
+const LANGUAGE_MENU_GAP_PX: i32 = 4;
+const POPUP_MIN_WIDTH: f32 = 340.0;
+const POPUP_MIN_SOURCE_HEIGHT: f32 = 86.0;
 
 thread_local! {
     static POPUP_REGISTRY: RefCell<Option<PopupRegistry>> = const { RefCell::new(None) };
@@ -170,19 +232,78 @@ fn popup_window_route(
 
 struct PopupRegistry {
     primary: slint::Weak<TranslationPopup>,
+    language_menu: PopupLanguageMenuWindow,
+    language_menu_owner: Option<LanguageMenuOwner>,
+    language_menu_pending: Option<PendingLanguageMenuShow>,
+    language_menu_dismissal_watched: bool,
     extras: HashMap<u64, TranslationPopup>,
     states: HashMap<u64, mapper::PopupUiState>,
     work_areas: HashMap<u64, Rect>,
     handler: Option<Rc<dyn Fn(AppEvent)>>,
-    interacted: HashSet<u64>,
-    foreground_seen: HashSet<u64>,
+    dismissal_watches: HashSet<u64>,
     drag_scheduler: PopupDragScheduler,
+    manual_sizes: HashMap<u64, ManualPopupSize>,
+    active_resizes: HashMap<u64, ActivePopupResize>,
     pending_shows: HashMap<u64, PendingPopupShow>,
     next_show_generation: u64,
     prepare_passive_window: fn(&slint::Window) -> PassiveWindowPreparation,
     complete_passive_window_show: CompletePassiveWindowShow,
     begin_window_drag: fn(&slint::Window) -> bool,
-    is_foreground_window: fn(&slint::Window) -> bool,
+    begin_window_resize: BeginWindowResize,
+    set_popup_dismissal: SetPopupDismissal,
+    attach_tool_window: AttachToolWindow,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ManualPopupSize {
+    width: f32,
+    height: f32,
+    source_height: f32,
+    baseline_source_height: f32,
+    baseline_remainder_height: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ActivePopupResize {
+    edge: PopupResizeEdge,
+    base_height: f32,
+    base_source_height: f32,
+}
+
+fn effective_manual_layout(
+    manual: ManualPopupSize,
+    auto_height: f32,
+    auto_source_height: f32,
+) -> (f32, f32, f32) {
+    let auto_remainder_height = auto_height - auto_source_height;
+    let source_growth = (auto_source_height - manual.baseline_source_height).max(0.0);
+    let remainder_growth = (auto_remainder_height - manual.baseline_remainder_height).max(0.0);
+    (
+        manual.width,
+        manual.height + source_growth + remainder_growth,
+        manual.source_height + source_growth,
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LanguageMenuKind {
+    Source,
+    Target,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LanguageMenuOwner {
+    session_id: u64,
+    kind: LanguageMenuKind,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PendingLanguageMenuShow {
+    owner: LanguageMenuOwner,
+    generation: u64,
+    deadline: Instant,
+    retried_once: bool,
+    native_window_creation_requested: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -192,6 +313,41 @@ struct PendingPopupShow {
     generation: u64,
     deadline: Instant,
     retried_once: bool,
+    native_window_creation_requested: bool,
+}
+
+impl PendingPopupShow {
+    fn new(
+        anchor: Option<Point>,
+        work_area: Option<Rect>,
+        generation: u64,
+        previous: Option<Self>,
+    ) -> Self {
+        let (retried_once, native_window_creation_requested) = previous
+            .map(|request| {
+                (
+                    request.retried_once,
+                    request.native_window_creation_requested,
+                )
+            })
+            .unwrap_or_default();
+        Self {
+            anchor,
+            work_area,
+            generation,
+            deadline: Instant::now() + POPUP_SHOW_TIMEOUT,
+            retried_once,
+            native_window_creation_requested,
+        }
+    }
+
+    fn request_native_window_creation(&mut self) -> bool {
+        if self.native_window_creation_requested {
+            return false;
+        }
+        self.native_window_creation_requested = true;
+        true
+    }
 }
 
 impl PopupRegistry {
@@ -223,6 +379,235 @@ impl PopupRegistry {
         Some(window)
     }
 
+    fn open_language_menu(
+        &mut self,
+        session_id: u64,
+        popup: &TranslationPopup,
+        kind: LanguageMenuKind,
+    ) {
+        let owner = LanguageMenuOwner { session_id, kind };
+        if self.language_menu_owner == Some(owner)
+            && (self.language_menu.window().is_visible() || self.language_menu_pending.is_some())
+        {
+            self.close_language_menu(true);
+            return;
+        }
+        self.close_language_menu(true);
+        let Some(work_area) = self.work_areas.get(&session_id).copied() else {
+            return;
+        };
+        self.disable_dismissal_watch(session_id, popup);
+        popup.set_source_menu_open(kind == LanguageMenuKind::Source);
+        popup.set_target_menu_open(kind == LanguageMenuKind::Target);
+        self.language_menu_owner = Some(owner);
+        match kind {
+            LanguageMenuKind::Source => {
+                self.language_menu
+                    .set_language_options(popup.get_source_language_options());
+                self.language_menu
+                    .set_selected_index(popup.get_source_index());
+            }
+            LanguageMenuKind::Target => {
+                self.language_menu
+                    .set_language_options(popup.get_target_language_options());
+                self.language_menu
+                    .set_selected_index(popup.get_target_index());
+            }
+        }
+        self.language_menu.set_menu_scroll_y(0.0);
+        self.next_show_generation = self.next_show_generation.wrapping_add(1).max(1);
+        let generation = self.next_show_generation;
+        self.language_menu_pending = Some(PendingLanguageMenuShow {
+            owner,
+            generation,
+            deadline: Instant::now() + POPUP_SHOW_TIMEOUT,
+            retried_once: false,
+            native_window_creation_requested: false,
+        });
+        self.try_show_language_menu(generation, work_area);
+    }
+
+    fn try_show_language_menu(&mut self, generation: u64, work_area: Rect) {
+        let Some(request) = self
+            .language_menu_pending
+            .filter(|request| request.generation == generation)
+        else {
+            return;
+        };
+        let Some(parent) = self
+            .existing_window(request.owner.session_id)
+            .filter(|window| {
+                window.window().is_visible()
+                    && match request.owner.kind {
+                        LanguageMenuKind::Source => window.get_source_menu_open(),
+                        LanguageMenuKind::Target => window.get_target_menu_open(),
+                    }
+            })
+        else {
+            self.close_language_menu(false);
+            return;
+        };
+        match (self.prepare_passive_window)(self.language_menu.window()) {
+            PassiveWindowPreparation::Ready => {
+                self.language_menu_pending = None;
+                self.finish_language_menu_show(request.owner, &parent, work_area);
+            }
+            PassiveWindowPreparation::Pending if Instant::now() < request.deadline => {
+                let should_prime = self.language_menu_pending.as_mut().is_some_and(|pending| {
+                    if pending.native_window_creation_requested {
+                        false
+                    } else {
+                        pending.native_window_creation_requested = true;
+                        true
+                    }
+                });
+                if should_prime && !prime_hidden_language_menu(&self.language_menu) {
+                    self.close_language_menu(true);
+                    return;
+                }
+                let delay = popup_show_retry_delay(request.retried_once);
+                if let Some(pending) = self.language_menu_pending.as_mut() {
+                    pending.retried_once = true;
+                }
+                schedule_language_menu_show_retry(generation, work_area, delay);
+            }
+            PassiveWindowPreparation::Pending => {
+                tracing::error!(
+                    session_id = request.owner.session_id,
+                    "popup language menu native window was not created before the show timeout"
+                );
+                self.close_language_menu(true);
+            }
+            PassiveWindowPreparation::Failed => self.close_language_menu(true),
+        }
+    }
+
+    fn finish_language_menu_show(
+        &mut self,
+        owner: LanguageMenuOwner,
+        parent: &TranslationPopup,
+        work_area: Rect,
+    ) {
+        self.position_language_menu(parent, owner.kind, work_area);
+        if !(self.attach_tool_window)(self.language_menu.window(), parent.window()) {
+            self.close_language_menu(true);
+            return;
+        }
+        if self.language_menu.show().is_err() {
+            self.close_language_menu(true);
+            return;
+        }
+        let pointer_sink = language_menu_pointer_sink(self.language_menu.as_weak());
+        if !(self.complete_passive_window_show)(self.language_menu.window(), pointer_sink) {
+            self.close_language_menu(true);
+            return;
+        }
+        if (self.set_popup_dismissal)(self.language_menu.window(), true) {
+            self.language_menu_dismissal_watched = true;
+        }
+        self.language_menu_owner = Some(owner);
+    }
+
+    fn position_language_menu(
+        &self,
+        parent: &TranslationPopup,
+        kind: LanguageMenuKind,
+        work_area: Rect,
+    ) {
+        let scale = parent.window().scale_factor().max(f32::EPSILON);
+        let parent_position = parent.window().position();
+        let (anchor_x, anchor_y, anchor_width, anchor_height, option_count, selected_index) =
+            match kind {
+                LanguageMenuKind::Source => (
+                    parent.get_source_menu_anchor_x(),
+                    parent.get_source_menu_anchor_y(),
+                    parent.get_source_menu_anchor_width(),
+                    parent.get_source_menu_anchor_height(),
+                    parent.get_source_language_options().row_count(),
+                    parent.get_source_index(),
+                ),
+                LanguageMenuKind::Target => (
+                    parent.get_target_menu_anchor_x(),
+                    parent.get_target_menu_anchor_y(),
+                    parent.get_target_menu_anchor_width(),
+                    parent.get_target_menu_anchor_height(),
+                    parent.get_target_language_options().row_count(),
+                    parent.get_target_index(),
+                ),
+            };
+        let anchor_left = parent_position.x + (anchor_x * scale).round() as i32;
+        let anchor_top = parent_position.y + (anchor_y * scale).round() as i32;
+        let anchor_width = (anchor_width * scale).round().max(1.0) as u32;
+        let anchor_height = (anchor_height * scale).round().max(1.0) as u32;
+        let visible_rows = option_count.min(LANGUAGE_MENU_VISIBLE_ROWS);
+        let desired_height = (visible_rows as f32 * LANGUAGE_MENU_ROW_HEIGHT * scale)
+            .round()
+            .max(1.0) as u32;
+        let placement = placement::place_attached_menu(
+            Rect {
+                left: anchor_left,
+                top: anchor_top,
+                right: anchor_left.saturating_add(anchor_width as i32),
+                bottom: anchor_top.saturating_add(anchor_height as i32),
+            },
+            desired_height,
+            work_area,
+            LANGUAGE_MENU_GAP_PX,
+            WORK_AREA_MARGIN_PX,
+        );
+        let logical_width = placement.width as f32 / scale;
+        let logical_height = placement.height as f32 / scale;
+        self.language_menu.set_menu_width(logical_width);
+        self.language_menu.set_menu_height(logical_height);
+        let max_scroll = (option_count as f32 * LANGUAGE_MENU_ROW_HEIGHT - logical_height).max(0.0);
+        let selected = selected_index.max(0) as f32;
+        self.language_menu.set_menu_scroll_y(
+            -(((selected * LANGUAGE_MENU_ROW_HEIGHT - logical_height / 2.0
+                + LANGUAGE_MENU_ROW_HEIGHT / 2.0)
+                .clamp(0.0, max_scroll)
+                / 4.0)
+                .round()
+                * 4.0),
+        );
+        self.language_menu
+            .window()
+            .set_position(slint::PhysicalPosition::new(
+                placement.position.x,
+                placement.position.y,
+            ));
+        self.language_menu
+            .window()
+            .set_size(slint::LogicalSize::new(logical_width, logical_height));
+    }
+
+    fn close_language_menu(&mut self, restore_parent_watch: bool) {
+        self.language_menu_pending = None;
+        if self.language_menu_dismissal_watched {
+            let _ = (self.set_popup_dismissal)(self.language_menu.window(), false);
+            self.language_menu_dismissal_watched = false;
+        }
+        let _ = self.language_menu.hide();
+        self.language_menu.set_menu_scroll_y(0.0);
+        let Some(owner) = self.language_menu_owner.take() else {
+            return;
+        };
+        let parent = self.existing_window(owner.session_id);
+        if let Some(parent) = &parent {
+            parent.set_source_menu_open(false);
+            parent.set_target_menu_open(false);
+        }
+        if restore_parent_watch
+            && let Some(parent) = parent
+            && parent.window().is_visible()
+            && self
+                .states
+                .get(&owner.session_id)
+                .is_some_and(|state| !state.pinned)
+        {
+            self.set_dismissal_watch(owner.session_id, &parent, true);
+        }
+    }
+
     fn update(&mut self, states: Vec<mapper::PopupUiState>) {
         let previous_states = std::mem::replace(
             &mut self.states,
@@ -234,19 +619,61 @@ impl PopupRegistry {
         if let Some(primary) = self.primary.upgrade() {
             let id = primary.get_session_id().max(0) as u64;
             if let Some(state) = self.states.get(&id) {
-                apply_popup_preserving_draft(&primary, state, previous_states.get(&id));
+                apply_popup_preserving_draft(
+                    &primary,
+                    state,
+                    previous_states.get(&id),
+                    self.manual_sizes.get(&id).copied(),
+                    self.active_resizes.contains_key(&id),
+                );
                 if let Some(work_area) = self.work_areas.get(&id) {
+                    apply_popup_resize_bounds(&primary, *work_area);
                     clamp_popup_to_work_area(&primary, *work_area);
                 }
             }
         }
         for (id, window) in &self.extras {
             if let Some(state) = self.states.get(id) {
-                apply_popup_preserving_draft(window, state, previous_states.get(id));
+                apply_popup_preserving_draft(
+                    window,
+                    state,
+                    previous_states.get(id),
+                    self.manual_sizes.get(id).copied(),
+                    self.active_resizes.contains_key(id),
+                );
                 if let Some(work_area) = self.work_areas.get(id) {
+                    apply_popup_resize_bounds(window, *work_area);
                     clamp_popup_to_work_area(window, *work_area);
                 }
             }
+        }
+        let watch_updates = self
+            .states
+            .iter()
+            .filter_map(|(id, state)| {
+                self.existing_window(*id)
+                    .filter(|window| window.window().is_visible())
+                    .map(|window| {
+                        (
+                            *id,
+                            window,
+                            !state.pinned
+                                && !self
+                                    .language_menu_owner
+                                    .is_some_and(|owner| owner.session_id == *id),
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
+        for (id, window, enabled) in watch_updates {
+            self.set_dismissal_watch(id, &window, enabled);
+        }
+        if self.language_menu.window().is_visible()
+            && let Some(owner) = self.language_menu_owner
+            && let Some(parent) = self.existing_window(owner.session_id)
+            && let Some(work_area) = self.work_areas.get(&owner.session_id).copied()
+        {
+            self.position_language_menu(&parent, owner.kind, work_area);
         }
     }
 
@@ -254,26 +681,32 @@ impl PopupRegistry {
         let Some(window) = self.window_for(session_id) else {
             return;
         };
+        if self
+            .language_menu_owner
+            .is_some_and(|owner| owner.session_id == session_id)
+        {
+            self.close_language_menu(false);
+        }
         reset_popup_transient_ui(&window);
         if let Some(state) = self.states.get(&session_id) {
-            binding::apply_popup(&window, state);
+            apply_popup_preserving_draft(
+                &window,
+                state,
+                None,
+                self.manual_sizes.get(&session_id).copied(),
+                false,
+            );
         } else {
             window.set_session_id(session_id as i32);
         }
-        self.interacted.remove(&session_id);
-        self.foreground_seen.remove(&session_id);
+        self.disable_dismissal_watch(session_id, &window);
         self.drag_scheduler.cancel(session_id);
         self.next_show_generation = self.next_show_generation.wrapping_add(1).max(1);
         let generation = self.next_show_generation;
+        let previous_request = self.pending_shows.get(&session_id).copied();
         self.pending_shows.insert(
             session_id,
-            PendingPopupShow {
-                anchor,
-                work_area,
-                generation,
-                deadline: Instant::now() + POPUP_SHOW_TIMEOUT,
-                retried_once: false,
-            },
+            PendingPopupShow::new(anchor, work_area, generation, previous_request),
         );
         self.try_show(session_id, generation);
     }
@@ -298,6 +731,15 @@ impl PopupRegistry {
             }
             PassiveWindowPreparation::Pending if Instant::now() < request.deadline => {
                 let delay = popup_show_retry_delay(request.retried_once);
+                let request_native_window_creation = self
+                    .pending_shows
+                    .get_mut(&session_id)
+                    .is_some_and(PendingPopupShow::request_native_window_creation);
+                if request_native_window_creation && !prime_hidden_popup_window(session_id, &window)
+                {
+                    self.pending_shows.remove(&session_id);
+                    return;
+                }
                 if let Some(request) = self.pending_shows.get_mut(&session_id) {
                     request.retried_once = true;
                 }
@@ -341,6 +783,7 @@ impl PopupRegistry {
         }
         if let (Some(anchor), Some(work_area)) = (anchor, work_area) {
             self.work_areas.insert(session_id, work_area);
+            apply_popup_resize_bounds(&window, work_area);
             let size = window.window().size();
             let placement = placement::place_popup(
                 anchor,
@@ -392,58 +835,176 @@ impl PopupRegistry {
         let pointer_sink = popup_pointer_sink(window.as_weak());
         if !(self.complete_passive_window_show)(window.window(), pointer_sink) {
             let _ = window.hide();
+            return;
+        }
+        let enabled = self
+            .states
+            .get(&session_id)
+            .is_some_and(|state| !state.pinned);
+        self.set_dismissal_watch(session_id, &window, enabled);
+    }
+
+    fn start_resize(&mut self, session_id: u64, window: &TranslationPopup, edge: PopupResizeEdge) {
+        if self
+            .language_menu_owner
+            .is_some_and(|owner| owner.session_id == session_id)
+        {
+            self.close_language_menu(false);
+        }
+        self.disable_dismissal_watch(session_id, window);
+        let height = window.get_popup_height();
+        let source_height = window.get_source_card_height();
+        window.set_resize_min_height((height - source_height + POPUP_MIN_SOURCE_HEIGHT).max(336.0));
+        self.active_resizes.insert(
+            session_id,
+            ActivePopupResize {
+                edge,
+                base_height: height,
+                base_source_height: source_height,
+            },
+        );
+    }
+
+    fn update_resize(
+        &mut self,
+        session_id: u64,
+        window: &TranslationPopup,
+        width: f32,
+        height: f32,
+    ) {
+        let Some(active) = self.active_resizes.get(&session_id).copied() else {
+            return;
+        };
+        let width = width.clamp(POPUP_MIN_WIDTH, window.get_max_popup_width());
+        let height = height.clamp(
+            window.get_resize_min_height(),
+            window.get_max_popup_height(),
+        );
+        window.set_popup_width(width);
+        window.set_popup_height(height);
+        if active.edge.changes_height() {
+            window.set_source_card_height(
+                (active.base_source_height + height - active.base_height)
+                    .max(POPUP_MIN_SOURCE_HEIGHT),
+            );
         }
     }
 
+    fn finish_resize(&mut self, session_id: u64, window: &TranslationPopup) {
+        if self.active_resizes.remove(&session_id).is_none() {
+            return;
+        }
+        let width = window.get_popup_width();
+        let height = window.get_popup_height();
+        let source_height = window.get_source_card_height();
+        if let Some(state) = self.states.get(&session_id) {
+            let (auto_height, auto_source_height) = mapper::popup_metrics_for_width(
+                &state.source,
+                &state.translated,
+                &state.error,
+                width,
+            );
+            self.manual_sizes.insert(
+                session_id,
+                ManualPopupSize {
+                    width,
+                    height,
+                    source_height,
+                    baseline_source_height: auto_source_height,
+                    baseline_remainder_height: auto_height - auto_source_height,
+                },
+            );
+        }
+        if let Some(work_area) = self.work_areas.get(&session_id).copied() {
+            clamp_popup_to_work_area(window, work_area);
+        }
+        let enabled = self
+            .states
+            .get(&session_id)
+            .is_some_and(|state| !state.pinned);
+        self.set_dismissal_watch(session_id, window, enabled);
+    }
+
+    fn cancel_resize(&mut self, session_id: u64, window: &TranslationPopup) {
+        if self.active_resizes.remove(&session_id).is_none() {
+            return;
+        }
+        let enabled = self
+            .states
+            .get(&session_id)
+            .is_some_and(|state| !state.pinned);
+        self.set_dismissal_watch(session_id, window, enabled);
+    }
+
     fn hide(&mut self, session_id: u64) {
+        if self
+            .language_menu_owner
+            .is_some_and(|owner| owner.session_id == session_id)
+        {
+            self.close_language_menu(false);
+        }
         let mut primary_hidden = false;
         if let Some(primary) = self.primary.upgrade()
             && primary.get_session_id().max(0) as u64 == session_id
         {
+            self.disable_dismissal_watch(session_id, &primary);
             reset_popup_transient_ui(&primary);
             let _ = primary.hide();
             primary.set_session_id(0);
             primary_hidden = true;
         }
         if !primary_hidden && let Some(window) = self.extras.remove(&session_id) {
+            self.disable_dismissal_watch(session_id, &window);
             reset_popup_transient_ui(&window);
             let _ = window.hide();
         }
         self.states.remove(&session_id);
         self.work_areas.remove(&session_id);
-        self.interacted.remove(&session_id);
-        self.foreground_seen.remove(&session_id);
         self.drag_scheduler.cancel(session_id);
+        self.active_resizes.remove(&session_id);
+        self.manual_sizes.remove(&session_id);
         self.pending_shows.remove(&session_id);
     }
 
-    fn foreground_lost_sessions(&mut self) -> Vec<u64> {
-        let candidates = self
-            .interacted
-            .iter()
-            .copied()
-            .filter(|id| self.states.get(id).is_some_and(|state| !state.pinned))
-            .collect::<Vec<_>>();
-        candidates
-            .into_iter()
-            .filter(|id| {
-                let window = self
-                    .primary
-                    .upgrade()
-                    .filter(|window| window.get_session_id().max(0) as u64 == *id)
-                    .or_else(|| self.extras.get(id).map(ComponentHandle::clone_strong));
-                let Some(window) = window.filter(|window| window.window().is_visible()) else {
-                    return false;
-                };
-                let is_foreground = (self.is_foreground_window)(window.window());
-                should_close_after_foreground_observation(
-                    &mut self.foreground_seen,
-                    *id,
-                    is_foreground,
-                )
-            })
-            .collect()
+    fn set_dismissal_watch(&mut self, session_id: u64, window: &TranslationPopup, enabled: bool) {
+        if enabled == self.dismissal_watches.contains(&session_id) {
+            return;
+        }
+        if (self.set_popup_dismissal)(window.window(), enabled) {
+            if enabled {
+                self.dismissal_watches.insert(session_id);
+            } else {
+                self.dismissal_watches.remove(&session_id);
+            }
+        } else if !enabled {
+            self.dismissal_watches.remove(&session_id);
+        }
     }
+
+    fn disable_dismissal_watch(&mut self, session_id: u64, window: &TranslationPopup) {
+        self.set_dismissal_watch(session_id, window, false);
+    }
+}
+
+fn prime_hidden_popup_window(session_id: u64, window: &TranslationPopup) -> bool {
+    if let Err(error) = window.show() {
+        tracing::error!(
+            session_id,
+            %error,
+            "translation popup could not request native window creation"
+        );
+        return false;
+    }
+    if let Err(error) = window.hide() {
+        let _ = window.hide();
+        tracing::error!(
+            session_id,
+            %error,
+            "translation popup could not remain hidden during native window creation"
+        );
+        return false;
+    }
+    true
 }
 
 fn popup_show_retry_delay(retried_once: bool) -> Duration {
@@ -464,31 +1025,81 @@ fn schedule_popup_show_retry(session_id: u64, generation: u64, delay: Duration) 
     });
 }
 
-fn should_close_after_foreground_observation(
-    foreground_seen: &mut HashSet<u64>,
-    session_id: u64,
-    is_foreground: bool,
-) -> bool {
-    if is_foreground {
-        foreground_seen.insert(session_id);
-        false
-    } else {
-        foreground_seen.contains(&session_id)
+fn prime_hidden_language_menu(menu: &PopupLanguageMenuWindow) -> bool {
+    if let Err(error) = menu.show() {
+        tracing::error!(%error, "target language menu could not request native window creation");
+        return false;
     }
+    if let Err(error) = menu.hide() {
+        let _ = menu.hide();
+        tracing::error!(%error, "target language menu could not remain hidden during native window creation");
+        return false;
+    }
+    true
+}
+
+fn schedule_language_menu_show_retry(generation: u64, work_area: Rect, delay: Duration) {
+    slint::Timer::single_shot(delay, move || {
+        POPUP_REGISTRY.with(|registry| {
+            if let Some(registry) = registry.borrow_mut().as_mut() {
+                registry.try_show_language_menu(generation, work_area);
+            }
+        });
+    });
 }
 
 fn apply_popup_preserving_draft(
     popup: &TranslationPopup,
     state: &mapper::PopupUiState,
     previous: Option<&mapper::PopupUiState>,
+    manual_size: Option<ManualPopupSize>,
+    resize_active: bool,
 ) {
     let draft = popup.get_source_text();
+    let active_layout = resize_active.then(|| {
+        (
+            popup.get_popup_width(),
+            popup.get_popup_height(),
+            popup.get_source_card_height(),
+            popup.get_resize_min_height(),
+        )
+    });
     let preserve_draft = previous.is_some_and(|previous| {
         previous.source == state.source && draft.as_str() != previous.source
     });
     binding::apply_popup(popup, state);
+    if let Some((width, height, source_height, min_height)) = active_layout {
+        // A Core snapshot can arrive while Windows is running its native
+        // sizing loop. Keep the live geometry rather than letting the normal
+        // state binding snap the card back to its automatic size mid-drag.
+        popup.set_popup_width(width);
+        popup.set_popup_height(height);
+        popup.set_source_card_height(source_height);
+        popup.set_resize_min_height(min_height);
+    } else if let Some(manual) = manual_size {
+        let (auto_height, auto_source_height) = mapper::popup_metrics_for_width(
+            &state.source,
+            &state.translated,
+            &state.error,
+            manual.width,
+        );
+        let (width, height, source_height) =
+            effective_manual_layout(manual, auto_height, auto_source_height);
+        popup.set_popup_width(width);
+        popup.set_source_card_height(source_height);
+        popup.set_popup_height(height);
+        popup.set_resize_min_height(
+            (manual.height - manual.source_height + POPUP_MIN_SOURCE_HEIGHT).max(336.0),
+        );
+    }
     if preserve_draft {
         popup.set_source_text(draft);
+    }
+    if !resize_active {
+        popup.window().set_size(slint::LogicalSize::new(
+            popup.get_popup_width(),
+            popup.get_popup_height(),
+        ));
     }
 }
 
@@ -498,6 +1109,82 @@ fn popup_pointer_sink(popup: slint::Weak<TranslationPopup>) -> PopupPointerSink 
             return;
         };
         let scale = popup.window().scale_factor().max(f32::EPSILON);
+        let position = |x: f32, y: f32| slint::LogicalPosition::new(x / scale, y / scale);
+        use slint::platform::{PointerEventButton, WindowEvent};
+        let event = match input {
+            PopupPointerInput::DismissRequested => {
+                let session_id = popup.get_session_id().max(0) as u64;
+                schedule_popup_dismissal(session_id);
+                return;
+            }
+            PopupPointerInput::Resized { width, height } => {
+                let session_id = popup.get_session_id().max(0) as u64;
+                POPUP_REGISTRY.with(|registry| {
+                    // Slint/Winit may synchronously emit WM_SIZE while a
+                    // registry operation calls Window::set_size(). That size
+                    // is already reflected by the caller, so ignore only that
+                    // re-entrant notification instead of panicking across the
+                    // native window procedure boundary.
+                    let Ok(mut registry) = registry.try_borrow_mut() else {
+                        return;
+                    };
+                    if let Some(registry) = registry.as_mut() {
+                        registry.update_resize(session_id, &popup, width / scale, height / scale);
+                    }
+                });
+                return;
+            }
+            PopupPointerInput::ResizeFinished => {
+                let session_id = popup.get_session_id().max(0) as u64;
+                POPUP_REGISTRY.with(|registry| {
+                    let Ok(mut registry) = registry.try_borrow_mut() else {
+                        return;
+                    };
+                    if let Some(registry) = registry.as_mut() {
+                        registry.finish_resize(session_id, &popup);
+                    }
+                });
+                return;
+            }
+            PopupPointerInput::Moved { x, y } => WindowEvent::PointerMoved {
+                position: position(x, y),
+            },
+            PopupPointerInput::Exited => WindowEvent::PointerExited,
+            PopupPointerInput::LeftPressed { x, y } => WindowEvent::PointerPressed {
+                position: position(x, y),
+                button: PointerEventButton::Left,
+            },
+            PopupPointerInput::LeftReleased { x, y } => WindowEvent::PointerReleased {
+                position: position(x, y),
+                button: PointerEventButton::Left,
+            },
+            PopupPointerInput::Scrolled {
+                x,
+                y,
+                delta_x,
+                delta_y,
+            } => WindowEvent::PointerScrolled {
+                position: position(x, y),
+                delta_x: delta_x / scale,
+                delta_y: delta_y / scale,
+            },
+        };
+        if let Err(error) = popup.window().dispatch_event_with_result(event) {
+            tracing::warn!(%error, "translation popup pointer event could not be dispatched");
+        }
+    })
+}
+
+fn language_menu_pointer_sink(menu: slint::Weak<PopupLanguageMenuWindow>) -> PopupPointerSink {
+    Rc::new(move |input| {
+        let Some(menu) = menu.upgrade() else {
+            return;
+        };
+        if input == PopupPointerInput::DismissRequested {
+            schedule_language_menu_dismissal();
+            return;
+        }
+        let scale = menu.window().scale_factor().max(f32::EPSILON);
         let position = |x: f32, y: f32| slint::LogicalPosition::new(x / scale, y / scale);
         use slint::platform::{PointerEventButton, WindowEvent};
         let event = match input {
@@ -523,11 +1210,47 @@ fn popup_pointer_sink(popup: slint::Weak<TranslationPopup>) -> PopupPointerSink 
                 delta_x: delta_x / scale,
                 delta_y: delta_y / scale,
             },
+            PopupPointerInput::DismissRequested => return,
+            PopupPointerInput::Resized { .. } | PopupPointerInput::ResizeFinished => return,
         };
-        if let Err(error) = popup.window().try_dispatch_event(event) {
-            tracing::warn!(%error, "translation popup pointer event could not be dispatched");
+        if let Err(error) = menu.window().dispatch_event_with_result(event) {
+            tracing::warn!(%error, "target language menu pointer event could not be dispatched");
         }
     })
+}
+
+fn schedule_language_menu_dismissal() {
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        POPUP_REGISTRY.with(|registry| {
+            if let Some(registry) = registry.borrow_mut().as_mut() {
+                registry.close_language_menu(true);
+            }
+        });
+    });
+}
+
+fn schedule_popup_dismissal(session_id: u64) {
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        let handler = POPUP_REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            let registry = registry.as_mut()?;
+            if registry
+                .states
+                .get(&session_id)
+                .is_none_or(|state| state.pinned)
+            {
+                return None;
+            }
+            let handler = registry.handler.as_ref().map(Rc::clone);
+            registry.hide(session_id);
+            handler
+        });
+        if let Some(handler) = handler {
+            handler(AppEvent::PopupClosed {
+                session_id: lexift_core::domain::translation::PopupSessionId::new(session_id),
+            });
+        }
+    });
 }
 
 fn clamp_popup_to_work_area(popup: &TranslationPopup, work_area: Rect) {
@@ -546,6 +1269,18 @@ fn clamp_popup_to_work_area(popup: &TranslationPopup, work_area: Rect) {
     }
 }
 
+fn apply_popup_resize_bounds(popup: &TranslationPopup, work_area: Rect) {
+    let scale = popup.window().scale_factor().max(f32::EPSILON);
+    let width = ((work_area.right - work_area.left - WORK_AREA_MARGIN_PX * 2).max(1) as f32
+        / scale)
+        .max(POPUP_MIN_WIDTH);
+    let height = ((work_area.bottom - work_area.top - WORK_AREA_MARGIN_PX * 2).max(1) as f32
+        / scale)
+        .max(336.0);
+    popup.set_max_popup_width(width);
+    popup.set_max_popup_height(height);
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SettingsToastRecord {
     id: i32,
@@ -562,7 +1297,6 @@ pub struct Ui {
     toast_records: Arc<Mutex<Vec<SettingsToastRecord>>>,
     background_mode: Rc<Cell<bool>>,
     activate_user_requested_window: fn(&slint::Window) -> bool,
-    foreground_timer: slint::Timer,
 }
 
 impl Ui {
@@ -574,6 +1308,7 @@ impl Ui {
     ) -> Result<Self, slint::PlatformError> {
         let main = AppWindow::new()?;
         let popup = TranslationPopup::new()?;
+        let language_menu = PopupLanguageMenuWindow::new()?;
         let settings = SettingsWindow::new()?;
         settings.window().set_size(slint::LogicalSize::new(
             SETTINGS_DEFAULT_WIDTH,
@@ -584,6 +1319,10 @@ impl Ui {
         POPUP_REGISTRY.with(|registry| {
             *registry.borrow_mut() = Some(PopupRegistry {
                 primary: popup.as_weak(),
+                language_menu: language_menu.clone_strong(),
+                language_menu_owner: None,
+                language_menu_pending: None,
+                language_menu_dismissal_watched: false,
                 extras: HashMap::new(),
                 states: mapper::popup_states(initial_state)
                     .into_iter()
@@ -591,9 +1330,10 @@ impl Ui {
                     .collect(),
                 work_areas: HashMap::new(),
                 handler: None,
-                interacted: HashSet::new(),
-                foreground_seen: HashSet::new(),
+                dismissal_watches: HashSet::new(),
                 drag_scheduler: PopupDragScheduler::default(),
+                manual_sizes: HashMap::new(),
+                active_resizes: HashMap::new(),
                 pending_shows: HashMap::new(),
                 next_show_generation: 0,
                 prepare_passive_window,
@@ -601,9 +1341,12 @@ impl Ui {
                     &window_lifecycle.complete_passive_window_show,
                 ),
                 begin_window_drag: window_lifecycle.begin_window_drag,
-                is_foreground_window: window_lifecycle.is_foreground_window,
+                begin_window_resize: Rc::clone(&window_lifecycle.begin_window_resize),
+                set_popup_dismissal: Rc::clone(&window_lifecycle.set_popup_dismissal),
+                attach_tool_window: Rc::clone(&window_lifecycle.attach_tool_window),
             });
         });
+        wire_language_menu_callbacks(&language_menu);
         Ok(Self {
             main,
             popup,
@@ -613,7 +1356,6 @@ impl Ui {
             toast_records: Arc::new(Mutex::new(Vec::new())),
             background_mode: Rc::new(Cell::new(false)),
             activate_user_requested_window: window_lifecycle.activate_user_requested_window,
-            foreground_timer: slint::Timer::default(),
         })
     }
 
@@ -655,29 +1397,6 @@ impl Ui {
                 registry.handler = Some(Rc::clone(&handler));
             }
         });
-        self.foreground_timer.start(
-            slint::TimerMode::Repeated,
-            Duration::from_millis(150),
-            move || {
-                let (sessions, handler) = POPUP_REGISTRY.with(|registry| {
-                    let mut registry = registry.borrow_mut();
-                    let Some(registry) = registry.as_mut() else {
-                        return (Vec::new(), None);
-                    };
-                    (
-                        registry.foreground_lost_sessions(),
-                        registry.handler.as_ref().map(Rc::clone),
-                    )
-                });
-                if let Some(handler) = handler {
-                    for id in sessions {
-                        handler(AppEvent::PopupClosed {
-                            session_id: lexift_core::domain::translation::PopupSessionId::new(id),
-                        });
-                    }
-                }
-            },
-        );
         let settings = self.settings.as_weak();
         let credential_generation = Arc::clone(&self.credential_generation);
         let toast_records = Arc::clone(&self.toast_records);
@@ -816,7 +1535,8 @@ impl Ui {
         }
         slint::run_event_loop_until_quit()?;
         POPUP_REGISTRY.with(|registry| {
-            if let Some(registry) = registry.borrow_mut().take() {
+            if let Some(mut registry) = registry.borrow_mut().take() {
+                registry.close_language_menu(false);
                 for window in registry.extras.into_values() {
                     reset_popup_transient_ui(&window);
                     let _ = window.hide();
@@ -835,8 +1555,9 @@ fn popup_session_id(popup: &TranslationPopup) -> lexift_core::domain::translatio
 }
 
 fn reset_popup_transient_ui(popup: &TranslationPopup) {
+    popup.set_source_menu_open(false);
     popup.set_target_menu_open(false);
-    popup.set_target_menu_scroll_y(0.0);
+    popup.set_resize_hover(-1);
 }
 
 fn wire_popup_close(popup: &TranslationPopup, handler: Rc<dyn Fn(AppEvent)>) {
@@ -845,7 +1566,13 @@ fn wire_popup_close(popup: &TranslationPopup, handler: Rc<dyn Fn(AppEvent)>) {
         if let Some(popup) = weak.upgrade() {
             let session_id = popup_session_id(&popup);
             reset_popup_transient_ui(&popup);
-            let _ = popup.hide();
+            POPUP_REGISTRY.with(|registry| {
+                if let Some(registry) = registry.borrow_mut().as_mut() {
+                    registry.hide(session_id.value());
+                } else {
+                    let _ = popup.hide();
+                }
+            });
             handler(AppEvent::PopupClosed { session_id });
         }
         slint::CloseRequestResponse::HideWindow
@@ -901,19 +1628,50 @@ fn schedule_popup_drag_dispatch(
     });
 }
 
-fn wire_popup_callbacks(popup: &TranslationPopup, handler: Rc<dyn Fn(AppEvent)>) {
-    let drag_render_notifier_installed = install_popup_drag_render_notifier(popup);
-    let weak = popup.as_weak();
-    popup.on_interaction_requested(move || {
-        if let Some(popup) = weak.upgrade() {
-            let id = popup.get_session_id().max(0) as u64;
-            POPUP_REGISTRY.with(|registry| {
-                if let Some(registry) = registry.borrow_mut().as_mut() {
-                    registry.interacted.insert(id);
-                }
+fn wire_language_menu_callbacks(menu: &PopupLanguageMenuWindow) {
+    menu.on_language_selected(move |selected_index| {
+        let dispatch = POPUP_REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            let registry = registry.as_mut()?;
+            let owner = registry.language_menu_owner?;
+            let popup = registry.existing_window(owner.session_id)?;
+            let source = popup.get_source_text().to_string();
+            let source_language = match owner.kind {
+                LanguageMenuKind::Source => source_language_for_index(selected_index),
+                LanguageMenuKind::Target => source_language_for_index(popup.get_source_index()),
+            };
+            let target_language = match owner.kind {
+                LanguageMenuKind::Source => language_for_index(popup.get_target_index()),
+                LanguageMenuKind::Target => language_for_index(selected_index),
+            };
+            let handler = registry.handler.as_ref().map(Rc::clone)?;
+            registry.close_language_menu(true);
+            Some((
+                handler,
+                owner.session_id,
+                source,
+                source_language,
+                target_language,
+            ))
+        });
+        if let Some((handler, session_id, source, source_language, target_language)) = dispatch {
+            handler(AppEvent::PopupTranslationRequested {
+                session_id: lexift_core::domain::translation::PopupSessionId::new(session_id),
+                text: source,
+                source_language,
+                target_language,
             });
         }
     });
+    menu.on_dismiss_requested(schedule_language_menu_dismissal);
+    menu.window().on_close_requested(move || {
+        schedule_language_menu_dismissal();
+        slint::CloseRequestResponse::KeepWindowShown
+    });
+}
+
+fn wire_popup_callbacks(popup: &TranslationPopup, handler: Rc<dyn Fn(AppEvent)>) {
+    let drag_render_notifier_installed = install_popup_drag_render_notifier(popup);
     let weak = popup.as_weak();
     popup.on_drag_requested(move || {
         let Some(popup) = weak.upgrade() else {
@@ -921,10 +1679,17 @@ fn wire_popup_callbacks(popup: &TranslationPopup, handler: Rc<dyn Fn(AppEvent)>)
         };
         let session_id = popup.get_session_id().max(0) as u64;
         let scheduled = POPUP_REGISTRY.with(|registry| {
-            registry
-                .borrow_mut()
-                .as_mut()
-                .is_some_and(|registry| registry.drag_scheduler.request(session_id))
+            let mut registry = registry.borrow_mut();
+            let Some(registry) = registry.as_mut() else {
+                return false;
+            };
+            if registry
+                .language_menu_owner
+                .is_some_and(|owner| owner.session_id == session_id)
+            {
+                registry.close_language_menu(true);
+            }
+            registry.drag_scheduler.request(session_id)
         });
         if !scheduled {
             return;
@@ -936,24 +1701,95 @@ fn wire_popup_callbacks(popup: &TranslationPopup, handler: Rc<dyn Fn(AppEvent)>)
     });
 
     let weak = popup.as_weak();
+    popup.on_resize_requested(move |edge_index| {
+        let Some(edge) = PopupResizeEdge::from_index(edge_index) else {
+            return;
+        };
+        let Some(popup) = weak.upgrade() else {
+            return;
+        };
+        let session_id = popup.get_session_id().max(0) as u64;
+        let begin_resize = POPUP_REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            let registry = registry.as_mut()?;
+            if registry.active_resizes.contains_key(&session_id) {
+                return None;
+            }
+            registry.start_resize(session_id, &popup, edge);
+            Some(Rc::clone(&registry.begin_window_resize))
+        });
+        let Some(begin_resize) = begin_resize else {
+            return;
+        };
+        let weak = popup.as_weak();
+        let bounds = PopupResizeBounds {
+            min_width: POPUP_MIN_WIDTH,
+            min_height: popup.get_resize_min_height(),
+            max_width: popup.get_max_popup_width(),
+            max_height: popup.get_max_popup_height(),
+        };
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            let Some(popup) = weak.upgrade().filter(|popup| {
+                popup.window().is_visible() && popup.get_session_id().max(0) as u64 == session_id
+            }) else {
+                return;
+            };
+            if !begin_resize(popup.window(), edge, bounds) {
+                POPUP_REGISTRY.with(|registry| {
+                    if let Some(registry) = registry.borrow_mut().as_mut() {
+                        registry.cancel_resize(session_id, &popup);
+                    }
+                });
+            }
+        });
+    });
+
+    let weak = popup.as_weak();
     let event_handler = Rc::clone(&handler);
-    popup.on_translate_requested(move |text, target_index| {
+    popup.on_translate_requested(move |text, source_index, target_index| {
         if let Some(popup) = weak.upgrade() {
             event_handler(AppEvent::PopupTranslationRequested {
                 session_id: popup_session_id(&popup),
                 text: text.to_string(),
+                source_language: source_language_for_index(source_index),
                 target_language: language_for_index(target_index),
             });
         }
     });
     let weak = popup.as_weak();
-    let event_handler = Rc::clone(&handler);
-    popup.on_target_language_selected(move |target_index| {
+    popup.on_source_menu_requested(move || {
         if let Some(popup) = weak.upgrade() {
-            event_handler(AppEvent::PopupTranslationRequested {
-                session_id: popup_session_id(&popup),
-                text: popup.get_source_text().to_string(),
-                target_language: language_for_index(target_index),
+            let session_id = popup.get_session_id().max(0) as u64;
+            POPUP_REGISTRY.with(|registry| {
+                if let Some(registry) = registry.borrow_mut().as_mut() {
+                    registry.open_language_menu(session_id, &popup, LanguageMenuKind::Source);
+                }
+            });
+        }
+    });
+    let weak = popup.as_weak();
+    popup.on_target_menu_requested(move || {
+        if let Some(popup) = weak.upgrade() {
+            let session_id = popup.get_session_id().max(0) as u64;
+            POPUP_REGISTRY.with(|registry| {
+                if let Some(registry) = registry.borrow_mut().as_mut() {
+                    registry.open_language_menu(session_id, &popup, LanguageMenuKind::Target);
+                }
+            });
+        }
+    });
+    let weak = popup.as_weak();
+    popup.on_language_menu_dismiss_requested(move || {
+        if let Some(popup) = weak.upgrade() {
+            let session_id = popup.get_session_id().max(0) as u64;
+            POPUP_REGISTRY.with(|registry| {
+                if let Some(registry) = registry.borrow_mut().as_mut()
+                    && registry
+                        .language_menu_owner
+                        .is_some_and(|owner| owner.session_id == session_id)
+                {
+                    registry.close_language_menu(true);
+                }
             });
         }
     });
@@ -961,10 +1797,17 @@ fn wire_popup_callbacks(popup: &TranslationPopup, handler: Rc<dyn Fn(AppEvent)>)
     let event_handler = Rc::clone(&handler);
     popup.on_pin_requested(move |pinned| {
         if let Some(popup) = weak.upgrade() {
-            event_handler(AppEvent::PopupPinChanged {
-                session_id: popup_session_id(&popup),
-                pinned,
+            let session_id = popup_session_id(&popup);
+            POPUP_REGISTRY.with(|registry| {
+                if let Some(registry) = registry.borrow_mut().as_mut() {
+                    let enabled = !pinned
+                        && !registry
+                            .language_menu_owner
+                            .is_some_and(|owner| owner.session_id == session_id.value());
+                    registry.set_dismissal_watch(session_id.value(), &popup, enabled);
+                }
             });
+            event_handler(AppEvent::PopupPinChanged { session_id, pinned });
         }
     });
     let weak = popup.as_weak();
@@ -973,7 +1816,13 @@ fn wire_popup_callbacks(popup: &TranslationPopup, handler: Rc<dyn Fn(AppEvent)>)
         if let Some(popup) = weak.upgrade() {
             let session_id = popup_session_id(&popup);
             reset_popup_transient_ui(&popup);
-            let _ = popup.hide();
+            POPUP_REGISTRY.with(|registry| {
+                if let Some(registry) = registry.borrow_mut().as_mut() {
+                    registry.hide(session_id.value());
+                } else {
+                    let _ = popup.hide();
+                }
+            });
             event_handler(AppEvent::PopupClosed { session_id });
         }
     });
@@ -1006,7 +1855,12 @@ fn wire_popup_callbacks(popup: &TranslationPopup, handler: Rc<dyn Fn(AppEvent)>)
                 source,
                 text: text.to_string(),
                 language: if source {
-                    let language = popup.get_detected_language();
+                    let selected = popup.get_source_language();
+                    let language = if selected.is_empty() {
+                        popup.get_detected_language()
+                    } else {
+                        selected
+                    };
                     if language.is_empty() {
                         None
                     } else {
@@ -1400,6 +2254,23 @@ fn language_for_index(index: i32) -> Language {
     Language(code.into())
 }
 
+fn source_language_for_index(index: i32) -> Option<Language> {
+    let code = match index {
+        0 => return None,
+        1 => "en-US",
+        2 => "zh-CN",
+        3 => "ja",
+        4 => "ko",
+        5 => "de",
+        6 => "fr",
+        7 => "es",
+        8 => "it",
+        9 => "pt-PT",
+        _ => return None,
+    };
+    Some(Language(code.into()))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MainWindowClosePolicy {
     HideToTray,
@@ -1419,11 +2290,32 @@ mod tests {
     use lexift_core::domain::language::Language;
 
     use super::{
-        MainWindowClosePolicy, PopupDragPhase, PopupDragScheduler, PopupWindowRoute,
-        SettingsToastRecord, close_policy, credential_session_is_current, language_index,
+        MainWindowClosePolicy, ManualPopupSize, PendingPopupShow, PopupDragPhase,
+        PopupDragScheduler, PopupWindowRoute, SettingsToastRecord, close_policy,
+        credential_session_is_current, effective_manual_layout, language_index,
         popup_show_retry_delay, popup_window_route, remove_settings_toast_record,
-        should_close_after_foreground_observation,
+        source_language_for_index,
     };
+
+    #[test]
+    fn manual_popup_size_is_a_floor_and_only_new_content_adds_growth() {
+        let manual = ManualPopupSize {
+            width: 360.0,
+            height: 350.0,
+            source_height: 90.0,
+            baseline_source_height: 120.0,
+            baseline_remainder_height: 240.0,
+        };
+
+        assert_eq!(
+            effective_manual_layout(manual, 300.0, 100.0),
+            (360.0, 350.0, 90.0)
+        );
+        assert_eq!(
+            effective_manual_layout(manual, 410.0, 140.0),
+            (360.0, 400.0, 110.0)
+        );
+    }
 
     #[test]
     fn pinned_primary_does_not_get_reused_for_a_new_session() {
@@ -1486,24 +2378,46 @@ mod tests {
     }
 
     #[test]
-    fn popup_only_closes_after_it_was_foreground_once() {
-        let mut foreground_seen = std::collections::HashSet::new();
+    fn popup_native_window_creation_is_requested_only_once() {
+        let mut request = PendingPopupShow::new(None, None, 1, None);
 
-        assert!(!should_close_after_foreground_observation(
-            &mut foreground_seen,
-            7,
-            false
-        ));
-        assert!(!should_close_after_foreground_observation(
-            &mut foreground_seen,
-            7,
-            true
-        ));
-        assert!(should_close_after_foreground_observation(
-            &mut foreground_seen,
-            7,
-            false
-        ));
+        assert!(request.request_native_window_creation());
+        assert!(!request.request_native_window_creation());
+    }
+
+    #[test]
+    fn popup_source_language_indices_are_reduced_and_auto_detect_is_none() {
+        assert_eq!(source_language_for_index(0), None);
+        for (index, code) in [
+            (1, "en-US"),
+            (2, "zh-CN"),
+            (3, "ja"),
+            (4, "ko"),
+            (5, "de"),
+            (6, "fr"),
+            (7, "es"),
+            (8, "it"),
+            (9, "pt-PT"),
+        ] {
+            assert_eq!(
+                source_language_for_index(index),
+                Some(Language(code.into()))
+            );
+        }
+        assert_eq!(source_language_for_index(10), None);
+    }
+
+    #[test]
+    fn repeated_popup_show_keeps_the_native_creation_request() {
+        let mut first = PendingPopupShow::new(None, None, 1, None);
+        assert!(first.request_native_window_creation());
+        first.retried_once = true;
+
+        let replacement = PendingPopupShow::new(None, None, 2, Some(first));
+
+        assert_eq!(replacement.generation, 2);
+        assert!(replacement.retried_once);
+        assert!(replacement.native_window_creation_requested);
     }
 
     #[test]

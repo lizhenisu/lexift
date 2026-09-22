@@ -18,6 +18,7 @@ pub async fn execute(
     translator
         .translate(TranslateRequest {
             text,
+            source_language: None,
             target_language,
         })
         .await
