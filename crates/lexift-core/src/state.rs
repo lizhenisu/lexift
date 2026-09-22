@@ -275,22 +275,21 @@ impl AppState {
                         .active_popup_session
                         .filter(|previous| *previous != session_id);
                     self.active_popup_session = Some(session_id);
-                    if let Some(previous) = previous {
-                        if let Some(index) = self
+                    if let Some(previous) = previous
+                        && let Some(index) = self
                             .popup_sessions
                             .iter()
                             .position(|session| session.id == previous && !session.pinned)
-                        {
-                            self.popup_sessions.remove(index);
-                            return vec![
-                                AppCommand::StopPopupSpeech {
-                                    session_id: previous,
-                                },
-                                AppCommand::HidePopup {
-                                    session_id: previous,
-                                },
-                            ];
-                        }
+                    {
+                        self.popup_sessions.remove(index);
+                        return vec![
+                            AppCommand::StopPopupSpeech {
+                                session_id: previous,
+                            },
+                            AppCommand::HidePopup {
+                                session_id: previous,
+                            },
+                        ];
                     }
                 }
                 Vec::new()

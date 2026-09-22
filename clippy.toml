@@ -1,1 +1,4 @@
-msrv = "1.85.0"
+# The floor is set by the dependency graph, not by edition 2024 (which only needs
+# 1.85): the Slint 1.18.1 family requires 1.92, so 1.92 is the lowest toolchain
+# this workspace can actually build with. Re-check after bumping dependencies.
+msrv = "1.92.0"

@@ -99,18 +99,18 @@ fn run_worker(
             match receiver.recv_timeout(Duration::from_millis(60)) {
                 Ok(command) => Some(command),
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if speech_finished(&voice) {
-                        if let Some((session_id, source)) = active.take() {
-                            notify(
-                                handler,
-                                SpeechEvent {
-                                    session_id,
-                                    source,
-                                    speaking: false,
-                                    error: None,
-                                },
-                            );
-                        }
+                    if speech_finished(&voice)
+                        && let Some((session_id, source)) = active.take()
+                    {
+                        notify(
+                            handler,
+                            SpeechEvent {
+                                session_id,
+                                source,
+                                speaking: false,
+                                error: None,
+                            },
+                        );
                     }
                     None
                 }

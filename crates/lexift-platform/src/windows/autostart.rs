@@ -119,8 +119,10 @@ fn read_run_value() -> Result<Option<String>> {
         return Err(registry_error("read", result));
     }
     let words = bytes[..byte_len as usize]
-        .chunks_exact(2)
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u16::from_le_bytes(*pair))
         .take_while(|word| *word != 0)
         .collect::<Vec<_>>();
     Ok(Some(String::from_utf16_lossy(&words)))
