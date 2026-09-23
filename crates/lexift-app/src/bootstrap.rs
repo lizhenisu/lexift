@@ -77,8 +77,8 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                         lexift_platform::PopupPointerEvent::Resized { width, height } => {
                             lexift_ui::PopupPointerInput::Resized { width, height }
                         }
-                        lexift_platform::PopupPointerEvent::ResizeFinished => {
-                            lexift_ui::PopupPointerInput::ResizeFinished
+                        lexift_platform::PopupPointerEvent::ResizeFinished { width, height } => {
+                            lexift_ui::PopupPointerInput::ResizeFinished { width, height }
                         }
                     };
                     sink(event);

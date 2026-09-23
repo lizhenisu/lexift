@@ -52,7 +52,10 @@ pub enum PopupPointerInput {
         width: f32,
         height: f32,
     },
-    ResizeFinished,
+    ResizeFinished {
+        width: f32,
+        height: f32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -305,6 +308,8 @@ struct ActivePopupResize {
     edge: PopupResizeEdge,
     base_height: f32,
     base_source_height: f32,
+    latest_width: f32,
+    latest_height: f32,
 }
 
 fn effective_manual_layout(
@@ -678,7 +683,9 @@ impl PopupRegistry {
                     self.manual_sizes.get(id).copied(),
                     self.active_resizes.contains_key(id),
                 );
-                if let Some(work_area) = self.work_areas.get(id) {
+                if !self.active_resizes.contains_key(id)
+                    && let Some(work_area) = self.work_areas.get(id)
+                {
                     apply_popup_resize_bounds(window, *work_area);
                     clamp_popup_to_work_area(window, *work_area);
                 }
@@ -883,15 +890,23 @@ impl PopupRegistry {
             self.close_language_menu(false);
         }
         self.disable_dismissal_watch(session_id, window);
-        let height = window.get_popup_height();
+        let scale = window.window().scale_factor().max(f32::EPSILON);
+        let actual_size = window.window().size();
+        let width = actual_size.width as f32 / scale;
+        let height = actual_size.height as f32 / scale;
         let source_height = window.get_source_card_height();
         window.set_resize_min_height((height - source_height + POPUP_MIN_SOURCE_HEIGHT).max(336.0));
+        window.set_resize_active(true);
+        window.set_resize_changes_height(edge.changes_height());
+        window.set_resize_fixed_remainder(height - source_height);
         self.active_resizes.insert(
             session_id,
             ActivePopupResize {
                 edge,
                 base_height: height,
                 base_source_height: source_height,
+                latest_width: width,
+                latest_height: height,
             },
         );
     }
@@ -903,7 +918,7 @@ impl PopupRegistry {
         width: f32,
         height: f32,
     ) {
-        let Some(active) = self.active_resizes.get(&session_id).copied() else {
+        let Some(active) = self.active_resizes.get_mut(&session_id) else {
             return;
         };
         let width = width.clamp(POPUP_MIN_WIDTH, window.get_max_popup_width());
@@ -911,23 +926,44 @@ impl PopupRegistry {
             window.get_resize_min_height(),
             window.get_max_popup_height(),
         );
-        window.set_popup_width(width);
-        window.set_popup_height(height);
-        if active.edge.changes_height() {
-            window.set_source_card_height(
-                (active.base_source_height + height - active.base_height)
-                    .max(POPUP_MIN_SOURCE_HEIGHT),
-            );
-        }
+        // WM_SIZE is only a measurement here. Writing the Window's preferred
+        // size before Winit consumes its corresponding Resized event creates
+        // two competing geometry updates during native edge resizing.
+        active.latest_width = width;
+        active.latest_height = height;
     }
 
-    fn finish_resize(&mut self, session_id: u64, window: &TranslationPopup) {
-        if self.active_resizes.remove(&session_id).is_none() {
+    fn finish_resize(
+        &mut self,
+        session_id: u64,
+        window: &TranslationPopup,
+        width: f32,
+        height: f32,
+    ) {
+        let Some(mut active) = self.active_resizes.remove(&session_id) else {
             return;
+        };
+        if width > 0.0 {
+            active.latest_width = width.clamp(POPUP_MIN_WIDTH, window.get_max_popup_width());
         }
-        let width = window.get_popup_width();
-        let height = window.get_popup_height();
-        let source_height = window.get_source_card_height();
+        if height > 0.0 {
+            active.latest_height = height.clamp(
+                window.get_resize_min_height(),
+                window.get_max_popup_height(),
+            );
+        }
+        let width = active.latest_width;
+        let height = active.latest_height;
+        let source_height = if active.edge.changes_height() {
+            (active.base_source_height + height - active.base_height).max(POPUP_MIN_SOURCE_HEIGHT)
+        } else {
+            active.base_source_height
+        };
+        window.set_resize_active(false);
+        window.set_resize_changes_height(false);
+        window.set_popup_width(width);
+        window.set_popup_height(height);
+        window.set_source_card_height(source_height);
         if let Some(state) = self.states.get(&session_id) {
             let (auto_height, auto_source_height) = mapper::popup_metrics_for_width(
                 &state.source,
@@ -960,6 +996,8 @@ impl PopupRegistry {
         if self.active_resizes.remove(&session_id).is_none() {
             return;
         }
+        window.set_resize_active(false);
+        window.set_resize_changes_height(false);
         let enabled = self
             .states
             .get(&session_id)
@@ -1079,27 +1117,15 @@ fn apply_popup_preserving_draft(
     resize_active: bool,
 ) {
     let draft = popup.get_source_text();
-    let active_layout = resize_active.then(|| {
-        (
-            popup.get_popup_width(),
-            popup.get_popup_height(),
-            popup.get_source_card_height(),
-            popup.get_resize_min_height(),
-        )
-    });
     let preserve_draft = previous.is_some_and(|previous| {
         previous.source == state.source && draft.as_str() != previous.source
     });
-    binding::apply_popup(popup, state);
-    if let Some((width, height, source_height, min_height)) = active_layout {
-        // A Core snapshot can arrive while Windows is running its native
-        // sizing loop. Keep the live geometry rather than letting the normal
-        // state binding snap the card back to its automatic size mid-drag.
-        popup.set_popup_width(width);
-        popup.set_popup_height(height);
-        popup.set_source_card_height(source_height);
-        popup.set_resize_min_height(min_height);
+    if resize_active {
+        // Core snapshots may arrive during native resizing. Refresh text and
+        // status, but leave all geometry properties untouched until it ends.
+        binding::apply_popup_content(popup, state);
     } else if let Some(manual) = manual_size {
+        binding::apply_popup_content(popup, state);
         let (auto_height, auto_source_height) = mapper::popup_metrics_for_width(
             &state.source,
             &state.translated,
@@ -1114,6 +1140,8 @@ fn apply_popup_preserving_draft(
         popup.set_resize_min_height(
             (manual.height - manual.source_height + POPUP_MIN_SOURCE_HEIGHT).max(336.0),
         );
+    } else {
+        binding::apply_popup(popup, state);
     }
     if preserve_draft {
         popup.set_source_text(draft);
@@ -1157,15 +1185,30 @@ fn popup_pointer_sink(popup: slint::Weak<TranslationPopup>) -> PopupPointerSink 
                 });
                 return;
             }
-            PopupPointerInput::ResizeFinished => {
+            PopupPointerInput::ResizeFinished { width, height } => {
                 let session_id = popup.get_session_id().max(0) as u64;
-                POPUP_REGISTRY.with(|registry| {
-                    let Ok(mut registry) = registry.try_borrow_mut() else {
+                let weak = popup.as_weak();
+                slint::Timer::single_shot(Duration::ZERO, move || {
+                    let Some(popup) = weak.upgrade().filter(|popup| {
+                        popup.window().is_visible()
+                            && popup.get_session_id().max(0) as u64 == session_id
+                    }) else {
                         return;
                     };
-                    if let Some(registry) = registry.as_mut() {
-                        registry.finish_resize(session_id, &popup);
-                    }
+                    let scale = popup.window().scale_factor().max(f32::EPSILON);
+                    POPUP_REGISTRY.with(|registry| {
+                        let Ok(mut registry) = registry.try_borrow_mut() else {
+                            return;
+                        };
+                        if let Some(registry) = registry.as_mut() {
+                            registry.finish_resize(
+                                session_id,
+                                &popup,
+                                width / scale,
+                                height / scale,
+                            );
+                        }
+                    });
                 });
                 return;
             }
@@ -1234,7 +1277,7 @@ fn language_menu_pointer_sink(menu: slint::Weak<PopupLanguageMenuWindow>) -> Pop
                 delta_y: delta_y / scale,
             },
             PopupPointerInput::DismissRequested => return,
-            PopupPointerInput::Resized { .. } | PopupPointerInput::ResizeFinished => return,
+            PopupPointerInput::Resized { .. } | PopupPointerInput::ResizeFinished { .. } => return,
         };
         if let Err(error) = menu.window().dispatch_event_with_result(event) {
             tracing::warn!(%error, "target language menu pointer event could not be dispatched");
@@ -1732,6 +1775,8 @@ fn reset_popup_transient_ui(popup: &TranslationPopup) {
     popup.set_source_menu_open(false);
     popup.set_target_menu_open(false);
     popup.set_resize_hover(-1);
+    popup.set_resize_active(false);
+    popup.set_resize_changes_height(false);
 }
 
 fn wire_popup_close(popup: &TranslationPopup, handler: Rc<dyn Fn(AppEvent)>) {

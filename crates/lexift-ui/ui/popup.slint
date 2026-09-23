@@ -73,6 +73,9 @@ export component TranslationPopup inherits Window {
     in-out property <length> resize-min-height: 336px;
     in-out property <length> max-popup-width: 1920px;
     in-out property <length> max-popup-height: 1080px;
+    in-out property <bool> resize-active: false;
+    in-out property <bool> resize-changes-height: false;
+    in-out property <length> resize-fixed-remainder: 0px;
     // Exposed to the bridge only so a hidden/reused window cannot retain a
     // stale resize affordance from its previous session.
     in-out property <int> resize-hover: -1;
@@ -179,7 +182,9 @@ export component TranslationPopup inherits Window {
             spacing: 10px;
 
             source-card := Rectangle {
-                height: root.source-card-height;
+                height: root.resize-active && root.resize-changes-height
+                    ? max(0px, root.height - root.resize-fixed-remainder)
+                    : root.source-card-height;
                 border-radius: 12px;
                 background: Colors.background;
                 border-width: source-input.has-focus ? 2px : 0px;

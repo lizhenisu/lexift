@@ -44,8 +44,11 @@ pub enum PopupPointerEvent {
         width: f32,
         height: f32,
     },
-    /// The native interactive resize loop ended.
-    ResizeFinished,
+    /// The native interactive resize loop ended at this client size in physical pixels.
+    ResizeFinished {
+        width: f32,
+        height: f32,
+    },
 }
 
 /// The edge or corner used to resize a translation popup.

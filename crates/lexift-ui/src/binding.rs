@@ -49,6 +49,14 @@ pub(crate) fn apply_settings(settings: &SettingsWindow, state: &UiState) {
 }
 
 pub(crate) fn apply_popup(popup: &TranslationPopup, state: &crate::mapper::PopupUiState) {
+    apply_popup_content(popup, state);
+    popup.set_popup_width(420.0);
+    popup.set_popup_height(state.height);
+    popup.set_source_card_height(state.source_height);
+    popup.set_resize_min_height(336.0);
+}
+
+pub(crate) fn apply_popup_content(popup: &TranslationPopup, state: &crate::mapper::PopupUiState) {
     popup.set_session_id(state.session_id as i32);
     popup.set_phase_text(state.status.clone().into());
     popup.set_source_text(state.source.clone().into());
@@ -66,10 +74,6 @@ pub(crate) fn apply_popup(popup: &TranslationPopup, state: &crate::mapper::Popup
     popup.set_speaking_translation(state.speaking_translation);
     popup.set_feedback_text(state.feedback.clone().into());
     popup.set_feedback_error(state.feedback_error);
-    popup.set_popup_width(420.0);
-    popup.set_popup_height(state.height);
-    popup.set_source_card_height(state.source_height);
-    popup.set_resize_min_height(336.0);
 }
 
 fn language_index(language: &str) -> i32 {
