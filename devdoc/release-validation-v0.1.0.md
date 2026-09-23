@@ -21,7 +21,7 @@
 - 当前用户静默安装成功，安装路径为 `%LOCALAPPDATA%\Lexift`，无需管理员权限。
 - Add/Remove Programs 信息、开始菜单快捷方式、应用文件、卸载器和 PE 元数据正确。
 - `InstallLocation` 使用无引号目录值；RC 验证期间发现并修复了旧模板写入带引号值的问题。
-- `--background` 只创建一个隐藏主窗口的进程；再次普通启动仍只有一个进程，并显示已有主窗口。
+- `--background` 启动后不创建 Slint 主窗口；再次普通启动仍只有一个进程，并按需创建并显示主窗口。
 - 启动项可从旧路径自动修复为当前安装路径；配置关闭开机启动后 Run 值被移除。
 - Portable 从独立目录和不同 working directory 启动成功，且不会在 portable 目录创建 `config.toml`。
 - 日志保留数量符合最多 5 个文件的约束，隐私模式扫描未发现 API Key、选中文字或 Clipboard 内容。
@@ -37,7 +37,7 @@
 
 ## 已完成人工 Smoke Test
 
-- 主窗口关闭后进程、托盘和 Hotkey 继续运行，Tray Open/Quit 可用。
+- 主窗口关闭后对应组件与 HWND 销毁，进程、托盘和 Hotkey 继续运行，Tray Open/Quit 可用；Tray Open 按最新 Core 状态重建主窗口。
 - Tray Open 可以将被其他普通窗口遮挡的主窗口恢复并提升到前台。
 - 注销并重新登录后主窗口保持隐藏，Tray 与 Hotkey 可用。
 - Chrome、Edge、VS Code、Notepad、Word 和 PDF Reader 的真实选择、翻译、Popup 全链路正常。

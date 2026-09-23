@@ -1,35 +1,38 @@
 use crate::{AppWindow, SettingsWindow, TranslationPopup, mapper::UiState};
 
-pub(crate) fn apply(main: &AppWindow, settings: &SettingsWindow, state: UiState) {
+pub(crate) fn apply_main(main: &AppWindow, state: &UiState) {
     main.set_status_text(state.status.clone().into());
     main.set_translation_busy(state.busy);
     main.set_target_language(state.target_language.clone().into());
     main.set_translated_text(state.translated.clone().into());
     main.set_error_text(state.error.clone().into());
+}
+
+pub(crate) fn apply_settings(settings: &SettingsWindow, state: &UiState) {
     let target_index = language_index(&state.target_language);
     if settings.get_draft_target_index() != target_index {
         settings.set_draft_target_index(target_index);
     }
     if settings.get_draft_hotkey_label().as_str() != state.hotkey {
-        settings.set_draft_hotkey_label(state.hotkey.into());
+        settings.set_draft_hotkey_label(state.hotkey.clone().into());
     }
     if settings.get_draft_provider_id().as_str() != state.provider {
-        settings.set_draft_provider_id(state.provider.into());
+        settings.set_draft_provider_id(state.provider.clone().into());
     }
     if settings.get_launch_at_login() != state.launch_at_login {
         settings.set_launch_at_login(state.launch_at_login);
     }
     if settings.get_target_language_error_text().as_str() != state.target_language_error {
-        settings.set_target_language_error_text(state.target_language_error.into());
+        settings.set_target_language_error_text(state.target_language_error.clone().into());
     }
     if settings.get_hotkey_error_text().as_str() != state.hotkey_error {
-        settings.set_hotkey_error_text(state.hotkey_error.into());
+        settings.set_hotkey_error_text(state.hotkey_error.clone().into());
     }
     if settings.get_provider_error_text().as_str() != state.provider_error {
-        settings.set_provider_error_text(state.provider_error.into());
+        settings.set_provider_error_text(state.provider_error.clone().into());
     }
     if settings.get_launch_at_login_error_text().as_str() != state.launch_at_login_error {
-        settings.set_launch_at_login_error_text(state.launch_at_login_error.into());
+        settings.set_launch_at_login_error_text(state.launch_at_login_error.clone().into());
     }
     if settings.get_credential_configured() != state.credential_configured {
         settings.set_credential_configured(state.credential_configured);
@@ -41,7 +44,7 @@ pub(crate) fn apply(main: &AppWindow, settings: &SettingsWindow, state: UiState)
         settings.set_credential_request_pending(state.credential_busy);
     }
     if settings.get_credential_error_text().as_str() != state.credential_error {
-        settings.set_credential_error_text(state.credential_error.into());
+        settings.set_credential_error_text(state.credential_error.clone().into());
     }
 }
 

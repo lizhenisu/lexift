@@ -207,36 +207,12 @@ impl PopupDragScheduler {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PopupWindowRoute {
-    Primary,
-    ExistingExtra,
-    NewExtra,
-}
-
-fn popup_window_route(
-    primary_session_id: Option<u64>,
-    extra_exists: bool,
-    requested_session_id: u64,
-) -> PopupWindowRoute {
-    if primary_session_id == Some(requested_session_id) {
-        PopupWindowRoute::Primary
-    } else if extra_exists {
-        PopupWindowRoute::ExistingExtra
-    } else if primary_session_id == Some(0) {
-        PopupWindowRoute::Primary
-    } else {
-        PopupWindowRoute::NewExtra
-    }
-}
-
 struct PopupRegistry {
-    primary: slint::Weak<TranslationPopup>,
-    language_menu: PopupLanguageMenuWindow,
+    language_menu: Option<PopupLanguageMenuWindow>,
     language_menu_owner: Option<LanguageMenuOwner>,
     language_menu_pending: Option<PendingLanguageMenuShow>,
     language_menu_dismissal_watched: bool,
-    extras: HashMap<u64, TranslationPopup>,
+    windows: HashMap<u64, TranslationPopup>,
     states: HashMap<u64, mapper::PopupUiState>,
     work_areas: HashMap<u64, Rect>,
     handler: Option<Rc<dyn Fn(AppEvent)>>,
@@ -352,30 +328,15 @@ impl PendingPopupShow {
 
 impl PopupRegistry {
     fn window_for(&mut self, session_id: u64) -> Option<TranslationPopup> {
-        let primary = self.primary.upgrade();
-        let primary_session_id = primary
-            .as_ref()
-            .map(|window| window.get_session_id().max(0) as u64);
-        match popup_window_route(
-            primary_session_id,
-            self.extras.contains_key(&session_id),
-            session_id,
-        ) {
-            PopupWindowRoute::Primary => return primary,
-            PopupWindowRoute::ExistingExtra => {
-                return self
-                    .extras
-                    .get(&session_id)
-                    .map(ComponentHandle::clone_strong);
-            }
-            PopupWindowRoute::NewExtra => {}
+        if let Some(window) = self.windows.get(&session_id) {
+            return Some(window.clone_strong());
         }
         let window = TranslationPopup::new().ok()?;
         if let Some(handler) = &self.handler {
             wire_popup_callbacks(&window, Rc::clone(handler));
             wire_popup_close(&window, Rc::clone(handler));
         }
-        self.extras.insert(session_id, window.clone_strong());
+        self.windows.insert(session_id, window.clone_strong());
         Some(window)
     }
 
@@ -387,7 +348,11 @@ impl PopupRegistry {
     ) {
         let owner = LanguageMenuOwner { session_id, kind };
         if self.language_menu_owner == Some(owner)
-            && (self.language_menu.window().is_visible() || self.language_menu_pending.is_some())
+            && (self
+                .language_menu
+                .as_ref()
+                .is_some_and(|menu| menu.window().is_visible())
+                || self.language_menu_pending.is_some())
         {
             self.close_language_menu(true);
             return;
@@ -396,25 +361,33 @@ impl PopupRegistry {
         let Some(work_area) = self.work_areas.get(&session_id).copied() else {
             return;
         };
+        let menu = match self.language_menu.as_ref() {
+            Some(menu) => menu.clone_strong(),
+            None => {
+                let Ok(menu) = PopupLanguageMenuWindow::new() else {
+                    tracing::error!(session_id, "popup language menu could not be created");
+                    return;
+                };
+                wire_language_menu_callbacks(&menu);
+                self.language_menu = Some(menu.clone_strong());
+                menu
+            }
+        };
         self.disable_dismissal_watch(session_id, popup);
         popup.set_source_menu_open(kind == LanguageMenuKind::Source);
         popup.set_target_menu_open(kind == LanguageMenuKind::Target);
         self.language_menu_owner = Some(owner);
         match kind {
             LanguageMenuKind::Source => {
-                self.language_menu
-                    .set_language_options(popup.get_source_language_options());
-                self.language_menu
-                    .set_selected_index(popup.get_source_index());
+                menu.set_language_options(popup.get_source_language_options());
+                menu.set_selected_index(popup.get_source_index());
             }
             LanguageMenuKind::Target => {
-                self.language_menu
-                    .set_language_options(popup.get_target_language_options());
-                self.language_menu
-                    .set_selected_index(popup.get_target_index());
+                menu.set_language_options(popup.get_target_language_options());
+                menu.set_selected_index(popup.get_target_index());
             }
         }
-        self.language_menu.set_menu_scroll_y(0.0);
+        menu.set_menu_scroll_y(0.0);
         self.next_show_generation = self.next_show_generation.wrapping_add(1).max(1);
         let generation = self.next_show_generation;
         self.language_menu_pending = Some(PendingLanguageMenuShow {
@@ -447,7 +420,15 @@ impl PopupRegistry {
             self.close_language_menu(false);
             return;
         };
-        match (self.prepare_passive_window)(self.language_menu.window()) {
+        let Some(menu) = self
+            .language_menu
+            .as_ref()
+            .map(ComponentHandle::clone_strong)
+        else {
+            self.language_menu_pending = None;
+            return;
+        };
+        match (self.prepare_passive_window)(menu.window()) {
             PassiveWindowPreparation::Ready => {
                 self.language_menu_pending = None;
                 self.finish_language_menu_show(request.owner, &parent, work_area);
@@ -461,7 +442,7 @@ impl PopupRegistry {
                         true
                     }
                 });
-                if should_prime && !prime_hidden_language_menu(&self.language_menu) {
+                if should_prime && !prime_hidden_language_menu(&menu) {
                     self.close_language_menu(true);
                     return;
                 }
@@ -489,20 +470,28 @@ impl PopupRegistry {
         work_area: Rect,
     ) {
         self.position_language_menu(parent, owner.kind, work_area);
-        if !(self.attach_tool_window)(self.language_menu.window(), parent.window()) {
+        let Some(menu) = self
+            .language_menu
+            .as_ref()
+            .map(ComponentHandle::clone_strong)
+        else {
+            self.close_language_menu(false);
+            return;
+        };
+        if !(self.attach_tool_window)(menu.window(), parent.window()) {
             self.close_language_menu(true);
             return;
         }
-        if self.language_menu.show().is_err() {
+        if menu.show().is_err() {
             self.close_language_menu(true);
             return;
         }
-        let pointer_sink = language_menu_pointer_sink(self.language_menu.as_weak());
-        if !(self.complete_passive_window_show)(self.language_menu.window(), pointer_sink) {
+        let pointer_sink = language_menu_pointer_sink(menu.as_weak());
+        if !(self.complete_passive_window_show)(menu.window(), pointer_sink) {
             self.close_language_menu(true);
             return;
         }
-        if (self.set_popup_dismissal)(self.language_menu.window(), true) {
+        if (self.set_popup_dismissal)(menu.window(), true) {
             self.language_menu_dismissal_watched = true;
         }
         self.language_menu_owner = Some(owner);
@@ -557,11 +546,14 @@ impl PopupRegistry {
         );
         let logical_width = placement.width as f32 / scale;
         let logical_height = placement.height as f32 / scale;
-        self.language_menu.set_menu_width(logical_width);
-        self.language_menu.set_menu_height(logical_height);
+        let Some(menu) = &self.language_menu else {
+            return;
+        };
+        menu.set_menu_width(logical_width);
+        menu.set_menu_height(logical_height);
         let max_scroll = (option_count as f32 * LANGUAGE_MENU_ROW_HEIGHT - logical_height).max(0.0);
         let selected = selected_index.max(0) as f32;
-        self.language_menu.set_menu_scroll_y(
+        menu.set_menu_scroll_y(
             -(((selected * LANGUAGE_MENU_ROW_HEIGHT - logical_height / 2.0
                 + LANGUAGE_MENU_ROW_HEIGHT / 2.0)
                 .clamp(0.0, max_scroll)
@@ -569,25 +561,25 @@ impl PopupRegistry {
                 .round()
                 * 4.0),
         );
-        self.language_menu
-            .window()
-            .set_position(slint::PhysicalPosition::new(
-                placement.position.x,
-                placement.position.y,
-            ));
-        self.language_menu
-            .window()
+        menu.window().set_position(slint::PhysicalPosition::new(
+            placement.position.x,
+            placement.position.y,
+        ));
+        menu.window()
             .set_size(slint::LogicalSize::new(logical_width, logical_height));
     }
 
     fn close_language_menu(&mut self, restore_parent_watch: bool) {
         self.language_menu_pending = None;
-        if self.language_menu_dismissal_watched {
-            let _ = (self.set_popup_dismissal)(self.language_menu.window(), false);
+        if let Some(menu) = self.language_menu.take() {
+            if self.language_menu_dismissal_watched {
+                let _ = (self.set_popup_dismissal)(menu.window(), false);
+            }
             self.language_menu_dismissal_watched = false;
+            menu.set_menu_scroll_y(0.0);
+            let _ = menu.hide();
+            slint::Timer::single_shot(Duration::ZERO, move || drop(menu));
         }
-        let _ = self.language_menu.hide();
-        self.language_menu.set_menu_scroll_y(0.0);
         let Some(owner) = self.language_menu_owner.take() else {
             return;
         };
@@ -616,23 +608,7 @@ impl PopupRegistry {
                 .map(|state| (state.session_id, state))
                 .collect(),
         );
-        if let Some(primary) = self.primary.upgrade() {
-            let id = primary.get_session_id().max(0) as u64;
-            if let Some(state) = self.states.get(&id) {
-                apply_popup_preserving_draft(
-                    &primary,
-                    state,
-                    previous_states.get(&id),
-                    self.manual_sizes.get(&id).copied(),
-                    self.active_resizes.contains_key(&id),
-                );
-                if let Some(work_area) = self.work_areas.get(&id) {
-                    apply_popup_resize_bounds(&primary, *work_area);
-                    clamp_popup_to_work_area(&primary, *work_area);
-                }
-            }
-        }
-        for (id, window) in &self.extras {
+        for (id, window) in &self.windows {
             if let Some(state) = self.states.get(id) {
                 apply_popup_preserving_draft(
                     window,
@@ -668,7 +644,10 @@ impl PopupRegistry {
         for (id, window, enabled) in watch_updates {
             self.set_dismissal_watch(id, &window, enabled);
         }
-        if self.language_menu.window().is_visible()
+        if self
+            .language_menu
+            .as_ref()
+            .is_some_and(|menu| menu.window().is_visible())
             && let Some(owner) = self.language_menu_owner
             && let Some(parent) = self.existing_window(owner.session_id)
             && let Some(work_area) = self.work_areas.get(&owner.session_id).copied()
@@ -679,6 +658,7 @@ impl PopupRegistry {
 
     fn show(&mut self, session_id: u64, anchor: Option<Point>, work_area: Option<Rect>) {
         let Some(window) = self.window_for(session_id) else {
+            tracing::error!(session_id, "translation popup could not be created");
             return;
         };
         if self
@@ -747,7 +727,7 @@ impl PopupRegistry {
             }
             PassiveWindowPreparation::Pending => {
                 self.pending_shows.remove(&session_id);
-                let _ = window.hide();
+                self.hide(session_id);
                 tracing::error!(
                     session_id,
                     "translation popup native window was not created before the show timeout"
@@ -755,20 +735,15 @@ impl PopupRegistry {
             }
             PassiveWindowPreparation::Failed => {
                 self.pending_shows.remove(&session_id);
-                let _ = window.hide();
+                self.hide(session_id);
             }
         }
     }
 
     fn existing_window(&self, session_id: u64) -> Option<TranslationPopup> {
-        self.primary
-            .upgrade()
-            .filter(|window| window.get_session_id().max(0) as u64 == session_id)
-            .or_else(|| {
-                self.extras
-                    .get(&session_id)
-                    .map(ComponentHandle::clone_strong)
-            })
+        self.windows
+            .get(&session_id)
+            .map(ComponentHandle::clone_strong)
     }
 
     fn finish_show(
@@ -799,12 +774,7 @@ impl PopupRegistry {
                 .states
                 .iter()
                 .filter(|(id, state)| **id != session_id && state.pinned)
-                .filter_map(|(id, _)| {
-                    self.primary
-                        .upgrade()
-                        .filter(|candidate| candidate.get_session_id().max(0) as u64 == *id)
-                        .or_else(|| self.extras.get(id).map(ComponentHandle::clone_strong))
-                })
+                .filter_map(|(id, _)| self.windows.get(id).map(ComponentHandle::clone_strong))
                 .filter(|candidate| candidate.window().is_visible())
                 .map(|candidate| candidate.window().position())
                 .collect::<Vec<_>>();
@@ -943,20 +913,11 @@ impl PopupRegistry {
         {
             self.close_language_menu(false);
         }
-        let mut primary_hidden = false;
-        if let Some(primary) = self.primary.upgrade()
-            && primary.get_session_id().max(0) as u64 == session_id
-        {
-            self.disable_dismissal_watch(session_id, &primary);
-            reset_popup_transient_ui(&primary);
-            let _ = primary.hide();
-            primary.set_session_id(0);
-            primary_hidden = true;
-        }
-        if !primary_hidden && let Some(window) = self.extras.remove(&session_id) {
+        if let Some(window) = self.windows.remove(&session_id) {
             self.disable_dismissal_watch(session_id, &window);
             reset_popup_transient_ui(&window);
             let _ = window.hide();
+            slint::Timer::single_shot(Duration::ZERO, move || drop(window));
         }
         self.states.remove(&session_id);
         self.work_areas.remove(&session_id);
@@ -1289,14 +1250,253 @@ struct SettingsToastRecord {
 }
 
 pub struct Ui {
-    main: AppWindow,
-    popup: TranslationPopup,
-    settings: SettingsWindow,
     credential_generation: Arc<AtomicU64>,
     toast_next_id: Arc<AtomicU64>,
     toast_records: Arc<Mutex<Vec<SettingsToastRecord>>>,
     background_mode: Rc<Cell<bool>>,
     activate_user_requested_window: fn(&slint::Window) -> bool,
+}
+
+struct AppWindowRegistry {
+    main: Option<AppWindow>,
+    settings: Option<SettingsWindow>,
+    latest_state: AppState,
+    show_selection_demo: bool,
+    handler: Option<Rc<dyn Fn(AppEvent)>>,
+    background_mode: Rc<Cell<bool>>,
+    credential_generation: Arc<AtomicU64>,
+    toast_records: Arc<Mutex<Vec<SettingsToastRecord>>>,
+    main_close_generation: u64,
+    settings_close_generation: u64,
+}
+
+thread_local! {
+    static APP_WINDOW_REGISTRY: RefCell<Option<AppWindowRegistry>> = const { RefCell::new(None) };
+}
+
+fn ensure_main_window(registry: &mut AppWindowRegistry) -> Result<AppWindow, slint::PlatformError> {
+    if let Some(main) = &registry.main {
+        return Ok(main.clone_strong());
+    }
+    let main = AppWindow::new()?;
+    main.set_show_selection_demo(registry.show_selection_demo);
+    binding::apply_main(&main, &mapper::view_state(&registry.latest_state));
+    if let Some(handler) = registry.handler.clone() {
+        wire_main_callbacks(&main, handler, Rc::clone(&registry.background_mode));
+    }
+    registry.main = Some(main.clone_strong());
+    Ok(main)
+}
+
+fn ensure_settings_window(
+    registry: &mut AppWindowRegistry,
+) -> Result<SettingsWindow, slint::PlatformError> {
+    if let Some(settings) = &registry.settings {
+        return Ok(settings.clone_strong());
+    }
+    let settings = SettingsWindow::new()?;
+    settings.window().set_size(slint::LogicalSize::new(
+        SETTINGS_DEFAULT_WIDTH,
+        SETTINGS_DEFAULT_HEIGHT,
+    ));
+    binding::apply_settings(&settings, &mapper::view_state(&registry.latest_state));
+    if let Some(handler) = registry.handler.clone() {
+        wire_settings_callbacks(
+            &settings,
+            handler,
+            Arc::clone(&registry.credential_generation),
+            Arc::clone(&registry.toast_records),
+        );
+    }
+    registry.settings = Some(settings.clone_strong());
+    Ok(settings)
+}
+
+fn schedule_main_window_destruction() {
+    let generation = APP_WINDOW_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let registry = registry.as_mut()?;
+        registry.main_close_generation = registry.main_close_generation.wrapping_add(1);
+        Some(registry.main_close_generation)
+    });
+    let Some(generation) = generation else {
+        return;
+    };
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        APP_WINDOW_REGISTRY.with(|registry| {
+            if let Some(registry) = registry.borrow_mut().as_mut()
+                && registry.main_close_generation == generation
+                && let Some(main) = registry.main.take()
+            {
+                let _ = main.hide();
+                drop(main);
+            }
+        });
+    });
+}
+
+fn schedule_settings_window_destruction() {
+    let generation = APP_WINDOW_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let registry = registry.as_mut()?;
+        registry.settings_close_generation = registry.settings_close_generation.wrapping_add(1);
+        Some(registry.settings_close_generation)
+    });
+    let Some(generation) = generation else {
+        return;
+    };
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        APP_WINDOW_REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            if let Some(registry) = registry.as_mut()
+                && registry.settings_close_generation == generation
+                && let Some(settings) = registry.settings.take()
+            {
+                settings.invoke_reset_settings_view();
+                clear_credential_transient(&settings, &registry.credential_generation);
+                clear_settings_toasts(&settings, &registry.toast_records);
+                let _ = settings.hide();
+                drop(settings);
+            }
+        });
+    });
+}
+
+fn wire_main_callbacks(
+    main: &AppWindow,
+    handler: Rc<dyn Fn(AppEvent)>,
+    background_mode: Rc<Cell<bool>>,
+) {
+    let main_close_handler = Rc::clone(&handler);
+    main.window().on_close_requested(move || {
+        match close_policy(background_mode.get()) {
+            MainWindowClosePolicy::HideToTray => {
+                schedule_main_window_destruction();
+            }
+            MainWindowClosePolicy::Exit => main_close_handler(AppEvent::ExitRequested),
+        }
+        slint::CloseRequestResponse::KeepWindowShown
+    });
+    let selection_handler = Rc::clone(&handler);
+    main.on_selection_translation_requested(move || {
+        selection_handler(AppEvent::SelectionTranslationRequested);
+    });
+    let input_handler = Rc::clone(&handler);
+    main.on_input_translation_requested(move |text| {
+        input_handler(AppEvent::InputTranslationRequested {
+            text: text.to_string(),
+        });
+    });
+    main.on_settings_window_requested(move || handler(AppEvent::SettingsWindowRequested));
+}
+
+fn wire_settings_callbacks(
+    settings: &SettingsWindow,
+    handler: Rc<dyn Fn(AppEvent)>,
+    credential_generation: Arc<AtomicU64>,
+    toast_records: Arc<Mutex<Vec<SettingsToastRecord>>>,
+) {
+    settings.window().on_close_requested(move || {
+        schedule_settings_window_destruction();
+        slint::CloseRequestResponse::KeepWindowShown
+    });
+    let settings_weak = settings.as_weak();
+    let toast_records_for_dismiss = Arc::clone(&toast_records);
+    settings.on_toast_dismiss_requested(move |id| {
+        remove_settings_toast(&settings_weak, &toast_records_for_dismiss, id);
+    });
+    settings.on_hotkey_key_pressed(move |text, control, alt, shift, meta| {
+        HotkeyConfig::from_key_event(&text, control, alt, shift, meta)
+            .map(|config| config.to_string().into())
+            .unwrap_or_default()
+    });
+    let settings_handler = Rc::clone(&handler);
+    settings.on_hotkey_change_requested(move |hotkey| {
+        if let Ok(hotkey) = hotkey.to_string().parse::<HotkeyConfig>() {
+            settings_handler(AppEvent::SettingsChangeRequested {
+                change: SettingsChange::Hotkey(hotkey),
+            });
+        }
+    });
+    let settings_handler = Rc::clone(&handler);
+    settings.on_launch_at_login_change_requested(move |enabled| {
+        settings_handler(AppEvent::SettingsChangeRequested {
+            change: SettingsChange::LaunchAtLogin(enabled),
+        });
+    });
+    let credential_handler = Rc::clone(&handler);
+    settings.on_credential_save_requested(move |secret| {
+        credential_handler(AppEvent::CredentialSaveRequested {
+            secret: CredentialSecret::new(secret.to_string()),
+        });
+    });
+    let credential_handler = Rc::clone(&handler);
+    settings.on_credential_remove_requested(move || {
+        credential_handler(AppEvent::CredentialRemoveRequested);
+    });
+    let settings_weak = settings.as_weak();
+    let generation = Arc::clone(&credential_generation);
+    let credential_handler = Rc::clone(&handler);
+    settings.on_credential_reveal_requested(move || {
+        let generation = begin_credential_access(&settings_weak, &generation);
+        credential_handler(AppEvent::CredentialAccessRequested {
+            purpose: CredentialAccessPurpose::Reveal,
+            generation,
+        });
+    });
+    let settings_weak = settings.as_weak();
+    let generation = Arc::clone(&credential_generation);
+    let credential_handler = Rc::clone(&handler);
+    settings.on_credential_edit_requested(move || {
+        let generation = begin_credential_access(&settings_weak, &generation);
+        credential_handler(AppEvent::CredentialAccessRequested {
+            purpose: CredentialAccessPurpose::Edit,
+            generation,
+        });
+    });
+    let settings_weak = settings.as_weak();
+    let generation = Arc::clone(&credential_generation);
+    let credential_handler = Rc::clone(&handler);
+    settings.on_credential_copy_requested(move || {
+        let generation = begin_credential_access(&settings_weak, &generation);
+        credential_handler(AppEvent::CredentialAccessRequested {
+            purpose: CredentialAccessPurpose::Copy,
+            generation,
+        });
+    });
+    let settings_weak = settings.as_weak();
+    let generation = Arc::clone(&credential_generation);
+    settings.on_credential_hide_requested(move || {
+        if let Some(settings) = settings_weak.upgrade() {
+            clear_credential_transient(&settings, &generation);
+        }
+    });
+    let settings_weak = settings.as_weak();
+    let generation = Arc::clone(&credential_generation);
+    settings.on_credential_edit_cancel_requested(move || {
+        if let Some(settings) = settings_weak.upgrade() {
+            clear_credential_transient(&settings, &generation);
+        }
+    });
+    let settings_weak = settings.as_weak();
+    settings.on_settings_menu_selected(move |index| {
+        if let Some(settings) = settings_weak.upgrade() {
+            if settings.get_settings_menu_provider_mode() {
+                let provider = ProviderConfig::DeepL;
+                if settings.get_draft_provider_id().as_str() != provider.id() {
+                    settings.set_draft_provider_id(provider.id().into());
+                    handler(AppEvent::SettingsChangeRequested {
+                        change: SettingsChange::Provider(provider),
+                    });
+                }
+            } else if settings.get_draft_target_index() != index {
+                settings.set_draft_target_index(index);
+                handler(AppEvent::SettingsChangeRequested {
+                    change: SettingsChange::TargetLanguage(language_for_index(index)),
+                });
+            }
+        }
+    });
 }
 
 impl Ui {
@@ -1306,24 +1506,31 @@ impl Ui {
         prepare_passive_window: fn(&slint::Window) -> PassiveWindowPreparation,
         window_lifecycle: WindowLifecycleCallbacks,
     ) -> Result<Self, slint::PlatformError> {
-        let main = AppWindow::new()?;
-        let popup = TranslationPopup::new()?;
-        let language_menu = PopupLanguageMenuWindow::new()?;
-        let settings = SettingsWindow::new()?;
-        settings.window().set_size(slint::LogicalSize::new(
-            SETTINGS_DEFAULT_WIDTH,
-            SETTINGS_DEFAULT_HEIGHT,
-        ));
-        main.set_show_selection_demo(show_selection_demo);
-        binding::apply(&main, &settings, mapper::view_state(initial_state));
+        let credential_generation = Arc::new(AtomicU64::new(0));
+        let toast_next_id = Arc::new(AtomicU64::new(0));
+        let toast_records = Arc::new(Mutex::new(Vec::new()));
+        let background_mode = Rc::new(Cell::new(false));
+        APP_WINDOW_REGISTRY.with(|registry| {
+            *registry.borrow_mut() = Some(AppWindowRegistry {
+                main: None,
+                settings: None,
+                latest_state: initial_state.clone(),
+                show_selection_demo,
+                handler: None,
+                background_mode: Rc::clone(&background_mode),
+                credential_generation: Arc::clone(&credential_generation),
+                toast_records: Arc::clone(&toast_records),
+                main_close_generation: 0,
+                settings_close_generation: 0,
+            });
+        });
         POPUP_REGISTRY.with(|registry| {
             *registry.borrow_mut() = Some(PopupRegistry {
-                primary: popup.as_weak(),
-                language_menu: language_menu.clone_strong(),
+                language_menu: None,
                 language_menu_owner: None,
                 language_menu_pending: None,
                 language_menu_dismissal_watched: false,
-                extras: HashMap::new(),
+                windows: HashMap::new(),
                 states: mapper::popup_states(initial_state)
                     .into_iter()
                     .map(|state| (state.session_id, state))
@@ -1346,23 +1553,17 @@ impl Ui {
                 attach_tool_window: Rc::clone(&window_lifecycle.attach_tool_window),
             });
         });
-        wire_language_menu_callbacks(&language_menu);
         Ok(Self {
-            main,
-            popup,
-            settings,
-            credential_generation: Arc::new(AtomicU64::new(0)),
-            toast_next_id: Arc::new(AtomicU64::new(0)),
-            toast_records: Arc::new(Mutex::new(Vec::new())),
-            background_mode: Rc::new(Cell::new(false)),
+            credential_generation,
+            toast_next_id,
+            toast_records,
+            background_mode,
             activate_user_requested_window: window_lifecycle.activate_user_requested_window,
         })
     }
 
     pub fn handle(&self) -> UiHandle {
         UiHandle {
-            main: self.main.as_weak(),
-            settings: self.settings.as_weak(),
             credential_generation: Arc::clone(&self.credential_generation),
             toast_next_id: Arc::clone(&self.toast_next_id),
             toast_records: Arc::clone(&self.toast_records),
@@ -1376,152 +1577,34 @@ impl Ui {
         _screen_context: impl Fn() -> Option<(Point, Rect)> + 'static,
     ) {
         let handler: Rc<dyn Fn(AppEvent)> = Rc::new(handler);
-        let main = self.main.as_weak();
-        let background_mode = Rc::clone(&self.background_mode);
-        let main_close_handler = Rc::clone(&handler);
-        self.main.window().on_close_requested(move || {
-            match close_policy(background_mode.get()) {
-                MainWindowClosePolicy::HideToTray => {
-                    if let Some(main) = main.upgrade() {
-                        let _ = main.hide();
-                    }
+        APP_WINDOW_REGISTRY.with(|registry| {
+            if let Some(registry) = registry.borrow_mut().as_mut() {
+                registry.handler = Some(Rc::clone(&handler));
+                if let Some(main) = registry.main.as_ref() {
+                    wire_main_callbacks(
+                        main,
+                        Rc::clone(&handler),
+                        Rc::clone(&self.background_mode),
+                    );
                 }
-                MainWindowClosePolicy::Exit => main_close_handler(AppEvent::ExitRequested),
+                if let Some(settings) = registry.settings.as_ref() {
+                    wire_settings_callbacks(
+                        settings,
+                        Rc::clone(&handler),
+                        Arc::clone(&self.credential_generation),
+                        Arc::clone(&self.toast_records),
+                    );
+                }
             }
-            slint::CloseRequestResponse::KeepWindowShown
         });
-        wire_popup_close(&self.popup, Rc::clone(&handler));
-        wire_popup_callbacks(&self.popup, Rc::clone(&handler));
         POPUP_REGISTRY.with(|registry| {
             if let Some(registry) = registry.borrow_mut().as_mut() {
                 registry.handler = Some(Rc::clone(&handler));
-            }
-        });
-        let settings = self.settings.as_weak();
-        let credential_generation = Arc::clone(&self.credential_generation);
-        let toast_records = Arc::clone(&self.toast_records);
-        self.settings.window().on_close_requested(move || {
-            if let Some(settings) = settings.upgrade() {
-                settings.invoke_reset_settings_view();
-                clear_credential_transient(&settings, &credential_generation);
-                clear_settings_toasts(&settings, &toast_records);
-                let _ = settings.hide();
-            }
-            slint::CloseRequestResponse::KeepWindowShown
-        });
-        let settings = self.settings.as_weak();
-        let toast_records = Arc::clone(&self.toast_records);
-        self.settings.on_toast_dismiss_requested(move |id| {
-            remove_settings_toast(&settings, &toast_records, id);
-        });
-        self.settings
-            .on_hotkey_key_pressed(move |text, control, alt, shift, meta| {
-                HotkeyConfig::from_key_event(&text, control, alt, shift, meta)
-                    .map(|config| config.to_string().into())
-                    .unwrap_or_default()
-            });
-        let settings_handler = Rc::clone(&handler);
-        self.settings.on_hotkey_change_requested(move |hotkey| {
-            if let Ok(hotkey) = hotkey.to_string().parse::<HotkeyConfig>() {
-                settings_handler(AppEvent::SettingsChangeRequested {
-                    change: SettingsChange::Hotkey(hotkey),
-                });
-            }
-        });
-        let settings_handler = Rc::clone(&handler);
-        self.settings
-            .on_launch_at_login_change_requested(move |enabled| {
-                settings_handler(AppEvent::SettingsChangeRequested {
-                    change: SettingsChange::LaunchAtLogin(enabled),
-                });
-            });
-        let credential_handler = Rc::clone(&handler);
-        self.settings.on_credential_save_requested(move |secret| {
-            credential_handler(AppEvent::CredentialSaveRequested {
-                secret: CredentialSecret::new(secret.to_string()),
-            });
-        });
-        let credential_handler = Rc::clone(&handler);
-        self.settings.on_credential_remove_requested(move || {
-            credential_handler(AppEvent::CredentialRemoveRequested);
-        });
-        let settings = self.settings.as_weak();
-        let credential_generation = Arc::clone(&self.credential_generation);
-        let credential_handler = Rc::clone(&handler);
-        self.settings.on_credential_reveal_requested(move || {
-            let generation = begin_credential_access(&settings, &credential_generation);
-            credential_handler(AppEvent::CredentialAccessRequested {
-                purpose: CredentialAccessPurpose::Reveal,
-                generation,
-            });
-        });
-        let settings = self.settings.as_weak();
-        let credential_generation = Arc::clone(&self.credential_generation);
-        let credential_handler = Rc::clone(&handler);
-        self.settings.on_credential_edit_requested(move || {
-            let generation = begin_credential_access(&settings, &credential_generation);
-            credential_handler(AppEvent::CredentialAccessRequested {
-                purpose: CredentialAccessPurpose::Edit,
-                generation,
-            });
-        });
-        let settings = self.settings.as_weak();
-        let credential_generation = Arc::clone(&self.credential_generation);
-        let credential_handler = Rc::clone(&handler);
-        self.settings.on_credential_copy_requested(move || {
-            let generation = begin_credential_access(&settings, &credential_generation);
-            credential_handler(AppEvent::CredentialAccessRequested {
-                purpose: CredentialAccessPurpose::Copy,
-                generation,
-            });
-        });
-        let settings = self.settings.as_weak();
-        let credential_generation = Arc::clone(&self.credential_generation);
-        self.settings.on_credential_hide_requested(move || {
-            if let Some(settings) = settings.upgrade() {
-                clear_credential_transient(&settings, &credential_generation);
-            }
-        });
-        let settings = self.settings.as_weak();
-        let credential_generation = Arc::clone(&self.credential_generation);
-        self.settings.on_credential_edit_cancel_requested(move || {
-            if let Some(settings) = settings.upgrade() {
-                clear_credential_transient(&settings, &credential_generation);
-            }
-        });
-        let settings = self.settings.as_weak();
-        let settings_handler = Rc::clone(&handler);
-        self.settings.on_settings_menu_selected(move |index| {
-            if let Some(settings) = settings.upgrade() {
-                if settings.get_settings_menu_provider_mode() {
-                    let provider = ProviderConfig::DeepL;
-                    if settings.get_draft_provider_id().as_str() != provider.id() {
-                        settings.set_draft_provider_id(provider.id().into());
-                        settings_handler(AppEvent::SettingsChangeRequested {
-                            change: SettingsChange::Provider(provider),
-                        });
-                    }
-                } else if settings.get_draft_target_index() != index {
-                    settings.set_draft_target_index(index);
-                    settings_handler(AppEvent::SettingsChangeRequested {
-                        change: SettingsChange::TargetLanguage(language_for_index(index)),
-                    });
+                for popup in registry.windows.values() {
+                    wire_popup_close(popup, Rc::clone(&handler));
+                    wire_popup_callbacks(popup, Rc::clone(&handler));
                 }
             }
-        });
-        let selection_handler = Rc::clone(&handler);
-        self.main.on_selection_translation_requested(move || {
-            selection_handler(AppEvent::SelectionTranslationRequested);
-        });
-        let input_handler = Rc::clone(&handler);
-        self.main.on_input_translation_requested(move |text| {
-            input_handler(AppEvent::InputTranslationRequested {
-                text: text.to_string(),
-            });
-        });
-        let settings_handler = Rc::clone(&handler);
-        self.main.on_settings_window_requested(move || {
-            settings_handler(AppEvent::SettingsWindowRequested);
         });
     }
 
@@ -1531,22 +1614,44 @@ impl Ui {
 
     pub fn run(&self, show_main_window: bool) -> Result<(), slint::PlatformError> {
         if show_main_window {
-            self.main.show()?;
+            APP_WINDOW_REGISTRY.with(|registry| {
+                let mut registry = registry.borrow_mut();
+                let main = ensure_main_window(registry.as_mut().expect("UI registry initialized"))?;
+                main.show()
+            })?;
         }
         slint::run_event_loop_until_quit()?;
         POPUP_REGISTRY.with(|registry| {
             if let Some(mut registry) = registry.borrow_mut().take() {
                 registry.close_language_menu(false);
-                for window in registry.extras.into_values() {
+                let windows: Vec<_> = registry
+                    .windows
+                    .iter()
+                    .map(|(session_id, window)| (*session_id, window.clone_strong()))
+                    .collect();
+                for (session_id, window) in windows {
+                    registry.disable_dismissal_watch(session_id, &window);
+                }
+                for window in registry.windows.drain().map(|(_, window)| window) {
                     reset_popup_transient_ui(&window);
                     let _ = window.hide();
                 }
             }
         });
-        reset_popup_transient_ui(&self.popup);
-        let _ = self.popup.hide();
-        let _ = self.settings.hide();
-        self.main.hide()
+        APP_WINDOW_REGISTRY.with(|registry| {
+            if let Some(mut registry) = registry.borrow_mut().take() {
+                if let Some(settings) = registry.settings.take() {
+                    settings.invoke_reset_settings_view();
+                    clear_credential_transient(&settings, &registry.credential_generation);
+                    clear_settings_toasts(&settings, &registry.toast_records);
+                    let _ = settings.hide();
+                }
+                if let Some(main) = registry.main.take() {
+                    let _ = main.hide();
+                }
+            }
+        });
+        Ok(())
     }
 }
 
@@ -1990,8 +2095,6 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
 
 #[derive(Clone)]
 pub struct UiHandle {
-    main: slint::Weak<AppWindow>,
-    settings: slint::Weak<SettingsWindow>,
     credential_generation: Arc<AtomicU64>,
     toast_next_id: Arc<AtomicU64>,
     toast_records: Arc<Mutex<Vec<SettingsToastRecord>>>,
@@ -2001,14 +2104,20 @@ pub struct UiHandle {
 impl UiHandle {
     /// Queues state rendering on the Slint event-loop thread.
     pub fn update(&self, state: AppState) {
-        let main = self.main.clone();
-        let settings = self.settings.clone();
         let view_state = mapper::view_state(&state);
         let popup_states = mapper::popup_states(&state);
         let _ = slint::invoke_from_event_loop(move || {
-            if let (Some(main), Some(settings)) = (main.upgrade(), settings.upgrade()) {
-                binding::apply(&main, &settings, view_state);
-            }
+            APP_WINDOW_REGISTRY.with(|registry| {
+                if let Some(registry) = registry.borrow_mut().as_mut() {
+                    registry.latest_state = state;
+                    if let Some(main) = registry.main.as_ref() {
+                        binding::apply_main(main, &view_state);
+                    }
+                    if let Some(settings) = registry.settings.as_ref() {
+                        binding::apply_settings(settings, &view_state);
+                    }
+                }
+            });
             POPUP_REGISTRY.with(|registry| {
                 if let Some(registry) = registry.borrow_mut().as_mut() {
                     registry.update(popup_states);
@@ -2045,33 +2154,53 @@ impl UiHandle {
     }
 
     pub fn show_main_window(&self) {
-        let main = self.main.clone();
-        let settings = self.settings.clone();
         let credential_generation = Arc::clone(&self.credential_generation);
         let toast_records = Arc::clone(&self.toast_records);
         let activate_user_requested_window = self.activate_user_requested_window;
         let _ = slint::invoke_from_event_loop(move || {
-            if let Some(settings) = settings.upgrade() {
-                settings.invoke_close_settings_menu();
-                clear_credential_transient(&settings, &credential_generation);
-                clear_settings_toasts(&settings, &toast_records);
-            }
-            if let Some(main) = main.upgrade() {
-                if main.window().is_minimized() {
-                    main.window().set_minimized(false);
+            APP_WINDOW_REGISTRY.with(|registry| {
+                let mut registry = registry.borrow_mut();
+                let Some(registry) = registry.as_mut() else {
+                    return;
+                };
+                registry.main_close_generation = registry.main_close_generation.wrapping_add(1);
+                if let Some(settings) = registry.settings.as_ref() {
+                    settings.invoke_close_settings_menu();
+                    clear_credential_transient(settings, &credential_generation);
+                    clear_settings_toasts(settings, &toast_records);
                 }
-                let _ = main.show();
-                activate_user_requested_window(main.window());
-            }
+                match ensure_main_window(registry) {
+                    Ok(main) => {
+                        if main.window().is_minimized() {
+                            main.window().set_minimized(false);
+                        }
+                        let _ = main.show();
+                        activate_user_requested_window(main.window());
+                    }
+                    Err(error) => tracing::error!(%error, "main window could not be created"),
+                }
+            });
         });
     }
 
     pub fn show_settings_window(&self, settings: Settings) {
-        let window = self.settings.clone();
         let credential_generation = Arc::clone(&self.credential_generation);
         let toast_records = Arc::clone(&self.toast_records);
         let _ = slint::invoke_from_event_loop(move || {
-            if let Some(window) = window.upgrade() {
+            APP_WINDOW_REGISTRY.with(|registry| {
+                let mut registry = registry.borrow_mut();
+                let Some(registry) = registry.as_mut() else {
+                    return;
+                };
+                registry.settings_close_generation =
+                    registry.settings_close_generation.wrapping_add(1);
+                let window = match ensure_settings_window(registry) {
+                    Ok(window) => window,
+                    Err(error) => {
+                        tracing::error!(%error, "settings window could not be created");
+                        return;
+                    }
+                };
                 window.invoke_reset_settings_view();
                 window.set_draft_target_index(language_index(&settings.target_language));
                 window.set_draft_hotkey_label(settings.hotkey.to_string().into());
@@ -2084,31 +2213,40 @@ impl UiHandle {
                     window.window().set_minimized(false);
                 }
                 let _ = window.show();
-            }
+            });
         });
     }
 
     pub fn hide_settings_window(&self) {
-        let settings = self.settings.clone();
         let credential_generation = Arc::clone(&self.credential_generation);
         let toast_records = Arc::clone(&self.toast_records);
         let _ = slint::invoke_from_event_loop(move || {
-            if let Some(settings) = settings.upgrade() {
-                settings.invoke_reset_settings_view();
-                clear_credential_transient(&settings, &credential_generation);
-                clear_settings_toasts(&settings, &toast_records);
-                let _ = settings.hide();
-            }
+            APP_WINDOW_REGISTRY.with(|registry| {
+                let mut registry = registry.borrow_mut();
+                if let Some(registry) = registry.as_mut()
+                    && let Some(settings) = registry.settings.take()
+                {
+                    registry.settings_close_generation =
+                        registry.settings_close_generation.wrapping_add(1);
+                    settings.invoke_reset_settings_view();
+                    clear_credential_transient(&settings, &credential_generation);
+                    clear_settings_toasts(&settings, &toast_records);
+                    let _ = settings.hide();
+                    drop(settings);
+                }
+            });
         });
     }
 
     pub fn clear_credential_draft(&self) {
-        let settings = self.settings.clone();
         let credential_generation = Arc::clone(&self.credential_generation);
         let _ = slint::invoke_from_event_loop(move || {
-            if let Some(settings) = settings.upgrade() {
-                clear_credential_transient(&settings, &credential_generation);
-            }
+            APP_WINDOW_REGISTRY.with(|registry| {
+                if let Some(settings) = registry.borrow().as_ref().and_then(|r| r.settings.as_ref())
+                {
+                    clear_credential_transient(settings, &credential_generation);
+                }
+            });
         });
     }
 
@@ -2118,13 +2256,19 @@ impl UiHandle {
         generation: u64,
         secret: CredentialSecret,
     ) {
-        let settings = self.settings.clone();
         let current_generation = Arc::clone(&self.credential_generation);
         let _ = slint::invoke_from_event_loop(move || {
             if !credential_session_is_current(&current_generation, generation) {
                 return;
             }
-            let Some(settings) = settings.upgrade() else {
+            let Some(settings) = APP_WINDOW_REGISTRY.with(|registry| {
+                registry
+                    .borrow()
+                    .as_ref()?
+                    .settings
+                    .as_ref()
+                    .map(ComponentHandle::clone_strong)
+            }) else {
                 return;
             };
             match purpose {
@@ -2169,7 +2313,6 @@ impl UiHandle {
 
     /// Adds an independently dismissible Settings toast.
     pub fn show_settings_feedback(&self, feedback: SettingsFeedback) {
-        let settings = self.settings.clone();
         let toast_records = Arc::clone(&self.toast_records);
         let id = self
             .toast_next_id
@@ -2192,7 +2335,14 @@ impl UiHandle {
                         error,
                     });
             }
-            let Some(settings) = settings.upgrade() else {
+            let Some(settings) = APP_WINDOW_REGISTRY.with(|registry| {
+                registry
+                    .borrow()
+                    .as_ref()?
+                    .settings
+                    .as_ref()
+                    .map(ComponentHandle::clone_strong)
+            }) else {
                 return;
             };
             render_settings_toasts(&settings, &toast_records);
@@ -2205,14 +2355,16 @@ impl UiHandle {
     }
 
     pub fn quit(&self) {
-        let settings = self.settings.clone();
         let credential_generation = Arc::clone(&self.credential_generation);
         let toast_records = Arc::clone(&self.toast_records);
         let _ = slint::invoke_from_event_loop(move || {
-            if let Some(settings) = settings.upgrade() {
-                clear_credential_transient(&settings, &credential_generation);
-                clear_settings_toasts(&settings, &toast_records);
-            }
+            APP_WINDOW_REGISTRY.with(|registry| {
+                if let Some(settings) = registry.borrow().as_ref().and_then(|r| r.settings.as_ref())
+                {
+                    clear_credential_transient(settings, &credential_generation);
+                    clear_settings_toasts(settings, &toast_records);
+                }
+            });
             let _ = slint::quit_event_loop();
         });
     }
@@ -2291,10 +2443,9 @@ mod tests {
 
     use super::{
         MainWindowClosePolicy, ManualPopupSize, PendingPopupShow, PopupDragPhase,
-        PopupDragScheduler, PopupWindowRoute, SettingsToastRecord, close_policy,
-        credential_session_is_current, effective_manual_layout, language_index,
-        popup_show_retry_delay, popup_window_route, remove_settings_toast_record,
-        source_language_for_index,
+        PopupDragScheduler, SettingsToastRecord, close_policy, credential_session_is_current,
+        effective_manual_layout, language_index, popup_show_retry_delay,
+        remove_settings_toast_record, source_language_for_index,
     };
 
     #[test]
@@ -2314,30 +2465,6 @@ mod tests {
         assert_eq!(
             effective_manual_layout(manual, 410.0, 140.0),
             (360.0, 400.0, 110.0)
-        );
-    }
-
-    #[test]
-    fn pinned_primary_does_not_get_reused_for_a_new_session() {
-        assert_eq!(
-            popup_window_route(Some(1), false, 2),
-            PopupWindowRoute::NewExtra
-        );
-        assert_eq!(
-            popup_window_route(Some(1), false, 1),
-            PopupWindowRoute::Primary
-        );
-    }
-
-    #[test]
-    fn existing_extra_wins_over_an_idle_primary() {
-        assert_eq!(
-            popup_window_route(Some(0), true, 2),
-            PopupWindowRoute::ExistingExtra
-        );
-        assert_eq!(
-            popup_window_route(Some(0), false, 3),
-            PopupWindowRoute::Primary
         );
     }
 
