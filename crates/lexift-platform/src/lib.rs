@@ -167,6 +167,16 @@ pub fn begin_window_drag(
     Ok(())
 }
 
+/// Asks Windows to evict this process's resident pages after an extended no-window idle period.
+///
+/// This only changes the resident working set. It does not decommit private allocations or
+/// recreate Slint's backend; per-window renderer resources are released with their windows.
+pub fn trim_process_working_set() -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    windows::memory::trim_working_set()?;
+    Ok(())
+}
+
 /// Starts the native system resize operation for a popup source-card handle.
 ///
 /// Returns `false` when the initiating left-button press has already ended.

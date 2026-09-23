@@ -5,6 +5,7 @@ mod clipboard;
 mod clipboard_selection;
 mod hotkey;
 mod instance;
+pub(crate) mod memory;
 mod screen;
 mod selection;
 mod speech;

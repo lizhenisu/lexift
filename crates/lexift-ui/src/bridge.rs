@@ -115,6 +115,7 @@ pub struct WindowLifecycleCallbacks {
     begin_window_resize: BeginWindowResize,
     set_popup_dismissal: SetPopupDismissal,
     attach_tool_window: AttachToolWindow,
+    trim_process_working_set: fn() -> bool,
 }
 
 impl WindowLifecycleCallbacks {
@@ -126,6 +127,7 @@ impl WindowLifecycleCallbacks {
         + 'static,
         set_popup_dismissal: impl Fn(&slint::Window, bool) -> bool + 'static,
         attach_tool_window: impl Fn(&slint::Window, &slint::Window) -> bool + 'static,
+        trim_process_working_set: fn() -> bool,
     ) -> Self {
         Self {
             complete_passive_window_show: Rc::new(complete_passive_window_show),
@@ -134,6 +136,7 @@ impl WindowLifecycleCallbacks {
             begin_window_resize: Rc::new(begin_window_resize),
             set_popup_dismissal: Rc::new(set_popup_dismissal),
             attach_tool_window: Rc::new(attach_tool_window),
+            trim_process_working_set,
         }
     }
 }
@@ -153,9 +156,67 @@ const LANGUAGE_MENU_VISIBLE_ROWS: usize = 10;
 const LANGUAGE_MENU_GAP_PX: i32 = 4;
 const POPUP_MIN_WIDTH: f32 = 340.0;
 const POPUP_MIN_SOURCE_HEIGHT: f32 = 86.0;
+const NO_WINDOW_MEMORY_TRIM_DELAY: Duration = Duration::from_secs(120);
 
 thread_local! {
     static POPUP_REGISTRY: RefCell<Option<PopupRegistry>> = const { RefCell::new(None) };
+    static IDLE_TRIM_GENERATION: RefCell<IdleTrimGeneration> = RefCell::new(IdleTrimGeneration::default());
+    static IDLE_TRIM_CALLBACK: Cell<Option<fn() -> bool>> = const { Cell::new(None) };
+}
+
+#[derive(Default)]
+struct IdleTrimGeneration(u64);
+
+impl IdleTrimGeneration {
+    fn invalidate(&mut self) {
+        self.0 = self.0.wrapping_add(1);
+    }
+
+    fn schedule(&mut self) -> u64 {
+        self.invalidate();
+        self.0
+    }
+
+    fn is_current(&self, generation: u64) -> bool {
+        self.0 == generation
+    }
+}
+
+fn cancel_idle_memory_trim() {
+    IDLE_TRIM_GENERATION.with(|generation| generation.borrow_mut().invalidate());
+}
+
+fn schedule_idle_memory_trim() {
+    let generation = IDLE_TRIM_GENERATION.with(|current| current.borrow_mut().schedule());
+    slint::Timer::single_shot(NO_WINDOW_MEMORY_TRIM_DELAY, move || {
+        let current = IDLE_TRIM_GENERATION.with(|current| current.borrow().is_current(generation));
+        if !current || has_live_window_instances() {
+            return;
+        }
+        let Some(trim) = IDLE_TRIM_CALLBACK.with(Cell::get) else {
+            return;
+        };
+        if trim() {
+            tracing::info!("trimmed resident memory after two minutes without UI windows");
+        } else {
+            tracing::warn!("could not trim resident memory after no-window idle period");
+        }
+    });
+}
+
+fn has_live_window_instances() -> bool {
+    let app_window_exists = APP_WINDOW_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .as_ref()
+            .is_some_and(|registry| registry.main.is_some() || registry.settings.is_some())
+    });
+    app_window_exists
+        || POPUP_REGISTRY.with(|registry| {
+            registry.borrow().as_ref().is_some_and(|registry| {
+                !registry.windows.is_empty() || registry.language_menu.is_some()
+            })
+        })
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -925,6 +986,7 @@ impl PopupRegistry {
         self.active_resizes.remove(&session_id);
         self.manual_sizes.remove(&session_id);
         self.pending_shows.remove(&session_id);
+        schedule_idle_memory_trim();
     }
 
     fn set_dismissal_watch(&mut self, session_id: u64, window: &TranslationPopup, enabled: bool) {
@@ -1332,6 +1394,7 @@ fn schedule_main_window_destruction() {
                 drop(main);
             }
         });
+        schedule_idle_memory_trim();
     });
 }
 
@@ -1359,6 +1422,7 @@ fn schedule_settings_window_destruction() {
                 drop(settings);
             }
         });
+        schedule_idle_memory_trim();
     });
 }
 
@@ -1506,6 +1570,10 @@ impl Ui {
         prepare_passive_window: fn(&slint::Window) -> PassiveWindowPreparation,
         window_lifecycle: WindowLifecycleCallbacks,
     ) -> Result<Self, slint::PlatformError> {
+        IDLE_TRIM_CALLBACK.with(|callback| {
+            callback.set(Some(window_lifecycle.trim_process_working_set));
+        });
+        cancel_idle_memory_trim();
         let credential_generation = Arc::new(AtomicU64::new(0));
         let toast_next_id = Arc::new(AtomicU64::new(0));
         let toast_records = Arc::new(Mutex::new(Vec::new()));
@@ -1614,6 +1682,7 @@ impl Ui {
 
     pub fn run(&self, show_main_window: bool) -> Result<(), slint::PlatformError> {
         if show_main_window {
+            cancel_idle_memory_trim();
             APP_WINDOW_REGISTRY.with(|registry| {
                 let mut registry = registry.borrow_mut();
                 let main = ensure_main_window(registry.as_mut().expect("UI registry initialized"))?;
@@ -2134,6 +2203,7 @@ impl UiHandle {
     ) {
         let session_id = session_id.value();
         let _ = slint::invoke_from_event_loop(move || {
+            cancel_idle_memory_trim();
             POPUP_REGISTRY.with(|registry| {
                 if let Some(registry) = registry.borrow_mut().as_mut() {
                     registry.show(session_id, anchor, work_area);
@@ -2158,6 +2228,7 @@ impl UiHandle {
         let toast_records = Arc::clone(&self.toast_records);
         let activate_user_requested_window = self.activate_user_requested_window;
         let _ = slint::invoke_from_event_loop(move || {
+            cancel_idle_memory_trim();
             APP_WINDOW_REGISTRY.with(|registry| {
                 let mut registry = registry.borrow_mut();
                 let Some(registry) = registry.as_mut() else {
@@ -2187,6 +2258,7 @@ impl UiHandle {
         let credential_generation = Arc::clone(&self.credential_generation);
         let toast_records = Arc::clone(&self.toast_records);
         let _ = slint::invoke_from_event_loop(move || {
+            cancel_idle_memory_trim();
             APP_WINDOW_REGISTRY.with(|registry| {
                 let mut registry = registry.borrow_mut();
                 let Some(registry) = registry.as_mut() else {
@@ -2235,6 +2307,7 @@ impl UiHandle {
                     drop(settings);
                 }
             });
+            schedule_idle_memory_trim();
         });
     }
 
@@ -2442,11 +2515,26 @@ mod tests {
     use lexift_core::domain::language::Language;
 
     use super::{
-        MainWindowClosePolicy, ManualPopupSize, PendingPopupShow, PopupDragPhase,
-        PopupDragScheduler, SettingsToastRecord, close_policy, credential_session_is_current,
-        effective_manual_layout, language_index, popup_show_retry_delay,
-        remove_settings_toast_record, source_language_for_index,
+        IdleTrimGeneration, MainWindowClosePolicy, ManualPopupSize, PendingPopupShow,
+        PopupDragPhase, PopupDragScheduler, SettingsToastRecord, close_policy,
+        credential_session_is_current, effective_manual_layout, language_index,
+        popup_show_retry_delay, remove_settings_toast_record, source_language_for_index,
     };
+
+    #[test]
+    fn idle_working_set_trim_is_invalidated_by_window_reopen_or_new_close() {
+        let mut generation = IdleTrimGeneration::default();
+        let first = generation.schedule();
+        assert!(generation.is_current(first));
+
+        generation.invalidate();
+        assert!(!generation.is_current(first));
+
+        let second = generation.schedule();
+        let third = generation.schedule();
+        assert!(!generation.is_current(second));
+        assert!(generation.is_current(third));
+    }
 
     #[test]
     fn manual_popup_size_is_a_floor_and_only_new_content_adds_growth() {

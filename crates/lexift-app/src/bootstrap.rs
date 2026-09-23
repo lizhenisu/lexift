@@ -159,6 +159,13 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                     false
                 }
             },
+            || match lexift_platform::trim_process_working_set() {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!(%error, "idle resident memory trim failed");
+                    false
+                }
+            },
         ),
     )?;
     let controller = Arc::new(
