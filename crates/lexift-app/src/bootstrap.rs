@@ -125,6 +125,8 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                     }
                 };
                 let scale = window.scale_factor().max(f32::EPSILON);
+                // UI work-area bounds are logical; the Windows sizing loop
+                // consumes physical MINMAXINFO values, so convert exactly once.
                 let bounds = lexift_platform::PopupResizeBounds {
                     min_width: (bounds.min_width * scale).round().max(1.0) as u32,
                     min_height: (bounds.min_height * scale).round().max(1.0) as u32,
@@ -166,7 +168,20 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                     false
                 }
             },
-        ),
+        )
+        .with_translation_popup_corners(|window| {
+            match lexift_platform::configure_translation_popup_corners(&window.window_handle()) {
+                lexift_platform::PopupCornerMode::NativeRounded => {
+                    lexift_ui::PopupCornerMode::NativeDwm
+                }
+                lexift_platform::PopupCornerMode::OpaqueSquare => {
+                    lexift_ui::PopupCornerMode::OpaqueSquare
+                }
+                lexift_platform::PopupCornerMode::SlintRounded => {
+                    lexift_ui::PopupCornerMode::SlintRounded
+                }
+            }
+        }),
     )?;
     let controller = Arc::new(
         AppController::new(

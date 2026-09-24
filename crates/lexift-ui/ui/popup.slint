@@ -4,6 +4,9 @@ import { Spacing } from "design/spacing.slint";
 import { Typography } from "design/typography.slint";
 import { AppAssets } from "design/assets.slint";
 import { AppVerticalScrollBar } from "design/scrollbar.slint";
+import { Metrics } from "design/metrics.slint";
+
+export enum PopupCornerMode { native-dwm, opaque-square, slint-rounded }
 
 component IconButton inherits Rectangle {
     in property <image> icon;
@@ -58,7 +61,9 @@ export component TranslationPopup inherits Window {
     icon: AppAssets.app-icon;
     no-frame: true;
     always-on-top: true;
-    background: transparent;
+    // Keep the native surface opaque so Windows can resize and present the
+    // Popup consistently; the full-window card supplies the rounded visual edge.
+    background: Colors.surface;
     preferred-width: root.popup-width;
     preferred-height: root.popup-height;
     min-width: 340px;
@@ -69,6 +74,7 @@ export component TranslationPopup inherits Window {
     in property <int> session-id: 0;
     in-out property <length> popup-width: 420px;
     in-out property <length> popup-height: 390px;
+    in-out property <PopupCornerMode> corner-mode: PopupCornerMode.slint-rounded;
     in-out property <length> source-card-height: 116px;
     in-out property <length> resize-min-height: 336px;
     in-out property <length> max-popup-width: 1920px;
@@ -79,6 +85,9 @@ export component TranslationPopup inherits Window {
     // Exposed to the bridge only so a hidden/reused window cannot retain a
     // stale resize affordance from its previous session.
     in-out property <int> resize-hover: -1;
+    property <length> corner-cue-size: root.corner-mode == PopupCornerMode.slint-rounded
+        ? Metrics.popup-shell-radius * 2 : Metrics.popup-native-corner-radius * 2;
+    property <float> corner-cue-viewbox-size: root.corner-mode == PopupCornerMode.slint-rounded ? 32 : 16;
     in property <string> phase-text: "Idle";
     in-out property <string> source-text: "";
     in property <string> translated-text: "";
@@ -128,21 +137,20 @@ export component TranslationPopup inherits Window {
     }
 
     card := Rectangle {
-        x: 8px; y: 8px;
-        width: parent.width - 16px;
-        height: parent.height - 16px;
-        border-radius: 16px;
+        x: 0px; y: 0px;
+        width: parent.width;
+        height: parent.height;
+        border-radius: root.corner-mode == PopupCornerMode.slint-rounded
+            ? Metrics.popup-shell-radius : 0px;
         background: Colors.surface;
         border-width: 1px;
         border-color: Colors.outline;
-        drop-shadow-blur: 10px;
-        drop-shadow-offset-y: 2px;
-        drop-shadow-color: #00000029;
         clip: true;
 
         top := Rectangle {
-            x: 0px; y: 0px; width: parent.width; height: 44px;
-            background: Colors.surface;
+            x: 8px; y: 8px; width: parent.width - 16px; height: 44px;
+            background: transparent;
+            z: 30;
             Text {
                 x: Spacing.medium; width: 180px; height: parent.height;
                 text: "Lexift";
@@ -152,7 +160,10 @@ export component TranslationPopup inherits Window {
                 vertical-alignment: center;
             }
             drag := TouchArea {
-                x: 0px; y: 0px; width: parent.width - 88px; height: parent.height;
+                // Leave the top resize strip and the corner handles clear, but
+                // make the remaining title row an easy, continuous drag target.
+                x: 16px; y: 4px; width: parent.width - 104px; height: parent.height - 4px;
+                z: 1;
                 clicked => { root.interaction-requested(); }
                 pointer-event(event) => {
                     if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
@@ -164,21 +175,23 @@ export component TranslationPopup inherits Window {
                 }
             }
             IconButton {
-                x: parent.width - 82px; y: 5px;
+                x: parent.width - 94px; y: 5px;
+                z: 2;
                 icon: AppAssets.icon-pin;
                 icon-size: 18px;
                 active: root.pinned;
                 clicked => { root.interaction-requested(); root.pin-requested(!root.pinned); }
             }
             IconButton {
-                x: parent.width - 42px; y: 5px;
+                x: parent.width - 54px; y: 5px;
+                z: 2;
                 icon: AppAssets.icon-close;
                 clicked => { root.source-menu-open = false; root.target-menu-open = false; root.close-requested(); }
             }
         }
 
         content := VerticalLayout {
-            x: 12px; y: 44px; width: parent.width - 24px; height: parent.height - 56px;
+            x: 20px; y: 52px; width: parent.width - 40px; height: parent.height - 72px;
             spacing: 10px;
 
             source-card := Rectangle {
@@ -258,144 +271,6 @@ export component TranslationPopup inherits Window {
                         enabled: root.source-text != "" && !root.busy;
                         clicked => { root.interaction-requested(); root.translate-requested(root.source-text, root.source-index, root.target-index); }
                     }
-                }
-
-                // Eight resize handles sit on the source-card border. Corners are
-                // declared last so they win hit testing where the regions overlap.
-                left-resize := TouchArea {
-                    x: -4px; y: 14px; width: 8px; height: parent.height - 28px;
-                    mouse-cursor: ew-resize;
-                    changed has-hover => { if self.has-hover { root.resize-hover = 0; } else if root.resize-hover == 0 { root.resize-hover = -1; } }
-                    pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(0); } }
-                }
-                right-resize := TouchArea {
-                    x: parent.width - 4px; y: 14px; width: 8px; height: parent.height - 28px;
-                    mouse-cursor: ew-resize;
-                    changed has-hover => { if self.has-hover { root.resize-hover = 1; } else if root.resize-hover == 1 { root.resize-hover = -1; } }
-                    pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(1); } }
-                }
-                top-resize := TouchArea {
-                    x: 14px; y: -4px; width: parent.width - 28px; height: 8px;
-                    mouse-cursor: ns-resize;
-                    changed has-hover => { if self.has-hover { root.resize-hover = 2; } else if root.resize-hover == 2 { root.resize-hover = -1; } }
-                    pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(2); } }
-                }
-                bottom-resize := TouchArea {
-                    x: 14px; y: parent.height - 4px; width: parent.width - 28px; height: 8px;
-                    mouse-cursor: ns-resize;
-                    changed has-hover => { if self.has-hover { root.resize-hover = 3; } else if root.resize-hover == 3 { root.resize-hover = -1; } }
-                    pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(3); } }
-                }
-                top-left-resize := TouchArea {
-                    x: -4px; y: -4px; width: 18px; height: 18px;
-                    mouse-cursor: nwse-resize;
-                    changed has-hover => { if self.has-hover { root.resize-hover = 4; } else if root.resize-hover == 4 { root.resize-hover = -1; } }
-                    pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(4); } }
-                }
-                top-right-resize := TouchArea {
-                    x: parent.width - 14px; y: -4px; width: 18px; height: 18px;
-                    mouse-cursor: nesw-resize;
-                    changed has-hover => { if self.has-hover { root.resize-hover = 5; } else if root.resize-hover == 5 { root.resize-hover = -1; } }
-                    pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(5); } }
-                }
-                bottom-left-resize := TouchArea {
-                    x: -4px; y: parent.height - 14px; width: 18px; height: 18px;
-                    mouse-cursor: nesw-resize;
-                    changed has-hover => { if self.has-hover { root.resize-hover = 6; } else if root.resize-hover == 6 { root.resize-hover = -1; } }
-                    pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(6); } }
-                }
-                bottom-right-resize := TouchArea {
-                    x: parent.width - 14px; y: parent.height - 14px; width: 18px; height: 18px;
-                    mouse-cursor: nwse-resize;
-                    changed has-hover => { if self.has-hover { root.resize-hover = 7; } else if root.resize-hover == 7 { root.resize-hover = -1; } }
-                    pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(7); } }
-                }
-
-                Rectangle {
-                    x: root.resize-hover == 4 || root.resize-hover == 6 ? 0px
-                        : root.resize-hover == 5 || root.resize-hover == 7 ? parent.width - 24px
-                        : (parent.width - 48px) / 2;
-                    y: 0px;
-                    width: root.resize-hover >= 4 ? 24px : 48px;
-                    height: 2px;
-                    border-radius: 1px;
-                    background: Colors.primary;
-                    opacity: root.resize-hover == 2 ? 1 : 0;
-                    animate opacity, width { duration: 120ms; easing: ease-out; }
-                }
-                Rectangle {
-                    x: root.resize-hover == 6 || root.resize-hover == 4 ? 0px
-                        : root.resize-hover == 7 || root.resize-hover == 5 ? parent.width - 24px
-                        : (parent.width - 48px) / 2;
-                    y: parent.height - 2px;
-                    width: root.resize-hover >= 4 ? 24px : 48px;
-                    height: 2px;
-                    border-radius: 1px;
-                    background: Colors.primary;
-                    opacity: root.resize-hover == 3 ? 1 : 0;
-                    animate opacity, width { duration: 120ms; easing: ease-out; }
-                }
-                Rectangle {
-                    x: 0px;
-                    y: root.resize-hover == 4 ? 0px : root.resize-hover == 6 ? parent.height - 24px : (parent.height - 48px) / 2;
-                    width: 2px;
-                    height: root.resize-hover >= 4 ? 24px : 48px;
-                    border-radius: 1px;
-                    background: Colors.primary;
-                    opacity: root.resize-hover == 0 ? 1 : 0;
-                    animate opacity, height { duration: 120ms; easing: ease-out; }
-                }
-                Rectangle {
-                    x: parent.width - 2px;
-                    y: root.resize-hover == 5 ? 0px : root.resize-hover == 7 ? parent.height - 24px : (parent.height - 48px) / 2;
-                    width: 2px;
-                    height: root.resize-hover >= 4 ? 24px : 48px;
-                    border-radius: 1px;
-                    background: Colors.primary;
-                    opacity: root.resize-hover == 1 ? 1 : 0;
-                    animate opacity, height { duration: 120ms; easing: ease-out; }
-                }
-                // Curved corner affordances follow the source card's rounded
-                // border instead of drawing a square L-shaped marker.
-                Path {
-                    x: 0px; y: 0px; width: 24px; height: 24px;
-                    viewbox-width: 24; viewbox-height: 24;
-                    commands: "M0 12 C0 5.37 5.37 0 12 0";
-                    fill: transparent;
-                    stroke: Colors.primary;
-                    stroke-width: 2.5px;
-                    opacity: root.resize-hover == 4 ? 1 : 0;
-                    animate opacity { duration: 120ms; easing: ease-out; }
-                }
-                Path {
-                    x: parent.width - 24px; y: 0px; width: 24px; height: 24px;
-                    viewbox-width: 24; viewbox-height: 24;
-                    commands: "M12 0 C18.63 0 24 5.37 24 12";
-                    fill: transparent;
-                    stroke: Colors.primary;
-                    stroke-width: 2.5px;
-                    opacity: root.resize-hover == 5 ? 1 : 0;
-                    animate opacity { duration: 120ms; easing: ease-out; }
-                }
-                Path {
-                    x: 0px; y: parent.height - 24px; width: 24px; height: 24px;
-                    viewbox-width: 24; viewbox-height: 24;
-                    commands: "M12 24 C5.37 24 0 18.63 0 12";
-                    fill: transparent;
-                    stroke: Colors.primary;
-                    stroke-width: 2.5px;
-                    opacity: root.resize-hover == 6 ? 1 : 0;
-                    animate opacity { duration: 120ms; easing: ease-out; }
-                }
-                Path {
-                    x: parent.width - 24px; y: parent.height - 24px; width: 24px; height: 24px;
-                    viewbox-width: 24; viewbox-height: 24;
-                    commands: "M24 12 C24 18.63 18.63 24 12 24";
-                    fill: transparent;
-                    stroke: Colors.primary;
-                    stroke-width: 2.5px;
-                    opacity: root.resize-hover == 7 ? 1 : 0;
-                    animate opacity { duration: 120ms; easing: ease-out; }
                 }
             }
 
@@ -506,10 +381,131 @@ export component TranslationPopup inherits Window {
                 }
             }
         }
+        // Resize handles follow the Popup surface, not the source editor card.
+        left-resize := TouchArea {
+            x: 0px; y: 20px; width: 12px; height: parent.height - 40px; z: 20;
+            mouse-cursor: ew-resize;
+            changed has-hover => { if self.has-hover { root.resize-hover = 0; } else if root.resize-hover == 0 { root.resize-hover = -1; } }
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(0); } }
+        }
+        right-resize := TouchArea {
+            x: parent.width - 12px; y: 20px; width: 12px; height: parent.height - 40px; z: 20;
+            mouse-cursor: ew-resize;
+            changed has-hover => { if self.has-hover { root.resize-hover = 1; } else if root.resize-hover == 1 { root.resize-hover = -1; } }
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(1); } }
+        }
+        top-resize := TouchArea {
+            x: 20px; y: 0px; width: parent.width - 40px; height: 12px; z: 20;
+            mouse-cursor: ns-resize;
+            changed has-hover => { if self.has-hover { root.resize-hover = 2; } else if root.resize-hover == 2 { root.resize-hover = -1; } }
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(2); } }
+        }
+        bottom-resize := TouchArea {
+            x: 20px; y: parent.height - 12px; width: parent.width - 40px; height: 12px; z: 20;
+            mouse-cursor: ns-resize;
+            changed has-hover => { if self.has-hover { root.resize-hover = 3; } else if root.resize-hover == 3 { root.resize-hover = -1; } }
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(3); } }
+        }
+        top-left-resize := TouchArea {
+            x: 0px; y: 0px; width: 20px; height: 20px; z: 20;
+            mouse-cursor: nwse-resize;
+            changed has-hover => { if self.has-hover { root.resize-hover = 4; } else if root.resize-hover == 4 { root.resize-hover = -1; } }
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(4); } }
+        }
+        top-right-resize := TouchArea {
+            x: parent.width - 20px; y: 0px; width: 20px; height: 20px; z: 20;
+            mouse-cursor: nesw-resize;
+            changed has-hover => { if self.has-hover { root.resize-hover = 5; } else if root.resize-hover == 5 { root.resize-hover = -1; } }
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(5); } }
+        }
+        bottom-left-resize := TouchArea {
+            x: 0px; y: parent.height - 20px; width: 20px; height: 20px; z: 20;
+            mouse-cursor: nesw-resize;
+            changed has-hover => { if self.has-hover { root.resize-hover = 6; } else if root.resize-hover == 6 { root.resize-hover = -1; } }
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(6); } }
+        }
+        bottom-right-resize := TouchArea {
+            x: parent.width - 20px; y: parent.height - 20px; width: 20px; height: 20px; z: 20;
+            mouse-cursor: nwse-resize;
+            changed has-hover => { if self.has-hover { root.resize-hover = 7; } else if root.resize-hover == 7 { root.resize-hover = -1; } }
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(7); } }
+        }
+
+        Rectangle {
+            x: root.resize-hover == 4 || root.resize-hover == 6 ? 0px
+                : root.resize-hover == 5 || root.resize-hover == 7 ? parent.width - 36px
+                : (parent.width - 36px) / 2;
+            y: 0px; width: 36px; height: 2px; z: 21;
+            border-radius: 1px; background: Colors.primary;
+            opacity: root.resize-hover == 2 ? 0.6 : 0;
+            animate opacity { duration: 120ms; easing: ease-out; }
+        }
+        Rectangle {
+            x: root.resize-hover == 6 || root.resize-hover == 4 ? 0px
+                : root.resize-hover == 7 || root.resize-hover == 5 ? parent.width - 36px
+                : (parent.width - 36px) / 2;
+            y: parent.height - 2px; width: 36px; height: 2px; z: 21;
+            border-radius: 1px; background: Colors.primary;
+            opacity: root.resize-hover == 3 ? 0.6 : 0;
+            animate opacity { duration: 120ms; easing: ease-out; }
+        }
+        Rectangle {
+            x: 0px;
+            y: root.resize-hover == 4 ? 0px : root.resize-hover == 6 ? parent.height - 36px : (parent.height - 36px) / 2;
+            width: 2px; height: 36px; z: 21;
+            border-radius: 1px; background: Colors.primary;
+            opacity: root.resize-hover == 0 ? 0.6 : 0;
+            animate opacity { duration: 120ms; easing: ease-out; }
+        }
+        Rectangle {
+            x: parent.width - 2px;
+            y: root.resize-hover == 5 ? 0px : root.resize-hover == 7 ? parent.height - 36px : (parent.height - 36px) / 2;
+            width: 2px; height: 36px; z: 21;
+            border-radius: 1px; background: Colors.primary;
+            opacity: root.resize-hover == 1 ? 0.6 : 0;
+            animate opacity { duration: 120ms; easing: ease-out; }
+        }
+        // Match each corner cue to the single corner source used by the shell.
+        Path {
+            x: 0px; y: 0px; width: root.corner-cue-size; height: root.corner-cue-size; z: 21;
+            viewbox-width: root.corner-cue-viewbox-size; viewbox-height: root.corner-cue-viewbox-size;
+            commands: root.corner-mode == PopupCornerMode.slint-rounded
+                ? "M0 16 C0 7.16 7.16 0 16 0" : "M0 8 C0 3.58 3.58 0 8 0";
+            fill: transparent; stroke: Colors.primary; stroke-width: 2.5px;
+            opacity: root.corner-mode != PopupCornerMode.opaque-square && root.resize-hover == 4 ? 0.6 : 0;
+            animate opacity { duration: 120ms; easing: ease-out; }
+        }
+        Path {
+            x: parent.width - root.corner-cue-size; y: 0px; width: root.corner-cue-size; height: root.corner-cue-size; z: 21;
+            viewbox-width: root.corner-cue-viewbox-size; viewbox-height: root.corner-cue-viewbox-size;
+            commands: root.corner-mode == PopupCornerMode.slint-rounded
+                ? "M16 0 C24.84 0 32 7.16 32 16" : "M8 0 C12.42 0 16 3.58 16 8";
+            fill: transparent; stroke: Colors.primary; stroke-width: 2.5px;
+            opacity: root.corner-mode != PopupCornerMode.opaque-square && root.resize-hover == 5 ? 0.6 : 0;
+            animate opacity { duration: 120ms; easing: ease-out; }
+        }
+        Path {
+            x: 0px; y: parent.height - root.corner-cue-size; width: root.corner-cue-size; height: root.corner-cue-size; z: 21;
+            viewbox-width: root.corner-cue-viewbox-size; viewbox-height: root.corner-cue-viewbox-size;
+            commands: root.corner-mode == PopupCornerMode.slint-rounded
+                ? "M16 32 C7.16 32 0 24.84 0 16" : "M8 16 C3.58 16 0 12.42 0 8";
+            fill: transparent; stroke: Colors.primary; stroke-width: 2.5px;
+            opacity: root.corner-mode != PopupCornerMode.opaque-square && root.resize-hover == 6 ? 0.6 : 0;
+            animate opacity { duration: 120ms; easing: ease-out; }
+        }
+        Path {
+            x: parent.width - root.corner-cue-size; y: parent.height - root.corner-cue-size; width: root.corner-cue-size; height: root.corner-cue-size; z: 21;
+            viewbox-width: root.corner-cue-viewbox-size; viewbox-height: root.corner-cue-viewbox-size;
+            commands: root.corner-mode == PopupCornerMode.slint-rounded
+                ? "M32 16 C32 24.84 24.84 32 16 32" : "M16 8 C16 12.42 12.42 16 8 16";
+            fill: transparent; stroke: Colors.primary; stroke-width: 2.5px;
+            opacity: root.corner-mode != PopupCornerMode.opaque-square && root.resize-hover == 7 ? 0.6 : 0;
+            animate opacity { duration: 120ms; easing: ease-out; }
+        }
 
         if root.feedback-text != "": Rectangle {
             x: (parent.width - min(280px, feedback-label.preferred-width + 28px)) / 2;
-            y: parent.height - 52px;
+            y: parent.height - 60px;
             width: min(280px, feedback-label.preferred-width + 28px);
             height: 38px;
             z: 30;

@@ -12,6 +12,17 @@ mod windows;
 
 pub use capabilities::PlatformCapabilities;
 
+/// The outer-corner treatment available for the translation popup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PopupCornerMode {
+    /// Windows applies the rounded clip to the native window surface.
+    NativeRounded,
+    /// Keep the stable opaque HWND surface without drawing a second rounded edge.
+    OpaqueSquare,
+    /// Let the UI draw and clip its own rounded outer edge.
+    SlintRounded,
+}
+
 /// A native pointer event captured from a translation popup tool window.
 ///
 /// Positions and scroll deltas use physical client-area pixels. The UI adapter converts them to
@@ -64,6 +75,7 @@ pub enum PopupResizeEdge {
     BottomRight,
 }
 
+/// Popup outer-window size limits in physical pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PopupResizeBounds {
     pub min_width: u32,
@@ -93,6 +105,30 @@ pub fn configure_passive_tool_window(
     {
         let _ = window;
         Ok(PassiveToolWindowPreparation::Ready)
+    }
+}
+
+/// Configures the Translation Popup's one outer-corner treatment.
+///
+/// Windows uses DWM clipping when available and reports an opaque square fallback when it is not.
+/// Other platforms continue to use the Slint-rounded surface. Other tool windows do not use this.
+pub fn configure_translation_popup_corners(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> PopupCornerMode {
+    #[cfg(target_os = "windows")]
+    {
+        match windows::popup::configure_translation_popup_corners(window) {
+            Ok(()) => PopupCornerMode::NativeRounded,
+            Err(error) => {
+                tracing::debug!(%error, "native translation popup corner preference unavailable");
+                PopupCornerMode::OpaqueSquare
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+        PopupCornerMode::SlintRounded
     }
 }
 

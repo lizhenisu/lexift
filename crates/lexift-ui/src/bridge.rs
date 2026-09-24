@@ -22,8 +22,8 @@ use lexift_core::{
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::{
-    AppWindow, PopupLanguageMenuWindow, SettingsToastData, SettingsWindow, TranslationPopup,
-    binding, mapper, placement,
+    AppWindow, PopupCornerMode, PopupLanguageMenuWindow, SettingsToastData, SettingsWindow,
+    TranslationPopup, binding, mapper, placement,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -96,6 +96,10 @@ impl PopupResizeEdge {
     fn changes_height(self) -> bool {
         !matches!(self, Self::Left | Self::Right)
     }
+
+    fn changes_width(self) -> bool {
+        !matches!(self, Self::Top | Self::Bottom)
+    }
 }
 
 pub type PopupPointerSink = Rc<dyn Fn(PopupPointerInput)>;
@@ -113,6 +117,7 @@ pub enum PassiveWindowPreparation {
 
 pub struct WindowLifecycleCallbacks {
     complete_passive_window_show: CompletePassiveWindowShow,
+    configure_translation_popup_corners: fn(&slint::Window) -> PopupCornerMode,
     activate_user_requested_window: fn(&slint::Window) -> bool,
     begin_window_drag: fn(&slint::Window) -> bool,
     begin_window_resize: BeginWindowResize,
@@ -134,6 +139,7 @@ impl WindowLifecycleCallbacks {
     ) -> Self {
         Self {
             complete_passive_window_show: Rc::new(complete_passive_window_show),
+            configure_translation_popup_corners: |_| PopupCornerMode::SlintRounded,
             activate_user_requested_window,
             begin_window_drag,
             begin_window_resize: Rc::new(begin_window_resize),
@@ -141,6 +147,15 @@ impl WindowLifecycleCallbacks {
             attach_tool_window: Rc::new(attach_tool_window),
             trim_process_working_set,
         }
+    }
+
+    /// Adds a best-effort, popup-only native surface setup after its HWND exists.
+    pub fn with_translation_popup_corners(
+        mut self,
+        configure: fn(&slint::Window) -> PopupCornerMode,
+    ) -> Self {
+        self.configure_translation_popup_corners = configure;
+        self
     }
 }
 
@@ -287,6 +302,7 @@ struct PopupRegistry {
     pending_shows: HashMap<u64, PendingPopupShow>,
     next_show_generation: u64,
     prepare_passive_window: fn(&slint::Window) -> PassiveWindowPreparation,
+    configure_translation_popup_corners: fn(&slint::Window) -> PopupCornerMode,
     complete_passive_window_show: CompletePassiveWindowShow,
     begin_window_drag: fn(&slint::Window) -> bool,
     begin_window_resize: BeginWindowResize,
@@ -775,6 +791,8 @@ impl PopupRegistry {
         match (self.prepare_passive_window)(window.window()) {
             PassiveWindowPreparation::Ready => {
                 self.pending_shows.remove(&session_id);
+                let corner_mode = (self.configure_translation_popup_corners)(window.window());
+                window.set_corner_mode(corner_mode);
                 self.finish_show(session_id, window, request.anchor, request.work_area);
             }
             PassiveWindowPreparation::Pending if Instant::now() < request.deadline => {
@@ -1347,6 +1365,54 @@ fn apply_popup_resize_bounds(popup: &TranslationPopup, work_area: Rect) {
     popup.set_max_popup_height(height);
 }
 
+fn popup_resize_bounds(
+    popup: &TranslationPopup,
+    edge: PopupResizeEdge,
+    work_area: Option<Rect>,
+) -> PopupResizeBounds {
+    let scale = popup.window().scale_factor().max(f32::EPSILON);
+    let position = popup.window().position();
+    let size = popup.window().size();
+    let max_width = work_area
+        .filter(|_| edge.changes_width())
+        .map(|work_area| {
+            let available = if matches!(
+                edge,
+                PopupResizeEdge::Left | PopupResizeEdge::TopLeft | PopupResizeEdge::BottomLeft
+            ) {
+                position.x + size.width as i32 - work_area.left - WORK_AREA_MARGIN_PX
+            } else {
+                work_area.right - WORK_AREA_MARGIN_PX - position.x
+            };
+            popup
+                .get_max_popup_width()
+                .min((available.max(1) as f32 / scale).max(POPUP_MIN_WIDTH))
+        })
+        .unwrap_or_else(|| popup.get_max_popup_width());
+    let max_height = work_area
+        .filter(|_| edge.changes_height())
+        .map(|work_area| {
+            let available = if matches!(
+                edge,
+                PopupResizeEdge::Top | PopupResizeEdge::TopLeft | PopupResizeEdge::TopRight
+            ) {
+                position.y + size.height as i32 - work_area.top - WORK_AREA_MARGIN_PX
+            } else {
+                work_area.bottom - WORK_AREA_MARGIN_PX - position.y
+            };
+            popup
+                .get_max_popup_height()
+                .min((available.max(1) as f32 / scale).max(popup.get_resize_min_height()))
+        })
+        .unwrap_or_else(|| popup.get_max_popup_height());
+    PopupResizeBounds {
+        min_width: POPUP_MIN_WIDTH,
+        min_height: popup.get_resize_min_height(),
+        max_width,
+        max_height,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SettingsToastRecord {
     id: i32,
@@ -1655,6 +1721,8 @@ impl Ui {
                 pending_shows: HashMap::new(),
                 next_show_generation: 0,
                 prepare_passive_window,
+                configure_translation_popup_corners: window_lifecycle
+                    .configure_translation_popup_corners,
                 complete_passive_window_show: Rc::clone(
                     &window_lifecycle.complete_passive_window_show,
                 ),
@@ -1928,25 +1996,23 @@ fn wire_popup_callbacks(popup: &TranslationPopup, handler: Rc<dyn Fn(AppEvent)>)
             return;
         };
         let session_id = popup.get_session_id().max(0) as u64;
-        let begin_resize = POPUP_REGISTRY.with(|registry| {
+        let resize_context = POPUP_REGISTRY.with(|registry| {
             let mut registry = registry.borrow_mut();
             let registry = registry.as_mut()?;
             if registry.active_resizes.contains_key(&session_id) {
                 return None;
             }
             registry.start_resize(session_id, &popup, edge);
-            Some(Rc::clone(&registry.begin_window_resize))
+            Some((
+                Rc::clone(&registry.begin_window_resize),
+                registry.work_areas.get(&session_id).copied(),
+            ))
         });
-        let Some(begin_resize) = begin_resize else {
+        let Some((begin_resize, work_area)) = resize_context else {
             return;
         };
         let weak = popup.as_weak();
-        let bounds = PopupResizeBounds {
-            min_width: POPUP_MIN_WIDTH,
-            min_height: popup.get_resize_min_height(),
-            max_width: popup.get_max_popup_width(),
-            max_height: popup.get_max_popup_height(),
-        };
+        let bounds = popup_resize_bounds(&popup, edge, work_area);
         slint::Timer::single_shot(Duration::ZERO, move || {
             let Some(popup) = weak.upgrade().filter(|popup| {
                 popup.window().is_visible() && popup.get_session_id().max(0) as u64 == session_id
