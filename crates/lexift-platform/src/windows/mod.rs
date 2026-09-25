@@ -10,6 +10,7 @@ pub(crate) mod renderer;
 pub(super) mod resize_background;
 mod screen;
 mod selection;
+pub(crate) mod selection_monitor;
 mod speech;
 mod tray;
 

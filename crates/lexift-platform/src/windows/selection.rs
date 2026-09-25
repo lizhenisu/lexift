@@ -34,6 +34,11 @@ impl WindowsSelectionPort {
 }
 
 impl SelectionPort for WindowsSelectionPort {
+    fn selected_text_passive(&self) -> Result<Option<Selection>> {
+        let anchor = super::screen::cursor_position().ok();
+        capture_with_uia().map(|text| text.map(|text| Selection { text, anchor }))
+    }
+
     fn selected_text(&self) -> Result<Option<Selection>> {
         let started_at = Instant::now();
         let anchor = super::screen::cursor_position().ok();

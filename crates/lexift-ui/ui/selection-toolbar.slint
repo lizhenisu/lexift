@@ -1,0 +1,46 @@
+import { Colors } from "design/colors.slint";
+import { AppAssets } from "design/assets.slint";
+
+export component SelectionToolbarWindow inherits Window {
+    title: "Lexift Selection Toolbar";
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+    preferred-width: 96px;
+    preferred-height: 48px;
+    min-width: 96px;
+    min-height: 48px;
+    max-width: 96px;
+    max-height: 48px;
+    in property <float> fade-opacity: 1;
+    callback translate-requested();
+    callback copy-requested();
+
+    Rectangle {
+        x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px;
+        opacity: root.fade-opacity;
+        background: Colors.surface;
+        border-radius: 23px;
+        border-width: 1px;
+        border-color: Colors.outline;
+
+        Rectangle {
+            x: 7px; y: 5px; width: 40px; height: 36px;
+            border-radius: 18px;
+            background: translate-area.pressed ? Colors.icon-button-pressed
+                : translate-area.has-hover ? Colors.icon-button-hover : transparent;
+            Image { x: 10px; y: 8px; width: 20px; height: 20px;
+                source: AppAssets.icon-translate; image-fit: contain; colorize: Colors.foreground; }
+            translate-area := TouchArea { clicked => { root.translate-requested(); } }
+        }
+        Rectangle {
+            x: 49px; y: 5px; width: 40px; height: 36px;
+            border-radius: 18px;
+            background: copy-area.pressed ? Colors.icon-button-pressed
+                : copy-area.has-hover ? Colors.icon-button-hover : transparent;
+            Image { x: 10px; y: 8px; width: 20px; height: 20px;
+                source: AppAssets.icon-copy; image-fit: contain; colorize: Colors.foreground; }
+            copy-area := TouchArea { clicked => { root.copy-requested(); } }
+        }
+    }
+}

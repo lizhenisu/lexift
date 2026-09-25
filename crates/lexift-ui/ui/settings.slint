@@ -318,6 +318,264 @@ component SettingsFieldLabel inherits Rectangle {
     }
 }
 
+component AppearanceThemeChoice inherits Rectangle {
+    in property <int> theme-kind;
+    in property <bool> selected;
+    callback chosen();
+
+    height: 106px;
+    background: transparent;
+
+    preview := Rectangle {
+        x: 0px; y: 0px; width: parent.width; height: 78px;
+        border-radius: Spacing.small;
+        border-width: root.selected ? 2px : 1px;
+        border-color: root.selected ? Colors.primary : Colors.outline;
+        background: root.theme-kind == 1 ? #15345d : #dcecff;
+        clip: true;
+
+        if root.theme-kind == 2: Rectangle {
+            x: parent.width / 2; width: parent.width / 2; height: parent.height;
+            background: #15345d;
+        }
+        Rectangle {
+            x: 9px; y: 13px; width: parent.width - 18px; height: parent.height - 13px;
+            border-radius: 5px;
+            background: root.theme-kind == 1 ? #25282d : Colors.surface;
+            clip: true;
+            if root.theme-kind == 2: Rectangle {
+                x: parent.width / 2; width: parent.width / 2; height: parent.height;
+                background: #25282d;
+            }
+            Rectangle {
+                x: 0px; y: 0px; width: parent.width; height: 14px;
+                border-radius: 5px;
+                background: root.theme-kind == 1 ? #383c43 : #f5f7fa;
+            }
+            if root.theme-kind == 2: Rectangle {
+                x: parent.width / 2; y: 0px; width: parent.width / 2; height: 14px;
+                background: #383c43;
+            }
+            for dot in [0, 1, 2]: Rectangle {
+                x: 6px + dot * 6px; y: 6px; width: 3px; height: 3px;
+                border-radius: 2px;
+                background: root.theme-kind == 1 ? #aeb5bf : #68707a;
+            }
+            Rectangle { x: 6px; y: 22px; width: 16px; height: 6px; border-radius: 2px; background: Colors.primary; }
+            Rectangle { x: 6px; y: 33px; width: 12px; height: 3px; border-radius: 2px; background: root.theme-kind == 1 ? #565b63 : #d4d9df; }
+            Rectangle { x: 28px; y: 23px; width: parent.width - 43px; height: 4px; border-radius: 2px; background: root.theme-kind == 1 ? #aeb5bf : #68707a; }
+            Rectangle { x: 28px; y: 33px; width: parent.width - 38px; height: 3px; border-radius: 2px; background: root.theme-kind == 1 ? #565b63 : #d4d9df; }
+            Rectangle { x: 28px; y: 42px; width: parent.width - 48px; height: 3px; border-radius: 2px; background: root.theme-kind == 1 ? #565b63 : #d4d9df; }
+            Rectangle { x: parent.width - 27px; y: parent.height - 13px; width: 19px; height: 6px; border-radius: 3px; background: Colors.primary; }
+        }
+    }
+    Text {
+        y: 82px; width: parent.width; height: 24px;
+        text: root.theme-kind == 0 ? "Light" : root.theme-kind == 1 ? "Dark" : "System";
+        color: root.selected ? Colors.primary : Colors.foreground;
+        font-size: Typography.compact-size;
+        font-weight: root.selected ? 700 : 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    TouchArea { clicked => { root.chosen(); } }
+}
+
+component AppearanceAccentChoice inherits Rectangle {
+    in property <color> swatch;
+    in property <bool> selected;
+    callback chosen();
+
+    width: 36px; height: 36px;
+    border-radius: 18px;
+    border-width: root.selected ? 2px : 0px;
+    border-color: Colors.primary;
+    background: transparent;
+    Rectangle {
+        x: 3px; y: 3px; width: 30px; height: 30px;
+        border-radius: 15px;
+        background: root.swatch;
+        if root.selected: Path {
+            x: 8px; y: 10px; width: 14px; height: 11px;
+            viewbox-width: 14; viewbox-height: 11;
+            stroke: Colors.surface; stroke-width: 2px;
+            MoveTo { x: 1; y: 5; } LineTo { x: 5; y: 9; } LineTo { x: 13; y: 1; }
+        }
+    }
+    TouchArea { clicked => { root.chosen(); } }
+}
+
+component AppearancePreviewField inherits Rectangle {
+    in property <string> value;
+    in property <bool> opened;
+    callback clicked();
+
+    height: 42px;
+    border-radius: 6px;
+    border-width: root.opened ? 2px : 1px;
+    border-color: root.opened ? Colors.primary : Colors.outline;
+    background: Colors.background;
+    Text {
+        x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 18px; height: parent.height;
+        text: root.value; color: Colors.foreground; font-size: Typography.body-size;
+        vertical-alignment: center; overflow: elide;
+    }
+    Path {
+        x: parent.width - Spacing.medium - 12px; y: (parent.height - 6px) / 2;
+        width: 12px; height: 6px; viewbox-width: 12; viewbox-height: 6;
+        stroke: Colors.secondary-foreground; stroke-width: 1.5px;
+        MoveTo { x: 1; y: root.opened ? 5 : 1; }
+        LineTo { x: 6; y: root.opened ? 1 : 5; }
+        LineTo { x: 11; y: root.opened ? 5 : 1; }
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+component UnavailableHotkeyRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> compact;
+
+    height: root.compact ? 88px : 64px;
+
+    Text {
+        x: 0px; y: 0px;
+        width: root.compact ? parent.width : parent.width * 0.45 - Spacing.small;
+        height: root.compact ? 32px : parent.height;
+        text: root.label; color: Colors.secondary-foreground;
+        font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
+    }
+    Rectangle {
+        x: root.compact ? 0px : parent.width * 0.45;
+        y: root.compact ? 38px : (parent.height - 40px) / 2;
+        width: root.compact ? parent.width - 112px : parent.width * 0.55 - 112px;
+        height: 40px; border-radius: 6px; border-width: 1px;
+        border-color: Colors.outline; background: Colors.background;
+        Text {
+            x: Spacing.medium; width: parent.width - 2 * Spacing.medium; height: parent.height;
+            text: "No shortcut"; color: Colors.secondary-foreground;
+            font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
+        }
+    }
+    Rectangle {
+        x: parent.width - 100px; y: root.compact ? 38px : (parent.height - 40px) / 2;
+        width: 100px; height: 40px; border-radius: 6px; background: Colors.background;
+        Text {
+            text: "Unavailable"; color: Colors.secondary-foreground;
+            font-size: 13px; horizontal-alignment: center; vertical-alignment: center;
+        }
+    }
+}
+
+component OffsetPreviewField inherits Rectangle {
+    in-out property <string> value: "12";
+    in property <string> unit: "px";
+    in property <int> fallback-value: 12;
+    in property <int> min-value: -10000;
+
+    function parsed-value() -> int {
+        if root.value.is-float() { return max(root.min-value, round(root.value.to-float())); }
+        return root.fallback-value;
+    }
+
+    height: 42px;
+    border-radius: 6px; border-width: 1px; border-color: Colors.outline;
+    background: Colors.background;
+
+    TextInput {
+        x: Spacing.medium; width: parent.width - (root.unit == "" ? 72px : 116px); height: parent.height;
+        text <=> root.value;
+        color: Colors.foreground; font-size: Typography.body-size;
+        selection-background-color: Colors.primary-container;
+        selection-foreground-color: Colors.foreground;
+        vertical-alignment: center;
+        accepted => { root.value = root.parsed-value(); }
+        changed has-focus => { if !self.has-focus { root.value = root.parsed-value(); } }
+    }
+    if root.unit != "": Text {
+        x: parent.width - 96px; width: 44px; height: parent.height;
+        text: root.unit; color: Colors.secondary-foreground;
+        font-size: Typography.body-size; vertical-alignment: center;
+    }
+    Rectangle {
+        x: parent.width - 44px; y: 1px; width: 43px; height: parent.height - 2px;
+        clip: true;
+
+        Rectangle {
+            x: 1px; y: 0px; width: parent.width - 1px; height: 20px;
+            background: increase-touch.pressed ? Colors.icon-button-pressed
+                : increase-touch.has-hover ? Colors.icon-button-hover : transparent;
+            Image {
+                x: (parent.width - 20px) / 2; y: 0px; width: 20px; height: 20px;
+                source: AppAssets.icon-expand-less; image-fit: contain;
+                colorize: Colors.secondary-foreground;
+            }
+            increase-touch := TouchArea {
+                clicked => { root.value = root.parsed-value() + 1; }
+            }
+        }
+        Rectangle {
+            x: 1px; y: 21px; width: parent.width - 1px; height: parent.height - 21px;
+            background: decrease-touch.pressed ? Colors.icon-button-pressed
+                : decrease-touch.has-hover ? Colors.icon-button-hover : transparent;
+            Image {
+                x: (parent.width - 20px) / 2; y: (parent.height - 20px) / 2;
+                width: 20px; height: 20px;
+                source: AppAssets.icon-expand-more; image-fit: contain;
+                colorize: Colors.secondary-foreground;
+            }
+            decrease-touch := TouchArea {
+                clicked => { root.value = max(root.min-value, root.parsed-value() - 1); }
+            }
+        }
+        Rectangle { x: 0px; y: 0px; width: 1px; height: parent.height; background: Colors.outline; }
+        Rectangle { x: 1px; y: 20px; width: parent.width - 1px; height: 1px; background: Colors.outline; }
+    }
+}
+
+component SelectionActionRow inherits Rectangle {
+    in property <string> label;
+    in property <image> icon;
+    // 0 is required, 1 is a preview switch, and 2 is unavailable.
+    in property <int> status;
+    in property <bool> checked: false;
+    callback toggled(bool);
+
+    height: Metrics.settings-row-height;
+
+    for dot in [0, 1, 2, 3, 4, 5]: Rectangle {
+        x: Math.mod(dot, 2) * 5px; y: 23px + floor(dot / 2) * 6px;
+        width: 2px; height: 2px; border-radius: 1px;
+        background: Colors.secondary-foreground;
+    }
+    Image {
+        x: 24px; y: (parent.height - 20px) / 2; width: 20px; height: 20px;
+        source: root.icon; image-fit: contain; colorize: Colors.secondary-foreground;
+    }
+    Text {
+        x: 56px; width: parent.width - 56px - (root.status == 1 ? 64px : 112px);
+        height: parent.height; text: root.label;
+        color: root.status == 2 ? Colors.secondary-foreground : Colors.foreground;
+        font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
+    }
+    if root.status == 0: Rectangle {
+        x: parent.width - 94px; y: (parent.height - 32px) / 2;
+        width: 94px; height: 32px; border-radius: 6px;
+        background: Colors.primary-container;
+        Text { text: "Required"; color: Colors.primary; font-size: 13px;
+            horizontal-alignment: center; vertical-alignment: center; }
+    }
+    if root.status == 1: SettingsSwitch {
+        x: parent.width - self.width; y: (parent.height - self.height) / 2;
+        checked: root.checked; toggled(value) => { root.toggled(value); }
+    }
+    if root.status == 2: Rectangle {
+        x: parent.width - 100px; y: (parent.height - 36px) / 2;
+        width: 100px; height: 36px; border-radius: 6px; background: Colors.background;
+        Text { text: "Unavailable"; color: Colors.secondary-foreground; font-size: 13px;
+            horizontal-alignment: center; vertical-alignment: center; }
+    }
+}
+
 component SettingsNavItem inherits Rectangle {
     in property <string> label;
     in property <int> icon-kind;
@@ -338,7 +596,13 @@ component SettingsNavItem inherits Rectangle {
         height: Metrics.icon-size;
         viewbox-width: 24;
         viewbox-height: 24;
-        commands: root.icon-kind == 0
+        commands: root.icon-kind == 4
+            ? "M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4zM10 10h4v4h-4v-4z"
+            : root.icon-kind == 3
+            ? "M11 2a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7V2zm0 4a5 5 0 1 0 5 5h-2a3 3 0 1 1-3-3V6zm1 5 9 4-4 1-1 4-4-9z"
+            : root.icon-kind == 2
+            ? "M20 5H4C2.9 5 2 5.9 2 7v10c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 12H4V7h16v10zM6 9h2v2H6V9zm3 0h2v2H9V9zm3 0h2v2h-2V9zm3 0h3v2h-3V9zM6 12h2v2H6v-2zm3 0h2v2H9v-2zm3 0h2v2h-2v-2zm3 0h3v2h-3v-2zM7 15h10v1H7v-1z"
+            : root.icon-kind == 0
             ? "M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"
             : "M12.87 15.07 10.33 12.56l.03-.03A17.52 17.52 0 0 0 14.07 6H17V4h-7V2H8v2H1v2h11.17A15.5 15.5 0 0 1 9 11.35 15.4 15.4 0 0 1 6.91 8H4.91A17.5 17.5 0 0 0 7.67 12.56L2.58 17.58 4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7 1.62-4.33L19.12 17h-3.24z";
         fill: root.selected ? Colors.primary : Colors.secondary-foreground;
@@ -350,9 +614,10 @@ component SettingsNavItem inherits Rectangle {
         height: parent.height;
         text: root.label;
         color: root.selected ? Colors.primary : Colors.foreground;
-        font-size: Typography.body-size;
+        font-size: root.icon-kind == 3 || root.icon-kind == 4 ? 13px : Typography.body-size;
         font-weight: root.selected ? 700 : 600;
         vertical-alignment: center;
+        wrap: word-wrap;
         overflow: elide;
     }
 
@@ -403,6 +668,7 @@ export component SettingsWindow inherits Window {
     in property <string> hotkey-error-text: "";
     in property <string> provider-error-text: "";
     in-out property <bool> launch-at-login: false;
+    in-out property <bool> selection-toolbar: true;
     in property <string> launch-at-login-error-text: "";
     in-out property <string> draft-hotkey-label: "Alt + X";
     in-out property <bool> hotkey-capturing: false;
@@ -423,15 +689,80 @@ export component SettingsWindow inherits Window {
     in-out property <length> settings-menu-scroll-y: 0px;
     in-out property <[SettingsToastData]> toast-items: [];
     in-out property <int> active-category: 0;
+    in-out property <int> appearance-theme-index: 0;
+    in-out property <int> appearance-accent-index: 0;
+    in-out property <int> appearance-font-index: 0;
+    in-out property <int> appearance-size-index: 1;
+    in-out property <int> appearance-language-index: 0;
+    in-out property <int> tray-click-index: 0;
+    in-out property <bool> open-settings-on-launch: true;
+    in-out property <bool> check-updates-on-launch: true;
+    in-out property <bool> background-copy-notifications: true;
+    in-out property <bool> anonymous-usage-statistics: false;
+    in-out property <bool> disable-hotkeys-in-fullscreen: false;
+    in-out property <bool> selection-double-click: true;
+    in-out property <string> selection-horizontal-offset: "12";
+    in-out property <string> selection-vertical-offset: "12";
+    in-out property <int> selection-filter-mode-index: 0;
+    in-out property <bool> selection-copy-action: true;
+    in-out property <bool> screenshot-crosshair-guides: false;
+    in-out property <bool> screenshot-magnifier: true;
+    in-out property <bool> screenshot-selection-dimensions: true;
+    in-out property <string> screenshot-line-width: "3";
+    in-out property <string> screenshot-text-size: "22";
+    in-out property <string> screenshot-save-location: "";
+    in-out property <int> screenshot-format-index: 0;
+    in-out property <bool> screenshot-copy-as-file: false;
+    in-out property <bool> screenshot-close-after-output: false;
+    private property <bool> preview-menu-open: false;
+    private property <int> preview-menu-kind: 0;
+    private property <length> preview-menu-scroll-y: 0px;
 
     private property <bool> expanded-navigation: root.width >= Metrics.settings-wide-nav-breakpoint;
     private property <length> sidebar-width: root.expanded-navigation ? Metrics.settings-sidebar-width : Metrics.settings-sidebar-compact-width;
     private property <bool> two-column-layout: root.width >= Metrics.settings-two-column-breakpoint;
+    private property <bool> hotkeys-compact: root.width < Metrics.settings-wide-nav-breakpoint;
     private property <length> page-width: root.width - root.sidebar-width;
     private property <[string]> language-labels: [
         "简体中文", "繁體中文", "English (US)", "English (UK)", "日本語", "한국어",
         "Deutsch", "Français", "Español", "Italiano", "Português", "Português (Brasil)"
     ];
+    private property <[color]> appearance-accents: [
+        Colors.primary, #9c4da0, #ec4899, #ff5a5f, #fa8324, #ffbe0b, #5baa43
+    ];
+    private property <[string]> appearance-fonts: ["System default", "Segoe UI", "Arial"];
+    private property <[string]> appearance-sizes: ["Compact", "Standard", "Large"];
+    private property <[string]> appearance-languages: ["Simplified Chinese", "English", "Japanese"];
+    private property <[string]> tray-click-actions: ["Open settings", "Open main window", "Do nothing"];
+    private property <[string]> selection-filter-modes: ["Blacklist", "Whitelist"];
+    private property <[string]> screenshot-formats: ["PNG", "JPEG", "WebP"];
+    private property <[string]> preview-menu-options: root.preview-menu-kind == 0
+        ? root.appearance-fonts : root.preview-menu-kind == 1 ? root.appearance-sizes
+            : root.preview-menu-kind == 2 ? root.appearance-languages
+                : root.preview-menu-kind == 3 ? root.tray-click-actions
+                    : root.preview-menu-kind == 4 ? root.selection-filter-modes : root.screenshot-formats;
+    private property <length> preview-menu-anchor-x: root.preview-menu-kind == 0
+        ? font-preview.absolute-position.x : root.preview-menu-kind == 1
+            ? size-preview.absolute-position.x : root.preview-menu-kind == 2
+                ? app-language-preview.absolute-position.x : root.preview-menu-kind == 3
+                    ? tray-click-preview.absolute-position.x : root.preview-menu-kind == 4
+                        ? filter-mode-preview.absolute-position.x : screenshot-format-preview.absolute-position.x;
+    private property <length> preview-menu-anchor-y: root.preview-menu-kind == 0
+        ? font-preview.absolute-position.y : root.preview-menu-kind == 1
+            ? size-preview.absolute-position.y : root.preview-menu-kind == 2
+                ? app-language-preview.absolute-position.y : root.preview-menu-kind == 3
+                    ? tray-click-preview.absolute-position.y : root.preview-menu-kind == 4
+                        ? filter-mode-preview.absolute-position.y : screenshot-format-preview.absolute-position.y;
+    private property <length> preview-menu-anchor-width: root.preview-menu-kind == 0
+        ? font-preview.width : root.preview-menu-kind == 1 ? size-preview.width
+            : root.preview-menu-kind == 2 ? app-language-preview.width
+                : root.preview-menu-kind == 3 ? tray-click-preview.width
+                    : root.preview-menu-kind == 4 ? filter-mode-preview.width : screenshot-format-preview.width;
+    private property <length> preview-menu-anchor-height: root.preview-menu-kind == 0
+        ? font-preview.height : root.preview-menu-kind == 1 ? size-preview.height
+            : root.preview-menu-kind == 2 ? app-language-preview.height
+                : root.preview-menu-kind == 3 ? tray-click-preview.height
+                    : root.preview-menu-kind == 4 ? filter-mode-preview.height : screenshot-format-preview.height;
     private property <length> settings-menu-anchor-x: root.settings-menu-provider-mode ? provider-selector.absolute-position.x : language-selector.absolute-position.x;
     private property <length> settings-menu-anchor-y: root.settings-menu-provider-mode ? provider-selector.absolute-position.y : language-selector.absolute-position.y;
     private property <length> settings-menu-anchor-height: root.settings-menu-provider-mode ? provider-selector.height : language-selector.height;
@@ -440,6 +771,7 @@ export component SettingsWindow inherits Window {
     callback hotkey-key-pressed(string, bool, bool, bool, bool) -> string;
     callback hotkey-change-requested(string);
     callback launch-at-login-change-requested(bool);
+    callback selection-toolbar-change-requested(bool);
     callback credential-save-requested(string);
     callback credential-remove-requested();
     callback credential-reveal-requested();
@@ -455,13 +787,16 @@ export component SettingsWindow inherits Window {
     public function focus-hotkey-capture() { hotkey-capture.focus(); }
     public function focus-settings-menu() { settings-menu-focus.focus(); }
     public function close-settings-menu() { settings-menu-open = false; settings-menu-dismiss-armed = false; }
+    public function close-preview-menu() { preview-menu-open = false; }
     public function reset-settings-view() {
-        root.close-settings-menu(); root.hotkey-capturing = false; root.active-category = 0;
+        root.close-settings-menu(); root.close-preview-menu(); root.hotkey-capturing = false; root.active-category = 0;
         general-scroll.content-y = 0px; translation-scroll.content-y = 0px;
+        hotkeys-scroll.content-y = 0px; selection-assistant-scroll.content-y = 0px;
+        screenshot-scroll.content-y = 0px;
     }
     function select-category(category: int) {
         if root.active-category == category { return; }
-        root.close-settings-menu(); root.hotkey-capturing = false;
+        root.close-settings-menu(); root.close-preview-menu(); root.hotkey-capturing = false;
         if root.active-category == 1 { root.credential-edit-cancel-requested(); }
         root.active-category = category;
     }
@@ -491,6 +826,27 @@ export component SettingsWindow inherits Window {
             x: root.expanded-navigation ? Spacing.medium : Spacing.small;
             y: Spacing.large + 64px + Metrics.settings-nav-item-height + Spacing.small;
             width: parent.width - 2 * self.x;
+            label: "Hotkeys"; icon-kind: 2; selected: root.active-category == 2; expanded: root.expanded-navigation;
+            activated => { root.select-category(2); }
+        }
+        SettingsNavItem {
+            x: root.expanded-navigation ? Spacing.medium : Spacing.small;
+            y: Spacing.large + 64px + 2 * (Metrics.settings-nav-item-height + Spacing.small);
+            width: parent.width - 2 * self.x;
+            label: "Selection Assistant"; icon-kind: 3; selected: root.active-category == 3; expanded: root.expanded-navigation;
+            activated => { root.select-category(3); }
+        }
+        SettingsNavItem {
+            x: root.expanded-navigation ? Spacing.medium : Spacing.small;
+            y: Spacing.large + 64px + 3 * (Metrics.settings-nav-item-height + Spacing.small);
+            width: parent.width - 2 * self.x;
+            label: "Screenshot settings"; icon-kind: 4; selected: root.active-category == 4; expanded: root.expanded-navigation;
+            activated => { root.select-category(4); }
+        }
+        SettingsNavItem {
+            x: root.expanded-navigation ? Spacing.medium : Spacing.small;
+            y: Spacing.large + 64px + 4 * (Metrics.settings-nav-item-height + Spacing.small);
+            width: parent.width - 2 * self.x;
             label: "Translation"; icon-kind: 1; selected: root.active-category == 1; expanded: root.expanded-navigation;
             activated => { root.select-category(1); }
         }
@@ -505,7 +861,9 @@ export component SettingsWindow inherits Window {
         x: 0px; y: 0px; width: main-pane.width; height: Metrics.settings-header-height; z: 5; background: Colors.surface;
         Text {
             x: Metrics.settings-page-padding; y: (parent.height - 32px) / 2; height: 32px;
-            text: root.active-category == 0 ? "General" : "Translation";
+            text: root.active-category == 0 ? "General" : root.active-category == 2 ? "Hotkeys"
+                : root.active-category == 3 ? "Selection Assistant"
+                    : root.active-category == 4 ? "Screenshot settings" : "Translation";
             color: Colors.foreground; font-size: 24px; font-weight: 700; vertical-alignment: center;
         }
         Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: Colors.outline; }
@@ -515,15 +873,17 @@ export component SettingsWindow inherits Window {
         visible: root.active-category == 0;
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
         content-width: self.visible-width;
-        content-height: max(self.visible-height, application-card.y + application-card.height + Metrics.settings-page-padding);
+        content-height: max(self.visible-height, privacy-card.y + privacy-card.height + Metrics.settings-page-padding);
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
-        scrolled => { if root.settings-menu-open && (root.settings-menu-anchor-y < Metrics.settings-header-height || root.settings-menu-anchor-y + root.settings-menu-anchor-height > root.height) { root.close-settings-menu(); } }
+        scrolled => {
+            root.close-preview-menu();
+            if root.settings-menu-open && (root.settings-menu-anchor-y < Metrics.settings-header-height || root.settings-menu-anchor-y + root.settings-menu-anchor-height > root.height) { root.close-settings-menu(); }
+        }
 
         language-card := SettingsCard {
-            x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
-            width: root.two-column-layout
-                ? (general-scroll.visible-width - 2 * Metrics.settings-page-padding - Metrics.settings-card-gap) / 2
-                : general-scroll.visible-width - 2 * Metrics.settings-page-padding;
+            x: Metrics.settings-page-padding;
+            y: appearance-card.y + appearance-card.height + Metrics.settings-card-gap;
+            width: general-scroll.visible-width - 2 * Metrics.settings-page-padding;
             title: "Language & region";
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1;
@@ -541,35 +901,131 @@ export component SettingsWindow inherits Window {
             }
         }
 
-        application-card := SettingsCard {
-            x: root.two-column-layout ? language-card.x + language-card.width + Metrics.settings-card-gap : Metrics.settings-page-padding;
-            y: root.two-column-layout ? Metrics.settings-page-padding : language-card.y + language-card.height + Metrics.settings-card-gap;
-            width: language-card.width; title: "Application";
+        appearance-card := SettingsCard {
+            x: Metrics.settings-page-padding;
+            y: Metrics.settings-page-padding;
+            width: general-scroll.visible-width - 2 * Metrics.settings-page-padding;
+            title: "Appearance";
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1;
-                spacing: Spacing.small;
-                SettingsFieldLabel { label: "Shortcut"; description: root.hotkey-capturing ? "Press a key combination" : "Translate the current selection"; error-text: root.hotkey-error-text; }
+                spacing: Spacing.medium;
+                Text { height: 22px; text: "App theme"; color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; vertical-alignment: center; }
                 HorizontalLayout {
-                    width: 100%; height: 40px; spacing: Spacing.small; alignment: center;
-                    hotkey-field := Rectangle {
-                        width: parent.width - 84px - Spacing.small; height: 40px; border-radius: 6px; border-width: root.hotkey-capturing ? 2px : 1px; border-color: root.hotkey-capturing ? Colors.primary : Colors.outline; background: Colors.background;
-                        Text { x: Spacing.medium; width: parent.width - 2 * Spacing.medium; text: root.hotkey-capturing ? "Press shortcut…" : root.draft-hotkey-label; color: root.hotkey-capturing ? Colors.primary : Colors.foreground; font-size: 13px; vertical-alignment: center; overflow: elide; }
-                        hotkey-capture := FocusScope {
-                            key-pressed(event) => {
-                                if event.text == Key.Escape { root.hotkey-capturing = false; return accept; }
-                                let captured = root.hotkey-key-pressed(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta);
-                                if captured != "" { root.hotkey-change-requested(captured); root.draft-hotkey-label = captured; root.hotkey-capturing = false; }
-                                return accept;
-                            }
-                        }
+                    width: 100%; height: 106px; spacing: Spacing.small;
+                    for theme in [0, 1, 2]: AppearanceThemeChoice {
+                        width: (parent.width - 2 * Spacing.small) / 3;
+                        theme-kind: theme; selected: root.appearance-theme-index == theme;
+                        chosen => { root.appearance-theme-index = theme; root.close-preview-menu(); }
                     }
-                    SettingsButton { width: 84px; label: root.hotkey-capturing ? "Cancel" : "Change"; clicked => { root.hotkey-capturing = !root.hotkey-capturing; if root.hotkey-capturing { root.focus-hotkey-capture(); } } }
                 }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                Text { height: 22px; text: "Accent color"; color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; vertical-alignment: center; }
+                HorizontalLayout {
+                    width: 100%; height: 36px; spacing: Spacing.small;
+                    for accent[index] in root.appearance-accents: AppearanceAccentChoice {
+                        swatch: accent; selected: root.appearance-accent-index == index;
+                        chosen => { root.appearance-accent-index = index; root.close-preview-menu(); }
+                    }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                HorizontalLayout {
+                    width: 100%; height: 56px; spacing: Spacing.small; alignment: center;
+                    Text { width: parent.width * 0.36 - Spacing.small; text: "App font"; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
+                    font-preview := AppearancePreviewField {
+                        width: parent.width * 0.64; value: root.appearance-fonts[root.appearance-font-index];
+                        opened: root.preview-menu-open && root.preview-menu-kind == 0;
+                        clicked => { root.toggle-preview-menu(0); }
+                    }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                HorizontalLayout {
+                    width: 100%; height: 56px; spacing: Spacing.small; alignment: center;
+                    Text { width: parent.width * 0.36 - Spacing.small; text: "Text size"; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
+                    size-preview := AppearancePreviewField {
+                        width: parent.width * 0.64; value: root.appearance-sizes[root.appearance-size-index];
+                        opened: root.preview-menu-open && root.preview-menu-kind == 1;
+                        clicked => { root.toggle-preview-menu(1); }
+                    }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                HorizontalLayout {
+                    width: 100%; height: 56px; spacing: Spacing.small; alignment: center;
+                    Text { width: parent.width * 0.36 - Spacing.small; text: "App language"; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
+                    app-language-preview := AppearancePreviewField {
+                        width: parent.width * 0.64; value: root.appearance-languages[root.appearance-language-index];
+                        opened: root.preview-menu-open && root.preview-menu-kind == 2;
+                        clicked => { root.toggle-preview-menu(2); }
+                    }
+                }
+            }
+        }
+
+        startup-card := SettingsCard {
+            x: Metrics.settings-page-padding;
+            y: language-card.y + language-card.height + Metrics.settings-card-gap;
+            width: general-scroll.visible-width - 2 * Metrics.settings-page-padding;
+            title: "Startup & updates";
+            VerticalLayout {
+                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
                 HorizontalLayout {
                     width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
                     SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: "Launch at startup"; description: ""; error-text: root.launch-at-login-error-text; }
                     SettingsSwitch { checked: root.launch-at-login; toggled(value) => { root.launch-at-login = value; root.launch-at-login-change-requested(value); } }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                HorizontalLayout {
+                    width: 100%; height: 56px; spacing: Spacing.small; alignment: center;
+                    Text { width: parent.width * 0.36 - Spacing.small; text: "On tray icon click"; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
+                    tray-click-preview := AppearancePreviewField {
+                        width: parent.width * 0.64; value: root.tray-click-actions[root.tray-click-index];
+                        opened: root.preview-menu-open && root.preview-menu-kind == 3;
+                        clicked => { root.toggle-preview-menu(3); }
+                    }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                HorizontalLayout {
+                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
+                    SettingsFieldLabel {
+                        width: parent.width - 52px - Spacing.medium;
+                        label: "Open settings on launch";
+                        description: "Start in the background when this is off."; error-text: "";
+                    }
+                    SettingsSwitch { checked: root.open-settings-on-launch; toggled(value) => { root.open-settings-on-launch = value; } }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                HorizontalLayout {
+                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
+                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: "Check for updates on launch"; description: ""; error-text: ""; }
+                    SettingsSwitch { checked: root.check-updates-on-launch; toggled(value) => { root.check-updates-on-launch = value; } }
+                }
+            }
+        }
+
+        privacy-card := SettingsCard {
+            x: Metrics.settings-page-padding;
+            y: startup-card.y + startup-card.height + Metrics.settings-card-gap;
+            width: general-scroll.visible-width - 2 * Metrics.settings-page-padding;
+            title: "Notifications & privacy";
+            VerticalLayout {
+                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
+                HorizontalLayout {
+                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
+                    SettingsFieldLabel {
+                        width: parent.width - 52px - Spacing.medium;
+                        label: "Show background copy notifications";
+                        description: "Shows background copy results and errors."; error-text: "";
+                    }
+                    SettingsSwitch { checked: root.background-copy-notifications; toggled(value) => { root.background-copy-notifications = value; } }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                HorizontalLayout {
+                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
+                    SettingsFieldLabel {
+                        width: parent.width - 52px - Spacing.medium;
+                        label: "Anonymous usage statistics";
+                        description: "No translation text or personal data."; error-text: "";
+                    }
+                    SettingsSwitch { checked: root.anonymous-usage-statistics; toggled(value) => { root.anonymous-usage-statistics = value; } }
                 }
             }
         }
@@ -582,6 +1038,404 @@ export component SettingsWindow inherits Window {
         viewport-height: general-scroll.visible-height;
         content-height: general-scroll.content-height;
         content-y <=> general-scroll.content-y;
+    }
+    hotkeys-scroll := ScrollView {
+        visible: root.active-category == 2;
+        x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
+        content-width: self.visible-width;
+        content-height: max(self.visible-height, selection-hotkeys-card.y + selection-hotkeys-card.height + Metrics.settings-page-padding);
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
+
+        behavior-hotkeys-card := SettingsCard {
+            x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
+            width: hotkeys-scroll.visible-width - 2 * Metrics.settings-page-padding;
+            title: "Behavior";
+            HorizontalLayout {
+                width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
+                SettingsFieldLabel {
+                    width: parent.width - 52px - Spacing.medium;
+                    label: "Disable hotkeys in fullscreen apps";
+                    description: "No global hotkeys in fullscreen apps.";
+                    error-text: "";
+                }
+                SettingsSwitch {
+                    checked: root.disable-hotkeys-in-fullscreen;
+                    toggled(value) => { root.disable-hotkeys-in-fullscreen = value; }
+                }
+            }
+        }
+
+        input-hotkeys-card := SettingsCard {
+            x: Metrics.settings-page-padding;
+            y: behavior-hotkeys-card.y + behavior-hotkeys-card.height + Metrics.settings-card-gap;
+            width: behavior-hotkeys-card.width;
+            title: "Input";
+            VerticalLayout {
+                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
+                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: "Input translation"; }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: "Inline input translation"; }
+            }
+        }
+
+        selection-hotkeys-card := SettingsCard {
+            x: Metrics.settings-page-padding;
+            y: input-hotkeys-card.y + input-hotkeys-card.height + Metrics.settings-card-gap;
+            width: behavior-hotkeys-card.width;
+            title: "Selection";
+            VerticalLayout {
+                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
+                Rectangle {
+                    width: 100%; height: root.hotkeys-compact ? 112px : 76px;
+                    SettingsFieldLabel {
+                        x: 0px; y: root.hotkeys-compact ? 0px : (parent.height - self.height) / 2;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.45 - Spacing.small;
+                        label: "Translate selection";
+                        description: root.hotkey-capturing ? "Press a key combination" : "Translate the current selection";
+                        error-text: root.hotkey-error-text;
+                    }
+                    hotkey-field := Rectangle {
+                        x: root.hotkeys-compact ? 0px : parent.width * 0.45;
+                        y: root.hotkeys-compact ? 58px : (parent.height - 40px) / 2;
+                        width: root.hotkeys-compact ? parent.width - 96px : parent.width * 0.55 - 96px;
+                        height: 40px; border-radius: 6px;
+                        border-width: root.hotkey-capturing ? 2px : 1px;
+                        border-color: root.hotkey-capturing ? Colors.primary : Colors.outline;
+                        background: Colors.background;
+                        Text {
+                            x: Spacing.medium; width: parent.width - 2 * Spacing.medium; height: parent.height;
+                            text: root.hotkey-capturing ? "Press shortcut…" : root.draft-hotkey-label;
+                            color: root.hotkey-capturing ? Colors.primary : Colors.foreground;
+                            font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
+                        }
+                        hotkey-capture := FocusScope {
+                            key-pressed(event) => {
+                                if !root.hotkey-capturing || root.active-category != 2 { return reject; }
+                                if event.text == Key.Escape { root.hotkey-capturing = false; return accept; }
+                                let captured = root.hotkey-key-pressed(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta);
+                                if captured != "" { root.hotkey-change-requested(captured); root.draft-hotkey-label = captured; root.hotkey-capturing = false; }
+                                return accept;
+                            }
+                        }
+                    }
+                    SettingsButton {
+                        x: parent.width - 84px; y: root.hotkeys-compact ? 58px : (parent.height - 40px) / 2;
+                        width: 84px; label: root.hotkey-capturing ? "Cancel" : "Change";
+                        clicked => {
+                            root.hotkey-capturing = !root.hotkey-capturing;
+                            if root.hotkey-capturing { root.focus-hotkey-capture(); }
+                        }
+                    }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: "Translate selection and copy"; }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: "Translate selection and replace"; }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: "Read selection aloud"; }
+            }
+        }
+    }
+    AppVerticalScrollBar {
+        visible: root.active-category == 2;
+        x: main-pane.width - 14px;
+        y: Metrics.settings-header-height + 4px;
+        height: main-pane.height - Metrics.settings-header-height - 8px;
+        viewport-height: hotkeys-scroll.visible-height;
+        content-height: hotkeys-scroll.content-height;
+        content-y <=> hotkeys-scroll.content-y;
+    }
+    selection-assistant-scroll := ScrollView {
+        visible: root.active-category == 3;
+        x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
+        content-width: self.visible-width;
+        content-height: max(self.visible-height, selection-actions-card.y + selection-actions-card.height + Metrics.settings-page-padding);
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
+        scrolled => { root.close-preview-menu(); }
+
+        selection-basic-card := SettingsCard {
+            x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
+            width: selection-assistant-scroll.visible-width - 2 * Metrics.settings-page-padding;
+            title: "Basic settings";
+            VerticalLayout {
+                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
+                HorizontalLayout {
+                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
+                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium;
+                        label: "Enable selection assistant"; description: "Show Translate and Copy after selecting text"; error-text: ""; }
+                    SettingsSwitch { checked: root.selection-toolbar;
+                        toggled(value) => { root.selection-toolbar = value; root.selection-toolbar-change-requested(value); } }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                HorizontalLayout {
+                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
+                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium;
+                        label: "Detect double-click selection"; description: "Show the assistant after selecting a word by double-clicking"; error-text: ""; }
+                    SettingsSwitch { checked: root.selection-double-click;
+                        toggled(value) => { root.selection-double-click = value; } }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                Rectangle {
+                    width: 100%; height: root.hotkeys-compact ? 102px : 64px;
+                    SettingsFieldLabel {
+                        x: 0px; y: root.hotkeys-compact ? 0px : 10px;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
+                        label: "Horizontal offset"; description: "Positive values move the toolbar right"; error-text: "";
+                    }
+                    OffsetPreviewField {
+                        x: root.hotkeys-compact ? 0px : parent.width * 0.58;
+                        y: root.hotkeys-compact ? 52px : 11px;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.42;
+                        value <=> root.selection-horizontal-offset;
+                    }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                Rectangle {
+                    width: 100%; height: root.hotkeys-compact ? 102px : 64px;
+                    SettingsFieldLabel {
+                        x: 0px; y: root.hotkeys-compact ? 0px : 10px;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
+                        label: "Vertical offset"; description: "Positive values move the toolbar down"; error-text: "";
+                    }
+                    OffsetPreviewField {
+                        x: root.hotkeys-compact ? 0px : parent.width * 0.58;
+                        y: root.hotkeys-compact ? 52px : 11px;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.42;
+                        value <=> root.selection-vertical-offset;
+                    }
+                }
+            }
+        }
+
+        selection-filter-card := SettingsCard {
+            x: Metrics.settings-page-padding;
+            y: selection-basic-card.y + selection-basic-card.height + Metrics.settings-card-gap;
+            width: selection-basic-card.width;
+            title: "App filtering";
+            Rectangle {
+                width: 100%; height: root.hotkeys-compact ? 102px : 64px;
+                SettingsFieldLabel {
+                    x: 0px; y: root.hotkeys-compact ? 0px : 10px;
+                    width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
+                    label: "Filter mode"; description: "Choose where the assistant would appear"; error-text: "";
+                }
+                filter-mode-preview := AppearancePreviewField {
+                    x: root.hotkeys-compact ? 0px : parent.width * 0.58;
+                    y: root.hotkeys-compact ? 52px : 11px;
+                    width: root.hotkeys-compact ? parent.width : parent.width * 0.42;
+                    value: root.selection-filter-modes[root.selection-filter-mode-index];
+                    opened: root.preview-menu-open && root.preview-menu-kind == 4;
+                    clicked => { root.toggle-preview-menu(4); }
+                }
+            }
+        }
+        selection-app-list-heading := Rectangle {
+            x: Metrics.settings-page-padding;
+            y: selection-filter-card.y + selection-filter-card.height + Metrics.settings-card-gap;
+            width: selection-basic-card.width; height: 40px;
+            Text { width: parent.width - 120px; height: parent.height; text: "App list";
+                color: Colors.secondary-foreground; font-size: Typography.body-size; vertical-alignment: center; }
+            SettingsButton { x: parent.width - 104px; width: 104px; label: "Add app"; enabled: false; }
+        }
+        selection-app-list-empty := Rectangle {
+            x: Metrics.settings-page-padding;
+            y: selection-app-list-heading.y + selection-app-list-heading.height + Spacing.small;
+            width: selection-basic-card.width; height: 68px;
+            border-radius: Metrics.settings-card-radius; background: Colors.surface;
+            Text { text: "No apps added"; color: Colors.secondary-foreground;
+                font-size: Typography.body-size; horizontal-alignment: center; vertical-alignment: center; }
+        }
+
+        selection-actions-card := SettingsCard {
+            x: Metrics.settings-page-padding;
+            y: selection-app-list-empty.y + selection-app-list-empty.height + Metrics.settings-card-gap;
+            width: selection-basic-card.width;
+            title: "Selection actions";
+            VerticalLayout {
+                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
+                SelectionActionRow { width: 100%; label: "Translate"; icon: AppAssets.icon-translate; status: 0; }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                SelectionActionRow { width: 100%; label: "Translate and copy"; icon: AppAssets.icon-copy; status: 2; }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                SelectionActionRow { width: 100%; label: "Translate and replace"; icon: AppAssets.icon-refresh; status: 2; }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                SelectionActionRow { width: 100%; label: "Read aloud"; icon: AppAssets.icon-volume; status: 2; }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                SelectionActionRow { width: 100%; label: "Copy"; icon: AppAssets.icon-copy; status: 1;
+                    checked: root.selection-copy-action; toggled(value) => { root.selection-copy-action = value; } }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                SelectionActionRow { width: 100%; label: "Paste"; icon: AppAssets.icon-paste; status: 2; }
+            }
+        }
+    }
+    AppVerticalScrollBar {
+        visible: root.active-category == 3;
+        x: main-pane.width - 14px;
+        y: Metrics.settings-header-height + 4px;
+        height: main-pane.height - Metrics.settings-header-height - 8px;
+        viewport-height: selection-assistant-scroll.visible-height;
+        content-height: selection-assistant-scroll.content-height;
+        content-y <=> selection-assistant-scroll.content-y;
+    }
+    screenshot-scroll := ScrollView {
+        visible: root.active-category == 4;
+        x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
+        content-width: self.visible-width;
+        content-height: max(self.visible-height, screenshot-output-card.y + screenshot-output-card.height + Metrics.settings-page-padding);
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
+        scrolled => { root.close-preview-menu(); }
+
+        screenshot-selection-card := SettingsCard {
+            x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
+            width: screenshot-scroll.visible-width - 2 * Metrics.settings-page-padding;
+            title: "Selection";
+            VerticalLayout {
+                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
+                HorizontalLayout {
+                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
+                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: "Crosshair guides"; description: ""; error-text: ""; }
+                    SettingsSwitch { checked: root.screenshot-crosshair-guides; toggled(value) => { root.screenshot-crosshair-guides = value; } }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                HorizontalLayout {
+                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
+                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: "Magnifier"; description: ""; error-text: ""; }
+                    SettingsSwitch { checked: root.screenshot-magnifier; toggled(value) => { root.screenshot-magnifier = value; } }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                HorizontalLayout {
+                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
+                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: "Show selection dimensions"; description: ""; error-text: ""; }
+                    SettingsSwitch { checked: root.screenshot-selection-dimensions; toggled(value) => { root.screenshot-selection-dimensions = value; } }
+                }
+            }
+        }
+
+        screenshot-annotation-card := SettingsCard {
+            x: Metrics.settings-page-padding;
+            y: screenshot-selection-card.y + screenshot-selection-card.height + Metrics.settings-card-gap;
+            width: screenshot-selection-card.width;
+            title: "Default annotation style";
+            VerticalLayout {
+                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
+                Rectangle {
+                    width: 100%; height: root.hotkeys-compact ? 92px : 56px;
+                    Text { x: 0px; y: root.hotkeys-compact ? 0px : 0px;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
+                        height: root.hotkeys-compact ? 36px : parent.height;
+                        text: "Annotation color"; color: Colors.foreground;
+                        font-size: Typography.body-size; vertical-alignment: center; }
+                    SettingsButton {
+                        x: root.hotkeys-compact ? 0px : parent.width * 0.58;
+                        y: root.hotkeys-compact ? 44px : 8px;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.42;
+                        label: "Select color"; clicked => { }
+                    }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                Rectangle {
+                    width: 100%; height: root.hotkeys-compact ? 92px : 56px;
+                    Text { x: 0px; y: 0px; width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
+                        height: root.hotkeys-compact ? 36px : parent.height;
+                        text: "Line width"; color: Colors.foreground;
+                        font-size: Typography.body-size; vertical-alignment: center; }
+                    OffsetPreviewField {
+                        x: root.hotkeys-compact ? 0px : parent.width * 0.58;
+                        y: root.hotkeys-compact ? 44px : 7px;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.42;
+                        unit: ""; fallback-value: 3; min-value: 1;
+                        value <=> root.screenshot-line-width;
+                    }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                Rectangle {
+                    width: 100%; height: root.hotkeys-compact ? 92px : 56px;
+                    Text { x: 0px; y: 0px; width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
+                        height: root.hotkeys-compact ? 36px : parent.height;
+                        text: "Text size"; color: Colors.foreground;
+                        font-size: Typography.body-size; vertical-alignment: center; }
+                    OffsetPreviewField {
+                        x: root.hotkeys-compact ? 0px : parent.width * 0.58;
+                        y: root.hotkeys-compact ? 44px : 7px;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.42;
+                        unit: ""; fallback-value: 22; min-value: 1;
+                        value <=> root.screenshot-text-size;
+                    }
+                }
+            }
+        }
+
+        screenshot-output-card := SettingsCard {
+            x: Metrics.settings-page-padding;
+            y: screenshot-annotation-card.y + screenshot-annotation-card.height + Metrics.settings-card-gap;
+            width: screenshot-selection-card.width;
+            title: "Image output";
+            VerticalLayout {
+                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
+                Rectangle {
+                    width: 100%; height: root.hotkeys-compact ? 92px : 56px;
+                    Text { x: 0px; y: 0px; width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
+                        height: root.hotkeys-compact ? 36px : parent.height;
+                        text: "Save location"; color: Colors.foreground;
+                        font-size: Typography.body-size; vertical-alignment: center; }
+                    Rectangle {
+                        x: root.hotkeys-compact ? 0px : parent.width * 0.58;
+                        y: root.hotkeys-compact ? 44px : 7px;
+                        width: root.hotkeys-compact ? parent.width - 96px : parent.width * 0.42 - 96px;
+                        height: 42px; border-radius: 6px; border-width: 1px;
+                        border-color: Colors.outline; background: Colors.background;
+                        TextInput {
+                            x: Spacing.medium; width: parent.width - 2 * Spacing.medium; height: parent.height;
+                            text <=> root.screenshot-save-location;
+                            color: Colors.foreground; font-size: Typography.body-size;
+                            selection-background-color: Colors.primary-container;
+                            selection-foreground-color: Colors.foreground; vertical-alignment: center;
+                        }
+                    }
+                    SettingsButton {
+                        x: parent.width - 84px; y: root.hotkeys-compact ? 44px : 8px;
+                        width: 84px; label: "Browse"; clicked => { }
+                    }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                Rectangle {
+                    width: 100%; height: root.hotkeys-compact ? 92px : 56px;
+                    Text { x: 0px; y: 0px; width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
+                        height: root.hotkeys-compact ? 36px : parent.height;
+                        text: "Image format"; color: Colors.foreground;
+                        font-size: Typography.body-size; vertical-alignment: center; }
+                    screenshot-format-preview := AppearancePreviewField {
+                        x: root.hotkeys-compact ? 0px : parent.width * 0.58;
+                        y: root.hotkeys-compact ? 44px : 7px;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.42;
+                        value: root.screenshot-formats[root.screenshot-format-index];
+                        opened: root.preview-menu-open && root.preview-menu-kind == 5;
+                        clicked => { root.toggle-preview-menu(5); }
+                    }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                HorizontalLayout {
+                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
+                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: "Copy image as file"; description: ""; error-text: ""; }
+                    SettingsSwitch { checked: root.screenshot-copy-as-file; toggled(value) => { root.screenshot-copy-as-file = value; } }
+                }
+                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
+                HorizontalLayout {
+                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
+                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: "Close after copying or saving"; description: ""; error-text: ""; }
+                    SettingsSwitch { checked: root.screenshot-close-after-output; toggled(value) => { root.screenshot-close-after-output = value; } }
+                }
+            }
+        }
+    }
+    AppVerticalScrollBar {
+        visible: root.active-category == 4;
+        x: main-pane.width - 14px;
+        y: Metrics.settings-header-height + 4px;
+        height: main-pane.height - Metrics.settings-header-height - 8px;
+        viewport-height: screenshot-scroll.visible-height;
+        content-height: screenshot-scroll.content-height;
+        content-y <=> screenshot-scroll.content-y;
     }
     translation-scroll := ScrollView {
         visible: root.active-category == 1;
@@ -704,6 +1558,7 @@ export component SettingsWindow inherits Window {
     }
     }
     function toggle-language-menu() {
+        root.close-preview-menu();
         if root.settings-menu-open && !root.settings-menu-provider-mode { root.close-settings-menu(); }
         else {
             root.settings-menu-provider-mode = false;
@@ -712,10 +1567,21 @@ export component SettingsWindow inherits Window {
         }
     }
     function toggle-provider-menu() {
+        root.close-preview-menu();
         if root.settings-menu-open && root.settings-menu-provider-mode { root.close-settings-menu(); }
         else {
             root.settings-menu-provider-mode = true; root.settings-menu-scroll-y = 0px;
             root.settings-menu-open = true; root.settings-menu-dismiss-armed = true; root.focus-settings-menu();
+        }
+    }
+    function toggle-preview-menu(kind: int) {
+        if root.preview-menu-open && root.preview-menu-kind == kind { root.close-preview-menu(); }
+        else {
+            root.close-settings-menu();
+            root.preview-menu-kind = kind;
+            root.preview-menu-scroll-y = 0px;
+            root.preview-menu-open = true;
+            preview-menu-focus.focus();
         }
     }
 
@@ -724,8 +1590,8 @@ export component SettingsWindow inherits Window {
 
     TouchArea {
         x: 0px; y: 0px; width: parent.width; height: parent.height; z: 10;
-        enabled: root.settings-menu-open && root.settings-menu-dismiss-armed;
-        clicked => { root.close-settings-menu(); }
+        enabled: (root.settings-menu-open && root.settings-menu-dismiss-armed) || root.preview-menu-open;
+        clicked => { root.close-settings-menu(); root.close-preview-menu(); }
     }
     settings-menu := SettingsSelectMenu {
         visible: root.settings-menu-open; z: 15;
@@ -742,6 +1608,40 @@ export component SettingsWindow inherits Window {
         visible: root.settings-menu-open; x: settings-menu.x; y: settings-menu.y; width: settings-menu.width; height: settings-menu.height; z: 16;
         key-pressed(event) => {
             if event.text == Key.Escape { root.close-settings-menu(); return accept; }
+            return reject;
+        }
+    }
+    preview-menu := SettingsSelectMenu {
+        visible: root.preview-menu-open; z: 15;
+        x: round(root.preview-menu-anchor-x / 1px) * 1px;
+        y: round((root.preview-menu-anchor-y + root.preview-menu-anchor-height + self.height + Metrics.settings-page-padding + 2px <= root.height
+            ? root.preview-menu-anchor-y + root.preview-menu-anchor-height + 2px
+            : max(Metrics.settings-header-height + 4px, root.preview-menu-anchor-y - self.height - 2px)) / 1px) * 1px;
+        width: round(root.preview-menu-anchor-width / 1px) * 1px;
+        height: round(min(root.preview-menu-options.length * 40px, max(0px, root.height - Metrics.settings-header-height - Metrics.settings-page-padding)) / 1px) * 1px;
+        options: root.preview-menu-options;
+        selected-index: root.preview-menu-kind == 0 ? root.appearance-font-index
+            : root.preview-menu-kind == 1 ? root.appearance-size-index
+                : root.preview-menu-kind == 2 ? root.appearance-language-index
+                    : root.preview-menu-kind == 3 ? root.tray-click-index
+                        : root.preview-menu-kind == 4 ? root.selection-filter-mode-index : root.screenshot-format-index;
+        scroll-y <=> root.preview-menu-scroll-y;
+        selected(index) => {
+            if root.preview-menu-kind == 0 { root.appearance-font-index = index; }
+            else if root.preview-menu-kind == 1 { root.appearance-size-index = index; }
+            else if root.preview-menu-kind == 2 { root.appearance-language-index = index; }
+            else if root.preview-menu-kind == 3 { root.tray-click-index = index; }
+            else if root.preview-menu-kind == 4 { root.selection-filter-mode-index = index; }
+            else { root.screenshot-format-index = index; }
+            root.close-preview-menu();
+        }
+    }
+    preview-menu-focus := FocusScope {
+        visible: root.preview-menu-open;
+        x: preview-menu.x; y: preview-menu.y;
+        width: preview-menu.width; height: preview-menu.height; z: 16;
+        key-pressed(event) => {
+            if event.text == Key.Escape { root.close-preview-menu(); return accept; }
             return reject;
         }
     }

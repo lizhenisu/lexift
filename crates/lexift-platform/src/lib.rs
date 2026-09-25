@@ -12,6 +12,37 @@ mod windows;
 
 pub use capabilities::PlatformCapabilities;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectionGesture {
+    Started,
+    Completed(lexift_core::domain::geometry::Point),
+}
+
+/// Installs a lightweight Windows mouse gesture monitor on the calling UI thread.
+pub fn start_selection_monitor(
+    handler: std::sync::Arc<dyn Fn(SelectionGesture) + Send + Sync>,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    return windows::selection_monitor::start(std::sync::Arc::new(move |gesture| {
+        handler(match gesture {
+            windows::selection_monitor::Gesture::Started => SelectionGesture::Started,
+            windows::selection_monitor::Gesture::Completed(point) => {
+                SelectionGesture::Completed(point)
+            }
+        });
+    }));
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = handler;
+        Ok(())
+    }
+}
+
+pub fn stop_selection_monitor() {
+    #[cfg(target_os = "windows")]
+    windows::selection_monitor::stop();
+}
+
 /// Prefer CPU rendering on a single-screen Intel display, where the GPU resize path is costly.
 /// Other configurations keep the graphics renderer for cross-monitor moves.
 pub fn prefer_software_renderer() -> bool {
@@ -182,6 +213,18 @@ pub fn enable_tool_window_interaction(
     {
         windows::popup::enable_interaction_without_activation(window, pointer_handler)?;
     }
+    #[cfg(not(target_os = "windows"))]
+    let _ = (window, pointer_handler);
+    Ok(())
+}
+
+/// Routes pointer clicks to a tool window while keeping the foreground app focused.
+pub fn enable_passive_tool_window_interaction(
+    window: &impl raw_window_handle::HasWindowHandle,
+    pointer_handler: PopupPointerHandler,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    windows::popup::enable_passive_interaction(window, pointer_handler)?;
     #[cfg(not(target_os = "windows"))]
     let _ = (window, pointer_handler);
     Ok(())

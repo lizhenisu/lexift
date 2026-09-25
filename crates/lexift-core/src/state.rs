@@ -3,6 +3,7 @@ use crate::{
     domain::{
         language::Language,
         runtime_config::RuntimeConfig,
+        selection::Selection,
         settings::{Settings, SettingsChange, SettingsFeedback, SettingsField},
         translation::{PopupSessionId, TranslateRequest, TranslationTaskId},
     },
@@ -61,6 +62,8 @@ pub struct AppState {
     pub credential_error_message: String,
     pub popup_sessions: Vec<PopupSessionState>,
     pub active_popup_session: Option<PopupSessionId>,
+    pub toolbar_selection: Option<Selection>,
+    pub toolbar_generation: u64,
     next_translation_task: u64,
     next_popup_session: u64,
     queued_settings_changes: Vec<SettingsChange>,
@@ -97,6 +100,8 @@ impl AppState {
             credential_error_message: String::new(),
             popup_sessions: Vec::new(),
             active_popup_session: None,
+            toolbar_selection: None,
+            toolbar_generation: 0,
             next_translation_task: 0,
             next_popup_session: 0,
             queued_settings_changes: Vec::new(),
@@ -114,6 +119,77 @@ impl AppState {
         match event {
             AppEvent::Started => Vec::new(),
             AppEvent::SelectionTranslationRequested => self.request_selection_translation(),
+            AppEvent::SelectionInteractionStarted | AppEvent::SelectionToolbarDismissRequested => {
+                self.toolbar_generation = self.toolbar_generation.wrapping_add(1);
+                self.toolbar_selection = None;
+                Vec::new()
+            }
+            AppEvent::SelectionGestureCompleted { anchor }
+                if self.desired_settings.selection_toolbar =>
+            {
+                self.toolbar_generation = self.toolbar_generation.wrapping_add(1);
+                self.toolbar_selection = None;
+                vec![AppCommand::CaptureToolbarSelection {
+                    generation: self.toolbar_generation,
+                    anchor,
+                }]
+            }
+            AppEvent::SelectionGestureCompleted { .. } => Vec::new(),
+            AppEvent::SelectionToolbarCaptured {
+                generation,
+                selection,
+            } if self.desired_settings.selection_toolbar
+                && generation == self.toolbar_generation =>
+            {
+                self.toolbar_selection = Some(selection);
+                Vec::new()
+            }
+            AppEvent::SelectionToolbarCaptureEmpty { generation }
+                if generation == self.toolbar_generation =>
+            {
+                self.toolbar_selection = None;
+                Vec::new()
+            }
+            AppEvent::SelectionToolbarCaptured { .. }
+            | AppEvent::SelectionToolbarCaptureEmpty { .. } => Vec::new(),
+            AppEvent::SelectionToolbarTranslateRequested => {
+                let Some(selection) = self.toolbar_selection.take() else {
+                    return Vec::new();
+                };
+                self.toolbar_generation = self.toolbar_generation.wrapping_add(1);
+                let task_id = self.begin_translation_task();
+                self.phase = TranslationPhase::Translating;
+                self.source_text = selection.text.clone();
+                let session_id = self.prepare_active_popup_session(
+                    selection.text.clone(),
+                    self.settings.target_language.clone(),
+                    TranslationPhase::Translating,
+                    Some(task_id),
+                );
+                vec![
+                    AppCommand::ShowPopup {
+                        session_id,
+                        anchor: selection.anchor,
+                    },
+                    AppCommand::Translate {
+                        task_id,
+                        request: TranslateRequest {
+                            text: selection.text,
+                            source_language: None,
+                            target_language: self.settings.target_language.clone(),
+                        },
+                    },
+                ]
+            }
+            AppEvent::SelectionToolbarCopyRequested => {
+                let Some(selection) = self.toolbar_selection.take() else {
+                    return Vec::new();
+                };
+                self.toolbar_generation = self.toolbar_generation.wrapping_add(1);
+                vec![AppCommand::CopyToolbarText {
+                    text: selection.text,
+                }]
+            }
             AppEvent::InputTranslationRequested { text } => self.request_input_translation(text),
             AppEvent::SelectionCaptured { task_id, selection } if self.is_current_task(task_id) => {
                 let anchor = selection.anchor;
@@ -142,9 +218,16 @@ impl AppState {
                 self.source_text.clear();
                 self.translated_text.clear();
                 self.error_message.clear();
-                self.take_active_popup()
-                    .map(|session_id| vec![AppCommand::HidePopup { session_id }])
-                    .unwrap_or_default()
+                let session_id = self.prepare_active_popup_session(
+                    String::new(),
+                    self.settings.target_language.clone(),
+                    TranslationPhase::NoSelection,
+                    None,
+                );
+                vec![AppCommand::ShowPopup {
+                    session_id,
+                    anchor: None,
+                }]
             }
             AppEvent::SelectionCaptureFailed { task_id, error }
                 if self.is_current_task(task_id) =>
@@ -353,7 +436,13 @@ impl AppState {
                 self.credential_error_message.clear();
                 vec![AppCommand::ShowSettingsWindow]
             }
-            AppEvent::SettingsChangeRequested { change } => self.request_settings_change(change),
+            AppEvent::SettingsChangeRequested { change } => {
+                if matches!(change, SettingsChange::SelectionToolbar(false)) {
+                    self.toolbar_generation = self.toolbar_generation.wrapping_add(1);
+                    self.toolbar_selection = None;
+                }
+                self.request_settings_change(change)
+            }
             AppEvent::RuntimeConfigChanged {
                 settings,
                 config,
@@ -372,6 +461,10 @@ impl AppState {
                 change,
             } => {
                 self.settings = settings;
+                if !self.settings.selection_toolbar {
+                    self.toolbar_generation = self.toolbar_generation.wrapping_add(1);
+                    self.toolbar_selection = None;
+                }
                 self.runtime_config = config;
                 self.settings_saving = false;
                 self.settings_saving_field = None;
@@ -571,6 +664,7 @@ impl AppState {
             SettingsField::Hotkey => self.hotkey_settings_error.clear(),
             SettingsField::Provider => self.provider_settings_error.clear(),
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error.clear(),
+            SettingsField::SelectionToolbar => {}
         }
     }
 
@@ -580,6 +674,9 @@ impl AppState {
             SettingsField::Hotkey => self.hotkey_settings_error = error,
             SettingsField::Provider => self.provider_settings_error = error,
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error = error,
+            SettingsField::SelectionToolbar => {
+                self.settings_error_message = error;
+            }
         }
     }
 
@@ -599,6 +696,9 @@ impl AppState {
             SettingsField::Provider => self.desired_settings.provider = self.settings.provider,
             SettingsField::LaunchAtLogin => {
                 self.desired_settings.launch_at_login = self.settings.launch_at_login;
+            }
+            SettingsField::SelectionToolbar => {
+                self.desired_settings.selection_toolbar = self.settings.selection_toolbar;
             }
         }
     }
@@ -791,13 +891,6 @@ impl AppState {
         ]
     }
 
-    fn take_active_popup(&mut self) -> Option<PopupSessionId> {
-        let session_id = self.active_popup_session.take()?;
-        self.popup_sessions
-            .retain(|session| session.id != session_id);
-        Some(session_id)
-    }
-
     fn popup_session_mut(&mut self, session_id: PopupSessionId) -> Option<&mut PopupSessionState> {
         self.popup_sessions
             .iter_mut()
@@ -831,6 +924,137 @@ mod tests {
     use crate::domain::{
         geometry::Point, language::Language, selection::Selection, translation::TranslateResult,
     };
+
+    #[test]
+    fn toolbar_keeps_the_latest_selection_and_ignores_late_captures() {
+        let mut state = AppState::default();
+        let first = state.reduce(AppEvent::SelectionGestureCompleted {
+            anchor: Point { x: 10, y: 20 },
+        });
+        let first_generation = match first[0] {
+            AppCommand::CaptureToolbarSelection { generation, .. } => generation,
+            _ => panic!("expected passive capture"),
+        };
+        let second = state.reduce(AppEvent::SelectionGestureCompleted {
+            anchor: Point { x: 30, y: 40 },
+        });
+        let second_generation = match second[0] {
+            AppCommand::CaptureToolbarSelection { generation, .. } => generation,
+            _ => panic!("expected passive capture"),
+        };
+        let selection = |text: &str| Selection {
+            text: text.into(),
+            anchor: Some(Point { x: 30, y: 40 }),
+        };
+        state.reduce(AppEvent::SelectionToolbarCaptured {
+            generation: second_generation,
+            selection: selection("latest"),
+        });
+        state.reduce(AppEvent::SelectionToolbarCaptured {
+            generation: first_generation,
+            selection: selection("stale"),
+        });
+        assert_eq!(state.toolbar_selection.as_ref().unwrap().text, "latest");
+        assert_eq!(
+            state.reduce(AppEvent::SelectionToolbarCopyRequested),
+            vec![AppCommand::CopyToolbarText {
+                text: "latest".into()
+            }]
+        );
+        assert!(state.toolbar_selection.is_none());
+        state.reduce(AppEvent::SelectionToolbarCaptured {
+            generation: second_generation,
+            selection: selection("late result"),
+        });
+        assert!(state.toolbar_selection.is_none());
+    }
+
+    #[test]
+    fn toolbar_translate_opens_popup_with_the_captured_text_and_anchor() {
+        let mut state = AppState::default();
+        let anchor = Point { x: 50, y: 60 };
+        let commands = state.reduce(AppEvent::SelectionGestureCompleted { anchor });
+        let generation = match commands[0] {
+            AppCommand::CaptureToolbarSelection { generation, .. } => generation,
+            _ => unreachable!(),
+        };
+        state.reduce(AppEvent::SelectionToolbarCaptured {
+            generation,
+            selection: Selection {
+                text: "hello".into(),
+                anchor: Some(anchor),
+            },
+        });
+        let commands = state.reduce(AppEvent::SelectionToolbarTranslateRequested);
+        assert!(
+            matches!(commands.first(), Some(AppCommand::ShowPopup { anchor: Some(point), .. }) if *point == anchor)
+        );
+        assert!(
+            matches!(commands.get(1), Some(AppCommand::Translate { request, .. }) if request.text == "hello")
+        );
+        assert!(state.toolbar_selection.is_none());
+        assert_eq!(state.popup_sessions[0].source_text, "hello");
+    }
+
+    #[test]
+    fn dismissing_toolbar_clears_snapshot_and_rejects_late_capture() {
+        let mut state = AppState::default();
+        let anchor = Point { x: 50, y: 60 };
+        let commands = state.reduce(AppEvent::SelectionGestureCompleted { anchor });
+        let generation = match commands[0] {
+            AppCommand::CaptureToolbarSelection { generation, .. } => generation,
+            _ => unreachable!(),
+        };
+        state.reduce(AppEvent::SelectionToolbarCaptured {
+            generation,
+            selection: Selection {
+                text: "selected".into(),
+                anchor: Some(anchor),
+            },
+        });
+        state.reduce(AppEvent::SelectionToolbarDismissRequested);
+        assert!(state.toolbar_selection.is_none());
+        state.reduce(AppEvent::SelectionToolbarCaptured {
+            generation,
+            selection: Selection {
+                text: "stale".into(),
+                anchor: Some(anchor),
+            },
+        });
+        assert!(state.toolbar_selection.is_none());
+    }
+
+    #[test]
+    fn disabling_toolbar_discards_pending_capture_and_prevents_new_capture() {
+        let mut state = AppState::default();
+        let anchor = Point { x: 1, y: 2 };
+        let commands = state.reduce(AppEvent::SelectionGestureCompleted { anchor });
+        let generation = match commands[0] {
+            AppCommand::CaptureToolbarSelection { generation, .. } => generation,
+            _ => unreachable!(),
+        };
+        state.reduce(AppEvent::SettingsChangeRequested {
+            change: SettingsChange::SelectionToolbar(false),
+        });
+        state.reduce(AppEvent::SelectionToolbarCaptured {
+            generation,
+            selection: Selection {
+                text: "private".into(),
+                anchor: Some(anchor),
+            },
+        });
+        assert!(state.toolbar_selection.is_none());
+        assert!(
+            state
+                .reduce(AppEvent::SelectionGestureCompleted { anchor })
+                .is_empty()
+        );
+        assert!(
+            state
+                .reduce(AppEvent::SelectionToolbarCopyRequested)
+                .is_empty()
+        );
+    }
 
     #[test]
     fn reduces_the_translation_vertical_slice() {
@@ -1089,7 +1313,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_selection_without_a_visible_popup_has_nothing_to_hide() {
+    fn empty_selection_opens_a_blank_popup_without_translating() {
         let mut state = AppState::default();
         state.reduce(AppEvent::SelectionTranslationRequested);
 
@@ -1097,11 +1321,77 @@ mod tests {
             state.reduce(AppEvent::SelectionCaptureEmpty {
                 task_id: TranslationTaskId::new(1),
             }),
-            Vec::<AppCommand>::new()
+            vec![AppCommand::ShowPopup {
+                session_id: PopupSessionId::new(1),
+                anchor: None,
+            }]
         );
         assert_eq!(state.phase, TranslationPhase::NoSelection);
         assert_eq!(state.current_translation_task, None);
         assert!(state.error_message.is_empty());
+        let popup = &state.popup_sessions[0];
+        assert_eq!(popup.phase, TranslationPhase::NoSelection);
+        assert!(popup.source_text.is_empty());
+        assert!(popup.translated_text.is_empty());
+        assert!(popup.error_message.is_empty());
+        assert_eq!(popup.current_translation_task, None);
+    }
+
+    #[test]
+    fn empty_selection_reuses_an_unpinned_popup_and_clears_its_content() {
+        let mut state = AppState::default();
+        let session_id = create_popup_session(&mut state, "old selection");
+        let task_id = state.current_translation_task.expect("translation task");
+        state.reduce(AppEvent::TranslationFinished {
+            task_id,
+            result: TranslateResult {
+                text: "old translation".into(),
+                detected_source_language: None,
+            },
+        });
+        state.reduce(AppEvent::SelectionTranslationRequested);
+        let capture_task = state.current_translation_task.expect("capture task");
+
+        assert_eq!(
+            state.reduce(AppEvent::SelectionCaptureEmpty {
+                task_id: capture_task,
+            }),
+            vec![AppCommand::ShowPopup {
+                session_id,
+                anchor: None,
+            }]
+        );
+        assert_eq!(state.popup_sessions.len(), 1);
+        assert!(state.popup_sessions[0].source_text.is_empty());
+        assert!(state.popup_sessions[0].translated_text.is_empty());
+        assert!(state.source_text.is_empty());
+        assert!(state.translated_text.is_empty());
+    }
+
+    #[test]
+    fn empty_selection_leaves_pinned_popups_alone() {
+        let mut state = AppState::default();
+        let pinned_id = create_popup_session(&mut state, "keep this");
+        state.reduce(AppEvent::PopupPinChanged {
+            session_id: pinned_id,
+            pinned: true,
+        });
+        state.reduce(AppEvent::SelectionTranslationRequested);
+        let capture_task = state.current_translation_task.expect("capture task");
+
+        assert_eq!(
+            state.reduce(AppEvent::SelectionCaptureEmpty {
+                task_id: capture_task,
+            }),
+            vec![AppCommand::ShowPopup {
+                session_id: PopupSessionId::new(2),
+                anchor: None,
+            }]
+        );
+        assert_eq!(state.popup_sessions.len(), 2);
+        assert_eq!(state.popup_sessions[0].id, pinned_id);
+        assert_eq!(state.popup_sessions[0].source_text, "keep this");
+        assert!(state.popup_sessions[0].pinned);
     }
 
     fn create_popup_session(state: &mut AppState, text: &str) -> PopupSessionId {
@@ -1344,6 +1634,13 @@ mod tests {
             task_id: TranslationTaskId::new(1),
             error: "stale capture error".into(),
         });
+        assert!(
+            state
+                .reduce(AppEvent::SelectionCaptureEmpty {
+                    task_id: TranslationTaskId::new(1),
+                })
+                .is_empty()
+        );
 
         assert_eq!(state.phase, TranslationPhase::Capturing);
         assert!(state.source_text.is_empty());

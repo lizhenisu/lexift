@@ -119,8 +119,10 @@ mod tests {
     #[test]
     fn saved_settings_round_trip() {
         let (_directory, store) = fixture();
-        store.save(&settings("fr")).unwrap();
-        assert_eq!(store.load().unwrap(), settings("fr"));
+        let mut configured = settings("fr");
+        configured.selection_toolbar = false;
+        store.save(&configured).unwrap();
+        assert_eq!(store.load().unwrap(), configured);
     }
 
     #[test]
@@ -160,6 +162,7 @@ mod tests {
         assert_eq!(loaded.hotkey.to_string(), "Alt + X");
         assert_eq!(loaded.provider.to_string(), "DeepL");
         assert!(!loaded.launch_at_login);
+        assert!(loaded.selection_toolbar);
     }
 
     #[test]

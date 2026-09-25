@@ -24,6 +24,8 @@ pub(crate) struct SettingsFile {
     provider: String,
     #[serde(default)]
     launch_at_login: bool,
+    #[serde(default = "default_selection_toolbar")]
+    selection_toolbar: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -57,6 +59,10 @@ fn default_provider() -> String {
     ProviderConfig::default().id().into()
 }
 
+fn default_selection_toolbar() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct CredentialReferencesFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -72,6 +78,7 @@ impl ConfigFile {
                 hotkey: settings.hotkey.into(),
                 provider: settings.provider.id().into(),
                 launch_at_login: settings.launch_at_login,
+                selection_toolbar: settings.selection_toolbar,
             },
             credentials: CredentialReferencesFile {
                 deepl: settings.deepl_credential_id.clone(),
@@ -95,6 +102,7 @@ impl ConfigFile {
             hotkey,
             provider: self.settings.provider.parse()?,
             launch_at_login: self.settings.launch_at_login,
+            selection_toolbar: self.settings.selection_toolbar,
             deepl_credential_id: self.credentials.deepl,
         })
     }

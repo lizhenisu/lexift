@@ -622,6 +622,8 @@ guard 会在剪贴板再次变化时放弃旧快照，用户的新内容不会�
 
 状态：✅ 核心验收通过；部分兼容性覆盖待补，可进入 M4
 
+当前行为更新（2026-09-25）：`Alt+X` 确认选区为空时仍进入 `NoSelection`，但现在会显示可手动输入的空白 Popup，且不会自动翻译；读取失败仍显示错误 Popup。本节下方“无选区不弹窗”等描述保留为当时的实现与验收记录。
+
 Selection capture 现在记录 `uia_latency_ms`、`clipboard_latency_ms` 和
 `total_capture_ms`，且事件日志只记录事件类型，不再通过 `Debug` 输出事件载荷。无选区使用
 独立的 `SelectionCaptureEmpty` 事件回到 `NoSelection` 状态，不弹错误 Popup。Controller

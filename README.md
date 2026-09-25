@@ -9,10 +9,10 @@ Lexift 是一款使用 Rust 与 Slint 构建的 Windows 桌面划词翻译工具
 首次使用：
 
 1. 打开 Settings，在 DeepL API key 字段中保存 API Key。
-2. 在任意应用中选中文字。
-3. 按 `Alt + X` 获取并翻译选中内容。
+2. 在支持 Windows UI Automation 的应用中用鼠标拖选或双击选中文字，松开后可点击悬浮工具条的翻译或复制按钮。
+3. 也可以按 `Alt + X` 获取并翻译选中内容。
 
-快捷键可在 Settings 的 Shortcut 项中点击 **Change** 后修改，捕获到有效组合后会自动保存。目标语言和开机启动设置也会即时保存。
+快捷键可在 Settings 的 Shortcut 项中点击 **Change** 后修改，捕获到有效组合后会自动保存。选词工具条默认开启，可在 Settings 的 Selection toolbar 项中关闭。工具条的自动检测只使用 UI Automation；不支持该接口的应用仍可尝试快捷键翻译。目标语言和开机启动设置也会即时保存。
 
 关闭主窗口只会把 Lexift 隐藏到系统托盘，划词翻译仍会继续工作。通过托盘菜单可以重新打开主窗口、打开 Settings 或完全退出 Lexift。
 

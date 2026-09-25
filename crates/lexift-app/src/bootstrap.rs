@@ -65,6 +65,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
     let screen_for_popup = services.screen.clone();
+    let screen_for_toolbar = services.screen.clone();
     let ui = lexift_ui::Ui::new(
         &initial_state,
         cfg!(feature = "m1-demo"),
@@ -83,46 +84,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         lexift_ui::WindowLifecycleCallbacks::new(
             |window, sink| match lexift_platform::enable_tool_window_interaction(
                 &window.window_handle(),
-                Box::new(move |event| {
-                    let event = match event {
-                        lexift_platform::PopupPointerEvent::Moved { x, y } => {
-                            lexift_ui::PopupPointerInput::Moved { x, y }
-                        }
-                        lexift_platform::PopupPointerEvent::Exited => {
-                            lexift_ui::PopupPointerInput::Exited
-                        }
-                        lexift_platform::PopupPointerEvent::LeftPressed { x, y } => {
-                            lexift_ui::PopupPointerInput::LeftPressed { x, y }
-                        }
-                        lexift_platform::PopupPointerEvent::LeftReleased { x, y } => {
-                            lexift_ui::PopupPointerInput::LeftReleased { x, y }
-                        }
-                        lexift_platform::PopupPointerEvent::Scrolled {
-                            x,
-                            y,
-                            delta_x,
-                            delta_y,
-                        } => lexift_ui::PopupPointerInput::Scrolled {
-                            x,
-                            y,
-                            delta_x,
-                            delta_y,
-                        },
-                        lexift_platform::PopupPointerEvent::DismissRequested => {
-                            lexift_ui::PopupPointerInput::DismissRequested
-                        }
-                        lexift_platform::PopupPointerEvent::NativeTopResizeRequested => {
-                            lexift_ui::PopupPointerInput::NativeTopResizeRequested
-                        }
-                        lexift_platform::PopupPointerEvent::Resized { width, height } => {
-                            lexift_ui::PopupPointerInput::Resized { width, height }
-                        }
-                        lexift_platform::PopupPointerEvent::ResizeFinished { width, height } => {
-                            lexift_ui::PopupPointerInput::ResizeFinished { width, height }
-                        }
-                    };
-                    sink(event);
-                }),
+                Box::new(move |event| sink(map_pointer_event(event))),
             ) {
                 Ok(()) => true,
                 Err(error) => {
@@ -221,6 +183,21 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 .work_area_for_point(point)
                 .ok()
         })
+        .with_toolbar_cursor_position(move || {
+            screen_for_toolbar.as_ref()?.cursor_position().ok()
+        })
+        .with_passive_toolbar_interaction(|window, sink| {
+            match lexift_platform::enable_passive_tool_window_interaction(
+                &window.window_handle(),
+                Box::new(move |event| sink(map_pointer_event(event))),
+            ) {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!(%error, "selection toolbar interaction could not be enabled");
+                    false
+                }
+            }
+        })
         .with_resize_background(move |window, color_rgb| {
             if !software_renderer {
                 return true;
@@ -318,6 +295,28 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
             }
         },
     );
+    #[cfg(not(feature = "m1-demo"))]
+    {
+        let weak = Arc::downgrade(&controller);
+        if let Err(error) = lexift_platform::start_selection_monitor(Arc::new(move |gesture| {
+            if let Some(controller) = weak.upgrade() {
+                if !controller.selection_toolbar_enabled() {
+                    return;
+                }
+                let event = match gesture {
+                    lexift_platform::SelectionGesture::Started => {
+                        lexift_core::AppEvent::SelectionInteractionStarted
+                    }
+                    lexift_platform::SelectionGesture::Completed(anchor) => {
+                        lexift_core::AppEvent::SelectionGestureCompleted { anchor }
+                    }
+                };
+                controller.dispatch(event);
+            }
+        })) {
+            tracing::warn!(%error, "selection toolbar mouse monitor is unavailable");
+        }
+    }
     if let Err(error) = services
         .runtime_manager
         .start_hotkey(controller.translate_hotkey_handler())
@@ -335,11 +334,51 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         .run(startup_mode == StartupMode::Interactive)
         .map_err(Into::into);
 
+    lexift_platform::stop_selection_monitor();
+
     drop(controller);
     drop(ui);
     drop(services);
     lifecycle::on_exit();
     result
+}
+
+fn map_pointer_event(event: lexift_platform::PopupPointerEvent) -> lexift_ui::PopupPointerInput {
+    match event {
+        lexift_platform::PopupPointerEvent::Moved { x, y } => {
+            lexift_ui::PopupPointerInput::Moved { x, y }
+        }
+        lexift_platform::PopupPointerEvent::Exited => lexift_ui::PopupPointerInput::Exited,
+        lexift_platform::PopupPointerEvent::LeftPressed { x, y } => {
+            lexift_ui::PopupPointerInput::LeftPressed { x, y }
+        }
+        lexift_platform::PopupPointerEvent::LeftReleased { x, y } => {
+            lexift_ui::PopupPointerInput::LeftReleased { x, y }
+        }
+        lexift_platform::PopupPointerEvent::Scrolled {
+            x,
+            y,
+            delta_x,
+            delta_y,
+        } => lexift_ui::PopupPointerInput::Scrolled {
+            x,
+            y,
+            delta_x,
+            delta_y,
+        },
+        lexift_platform::PopupPointerEvent::DismissRequested => {
+            lexift_ui::PopupPointerInput::DismissRequested
+        }
+        lexift_platform::PopupPointerEvent::NativeTopResizeRequested => {
+            lexift_ui::PopupPointerInput::NativeTopResizeRequested
+        }
+        lexift_platform::PopupPointerEvent::Resized { width, height } => {
+            lexift_ui::PopupPointerInput::Resized { width, height }
+        }
+        lexift_platform::PopupPointerEvent::ResizeFinished { width, height } => {
+            lexift_ui::PopupPointerInput::ResizeFinished { width, height }
+        }
+    }
 }
 
 fn register_tray(tray: Option<&Arc<dyn TrayPort>>, handler: TrayHandler) -> bool {

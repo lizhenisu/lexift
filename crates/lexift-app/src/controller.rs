@@ -120,6 +120,7 @@ pub(crate) struct AppController {
     speech: Option<Arc<dyn SpeechPort>>,
     ui: Arc<dyn ViewPort>,
     selection_capture_in_flight: AtomicBool,
+    selection_toolbar_enabled: AtomicBool,
     state_changed: Arc<Notify>,
 }
 
@@ -133,6 +134,11 @@ impl AppController {
         settings_store: Arc<dyn SettingsStore>,
         ui: Arc<dyn ViewPort>,
     ) -> Self {
+        let selection_toolbar_enabled = state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .desired_settings
+            .selection_toolbar;
         Self {
             runtime,
             state,
@@ -147,6 +153,7 @@ impl AppController {
             speech: None,
             ui,
             selection_capture_in_flight: AtomicBool::new(false),
+            selection_toolbar_enabled: AtomicBool::new(selection_toolbar_enabled),
             state_changed: Arc::new(Notify::new()),
         }
     }
@@ -206,12 +213,20 @@ impl AppController {
             );
             (state.clone(), commands)
         };
+        self.selection_toolbar_enabled.store(
+            snapshot.desired_settings.selection_toolbar,
+            Ordering::Release,
+        );
         self.state_changed.notify_waiters();
         self.ui.update(snapshot);
 
         for command in commands {
             self.execute(command);
         }
+    }
+
+    pub(crate) fn selection_toolbar_enabled(&self) -> bool {
+        self.selection_toolbar_enabled.load(Ordering::Acquire)
     }
 
     pub(crate) fn translate_hotkey_handler(self: &Arc<Self>) -> HotkeyHandler {
@@ -227,6 +242,20 @@ impl AppController {
     fn execute(self: &Arc<Self>, command: AppCommand) {
         match command {
             AppCommand::CaptureSelection { task_id } => self.capture_selection(task_id),
+            AppCommand::CaptureToolbarSelection { generation, anchor } => {
+                self.capture_toolbar_selection(generation, anchor)
+            }
+            AppCommand::CopyToolbarText { text } => {
+                if let Some(clipboard) = self.clipboard.clone() {
+                    self.runtime.spawn(async move {
+                        let result =
+                            tokio::task::spawn_blocking(move || clipboard.write_text(&text)).await;
+                        if !matches!(result, Ok(Ok(()))) {
+                            tracing::warn!("selection toolbar could not copy text");
+                        }
+                    });
+                }
+            }
             AppCommand::Translate { task_id, request } => self.translate(task_id, request),
             AppCommand::TranslatePopup {
                 session_id,
@@ -618,6 +647,29 @@ impl AppController {
         });
     }
 
+    fn capture_toolbar_selection(self: &Arc<Self>, generation: u64, anchor: Point) {
+        let Some(selection) = self.selection.clone() else {
+            return;
+        };
+        let controller = Arc::clone(self);
+        self.runtime.spawn(async move {
+            // The target control receives mouse-up after our low-level hook returns.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let result =
+                tokio::task::spawn_blocking(move || selection.selected_text_passive()).await;
+            match result {
+                Ok(Ok(Some(mut selection))) => {
+                    selection.anchor = Some(anchor);
+                    controller.dispatch(AppEvent::SelectionToolbarCaptured {
+                        generation,
+                        selection,
+                    });
+                }
+                _ => controller.dispatch(AppEvent::SelectionToolbarCaptureEmpty { generation }),
+            }
+        });
+    }
+
     fn translate(
         self: &Arc<Self>,
         task_id: TranslationTaskId,
@@ -700,6 +752,13 @@ fn event_name(event: &AppEvent) -> &'static str {
     match event {
         AppEvent::Started => "started",
         AppEvent::SelectionTranslationRequested => "selection_translation_requested",
+        AppEvent::SelectionInteractionStarted => "selection_interaction_started",
+        AppEvent::SelectionGestureCompleted { .. } => "selection_gesture_completed",
+        AppEvent::SelectionToolbarCaptured { .. } => "selection_toolbar_captured",
+        AppEvent::SelectionToolbarCaptureEmpty { .. } => "selection_toolbar_capture_empty",
+        AppEvent::SelectionToolbarTranslateRequested => "selection_toolbar_translate_requested",
+        AppEvent::SelectionToolbarCopyRequested => "selection_toolbar_copy_requested",
+        AppEvent::SelectionToolbarDismissRequested => "selection_toolbar_dismiss_requested",
         AppEvent::InputTranslationRequested { .. } => "input_translation_requested",
         AppEvent::SelectionCaptured { .. } => "selection_captured",
         AppEvent::SelectionCaptureEmpty { .. } => "selection_capture_empty",
@@ -1312,7 +1371,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_selection_does_not_open_an_error_popup() {
+    fn empty_selection_opens_a_blank_popup() {
         let runtime = Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -1334,11 +1393,12 @@ mod tests {
         controller.translate_hotkey_handler()();
         let deadline = Instant::now() + Duration::from_secs(1);
         loop {
-            if state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .phase
-                == TranslationPhase::NoSelection
+            if view.popup_shown.load(Ordering::SeqCst)
+                && state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .phase
+                    == TranslationPhase::NoSelection
             {
                 break;
             }
@@ -1346,7 +1406,14 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         }
 
-        assert!(!view.popup_shown.load(Ordering::SeqCst));
+        let state = state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(state.popup_sessions.len(), 1);
+        assert!(state.popup_sessions[0].source_text.is_empty());
+        assert!(state.popup_sessions[0].translated_text.is_empty());
+        assert!(state.popup_sessions[0].error_message.is_empty());
+        assert_eq!(state.current_translation_task, None);
     }
 
     #[test]

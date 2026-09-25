@@ -11,6 +11,20 @@ use crate::ports::credential::{CredentialAccessPurpose, CredentialSecret};
 pub enum AppEvent {
     Started,
     SelectionTranslationRequested,
+    SelectionInteractionStarted,
+    SelectionGestureCompleted {
+        anchor: crate::domain::geometry::Point,
+    },
+    SelectionToolbarCaptured {
+        generation: u64,
+        selection: Selection,
+    },
+    SelectionToolbarCaptureEmpty {
+        generation: u64,
+    },
+    SelectionToolbarTranslateRequested,
+    SelectionToolbarCopyRequested,
+    SelectionToolbarDismissRequested,
     InputTranslationRequested {
         text: String,
     },

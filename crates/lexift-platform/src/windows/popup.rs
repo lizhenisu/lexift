@@ -74,7 +74,15 @@ pub(crate) fn enable_interaction_without_activation(
     pointer_handler: PopupPointerHandler,
 ) -> lexift_core::Result<()> {
     configure_extended_style(window, interactive_extended_style)?;
-    install_pointer_bridge(window, pointer_handler)
+    install_pointer_bridge(window, pointer_handler, true)
+}
+
+pub(crate) fn enable_passive_interaction(
+    window: &impl raw_window_handle::HasWindowHandle,
+    pointer_handler: PopupPointerHandler,
+) -> lexift_core::Result<()> {
+    configure_extended_style(window, passive_extended_style)?;
+    install_pointer_bridge(window, pointer_handler, false)
 }
 
 pub(crate) fn attach_owner(
@@ -347,6 +355,7 @@ struct PopupInputBridge {
     pressed: bool,
     tracking_leave: bool,
     resize: Option<PopupResizeSession>,
+    activate_on_click: bool,
 }
 
 /// A resize request handed to the Windows sizing loop.
@@ -408,28 +417,31 @@ fn native_top_resize_hit_test(rect: PopupWindowRect, x: i32, y: i32, dpi: u32) -
 }
 
 impl PopupInputBridge {
-    fn new(handler: PopupPointerHandler) -> Self {
+    fn new(handler: PopupPointerHandler, activate_on_click: bool) -> Self {
         Self {
             handler,
             last_position: (0.0, 0.0),
             pressed: false,
             tracking_leave: false,
             resize: None,
+            activate_on_click,
         }
     }
 
-    fn replace_handler(&mut self, handler: PopupPointerHandler) {
+    fn replace_handler(&mut self, handler: PopupPointerHandler, activate_on_click: bool) {
         self.handler = handler;
         self.last_position = (0.0, 0.0);
         self.pressed = false;
         self.tracking_leave = false;
         self.resize = None;
+        self.activate_on_click = activate_on_click;
     }
 }
 
 fn install_pointer_bridge(
     window: &impl raw_window_handle::HasWindowHandle,
     pointer_handler: PopupPointerHandler,
+    activate_on_click: bool,
 ) -> lexift_core::Result<()> {
     use windows::{
         Win32::{
@@ -447,11 +459,14 @@ fn install_pointer_bridge(
     if !existing.0.is_null() {
         clear_popup_resize(hwnd, false);
         let bridge = unsafe { &mut *(existing.0 as *mut PopupInputBridge) };
-        bridge.replace_handler(pointer_handler);
+        bridge.replace_handler(pointer_handler, activate_on_click);
         return Ok(());
     }
 
-    let bridge_ptr = Box::into_raw(Box::new(PopupInputBridge::new(pointer_handler)));
+    let bridge_ptr = Box::into_raw(Box::new(PopupInputBridge::new(
+        pointer_handler,
+        activate_on_click,
+    )));
     if let Err(error) = unsafe {
         SetPropW(
             hwnd,
@@ -624,8 +639,11 @@ unsafe extern "system" fn popup_input_subclass(
             return LRESULT(0);
         }
         WM_MOUSEACTIVATE => {
-            activate_for_pointer_input(hwnd);
-            return LRESULT(MA_ACTIVATE as isize);
+            if bridge.activate_on_click {
+                activate_for_pointer_input(hwnd);
+                return LRESULT(MA_ACTIVATE as isize);
+            }
+            return LRESULT(windows::Win32::UI::WindowsAndMessaging::MA_NOACTIVATE as isize);
         }
         0x02A3 => {
             bridge.tracking_leave = false;
@@ -633,7 +651,9 @@ unsafe extern "system" fn popup_input_subclass(
             return LRESULT(0);
         }
         WM_LBUTTONDOWN => {
-            activate_for_pointer_input(hwnd);
+            if bridge.activate_on_click {
+                activate_for_pointer_input(hwnd);
+            }
             let _ = unsafe { SetCapture(hwnd) };
             let (x, y) = client_position(lparam.0);
             bridge.last_position = (x, y);
@@ -1223,9 +1243,12 @@ mod tests {
     fn replacing_a_bridge_handler_resets_transient_pointer_state() {
         let old_calls = Rc::new(Cell::new(0));
         let old_calls_for_handler = Rc::clone(&old_calls);
-        let mut bridge = PopupInputBridge::new(Box::new(move |_| {
-            old_calls_for_handler.set(old_calls_for_handler.get() + 1);
-        }));
+        let mut bridge = PopupInputBridge::new(
+            Box::new(move |_| {
+                old_calls_for_handler.set(old_calls_for_handler.get() + 1);
+            }),
+            true,
+        );
         bridge.last_position = (42.0, 21.0);
         bridge.pressed = true;
         bridge.tracking_leave = true;
@@ -1235,9 +1258,12 @@ mod tests {
 
         let new_calls = Rc::new(Cell::new(0));
         let new_calls_for_handler = Rc::clone(&new_calls);
-        bridge.replace_handler(Box::new(move |_| {
-            new_calls_for_handler.set(new_calls_for_handler.get() + 1);
-        }));
+        bridge.replace_handler(
+            Box::new(move |_| {
+                new_calls_for_handler.set(new_calls_for_handler.get() + 1);
+            }),
+            true,
+        );
         (bridge.handler)(PopupPointerEvent::Exited);
 
         assert_eq!(old_calls.get(), 0);

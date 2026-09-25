@@ -12,6 +12,13 @@ pub enum AppCommand {
     CaptureSelection {
         task_id: TranslationTaskId,
     },
+    CaptureToolbarSelection {
+        generation: u64,
+        anchor: Point,
+    },
+    CopyToolbarText {
+        text: String,
+    },
     Translate {
         task_id: TranslationTaskId,
         request: TranslateRequest,

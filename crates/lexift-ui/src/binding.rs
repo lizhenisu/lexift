@@ -22,6 +22,9 @@ pub(crate) fn apply_settings(settings: &SettingsWindow, state: &UiState) {
     if settings.get_launch_at_login() != state.launch_at_login {
         settings.set_launch_at_login(state.launch_at_login);
     }
+    if settings.get_selection_toolbar() != state.selection_toolbar {
+        settings.set_selection_toolbar(state.selection_toolbar);
+    }
     if settings.get_target_language_error_text().as_str() != state.target_language_error {
         settings.set_target_language_error_text(state.target_language_error.clone().into());
     }

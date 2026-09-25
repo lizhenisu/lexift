@@ -9,6 +9,7 @@ pub enum SettingsField {
     Hotkey,
     Provider,
     LaunchAtLogin,
+    SelectionToolbar,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +28,7 @@ pub enum SettingsChange {
     Hotkey(HotkeyConfig),
     Provider(ProviderConfig),
     LaunchAtLogin(bool),
+    SelectionToolbar(bool),
 }
 
 impl SettingsChange {
@@ -36,6 +38,7 @@ impl SettingsChange {
             Self::Hotkey(_) => SettingsField::Hotkey,
             Self::Provider(_) => SettingsField::Provider,
             Self::LaunchAtLogin(_) => SettingsField::LaunchAtLogin,
+            Self::SelectionToolbar(_) => SettingsField::SelectionToolbar,
         }
     }
 
@@ -45,6 +48,7 @@ impl SettingsChange {
             Self::Hotkey(value) => settings.hotkey = *value,
             Self::Provider(value) => settings.provider = *value,
             Self::LaunchAtLogin(value) => settings.launch_at_login = *value,
+            Self::SelectionToolbar(value) => settings.selection_toolbar = *value,
         }
     }
 
@@ -54,6 +58,7 @@ impl SettingsChange {
             Self::Hotkey(value) => settings.hotkey == *value,
             Self::Provider(value) => settings.provider == *value,
             Self::LaunchAtLogin(value) => settings.launch_at_login == *value,
+            Self::SelectionToolbar(value) => settings.selection_toolbar == *value,
         }
     }
 }
@@ -64,6 +69,7 @@ pub struct Settings {
     pub hotkey: HotkeyConfig,
     pub provider: ProviderConfig,
     pub launch_at_login: bool,
+    pub selection_toolbar: bool,
     /// Reference to a system credential. This value is never the credential secret.
     pub deepl_credential_id: Option<String>,
 }
@@ -75,6 +81,7 @@ impl Default for Settings {
             hotkey: HotkeyConfig::default(),
             provider: ProviderConfig::default(),
             launch_at_login: false,
+            selection_toolbar: true,
             deepl_credential_id: None,
         }
     }
