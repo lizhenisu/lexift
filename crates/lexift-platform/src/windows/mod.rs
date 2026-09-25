@@ -6,6 +6,7 @@ mod clipboard_selection;
 mod hotkey;
 mod instance;
 pub(crate) mod memory;
+pub(crate) mod renderer;
 pub(super) mod resize_background;
 mod screen;
 mod selection;

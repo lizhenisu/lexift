@@ -98,7 +98,6 @@ type AttachToolWindow = Rc<dyn Fn(&slint::Window, &slint::Window) -> bool>;
 type BeginWindowResize = Rc<dyn Fn(&slint::Window, PopupResizeEdge, bool) -> bool>;
 type PopupWorkArea = Rc<dyn Fn(Point) -> Option<Rect>>;
 type ConfigureResizeBackground = Rc<dyn Fn(&slint::Window, [u8; 3]) -> bool>;
-/// Repaints one window completely, installed into the platform's per-window hook.
 type WindowPaintRepair = Rc<dyn Fn()>;
 type ConfigureWindowPaintRepair = Rc<dyn Fn(&slint::Window, WindowPaintRepair) -> bool>;
 
@@ -163,7 +162,7 @@ impl WindowLifecycleCallbacks {
         self
     }
 
-    /// Paints newly exposed client area with the window background while Windows owns a resize.
+    /// Adds the software renderer's native resize fill.
     pub fn with_resize_background(
         mut self,
         configure: impl Fn(&slint::Window, [u8; 3]) -> bool + 'static,
@@ -172,11 +171,7 @@ impl WindowLifecycleCallbacks {
         self
     }
 
-    /// Repaints a window completely after Windows finishes a move or resize it started itself.
-    ///
-    /// Windows snaps a window to the screen edges while the modal loop runs and can restore it before
-    /// the button is released, coalescing the size messages so Slint never learns that the client
-    /// area changed and never repaints those pixels. The platform calls this hook for that case.
+    /// Adds the software renderer's full repaint after native movement ends.
     pub fn with_window_paint_repair(
         mut self,
         configure: impl Fn(&slint::Window, WindowPaintRepair) -> bool + 'static,
@@ -1154,7 +1149,6 @@ impl PopupRegistry {
         Some(work_area)
     }
 
-    /// Hands the popup's own background colour and full-repaint hook to the platform.
     fn install_popup_resize_background(&self, window: &TranslationPopup) {
         if !install_resize_background(
             &self.configure_resize_background,
@@ -1687,23 +1681,15 @@ thread_local! {
     static APP_WINDOW_REGISTRY: RefCell<Option<AppWindowRegistry>> = const { RefCell::new(None) };
 }
 
-/// Hands a window's own background colour to the platform-side resize fill, once.
 fn install_resize_background(
     configure: &ConfigureResizeBackground,
     window: &slint::Window,
     color: slint::Color,
 ) -> bool {
-    let rgb = [color.red(), color.green(), color.blue()];
-    (configure)(window, rgb)
+    (configure)(window, [color.red(), color.green(), color.blue()])
 }
 
-/// Repaints the whole window.
-///
-/// Slint only paints the region it considers dirty. Windows can resize a window on its own while the
-/// user drags it (edge snaps, then the restore that follows) and coalesce the size messages, so the
-/// damage stays empty while the pixels on screen belong to the intermediate geometry.
-/// `mark_dirty_region` is the renderer's documented escape hatch for that case, followed by a redraw
-/// request because nothing else schedules a frame.
+/// Invalidate all software-rendered pixels after Windows finishes a native move or resize.
 fn repair_window_paint(window: &slint::Window) {
     let scale = window.scale_factor().max(f32::EPSILON);
     let logical = window.size().to_logical(scale);
@@ -1721,7 +1707,6 @@ fn repair_window_paint(window: &slint::Window) {
     window.request_redraw();
 }
 
-/// Builds the repair hook for one component, so it can be installed before the HWND exists.
 fn window_paint_repair<T: ComponentHandle + 'static>(component: &T) -> WindowPaintRepair {
     let weak = component.as_weak();
     Rc::new(move || {
@@ -1735,7 +1720,6 @@ fn window_paint_repair<T: ComponentHandle + 'static>(component: &T) -> WindowPai
     })
 }
 
-/// Retries while the native window is still being created, which happens asynchronously on show.
 fn retry_settings_resize_background(
     configure: ConfigureResizeBackground,
     configure_repair: ConfigureWindowPaintRepair,
@@ -1744,9 +1728,7 @@ fn retry_settings_resize_background(
     attempts: u32,
 ) {
     if attempts == 0 {
-        tracing::debug!(
-            "settings resize background fill was not installed before the retry expired"
-        );
+        tracing::debug!("settings resize background fill was not installed before retry expired");
         return;
     }
     slint::Timer::single_shot(RESIZE_BACKGROUND_RETRY_INTERVAL, move || {
@@ -1765,7 +1747,6 @@ fn retry_settings_resize_background(
     });
 }
 
-/// Installs the background fill and the full-repaint hook for the Settings window.
 fn install_settings_platform_hooks(
     configure: &ConfigureResizeBackground,
     configure_repair: &ConfigureWindowPaintRepair,
@@ -2756,8 +2737,6 @@ impl UiHandle {
                     window.window().set_minimized(false);
                 }
                 let _ = window.show();
-                // The native window is created asynchronously on show, so the fill is installed
-                // here and retried for a few frames when the handle is not ready yet.
                 let color = window.get_resize_fallback_color();
                 if !install_settings_platform_hooks(
                     &registry.configure_resize_background,

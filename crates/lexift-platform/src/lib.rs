@@ -12,12 +12,20 @@ mod windows;
 
 pub use capabilities::PlatformCapabilities;
 
-/// Keeps an opaque window opaque and fills the client area a native resize exposes.
-///
-/// Slint asks winit for a transparent window, which on Windows means per-pixel alpha, so anything
-/// the application has not painted would show the desktop through the window; winit also leaves its
-/// window class without a background brush, so a band a resize uncovers stays unpainted. Call this
-/// for the windows whose design is an opaque panel, with the colour they paint behind their content.
+/// Prefer CPU rendering on a single-screen Intel display, where the GPU resize path is costly.
+/// Other configurations keep the graphics renderer for cross-monitor moves.
+pub fn prefer_software_renderer() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        windows::renderer::prefer_software_renderer()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
+}
+
+/// Installs the Windows opaque background fill used by Slint's software renderer.
 pub fn configure_resize_background(
     window: &impl raw_window_handle::HasWindowHandle,
     background_color_rgb: [u8; 3],
@@ -33,16 +41,7 @@ pub fn configure_resize_background(
     }
 }
 
-/// Registers the callback that runs after Windows finishes an interactive move or resize.
-///
-/// Windows can resize a window on its own while the modal loop runs — an edge snap, plus the restore
-/// that follows when the user keeps dragging — and coalesces those size messages, so the application
-/// can end up never hearing about the intermediate geometry. The pixels painted for it stay on
-/// screen, which is why the window's owner repaints the whole client area through this hook once the
-/// loop ends.
-///
-/// Call it after [`configure_resize_background`], which installs the per-window state this hook lives
-/// in, and only from the thread that owns the window.
+/// Repaints a software-rendered window after native move or resize completes.
 pub fn configure_window_geometry_repair(
     window: &impl raw_window_handle::HasWindowHandle,
     repair: Box<dyn Fn()>,

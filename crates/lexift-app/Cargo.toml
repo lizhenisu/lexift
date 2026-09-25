@@ -19,6 +19,8 @@ LegalCopyright = "Copyright © 2026 Lexift contributors"
 [features]
 default = []
 m1-demo = ["lexift-platform/mock", "lexift-translate/mock"]
+renderer-diagnostic = []
+renderer-diagnostic-software = ["renderer-diagnostic"]
 
 [dependencies]
 lexift-core.workspace = true

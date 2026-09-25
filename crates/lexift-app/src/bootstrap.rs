@@ -23,6 +23,41 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         return Ok(());
     }
 
+    // Slint fixes the renderer when the platform is selected, before any window is created.
+    // Keep its built-in environment override for diagnostics and per-machine preferences.
+    #[cfg(not(feature = "renderer-diagnostic"))]
+    let renderer = if std::env::var_os("SLINT_BACKEND").is_some() {
+        None
+    } else if lexift_platform::prefer_software_renderer() {
+        Some("software")
+    } else {
+        Some("femtovg")
+    };
+    let selector = slint::BackendSelector::new().backend_name("winit".into());
+    #[cfg(not(feature = "renderer-diagnostic"))]
+    let selector = if let Some(renderer) = renderer {
+        selector.renderer_name(renderer.into())
+    } else {
+        selector
+    };
+    selector.select()?;
+    #[cfg(not(feature = "renderer-diagnostic"))]
+    tracing::info!(
+        renderer = renderer.unwrap_or("environment override"),
+        "Slint renderer selected"
+    );
+    #[cfg(not(feature = "renderer-diagnostic"))]
+    let software_renderer = renderer == Some("software")
+        || std::env::var("SLINT_BACKEND")
+            .is_ok_and(|value| value.eq_ignore_ascii_case("winit-software"));
+    #[cfg(feature = "renderer-diagnostic-software")]
+    let software_renderer = true;
+    #[cfg(all(
+        feature = "renderer-diagnostic",
+        not(feature = "renderer-diagnostic-software")
+    ))]
+    let software_renderer = false;
+
     let services = AppServices::for_current_build(platform)?;
     let initial_state = services
         .state
@@ -186,23 +221,29 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 .work_area_for_point(point)
                 .ok()
         })
-        .with_resize_background(|window, color_rgb| {
+        .with_resize_background(move |window, color_rgb| {
+            if !software_renderer {
+                return true;
+            }
             match lexift_platform::configure_resize_background(&window.window_handle(), color_rgb) {
                 Ok(()) => true,
                 Err(error) => {
-                    tracing::debug!(%error, "resize background fill could not be installed");
+                    tracing::debug!(%error, "software resize background fill could not be installed");
                     false
                 }
             }
         })
-        .with_window_paint_repair(|window, repair| {
+        .with_window_paint_repair(move |window, repair| {
+            if !software_renderer {
+                return true;
+            }
             match lexift_platform::configure_window_geometry_repair(
                 &window.window_handle(),
                 Box::new(move || repair()),
             ) {
                 Ok(()) => true,
                 Err(error) => {
-                    tracing::debug!(%error, "window paint repair could not be installed");
+                    tracing::debug!(%error, "software window paint repair could not be installed");
                     false
                 }
             }

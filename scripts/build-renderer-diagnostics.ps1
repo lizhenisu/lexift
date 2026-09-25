@@ -22,9 +22,12 @@ Copy-Item -LiteralPath (Join-Path $root 'assets') -Destination $workspace -Recur
 
 $manifestPath = Join-Path $workspace 'Cargo.toml'
 $baseline = [System.IO.File]::ReadAllText($manifestPath)
-if (-not $baseline.Contains('"renderer-software"')) {
-    throw 'The workspace Slint feature list no longer contains renderer-software.'
+if (-not $baseline.Contains('"renderer-femtovg"')) {
+    throw 'The workspace Slint feature list no longer contains renderer-femtovg.'
 }
+# The normal build includes both renderers for startup selection. Remove the software
+# fallback from diagnostic copies so each variant measures exactly one renderer.
+$singleRendererBaseline = $baseline -replace '(?m)^\s*"renderer-software",\r?\n', ''
 
 $variants = [ordered]@{
     'skia-opengl' = 'renderer-skia-opengl'
@@ -36,10 +39,11 @@ foreach ($variant in $variants.Keys) {
     $feature = $variants[$variant]
     [System.IO.File]::WriteAllText(
         $manifestPath,
-        $baseline.Replace('"renderer-software"', '"' + $feature + '"')
+        $singleRendererBaseline.Replace('"renderer-femtovg"', '"' + $feature + '"')
     )
     $env:CARGO_TARGET_DIR = $build
-    cargo build --release --manifest-path $manifestPath -p lexift-app
+    $diagnosticFeature = if ($variant -eq 'software') { 'renderer-diagnostic-software' } else { 'renderer-diagnostic' }
+    cargo build --release --manifest-path $manifestPath -p lexift-app --features $diagnosticFeature
     if ($LASTEXITCODE -ne 0) {
         throw "Release build failed for $variant"
     }

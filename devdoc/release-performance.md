@@ -1,6 +1,8 @@
 # Windows V0.1 Release Measurements
 
-该文档记录正式 Release 构建的可复现产物指标。运行 `scripts/package-release.ps1` 后更新下表；启动耗时和内存必须在无调试器的干净 Windows 会话中测量。
+该文档记录正式 Release 构建的可复现产物指标。运行 `scripts/package-release.ps1` 后更新下表；启动耗时和内存必须在无调试器的干净 Windows 会话中测量。下表及后续 A/B 数据是历史测量，不代表当前双渲染器构建。
+
+当前双渲染器构建（2026-09-25）：`cargo build --release -p lexift-app` 生成的 `lexift.exe` 为 **16,524,800 bytes**；单屏 Intel 主显示器启动时选软件渲染，其他配置选 FemtoVG。软件渲染路径保留原有窗口补绘。此前单 FemtoVG 构建为 15,493,632 bytes，已安装的软件渲染版为 16,012,800 bytes。这些仅是文件大小；新构建的实际缩放流畅度、跨屏画面、CPU/GPU 占用和安装包体积仍需现场测量。
 
 | 指标 | V0.1.0 | 测量方法 |
 | --- | ---: | --- |
@@ -14,7 +16,7 @@
 
 ## 渲染器体积对照（2026-09-24）
 
-提交 `bcab46f` 将 Slint 渲染器由 FemtoVG 切换为 Skia OpenGL。同源 A/B Release 构建保存在 `dist/renderer-ab/`：FemtoVG 的 `lexift.exe` 为 15,490,560 bytes，Skia OpenGL 为 23,897,600 bytes，增长 8,407,040 bytes（约 8.02 MiB）。对应 Portable ZIP 分别为 7,929,674 和 11,718,314 bytes。该增长主要来自渲染器依赖和链接产物，不是 popup 的 Slint 界面代码。这是当时的渲染器取舍；当前默认值见下方 Intel 核显 A/B 记录。
+提交 `bcab46f` 将 Slint 渲染器由 FemtoVG 切换为 Skia OpenGL。同源 A/B Release 构建保存在 `dist/renderer-ab/`：FemtoVG 的 `lexift.exe` 为 15,490,560 bytes，Skia OpenGL 为 23,897,600 bytes，增长 8,407,040 bytes（约 8.02 MiB）。对应 Portable ZIP 分别为 7,929,674 和 11,718,314 bytes。该增长主要来自渲染器依赖和链接产物，不是 popup 的 Slint 界面代码。这是当时的渲染器取舍；当前默认值见文首。
 
 体积比较必须区分未压缩的 `lexift.exe`、Portable ZIP 和 NSIS 安装器。仓库现有 `dist` 目录中的 NSIS 安装器为 10,223,080 bytes（约 9.75 MiB）；用户观察到的约 22 MB 与 Skia exe 体积更接近，不应写作安装器的实测值。上方 V0.1.0 表格是历史基线，不代表当前 Skia 构建。
 
