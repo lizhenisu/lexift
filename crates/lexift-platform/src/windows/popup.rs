@@ -1,8 +1,7 @@
 use std::{cell::RefCell, collections::HashMap};
 
 use crate::{
-    PassiveToolWindowPreparation, PopupPointerEvent, PopupPointerHandler, PopupResizeBounds,
-    PopupResizeEdge,
+    PassiveToolWindowPreparation, PopupPointerEvent, PopupPointerHandler, PopupResizeEdge,
 };
 
 pub(crate) fn configure_passive(
@@ -42,8 +41,18 @@ pub(crate) fn configure_translation_popup_corners(
     use windows::Win32::Graphics::Dwm::{
         DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
     };
+    use windows::Win32::{Foundation::HANDLE, UI::WindowsAndMessaging::SetPropW};
+    use windows::core::w;
 
     let hwnd = required_hwnd(window)?;
+    unsafe {
+        SetPropW(
+            hwnd,
+            w!("Lexift.TranslationPopup"),
+            Some(HANDLE(std::ptr::dangling_mut())),
+        )
+    }
+    .map_err(|error| lexift_core::Error::new(format!("Could not mark popup HWND: {error}")))?;
     let preference = DWMWCP_ROUND;
     unsafe {
         DwmSetWindowAttribute(
@@ -92,7 +101,6 @@ pub(crate) fn attach_owner(
 
 const POPUP_INPUT_SUBCLASS_ID: usize = 0x4C58_4654;
 const POPUP_DISMISS_MESSAGE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 0x4C;
-const POPUP_BEGIN_RESIZE_MESSAGE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 0x4D;
 const WHEEL_DELTA: f32 = 120.0;
 const LOGICAL_SCROLL_PIXELS_PER_NOTCH: f32 = 60.0;
 
@@ -341,45 +349,31 @@ struct PopupInputBridge {
     resize: Option<PopupResizeSession>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PopupResizePhase {
-    AwaitingNativeStart,
-    NativeSizing,
-    Completed,
-}
-
+/// A resize request handed to the Windows sizing loop.
+///
+/// The platform remembers only which handle started it; geometry stays with Windows and the UI.
 #[derive(Clone, Copy)]
 struct PopupResizeSession {
     edge: PopupResizeEdge,
-    initial_rect: PopupWindowRect,
-    bounds: PopupResizeBounds,
-    phase: PopupResizePhase,
-    size_samples: u32,
-    max_fixed_edge_drift: u32,
-    frame_sync: PopupResizeFrameSyncStats,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-struct PopupResizeFrameSyncStats {
-    requested_frames: u32,
-    presented_frames: u32,
-    dwm_flushed_frames: u32,
-    presentation_misses: u32,
-    property_failures: u32,
-    dwm_flush_failures: u32,
-    total_dwm_flush_micros: u64,
-    max_dwm_flush_micros: u64,
-    generation: u32,
-    expected_size: (u32, u32),
-    last_presented_size: (u32, u32),
-}
-
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct PopupWindowRect {
     left: i32,
     top: i32,
     right: i32,
     bottom: i32,
+}
+
+impl PopupWindowRect {
+    fn from_rect(rect: windows::Win32::Foundation::RECT) -> Self {
+        Self {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+        }
+    }
 }
 
 impl PopupResizeEdge {
@@ -400,59 +394,17 @@ impl PopupResizeEdge {
     }
 }
 
-impl PopupResizeSession {
-    fn native_start_allowed(self, left_button_down: bool) -> bool {
-        self.phase == PopupResizePhase::AwaitingNativeStart && left_button_down
-    }
-
-    fn fixed_edge_drift(self, rect: &windows::Win32::Foundation::RECT) -> u32 {
-        let drift = |actual: i32, expected: i32| actual.abs_diff(expected);
-        match self.edge {
-            PopupResizeEdge::Left => drift(rect.right, self.initial_rect.right),
-            PopupResizeEdge::Right => drift(rect.left, self.initial_rect.left),
-            PopupResizeEdge::Top => drift(rect.bottom, self.initial_rect.bottom),
-            PopupResizeEdge::Bottom => drift(rect.top, self.initial_rect.top),
-            PopupResizeEdge::TopLeft => drift(rect.right, self.initial_rect.right)
-                .max(drift(rect.bottom, self.initial_rect.bottom)),
-            PopupResizeEdge::TopRight => drift(rect.left, self.initial_rect.left)
-                .max(drift(rect.bottom, self.initial_rect.bottom)),
-            PopupResizeEdge::BottomLeft => drift(rect.right, self.initial_rect.right)
-                .max(drift(rect.top, self.initial_rect.top)),
-            PopupResizeEdge::BottomRight => {
-                drift(rect.left, self.initial_rect.left).max(drift(rect.top, self.initial_rect.top))
-            }
-        }
-    }
-
-    fn enter_native_sizing(&mut self) -> bool {
-        if self.phase != PopupResizePhase::AwaitingNativeStart {
-            return false;
-        }
-        self.phase = PopupResizePhase::NativeSizing;
-        true
-    }
-
-    fn complete_native_sizing(&mut self) -> bool {
-        if self.phase != PopupResizePhase::NativeSizing {
-            return false;
-        }
-        self.phase = PopupResizePhase::Completed;
-        true
-    }
-
-    fn needs_frame_sync(self) -> bool {
-        self.phase == PopupResizePhase::NativeSizing
-    }
+fn scale_dip_to_physical(dip: f32, dpi: u32) -> i32 {
+    ((dip * dpi.max(96) as f32) / 96.0).round().max(1.0) as i32
 }
 
-fn popup_resize_presentation_matches(
-    requested_generation: u32,
-    requested_size: (u32, u32),
-    presented_generation: usize,
-    presented_size: (usize, usize),
-) -> bool {
-    presented_generation == requested_generation as usize
-        && presented_size == (requested_size.0 as usize, requested_size.1 as usize)
+fn native_top_resize_hit_test(rect: PopupWindowRect, x: i32, y: i32, dpi: u32) -> bool {
+    let strip = scale_dip_to_physical(8.0, dpi);
+    let corner = scale_dip_to_physical(36.0, dpi);
+    x >= rect.left.saturating_add(corner)
+        && x < rect.right.saturating_sub(corner)
+        && y >= rect.top
+        && y < rect.top.saturating_add(strip)
 }
 
 impl PopupInputBridge {
@@ -493,6 +445,7 @@ fn install_pointer_bridge(
     let hwnd = required_hwnd(window)?;
     let existing = unsafe { GetPropW(hwnd, w!("Lexift.PopupInputBridge")) };
     if !existing.0.is_null() {
+        clear_popup_resize(hwnd, false);
         let bridge = unsafe { &mut *(existing.0 as *mut PopupInputBridge) };
         bridge.replace_handler(pointer_handler);
         return Ok(());
@@ -554,10 +507,10 @@ unsafe extern "system" fn popup_input_subclass(
             },
             Shell::{DefSubclassProc, RemoveWindowSubclass},
             WindowsAndMessaging::{
-                GetPropW, MA_ACTIVATE, PostMessageW, RemovePropW, WM_CAPTURECHANGED,
-                WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_LBUTTONDOWN, WM_LBUTTONUP,
-                WM_MOUSEACTIVATE, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY,
-                WM_NCLBUTTONDOWN, WM_SHOWWINDOW, WM_SIZE,
+                GetPropW, MA_ACTIVATE, RemovePropW, WM_CANCELMODE, WM_CAPTURECHANGED,
+                WM_EXITSIZEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEHWHEEL,
+                WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDOWN,
+                WM_SHOWWINDOW, WM_SIZE,
             },
         },
     };
@@ -567,81 +520,59 @@ unsafe extern "system" fn popup_input_subclass(
         return unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
     }
 
-    if message == WM_GETMINMAXINFO {
-        let default_result = unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
-        let state = unsafe { GetPropW(hwnd, w!("Lexift.PopupInputBridge")) };
-        if !state.0.is_null() {
-            let bridge = unsafe { &mut *(state.0 as *mut PopupInputBridge) };
-            if let Some(resize) = bridge.resize {
-                let info = unsafe {
-                    &mut *(lparam.0 as *mut windows::Win32::UI::WindowsAndMessaging::MINMAXINFO)
-                };
-                info.ptMinTrackSize.x = resize.bounds.min_width as i32;
-                info.ptMinTrackSize.y = resize.bounds.min_height as i32;
-                info.ptMaxTrackSize.x = resize.bounds.max_width as i32;
-                info.ptMaxTrackSize.y = resize.bounds.max_height as i32;
-                return LRESULT(0);
+    if message == WM_NCHITTEST {
+        let popup = unsafe { GetPropW(hwnd, w!("Lexift.TranslationPopup")) };
+        if !popup.0.is_null() {
+            let mut rect = windows::Win32::Foundation::RECT::default();
+            if unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect) }
+                .is_ok()
+            {
+                let (x, y) = client_position(lparam.0);
+                if native_top_resize_hit_test(
+                    PopupWindowRect::from_rect(rect),
+                    x as i32,
+                    y as i32,
+                    window_dpi(hwnd),
+                ) {
+                    return LRESULT(windows::Win32::UI::WindowsAndMessaging::HTTOP as isize);
+                }
             }
         }
-        return default_result;
-    }
-
-    if message == POPUP_BEGIN_RESIZE_MESSAGE {
-        let state = unsafe { GetPropW(hwnd, w!("Lexift.PopupInputBridge")) };
-        if state.0.is_null() {
-            return LRESULT(0);
-        }
-        let bridge = unsafe { &mut *(state.0 as *mut PopupInputBridge) };
-        let Some(resize) = bridge.resize else {
-            return LRESULT(0);
-        };
-        if !resize.native_start_allowed(async_key_is_pressed(unsafe {
-            GetAsyncKeyState(VK_LBUTTON.0 as i32)
-        })) {
-            cancel_popup_resize(hwnd);
-            return LRESULT(0);
-        }
-        if let Err(error) = unsafe {
-            PostMessageW(
-                Some(hwnd),
-                WM_NCLBUTTONDOWN,
-                windows::Win32::Foundation::WPARAM(resize.edge.hit_test_code() as usize),
-                lparam,
-            )
-        } {
-            tracing::warn!(%error, "translation popup native resize could not be started");
-            cancel_popup_resize(hwnd);
-        }
-        return LRESULT(0);
+        return unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
     }
 
     if message == WM_NCLBUTTONDOWN {
         let state = unsafe { GetPropW(hwnd, w!("Lexift.PopupInputBridge")) };
-        if !state.0.is_null()
-            && let Some(resize) = unsafe { &*(state.0 as *const PopupInputBridge) }.resize
-            && resize.phase == PopupResizePhase::AwaitingNativeStart
-            && wparam.0 == resize.edge.hit_test_code() as usize
-            && !async_key_is_pressed(unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) })
-        {
-            cancel_popup_resize(hwnd);
-            return LRESULT(0);
+        if !state.0.is_null() {
+            let popup = unsafe { GetPropW(hwnd, w!("Lexift.TranslationPopup")) };
+            let top_press = !popup.0.is_null()
+                && wparam.0 == windows::Win32::UI::WindowsAndMessaging::HTTOP as usize;
+            let left_down = async_key_is_pressed(unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) });
+            if top_press
+                && unsafe { &*(state.0 as *const PopupInputBridge) }
+                    .resize
+                    .is_none()
+            {
+                // The UI arms its resize session before DefWindowProc enters the sizing loop.
+                let bridge = unsafe { &*(state.0 as *const PopupInputBridge) };
+                (bridge.handler)(PopupPointerEvent::NativeTopResizeRequested);
+            }
+            let armed = unsafe { &*(state.0 as *const PopupInputBridge) }.resize;
+            match armed {
+                Some(resize) if wparam.0 == resize.edge.hit_test_code() as usize && !left_down => {
+                    // The press that requested this resize is already over.
+                    cancel_popup_resize(hwnd);
+                    return LRESULT(0);
+                }
+                None if top_press => return LRESULT(0),
+                _ => {}
+            }
         }
-    }
-
-    if message == WM_ENTERSIZEMOVE {
-        let result = unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
-        mark_native_resize_started(hwnd);
-        return result;
     }
 
     if message == WM_EXITSIZEMOVE {
         let result = unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
         finish_popup_resize(hwnd);
-        if has_active_popup_resize(hwnd) {
-            // A pending request may be superseded before Windows enters its
-            // sizing loop. Do not leave the UI resize state armed.
-            cancel_popup_resize(hwnd);
-        }
         return result;
     }
 
@@ -649,9 +580,13 @@ unsafe extern "system" fn popup_input_subclass(
         clear_popup_resize(hwnd, false);
     }
 
-    // Let the Windows sizing loop own geometry and pointer tracking. In
-    // particular, do not resize the transparent Skia surface per WM_MOUSEMOVE:
-    // DWM can otherwise show a stale surface clipped to the new HWND bounds.
+    if message == WM_CANCELMODE && has_active_popup_resize(hwnd) {
+        clear_popup_resize(hwnd, true);
+        return unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
+    }
+
+    // Let the Windows sizing loop own geometry and pointer tracking. Do not
+    // write a competing preferred size while the native loop is active.
     if message == WM_MOUSEMOVE {
         let bridge = unsafe { &mut *(reference_data as *mut PopupInputBridge) };
         if !bridge.tracking_leave {
@@ -672,14 +607,14 @@ unsafe extern "system" fn popup_input_subclass(
     }
 
     if message == WM_SIZE {
-        record_native_resize_sample(hwnd);
-        if native_popup_resize_active(hwnd) {
-            begin_native_resize_frame(
-                hwnd,
-                (lparam.0 as u16) as u32,
-                ((lparam.0 >> 16) as u16) as u32,
-            );
+        let result = unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
+        let width = (lparam.0 as u16) as f32;
+        let height = ((lparam.0 >> 16) as u16) as f32;
+        {
+            let bridge = unsafe { &mut *(reference_data as *mut PopupInputBridge) };
+            (bridge.handler)(PopupPointerEvent::Resized { width, height });
         }
+        return result;
     }
 
     let bridge = unsafe { &mut *(reference_data as *mut PopupInputBridge) };
@@ -725,11 +660,6 @@ unsafe extern "system" fn popup_input_subclass(
                 (bridge.handler)(PopupPointerEvent::LeftReleased { x, y });
             }
         }
-        WM_SIZE => {
-            let width = (lparam.0 as u16) as f32;
-            let height = ((lparam.0 >> 16) as u16) as f32;
-            (bridge.handler)(PopupPointerEvent::Resized { width, height });
-        }
         WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
             let (screen_x, screen_y) = client_position(lparam.0);
             let mut point = POINT {
@@ -756,7 +686,8 @@ unsafe extern "system" fn popup_input_subclass(
         }
         WM_NCDESTROY => {
             unregister_dismissal_hwnd(hwnd);
-            clear_native_resize_properties(hwnd);
+            clear_popup_resize(hwnd, false);
+            let _ = unsafe { RemovePropW(hwnd, w!("Lexift.TranslationPopup")) };
             let _ = unsafe { RemoveWindowSubclass(hwnd, Some(popup_input_subclass), subclass_id) };
             let removed = unsafe { RemovePropW(hwnd, w!("Lexift.PopupInputBridge")) };
             if let Ok(HANDLE(pointer)) = removed
@@ -769,15 +700,7 @@ unsafe extern "system" fn popup_input_subclass(
         }
         _ => {}
     }
-    let result = unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
-    if message == WM_SIZE && native_popup_resize_active(hwnd) {
-        // Winit handles WM_SIZE first and forwards the new dimensions to Slint.
-        // Force that resized surface to paint before returning to Windows' modal
-        // sizing loop, then wait for DWM to consume the frame before the next
-        // native geometry update can overtake it.
-        synchronize_native_resize_frame(hwnd);
-    }
-    result
+    unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
 }
 
 fn activate_for_pointer_input(hwnd: windows::Win32::Foundation::HWND) {
@@ -885,66 +808,27 @@ pub(crate) fn begin_drag(
     Ok(())
 }
 
-pub(crate) fn begin_resize(
+pub(crate) fn prepare_resize_tracking(
     window: &impl raw_window_handle::HasWindowHandle,
     edge: PopupResizeEdge,
-    bounds: PopupResizeBounds,
 ) -> lexift_core::Result<bool> {
-    use windows::Win32::{
-        Foundation::{POINT, RECT},
-        UI::{
-            Input::KeyboardAndMouse::{GetAsyncKeyState, ReleaseCapture, VK_LBUTTON},
-            WindowsAndMessaging::{GetCursorPos, GetWindowRect, PostMessageW},
-        },
-    };
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
     let hwnd = required_hwnd(window)?;
     unsafe {
         if !async_key_is_pressed(GetAsyncKeyState(VK_LBUTTON.0 as i32)) {
             return Ok(false);
         }
-        let mut rect = RECT::default();
-        GetWindowRect(hwnd, &mut rect)
-            .map_err(|_| lexift_core::Error::new("Could not read the popup window bounds"))?;
-        let mut cursor = POINT::default();
-        if GetCursorPos(&mut cursor).is_err() {
-            return Err(lexift_core::Error::new(
-                "Could not read the pointer position",
-            ));
-        }
-        set_resize_state(
-            hwnd,
-            PopupResizeSession {
-                edge,
-                initial_rect: PopupWindowRect {
-                    left: rect.left,
-                    top: rect.top,
-                    right: rect.right,
-                    bottom: rect.bottom,
-                },
-                bounds,
-                phase: PopupResizePhase::AwaitingNativeStart,
-                size_samples: 0,
-                max_fixed_edge_drift: 0,
-                frame_sync: Default::default(),
-            },
-        )?;
-        // Release Slint's client-area capture first. The private message makes
-        // the native non-client sizing request asynchronous and rechecks the
-        // button state after any already-queued mouse-up has been dispatched.
-        let _ = ReleaseCapture();
-        if let Err(error) = PostMessageW(
-            Some(hwnd),
-            POPUP_BEGIN_RESIZE_MESSAGE,
-            windows::Win32::Foundation::WPARAM(0),
-            windows::Win32::Foundation::LPARAM(pack_screen_position(cursor.x, cursor.y)),
-        ) {
-            clear_popup_resize(hwnd, false);
-            return Err(lexift_core::Error::new(format!(
-                "Could not queue native popup resizing: {error}"
-            )));
-        }
+        ensure_native_snap_styles(hwnd)?;
+        set_resize_state(hwnd, PopupResizeSession { edge })?;
     }
     Ok(true)
+}
+
+pub(crate) fn cancel_resize_tracking(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    clear_popup_resize(required_hwnd(window)?, false);
+    Ok(())
 }
 
 fn has_active_popup_resize(hwnd: windows::Win32::Foundation::HWND) -> bool {
@@ -956,197 +840,15 @@ fn has_active_popup_resize(hwnd: windows::Win32::Foundation::HWND) -> bool {
             .is_some()
 }
 
-fn mark_native_resize_started(hwnd: windows::Win32::Foundation::HWND) {
-    use windows::{
-        Win32::{
-            Foundation::HANDLE,
-            UI::WindowsAndMessaging::{GetPropW, RemovePropW, SetPropW},
-        },
-        core::w,
-    };
-    let state = unsafe { GetPropW(hwnd, w!("Lexift.PopupInputBridge")) };
-    if state.0.is_null() {
-        return;
-    }
-    let entered = {
-        let bridge = unsafe { &mut *(state.0 as *mut PopupInputBridge) };
-        bridge
-            .resize
-            .as_mut()
-            .is_some_and(|resize| resize.enter_native_sizing())
-    };
-    if entered {
-        let _ = unsafe { RemovePropW(hwnd, w!("Lexift.PopupPresentedGeneration")) };
-        let _ = unsafe { RemovePropW(hwnd, w!("Lexift.PopupPresentedWidth")) };
-        let _ = unsafe { RemovePropW(hwnd, w!("Lexift.PopupPresentedHeight")) };
-        if let Err(error) = unsafe {
-            SetPropW(
-                hwnd,
-                w!("Lexift.PopupNativeResize"),
-                Some(HANDLE(std::ptr::dangling_mut::<core::ffi::c_void>())),
-            )
-        } {
-            let state = unsafe { GetPropW(hwnd, w!("Lexift.PopupInputBridge")) };
-            if !state.0.is_null()
-                && let Some(resize) = unsafe { &mut *(state.0 as *mut PopupInputBridge) }
-                    .resize
-                    .as_mut()
-            {
-                resize.frame_sync.property_failures =
-                    resize.frame_sync.property_failures.saturating_add(1);
-            }
-            tracing::error!(%error, "could not enable synchronous popup resize rendering");
-        }
-    }
-}
-
-fn native_popup_resize_active(hwnd: windows::Win32::Foundation::HWND) -> bool {
-    use windows::{Win32::UI::WindowsAndMessaging::GetPropW, core::w};
-    let state = unsafe { GetPropW(hwnd, w!("Lexift.PopupInputBridge")) };
-    !state.0.is_null()
-        && unsafe { &*(state.0 as *const PopupInputBridge) }
-            .resize
-            .is_some_and(|resize| resize.needs_frame_sync())
-}
-
-fn begin_native_resize_frame(hwnd: windows::Win32::Foundation::HWND, width: u32, height: u32) {
-    use windows::{
-        Win32::{Foundation::HANDLE, UI::WindowsAndMessaging::SetPropW},
-        core::w,
-    };
-    let state = unsafe {
-        windows::Win32::UI::WindowsAndMessaging::GetPropW(hwnd, w!("Lexift.PopupInputBridge"))
-    };
-    if state.0.is_null() {
-        return;
-    }
-    let bridge = unsafe { &mut *(state.0 as *mut PopupInputBridge) };
-    let Some(resize) = bridge
-        .resize
-        .as_mut()
-        .filter(|resize| resize.needs_frame_sync())
-    else {
-        return;
-    };
-    resize.frame_sync.requested_frames = resize.frame_sync.requested_frames.saturating_add(1);
-    resize.frame_sync.generation = resize.frame_sync.generation.wrapping_add(1).max(1);
-    resize.frame_sync.expected_size = (width, height);
-    if let Err(error) = unsafe {
-        SetPropW(
-            hwnd,
-            w!("Lexift.PopupResizeGeneration"),
-            Some(HANDLE(resize.frame_sync.generation as usize as *mut _)),
-        )
-    } {
-        resize.frame_sync.property_failures = resize.frame_sync.property_failures.saturating_add(1);
-        tracing::debug!(%error, "could not mark popup resize generation");
-    }
-}
-
-fn synchronize_native_resize_frame(hwnd: windows::Win32::Foundation::HWND) {
-    use windows::{
-        Win32::{Graphics::Dwm::DwmFlush, UI::WindowsAndMessaging::GetPropW},
-        core::w,
-    };
-
-    let state = unsafe { GetPropW(hwnd, w!("Lexift.PopupInputBridge")) };
-    if state.0.is_null() {
-        return;
-    }
-    let (generation, expected_size) = {
-        let bridge = unsafe { &*(state.0 as *const PopupInputBridge) };
-        let Some(resize) = bridge.resize.filter(|resize| resize.needs_frame_sync()) else {
-            return;
-        };
-        (
-            resize.frame_sync.generation,
-            resize.frame_sync.expected_size,
-        )
-    };
-    let presented_generation = unsafe { GetPropW(hwnd, w!("Lexift.PopupPresentedGeneration")) };
-    let presented_width = unsafe { GetPropW(hwnd, w!("Lexift.PopupPresentedWidth")) };
-    let presented_height = unsafe { GetPropW(hwnd, w!("Lexift.PopupPresentedHeight")) };
-    let presentation_matches = popup_resize_presentation_matches(
-        generation,
-        expected_size,
-        presented_generation.0 as usize,
-        (presented_width.0 as usize, presented_height.0 as usize),
-    );
-
-    // The Winit resize-event path now calls draw_with_outcome() before the
-    // WM_SIZE dispatch returns. Wait for DWM only after that draw actually
-    // swapped a frame for this exact generation and physical client size.
-    let flush_start = std::time::Instant::now();
-    let flush_succeeded = presentation_matches && unsafe { DwmFlush() }.is_ok();
-    let flush_micros = flush_start.elapsed().as_micros().min(u64::MAX as u128) as u64;
-
-    let state = unsafe { GetPropW(hwnd, w!("Lexift.PopupInputBridge")) };
-    if state.0.is_null() {
-        return;
-    }
-    let bridge = unsafe { &mut *(state.0 as *mut PopupInputBridge) };
-    let Some(resize) = bridge
-        .resize
-        .as_mut()
-        .filter(|resize| resize.needs_frame_sync())
-    else {
-        return;
-    };
-    if presentation_matches {
-        resize.frame_sync.presented_frames = resize.frame_sync.presented_frames.saturating_add(1);
-    } else {
-        resize.frame_sync.presentation_misses =
-            resize.frame_sync.presentation_misses.saturating_add(1);
-    }
-    if presentation_matches && flush_succeeded {
-        resize.frame_sync.dwm_flushed_frames =
-            resize.frame_sync.dwm_flushed_frames.saturating_add(1);
-        resize.frame_sync.total_dwm_flush_micros = resize
-            .frame_sync
-            .total_dwm_flush_micros
-            .saturating_add(flush_micros);
-        resize.frame_sync.max_dwm_flush_micros =
-            resize.frame_sync.max_dwm_flush_micros.max(flush_micros);
-    } else if presentation_matches {
-        resize.frame_sync.dwm_flush_failures =
-            resize.frame_sync.dwm_flush_failures.saturating_add(1);
-    }
-    if presentation_matches {
-        resize.frame_sync.last_presented_size = expected_size;
-    }
-}
-
-fn record_native_resize_sample(hwnd: windows::Win32::Foundation::HWND) {
-    use windows::Win32::{
-        Foundation::RECT,
-        UI::WindowsAndMessaging::{GetPropW, GetWindowRect},
-    };
-    use windows::core::w;
-
-    let state = unsafe { GetPropW(hwnd, w!("Lexift.PopupInputBridge")) };
-    if state.0.is_null() {
-        return;
-    }
-    let bridge = unsafe { &mut *(state.0 as *mut PopupInputBridge) };
-    let Some(resize) = bridge.resize.as_mut() else {
-        return;
-    };
-    if resize.phase != PopupResizePhase::NativeSizing {
-        return;
-    }
-    resize.size_samples = resize.size_samples.saturating_add(1);
-    let mut rect = RECT::default();
-    if unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok() {
-        resize.max_fixed_edge_drift = resize
-            .max_fixed_edge_drift
-            .max(resize.fixed_edge_drift(&rect));
-    }
-}
-
+/// Reports the final client size to the UI once Windows leaves the sizing loop.
+///
+/// The UI owns the matching resize state, so every armed session must end with exactly one report
+/// even when the press never changed the window geometry. Dropping the session silently would
+/// leave the UI believing a resize is still in flight and refuse every later handle press.
 fn finish_popup_resize(hwnd: windows::Win32::Foundation::HWND) {
     use windows::Win32::{
         Foundation::RECT,
-        UI::WindowsAndMessaging::{GetClientRect, GetPropW, GetWindowRect},
+        UI::WindowsAndMessaging::{GetClientRect, GetPropW},
     };
     use windows::core::w;
 
@@ -1154,59 +856,18 @@ fn finish_popup_resize(hwnd: windows::Win32::Foundation::HWND) {
     if state.0.is_null() {
         return;
     }
-    let mut resize = {
-        let bridge = unsafe { &mut *(state.0 as *mut PopupInputBridge) };
-        if !bridge
-            .resize
-            .is_some_and(|resize| resize.phase == PopupResizePhase::NativeSizing)
-        {
-            return;
-        }
-        bridge.resize.take().expect("native resize was checked")
-    };
-    clear_native_resize_properties(hwnd);
-    if !resize.complete_native_sizing() {
+    let bridge = unsafe { &mut *(state.0 as *mut PopupInputBridge) };
+    let Some(_resize) = bridge.resize.take() else {
         return;
-    }
+    };
 
     let mut client = RECT::default();
-    let size = if unsafe { GetClientRect(hwnd, &mut client) }.is_ok() {
-        (
-            (client.right - client.left) as f32,
-            (client.bottom - client.top) as f32,
-        )
-    } else {
-        (0.0, 0.0)
-    };
-    let mut outer = RECT::default();
-    let final_fixed_edge_drift = if unsafe { GetWindowRect(hwnd, &mut outer) }.is_ok() {
-        resize.fixed_edge_drift(&outer)
-    } else {
-        u32::MAX
-    };
-    tracing::info!(
-        edge = ?resize.edge,
-        resize_samples = resize.size_samples,
-        max_fixed_edge_drift_px = resize.max_fixed_edge_drift,
-        final_fixed_edge_drift_px = final_fixed_edge_drift,
-        resize_requests = resize.frame_sync.requested_frames,
-        renderer_presented_frames = resize.frame_sync.presented_frames,
-        dwm_flushed_frames = resize.frame_sync.dwm_flushed_frames,
-        presentation_misses = resize.frame_sync.presentation_misses,
-        last_requested_client_size_px = ?resize.frame_sync.expected_size,
-        last_presented_client_size_px = ?resize.frame_sync.last_presented_size,
-        sync_property_failures = resize.frame_sync.property_failures,
-        dwm_flush_failures = resize.frame_sync.dwm_flush_failures,
-        total_dwm_flush_us = resize.frame_sync.total_dwm_flush_micros,
-        max_dwm_flush_us = resize.frame_sync.max_dwm_flush_micros,
-        "translation popup native resize completed"
-    );
-
-    let bridge = unsafe { &*(state.0 as *const PopupInputBridge) };
-    (bridge.handler)(PopupPointerEvent::ResizeFinished {
-        width: size.0,
-        height: size.1,
-    });
+    if unsafe { GetClientRect(hwnd, &mut client) }.is_ok() {
+        (bridge.handler)(PopupPointerEvent::ResizeFinished {
+            width: (client.right - client.left) as f32,
+            height: (client.bottom - client.top) as f32,
+        });
+    }
 }
 
 fn cancel_popup_resize(hwnd: windows::Win32::Foundation::HWND) {
@@ -1224,9 +885,11 @@ fn clear_popup_resize(hwnd: windows::Win32::Foundation::HWND, notify_ui: bool) {
     if state.0.is_null() {
         return;
     }
-    clear_native_resize_properties(hwnd);
     let bridge = unsafe { &mut *(state.0 as *mut PopupInputBridge) };
-    if bridge.resize.take().is_none() || !notify_ui {
+    let Some(_resize) = bridge.resize.take() else {
+        return;
+    };
+    if !notify_ui {
         return;
     }
     let mut client = RECT::default();
@@ -1235,21 +898,6 @@ fn clear_popup_resize(hwnd: windows::Win32::Foundation::HWND, notify_ui: bool) {
             width: (client.right - client.left) as f32,
             height: (client.bottom - client.top) as f32,
         });
-    }
-}
-
-fn clear_native_resize_properties(hwnd: windows::Win32::Foundation::HWND) {
-    use windows::Win32::UI::WindowsAndMessaging::RemovePropW;
-    use windows::core::w;
-
-    for property in [
-        w!("Lexift.PopupNativeResize"),
-        w!("Lexift.PopupResizeGeneration"),
-        w!("Lexift.PopupPresentedGeneration"),
-        w!("Lexift.PopupPresentedWidth"),
-        w!("Lexift.PopupPresentedHeight"),
-    ] {
-        let _ = unsafe { RemovePropW(hwnd, property) };
     }
 }
 
@@ -1319,6 +967,38 @@ fn configure_hwnd_extended_style(
     Ok(())
 }
 
+fn popup_native_snap_style(style: isize) -> isize {
+    use windows::Win32::UI::WindowsAndMessaging::{WS_MAXIMIZEBOX, WS_THICKFRAME};
+
+    style | WS_THICKFRAME.0 as isize | WS_MAXIMIZEBOX.0 as isize
+}
+
+fn ensure_native_snap_styles(hwnd: windows::Win32::Foundation::HWND) -> lexift_core::Result<()> {
+    use windows::Win32::{
+        Foundation::{GetLastError, SetLastError, WIN32_ERROR},
+        UI::WindowsAndMessaging::{GWL_STYLE, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos},
+    };
+
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        let updated_style = popup_native_snap_style(style);
+        if updated_style == style {
+            return Ok(());
+        }
+        SetLastError(WIN32_ERROR(0));
+        let previous = SetWindowLongPtrW(hwnd, GWL_STYLE, updated_style);
+        if previous == 0 && GetLastError().0 != 0 {
+            return Err(lexift_core::Error::new(
+                "Could not enable native resizing and snap behavior for the translation popup",
+            ));
+        }
+        SetWindowPos(hwnd, None, 0, 0, 0, 0, passive_refresh_flags()).map_err(|_| {
+            lexift_core::Error::new("Could not refresh translation popup native resize styles")
+        })?;
+    }
+    Ok(())
+}
+
 fn required_hwnd(
     window: &impl raw_window_handle::HasWindowHandle,
 ) -> lexift_core::Result<windows::Win32::Foundation::HWND> {
@@ -1361,13 +1041,14 @@ fn passive_refresh_flags() -> windows::Win32::UI::WindowsAndMessaging::SET_WINDO
 mod tests {
     use std::{cell::Cell, rc::Rc};
 
-    use crate::{PopupPointerEvent, PopupResizeBounds, PopupResizeEdge};
+    use crate::{PopupPointerEvent, PopupResizeEdge};
 
     use super::{
-        PopupDismissWatch, PopupInputBridge, PopupResizePhase, PopupResizeSession, PopupWindowRect,
+        PopupDismissWatch, PopupInputBridge, PopupResizeSession, PopupWindowRect,
         async_key_is_pressed, client_position, configure_passive, interactive_extended_style,
-        pack_screen_position, passive_extended_style, passive_refresh_flags, point_inside_rect,
-        popup_resize_presentation_matches, should_dismiss_for_foreground, wheel_delta_physical,
+        native_top_resize_hit_test, pack_screen_position, passive_extended_style,
+        passive_refresh_flags, point_inside_rect, popup_native_snap_style, scale_dip_to_physical,
+        should_dismiss_for_foreground, wheel_delta_physical,
     };
     use crate::PassiveToolWindowPreparation;
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -1430,172 +1111,40 @@ mod tests {
     }
 
     #[test]
-    fn native_resize_tracks_the_expected_fixed_edges_in_all_directions() {
-        use windows::Win32::Foundation::RECT;
+    fn popup_adds_native_resize_and_snap_styles_without_dropping_existing_styles() {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            WS_CAPTION, WS_MAXIMIZEBOX, WS_SYSMENU, WS_THICKFRAME,
+        };
 
-        let initial_rect = PopupWindowRect {
+        let original = WS_SYSMENU.0 as isize;
+        let updated = popup_native_snap_style(original);
+        assert_eq!(updated & original, original);
+        assert_ne!(updated & WS_THICKFRAME.0 as isize, 0);
+        assert_ne!(updated & WS_MAXIMIZEBOX.0 as isize, 0);
+        assert_eq!(updated & WS_CAPTION.0 as isize, 0);
+    }
+
+    #[test]
+    fn only_the_middle_of_the_popup_top_strip_uses_native_hit_testing() {
+        let rect = PopupWindowRect {
             left: 100,
             top: 200,
-            right: 500,
-            bottom: 700,
+            right: 600,
+            bottom: 600,
         };
-        let expected = [
-            (
-                PopupResizeEdge::Left,
-                RECT {
-                    left: 25,
-                    top: 200,
-                    right: 500,
-                    bottom: 700,
-                },
-            ),
-            (
-                PopupResizeEdge::Right,
-                RECT {
-                    left: 100,
-                    top: 200,
-                    right: 575,
-                    bottom: 700,
-                },
-            ),
-            (
-                PopupResizeEdge::Top,
-                RECT {
-                    left: 100,
-                    top: 150,
-                    right: 500,
-                    bottom: 700,
-                },
-            ),
-            (
-                PopupResizeEdge::Bottom,
-                RECT {
-                    left: 100,
-                    top: 200,
-                    right: 500,
-                    bottom: 750,
-                },
-            ),
-            (
-                PopupResizeEdge::TopLeft,
-                RECT {
-                    left: 25,
-                    top: 150,
-                    right: 500,
-                    bottom: 700,
-                },
-            ),
-            (
-                PopupResizeEdge::TopRight,
-                RECT {
-                    left: 100,
-                    top: 150,
-                    right: 575,
-                    bottom: 700,
-                },
-            ),
-            (
-                PopupResizeEdge::BottomLeft,
-                RECT {
-                    left: 25,
-                    top: 200,
-                    right: 500,
-                    bottom: 750,
-                },
-            ),
-            (
-                PopupResizeEdge::BottomRight,
-                RECT {
-                    left: 100,
-                    top: 200,
-                    right: 575,
-                    bottom: 750,
-                },
-            ),
-        ];
+        assert!(native_top_resize_hit_test(rect, 350, 204, 96));
+        assert!(!native_top_resize_hit_test(rect, 350, 208, 96));
+        assert!(!native_top_resize_hit_test(rect, 120, 204, 96));
+        assert!(!native_top_resize_hit_test(rect, 580, 204, 96));
+        assert!(native_top_resize_hit_test(rect, 350, 210, 144));
+        assert!(!native_top_resize_hit_test(rect, 350, 212, 144));
+    }
 
-        for (edge, actual) in expected {
-            let resize = PopupResizeSession {
-                edge,
-                initial_rect,
-                bounds: PopupResizeBounds {
-                    min_width: 340,
-                    min_height: 336,
-                    max_width: 1_000,
-                    max_height: 1_000,
-                },
-                phase: PopupResizePhase::NativeSizing,
-                size_samples: 1,
-                max_fixed_edge_drift: 0,
-                frame_sync: Default::default(),
-            };
-            assert_eq!(resize.fixed_edge_drift(&actual), 0, "{edge:?}");
+    #[test]
+    fn native_hit_test_strip_scales_with_monitor_dpi() {
+        for (dpi, expected_pixels) in [(96, 8), (120, 10), (144, 12), (192, 16)] {
+            assert_eq!(scale_dip_to_physical(8.0, dpi), expected_pixels);
         }
-    }
-
-    #[test]
-    fn native_resize_state_requires_a_pressed_button_and_completes_once() {
-        let mut resize = PopupResizeSession {
-            edge: PopupResizeEdge::TopLeft,
-            initial_rect: PopupWindowRect {
-                left: 100,
-                top: 200,
-                right: 500,
-                bottom: 700,
-            },
-            bounds: PopupResizeBounds {
-                min_width: 340,
-                min_height: 336,
-                max_width: 1_000,
-                max_height: 1_000,
-            },
-            phase: PopupResizePhase::AwaitingNativeStart,
-            size_samples: 0,
-            max_fixed_edge_drift: 0,
-            frame_sync: Default::default(),
-        };
-
-        assert!(!resize.native_start_allowed(false));
-        assert!(resize.native_start_allowed(true));
-        assert!(resize.enter_native_sizing());
-        assert_eq!(resize.phase, PopupResizePhase::NativeSizing);
-        assert!(resize.needs_frame_sync());
-        assert!(!resize.enter_native_sizing());
-        assert!(resize.complete_native_sizing());
-        assert_eq!(resize.phase, PopupResizePhase::Completed);
-        assert!(!resize.needs_frame_sync());
-        assert!(!resize.complete_native_sizing());
-    }
-
-    #[test]
-    fn native_resize_waits_for_a_presented_frame_of_the_requested_size() {
-        let generation = 17;
-        let requested_size = (1280, 720);
-
-        assert!(popup_resize_presentation_matches(
-            generation,
-            requested_size,
-            17,
-            (1280, 720)
-        ));
-        assert!(!popup_resize_presentation_matches(
-            generation,
-            requested_size,
-            16,
-            (1280, 720)
-        ));
-        assert!(!popup_resize_presentation_matches(
-            generation,
-            requested_size,
-            17,
-            (1279, 720)
-        ));
-        assert!(!popup_resize_presentation_matches(
-            generation,
-            requested_size,
-            17,
-            (1280, 719)
-        ));
     }
 
     #[test]
@@ -1682,22 +1231,6 @@ mod tests {
         bridge.tracking_leave = true;
         bridge.resize = Some(PopupResizeSession {
             edge: PopupResizeEdge::TopLeft,
-            initial_rect: PopupWindowRect {
-                left: 10,
-                top: 20,
-                right: 300,
-                bottom: 400,
-            },
-            bounds: PopupResizeBounds {
-                min_width: 340,
-                min_height: 336,
-                max_width: 1_000,
-                max_height: 1_000,
-            },
-            phase: PopupResizePhase::AwaitingNativeStart,
-            size_samples: 3,
-            max_fixed_edge_drift: 2,
-            frame_sync: Default::default(),
         });
 
         let new_calls = Rc::new(Cell::new(0));

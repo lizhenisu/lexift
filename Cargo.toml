@@ -25,13 +25,15 @@ lexift-config = { path = "crates/lexift-config" }
 lexift-observability = { path = "crates/lexift-observability" }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "system-proxy"] }
 atomic-write-file = "0.3.1"
+i-slint-backend-winit = { version = "1.18.1", default-features = false }
+i-slint-core = { version = "1.18.1", default-features = false, features = ["std"] }
 dirs = "7.0.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 slint = { version = "1.18.1", default-features = false, features = [
     "backend-winit",
     "compat-1-2",
-    "renderer-skia-opengl",
+    "renderer-software",
     "std",
 ] }
 slint-build = "1.18.1"

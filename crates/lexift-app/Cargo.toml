@@ -27,6 +27,8 @@ lexift-platform.workspace = true
 lexift-translate.workspace = true
 lexift-config.workspace = true
 lexift-observability.workspace = true
+i-slint-backend-winit.workspace = true
+slint.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 

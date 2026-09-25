@@ -12,6 +12,52 @@ mod windows;
 
 pub use capabilities::PlatformCapabilities;
 
+/// Keeps an opaque window opaque and fills the client area a native resize exposes.
+///
+/// Slint asks winit for a transparent window, which on Windows means per-pixel alpha, so anything
+/// the application has not painted would show the desktop through the window; winit also leaves its
+/// window class without a background brush, so a band a resize uncovers stays unpainted. Call this
+/// for the windows whose design is an opaque panel, with the colour they paint behind their content.
+pub fn configure_resize_background(
+    window: &impl raw_window_handle::HasWindowHandle,
+    background_color_rgb: [u8; 3],
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::resize_background::install(window, background_color_rgb)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, background_color_rgb);
+        Ok(())
+    }
+}
+
+/// Registers the callback that runs after Windows finishes an interactive move or resize.
+///
+/// Windows can resize a window on its own while the modal loop runs — an edge snap, plus the restore
+/// that follows when the user keeps dragging — and coalesces those size messages, so the application
+/// can end up never hearing about the intermediate geometry. The pixels painted for it stay on
+/// screen, which is why the window's owner repaints the whole client area through this hook once the
+/// loop ends.
+///
+/// Call it after [`configure_resize_background`], which installs the per-window state this hook lives
+/// in, and only from the thread that owns the window.
+pub fn configure_window_geometry_repair(
+    window: &impl raw_window_handle::HasWindowHandle,
+    repair: Box<dyn Fn()>,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::resize_background::set_geometry_repair(window, repair)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, repair);
+        Ok(())
+    }
+}
+
 /// The outer-corner treatment available for the translation popup.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PopupCornerMode {
@@ -50,6 +96,8 @@ pub enum PopupPointerEvent {
     },
     /// The user continued working outside an unpinned popup.
     DismissRequested,
+    /// A real non-client top-edge press is about to enter Windows' sizing loop.
+    NativeTopResizeRequested,
     /// The native client area changed size, in physical pixels.
     Resized {
         width: f32,
@@ -73,15 +121,6 @@ pub enum PopupResizeEdge {
     TopRight,
     BottomLeft,
     BottomRight,
-}
-
-/// Popup outer-window size limits in physical pixels.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PopupResizeBounds {
-    pub min_width: u32,
-    pub min_height: u32,
-    pub max_width: u32,
-    pub max_height: u32,
 }
 
 pub type PopupPointerHandler = Box<dyn Fn(PopupPointerEvent) + 'static>;
@@ -216,24 +255,38 @@ pub fn trim_process_working_set() -> lexift_core::Result<()> {
     Ok(())
 }
 
-/// Starts the native system resize operation for a popup source-card handle.
+/// Prepares platform tracking for a popup's native resize operation.
 ///
-/// Returns `false` when the initiating left-button press has already ended.
+/// The UI backend starts the actual OS resize loop after this returns `true`.
 #[cfg(target_os = "windows")]
-pub fn begin_window_resize(
+pub fn prepare_window_resize_tracking(
     window: &impl raw_window_handle::HasWindowHandle,
     edge: PopupResizeEdge,
-    bounds: PopupResizeBounds,
 ) -> lexift_core::Result<bool> {
-    windows::popup::begin_resize(window, edge, bounds)
+    windows::popup::prepare_resize_tracking(window, edge)
+}
+
+/// Cancels prepared platform resize tracking when the UI backend cannot start resizing.
+#[cfg(target_os = "windows")]
+pub fn cancel_window_resize_tracking(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    windows::popup::cancel_resize_tracking(window)
 }
 
 /// Reports unsupported native popup resizing on non-Windows platforms.
 #[cfg(not(target_os = "windows"))]
-pub fn begin_window_resize(
+pub fn prepare_window_resize_tracking(
     _window: &impl raw_window_handle::HasWindowHandle,
     _edge: PopupResizeEdge,
-    _bounds: PopupResizeBounds,
 ) -> lexift_core::Result<bool> {
     Ok(false)
+}
+
+/// Does nothing on platforms that do not prepare native popup resize tracking.
+#[cfg(not(target_os = "windows"))]
+pub fn cancel_window_resize_tracking(
+    _window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    Ok(())
 }

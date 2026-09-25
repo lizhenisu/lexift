@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use i_slint_backend_winit::{WinitWindowAccessor, winit::window::ResizeDirection};
 use lexift_core::ports::instance::InstanceStatus;
 use lexift_core::ports::tray::{TrayHandler, TrayPort};
 
@@ -28,6 +29,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
+    let screen_for_popup = services.screen.clone();
     let ui = lexift_ui::Ui::new(
         &initial_state,
         cfg!(feature = "m1-demo"),
@@ -74,6 +76,9 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                         lexift_platform::PopupPointerEvent::DismissRequested => {
                             lexift_ui::PopupPointerInput::DismissRequested
                         }
+                        lexift_platform::PopupPointerEvent::NativeTopResizeRequested => {
+                            lexift_ui::PopupPointerInput::NativeTopResizeRequested
+                        }
                         lexift_platform::PopupPointerEvent::Resized { width, height } => {
                             lexift_ui::PopupPointerInput::Resized { width, height }
                         }
@@ -105,38 +110,44 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                     false
                 }
             },
-            |window, edge, bounds| {
-                let edge = match edge {
-                    lexift_ui::PopupResizeEdge::Left => lexift_platform::PopupResizeEdge::Left,
-                    lexift_ui::PopupResizeEdge::Right => lexift_platform::PopupResizeEdge::Right,
-                    lexift_ui::PopupResizeEdge::Top => lexift_platform::PopupResizeEdge::Top,
-                    lexift_ui::PopupResizeEdge::Bottom => lexift_platform::PopupResizeEdge::Bottom,
-                    lexift_ui::PopupResizeEdge::TopLeft => {
-                        lexift_platform::PopupResizeEdge::TopLeft
-                    }
-                    lexift_ui::PopupResizeEdge::TopRight => {
-                        lexift_platform::PopupResizeEdge::TopRight
-                    }
-                    lexift_ui::PopupResizeEdge::BottomLeft => {
-                        lexift_platform::PopupResizeEdge::BottomLeft
-                    }
-                    lexift_ui::PopupResizeEdge::BottomRight => {
-                        lexift_platform::PopupResizeEdge::BottomRight
-                    }
-                };
-                let scale = window.scale_factor().max(f32::EPSILON);
-                // UI work-area bounds are logical; the Windows sizing loop
-                // consumes physical MINMAXINFO values, so convert exactly once.
-                let bounds = lexift_platform::PopupResizeBounds {
-                    min_width: (bounds.min_width * scale).round().max(1.0) as u32,
-                    min_height: (bounds.min_height * scale).round().max(1.0) as u32,
-                    max_width: (bounds.max_width * scale).round().max(1.0) as u32,
-                    max_height: (bounds.max_height * scale).round().max(1.0) as u32,
-                };
-                match lexift_platform::begin_window_resize(&window.window_handle(), edge, bounds) {
-                    Ok(started) => started,
+            |window, edge, native_hit_test| {
+                let platform_edge = popup_resize_platform_edge(edge);
+                match lexift_platform::prepare_window_resize_tracking(
+                    &window.window_handle(),
+                    platform_edge,
+                ) {
+                    Ok(true) => {}
+                    Ok(false) => return false,
                     Err(error) => {
-                        tracing::warn!(%error, "window resize failed");
+                        tracing::warn!(%error, "popup resize tracking could not be prepared");
+                        return false;
+                    }
+                }
+                if native_hit_test {
+                    // DefWindowProc will enter the sizing loop for the real HTTOP press.
+                    return true;
+                }
+                let direction = popup_resize_direction(edge);
+                match window.with_winit_window(|winit_window| {
+                    winit_window.drag_resize_window(direction)
+                }) {
+                    Some(Ok(())) => true,
+                    Some(Err(error)) => {
+                        if let Err(cancel_error) =
+                            lexift_platform::cancel_window_resize_tracking(&window.window_handle())
+                        {
+                            tracing::warn!(%cancel_error, "popup resize tracking could not be cancelled");
+                        }
+                        tracing::warn!(%error, "Winit could not start popup resize");
+                        false
+                    }
+                    None => {
+                        if let Err(error) =
+                            lexift_platform::cancel_window_resize_tracking(&window.window_handle())
+                        {
+                            tracing::warn!(%error, "popup resize tracking could not be cancelled");
+                        }
+                        tracing::warn!("Winit window is unavailable for popup resize");
                         false
                     }
                 }
@@ -169,6 +180,33 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 }
             },
         )
+        .with_popup_work_area(move |point| {
+            screen_for_popup
+                .as_ref()?
+                .work_area_for_point(point)
+                .ok()
+        })
+        .with_resize_background(|window, color_rgb| {
+            match lexift_platform::configure_resize_background(&window.window_handle(), color_rgb) {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::debug!(%error, "resize background fill could not be installed");
+                    false
+                }
+            }
+        })
+        .with_window_paint_repair(|window, repair| {
+            match lexift_platform::configure_window_geometry_repair(
+                &window.window_handle(),
+                Box::new(move || repair()),
+            ) {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::debug!(%error, "window paint repair could not be installed");
+                    false
+                }
+            }
+        })
         .with_translation_popup_corners(|window| {
             match lexift_platform::configure_translation_popup_corners(&window.window_handle()) {
                 lexift_platform::PopupCornerMode::NativeRounded => {
@@ -276,6 +314,34 @@ fn register_tray(tray: Option<&Arc<dyn TrayPort>>, handler: TrayHandler) -> bool
     }
 }
 
+fn popup_resize_platform_edge(
+    edge: lexift_ui::PopupResizeEdge,
+) -> lexift_platform::PopupResizeEdge {
+    match edge {
+        lexift_ui::PopupResizeEdge::Left => lexift_platform::PopupResizeEdge::Left,
+        lexift_ui::PopupResizeEdge::Right => lexift_platform::PopupResizeEdge::Right,
+        lexift_ui::PopupResizeEdge::Top => lexift_platform::PopupResizeEdge::Top,
+        lexift_ui::PopupResizeEdge::Bottom => lexift_platform::PopupResizeEdge::Bottom,
+        lexift_ui::PopupResizeEdge::TopLeft => lexift_platform::PopupResizeEdge::TopLeft,
+        lexift_ui::PopupResizeEdge::TopRight => lexift_platform::PopupResizeEdge::TopRight,
+        lexift_ui::PopupResizeEdge::BottomLeft => lexift_platform::PopupResizeEdge::BottomLeft,
+        lexift_ui::PopupResizeEdge::BottomRight => lexift_platform::PopupResizeEdge::BottomRight,
+    }
+}
+
+fn popup_resize_direction(edge: lexift_ui::PopupResizeEdge) -> ResizeDirection {
+    match edge {
+        lexift_ui::PopupResizeEdge::Left => ResizeDirection::West,
+        lexift_ui::PopupResizeEdge::Right => ResizeDirection::East,
+        lexift_ui::PopupResizeEdge::Top => ResizeDirection::North,
+        lexift_ui::PopupResizeEdge::Bottom => ResizeDirection::South,
+        lexift_ui::PopupResizeEdge::TopLeft => ResizeDirection::NorthWest,
+        lexift_ui::PopupResizeEdge::TopRight => ResizeDirection::NorthEast,
+        lexift_ui::PopupResizeEdge::BottomLeft => ResizeDirection::SouthWest,
+        lexift_ui::PopupResizeEdge::BottomRight => ResizeDirection::SouthEast,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use lexift_core::{Error, Result};
@@ -295,5 +361,24 @@ mod tests {
         let tray: Arc<dyn TrayPort> = Arc::new(FailingTray);
         assert!(!register_tray(Some(&tray), Arc::new(|_| {})));
         assert!(!register_tray(None, Arc::new(|_| {})));
+    }
+
+    #[test]
+    fn popup_resize_edges_map_to_winit_directions() {
+        use ResizeDirection as Direction;
+        use lexift_ui::PopupResizeEdge as Edge;
+
+        for (edge, expected) in [
+            (Edge::Left, Direction::West),
+            (Edge::Right, Direction::East),
+            (Edge::Top, Direction::North),
+            (Edge::Bottom, Direction::South),
+            (Edge::TopLeft, Direction::NorthWest),
+            (Edge::TopRight, Direction::NorthEast),
+            (Edge::BottomLeft, Direction::SouthWest),
+            (Edge::BottomRight, Direction::SouthEast),
+        ] {
+            assert_eq!(popup_resize_direction(edge), expected);
+        }
     }
 }

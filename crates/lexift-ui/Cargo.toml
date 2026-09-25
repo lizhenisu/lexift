@@ -6,6 +6,7 @@ license.workspace = true
 build = "build.rs"
 
 [dependencies]
+i-slint-core.workspace = true
 lexift-core.workspace = true
 slint = { workspace = true, features = ["raw-window-handle-06"] }
 tracing.workspace = true

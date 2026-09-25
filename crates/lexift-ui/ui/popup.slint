@@ -77,8 +77,21 @@ export component TranslationPopup inherits Window {
     in-out property <PopupCornerMode> corner-mode: PopupCornerMode.slint-rounded;
     in-out property <length> source-card-height: 116px;
     in-out property <length> resize-min-height: 336px;
+    in-out property <length> resize-min-source-height: 86px;
     in-out property <length> max-popup-width: 1920px;
     in-out property <length> max-popup-height: 1080px;
+    out property <color> resize-fallback-color: Colors.surface;
+    // Vertical budget the source card must leave for the language row and the
+    // result card. Measured from the live layout, never from a frozen size.
+    out property <length> resize-layout-reserve-height:
+        root.height - content.height + language-bar.height + content.spacing + content.spacing + result-card.min-height;
+    // Hard ceiling for the source card. Windows can shrink the window without the UI seeing an
+    // event first (dragging the title row out of a top-edge snap, or a cross-DPI move), because its
+    // modal move loop blocks the event loop; the bridge can only re-clamp the saved card height
+    // once the mouse is released. Capping the rendered height here keeps the language row and the
+    // result card on screen during that drag.
+    out property <length> resize-max-source-height:
+        max(root.height - root.resize-layout-reserve-height, root.resize-min-source-height);
     in-out property <bool> resize-active: false;
     in-out property <bool> resize-changes-height: false;
     in-out property <length> resize-fixed-remainder: 0px;
@@ -195,9 +208,17 @@ export component TranslationPopup inherits Window {
             spacing: 10px;
 
             source-card := Rectangle {
-                height: root.resize-active && root.resize-changes-height
-                    ? max(0px, root.height - root.resize-fixed-remainder)
-                    : root.source-card-height;
+                // While a native resize is in flight the card follows the window so the
+                // exposed area stays filled; otherwise the saved card height wins. The card keeps
+                // its own minimum during a shrink so it never collapses while the result card takes
+                // the rest of the available space, and it never grows past the layout budget so a
+                // window shrink the UI has not processed yet cannot push the rows below out of view.
+                height: min(
+                    root.resize-active && root.resize-changes-height
+                        ? max(root.resize-min-source-height, root.height - root.resize-fixed-remainder)
+                        : root.source-card-height,
+                    root.resize-max-source-height
+                );
                 border-radius: 12px;
                 background: Colors.background;
                 border-width: source-input.has-focus ? 2px : 0px;

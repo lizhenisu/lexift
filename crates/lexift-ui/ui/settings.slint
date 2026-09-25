@@ -396,6 +396,8 @@ export component SettingsWindow inherits Window {
     title: "Lexift Settings"; icon: AppAssets.app-icon;
     preferred-width: 820px; preferred-height: 680px; min-width: 520px; min-height: 520px;
     background: Colors.background;
+    // Exposed to the bridge so native resizing can fill newly exposed client area with it.
+    out property <color> resize-fallback-color: Colors.background;
 
     in-out property <int> draft-target-index: 0;
     in property <string> target-language-error-text: "";
