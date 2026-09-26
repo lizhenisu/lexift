@@ -3426,6 +3426,114 @@ mod tests {
     };
 
     #[test]
+    fn migrated_settings_keep_real_callbacks_and_isolate_preview_state() {
+        use super::*;
+        use slint::platform::{
+            Platform, WindowAdapter,
+            software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+        };
+        use std::cell::RefCell;
+        struct TestPlatform;
+        impl Platform for TestPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer))
+            }
+        }
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        let settings = SettingsWindow::new().unwrap();
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let recorded = events.clone();
+        let generation = Arc::new(AtomicU64::new(0));
+        wire_settings_callbacks(
+            &settings,
+            Rc::new(move |event| recorded.borrow_mut().push(event)),
+            generation.clone(),
+            Arc::new(Mutex::new(Vec::new())),
+        );
+        settings.invoke_select_category(1);
+        settings.set_draft_target_index(0);
+        settings.set_settings_menu_provider_mode(false);
+        settings.invoke_settings_menu_selected(4);
+        assert!(
+            matches!(&events.borrow()[0], AppEvent::SettingsChangeRequested { change: SettingsChange::TargetLanguage(language) } if language == &language_for_index(4))
+        );
+        assert_eq!(settings.get_appearance_language_index(), 2);
+        events.borrow_mut().clear();
+
+        settings.set_fallback_target_index(6);
+        settings.set_preprocess_join_lines(true);
+        settings.set_translation_auto_copy(true);
+        settings.set_translation_auto_resize(false);
+        settings.invoke_select_category(5);
+        settings.invoke_select_category(1);
+        assert_eq!(settings.get_fallback_target_index(), 6);
+        assert!(settings.get_preprocess_join_lines());
+        assert!(settings.get_translation_auto_copy());
+        assert!(!settings.get_translation_auto_resize());
+        assert!(events.borrow().is_empty());
+
+        settings.invoke_select_category(5);
+        settings.set_draft_provider_id("".into());
+        settings.set_settings_menu_provider_mode(true);
+        settings.invoke_settings_menu_selected(0);
+        assert!(matches!(
+            &events.borrow()[0],
+            AppEvent::SettingsChangeRequested {
+                change: SettingsChange::Provider(ProviderConfig::DeepL)
+            }
+        ));
+        settings.invoke_credential_save_requested("test-only-placeholder".into());
+        settings.invoke_credential_reveal_requested();
+        settings.invoke_credential_copy_requested();
+        settings.invoke_credential_edit_requested();
+        settings.invoke_credential_remove_requested();
+        {
+            let events = events.borrow();
+            assert!(matches!(
+                &events[1],
+                AppEvent::CredentialSaveRequested { .. }
+            ));
+            assert!(matches!(
+                &events[2],
+                AppEvent::CredentialAccessRequested {
+                    purpose: CredentialAccessPurpose::Reveal,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                &events[3],
+                AppEvent::CredentialAccessRequested {
+                    purpose: CredentialAccessPurpose::Copy,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                &events[4],
+                AppEvent::CredentialAccessRequested {
+                    purpose: CredentialAccessPurpose::Edit,
+                    ..
+                }
+            ));
+            assert!(matches!(&events[5], AppEvent::CredentialRemoveRequested));
+        }
+        settings.set_credential_draft("test-only-placeholder".into());
+        settings.set_credential_transient_secret("test-only-placeholder".into());
+        settings.set_credential_editing(true);
+        let old_generation = generation.load(Ordering::Relaxed);
+        settings.invoke_select_category(0);
+        assert!(settings.get_credential_draft().is_empty());
+        assert!(settings.get_credential_transient_secret().is_empty());
+        assert!(!settings.get_credential_editing());
+        assert!(generation.load(Ordering::Relaxed) > old_generation);
+        drop(settings);
+        let reopened = SettingsWindow::new().unwrap();
+        assert_eq!(reopened.get_fallback_target_index(), 2);
+        assert!(!reopened.get_preprocess_join_lines());
+        assert!(!reopened.get_translation_auto_copy());
+        assert!(reopened.get_translation_auto_resize());
+    }
+
+    #[test]
     fn toolbar_fade_follows_distance_and_scale() {
         let bounds = Rect {
             left: 100,

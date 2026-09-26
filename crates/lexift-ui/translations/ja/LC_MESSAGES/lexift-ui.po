@@ -567,3 +567,87 @@ msgstr "幅"
 
 msgid "Working…"
 msgstr "処理中…"
+
+msgid "Adjust window height to the content. Window width is resized manually."
+msgstr "内容に合わせて高さを調整します。幅は手動で変更します。"
+
+msgid "Convert FooBar to foo bar before translation."
+msgstr "翻訳前に FooBar を foo bar に変換します。"
+
+msgid "Convert foo-bar to foo bar before translation."
+msgstr "翻訳前に foo-bar を foo bar に変換します。"
+
+msgid "Convert fooBar to foo bar before translation."
+msgstr "翻訳前に fooBar を foo bar に変換します。"
+
+msgid "Convert foo_bar to foo bar before translation."
+msgstr "翻訳前に foo_bar を foo bar に変換します。"
+
+msgid "Copy the first translation result automatically"
+msgstr "最初の翻訳結果を自動コピー"
+
+msgid "Default target language"
+msgstr "既定の翻訳先言語"
+
+msgid "Fallback target language"
+msgstr "代替の翻訳先言語"
+
+msgid "Hide input area"
+msgstr "入力欄を非表示"
+
+msgid "Hide language bar"
+msgstr "言語バーを非表示"
+
+msgid "Hide language controls for selection and screenshot translations. Keep them visible for typed translations."
+msgstr "選択範囲やスクリーンショットの翻訳で言語の設定を非表示にします。入力翻訳では表示します。"
+
+msgid "Hide source text for selection and screenshot translations. Keep it visible for typed translations."
+msgstr "選択範囲やスクリーンショットの翻訳で原文を非表示にします。入力翻訳では表示します。"
+
+msgid "Join wrapped lines while preserving paragraph breaks."
+msgstr "折り返された行を結合し、段落の区切りは保持します。"
+
+msgid "Languages"
+msgstr "言語"
+
+msgid "Large language model providers"
+msgstr "大規模言語モデルのプロバイダー"
+
+msgid "Not available yet"
+msgstr "まだ利用できません"
+
+msgid "Pin the translation window by default"
+msgstr "翻訳ウィンドウを既定で固定"
+
+msgid "Resize the translation window automatically"
+msgstr "翻訳ウィンドウのサイズを自動調整"
+
+msgid "Service providers"
+msgstr "サービスプロバイダー"
+
+msgid "Smart line break removal"
+msgstr "改行を自動で整理"
+
+msgid "Source text preprocessing"
+msgstr "原文の前処理"
+
+msgid "Split PascalCase"
+msgstr "PascalCase を分割"
+
+msgid "Split camelCase"
+msgstr "camelCase を分割"
+
+msgid "Split kebab-case"
+msgstr "kebab-case を分割"
+
+msgid "Split snake_case"
+msgstr "snake_case を分割"
+
+msgid "Translation providers"
+msgstr "翻訳サービスプロバイダー"
+
+msgid "Translation settings"
+msgstr "翻訳設定"
+
+msgid "Used when the detected source language matches the default target language."
+msgstr "検出された原文の言語が既定の翻訳先と同じ場合に使用します。"

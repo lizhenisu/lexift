@@ -567,3 +567,87 @@ msgstr "Largeur"
 
 msgid "Working…"
 msgstr "Traitement…"
+
+msgid "Adjust window height to the content. Window width is resized manually."
+msgstr "Adapte la hauteur au contenu. La largeur se règle manuellement."
+
+msgid "Convert FooBar to foo bar before translation."
+msgstr "Convertit FooBar en foo bar avant la traduction."
+
+msgid "Convert foo-bar to foo bar before translation."
+msgstr "Convertit foo-bar en foo bar avant la traduction."
+
+msgid "Convert fooBar to foo bar before translation."
+msgstr "Convertit fooBar en foo bar avant la traduction."
+
+msgid "Convert foo_bar to foo bar before translation."
+msgstr "Convertit foo_bar en foo bar avant la traduction."
+
+msgid "Copy the first translation result automatically"
+msgstr "Copier automatiquement le premier résultat de traduction"
+
+msgid "Default target language"
+msgstr "Langue cible par défaut"
+
+msgid "Fallback target language"
+msgstr "Langue cible alternative"
+
+msgid "Hide input area"
+msgstr "Masquer la zone de saisie"
+
+msgid "Hide language bar"
+msgstr "Masquer la barre de langue"
+
+msgid "Hide language controls for selection and screenshot translations. Keep them visible for typed translations."
+msgstr "Masque les langues pour les traductions de sélection et de capture d’écran. Les conserve pour le texte saisi."
+
+msgid "Hide source text for selection and screenshot translations. Keep it visible for typed translations."
+msgstr "Masque le texte source pour les traductions de sélection et de capture d’écran. Le conserve pour le texte saisi."
+
+msgid "Join wrapped lines while preserving paragraph breaks."
+msgstr "Réunit les lignes coupées tout en conservant les paragraphes."
+
+msgid "Languages"
+msgstr "Langues"
+
+msgid "Large language model providers"
+msgstr "Fournisseurs de grands modèles de langage"
+
+msgid "Not available yet"
+msgstr "Pas encore disponible"
+
+msgid "Pin the translation window by default"
+msgstr "Épingler la fenêtre de traduction par défaut"
+
+msgid "Resize the translation window automatically"
+msgstr "Redimensionner automatiquement la fenêtre de traduction"
+
+msgid "Service providers"
+msgstr "Fournisseurs de services"
+
+msgid "Smart line break removal"
+msgstr "Suppression intelligente des sauts de ligne"
+
+msgid "Source text preprocessing"
+msgstr "Prétraitement du texte source"
+
+msgid "Split PascalCase"
+msgstr "Séparer PascalCase"
+
+msgid "Split camelCase"
+msgstr "Séparer camelCase"
+
+msgid "Split kebab-case"
+msgstr "Séparer kebab-case"
+
+msgid "Split snake_case"
+msgstr "Séparer snake_case"
+
+msgid "Translation providers"
+msgstr "Fournisseurs de traduction"
+
+msgid "Translation settings"
+msgstr "Paramètres de traduction"
+
+msgid "Used when the detected source language matches the default target language."
+msgstr "Utilisée lorsque la langue source détectée correspond à la langue cible par défaut."

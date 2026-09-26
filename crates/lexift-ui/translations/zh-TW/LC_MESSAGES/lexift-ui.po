@@ -567,3 +567,87 @@ msgstr "寬度"
 
 msgid "Working…"
 msgstr "處理中…"
+
+msgid "Adjust window height to the content. Window width is resized manually."
+msgstr "依內容調整視窗高度，視窗寬度需手動調整。"
+
+msgid "Convert FooBar to foo bar before translation."
+msgstr "翻譯前將 FooBar 轉換為 foo bar。"
+
+msgid "Convert foo-bar to foo bar before translation."
+msgstr "翻譯前將 foo-bar 轉換為 foo bar。"
+
+msgid "Convert fooBar to foo bar before translation."
+msgstr "翻譯前將 fooBar 轉換為 foo bar。"
+
+msgid "Convert foo_bar to foo bar before translation."
+msgstr "翻譯前將 foo_bar 轉換為 foo bar。"
+
+msgid "Copy the first translation result automatically"
+msgstr "自動複製首個翻譯服務的結果"
+
+msgid "Default target language"
+msgstr "預設目標語言"
+
+msgid "Fallback target language"
+msgstr "備用目標語言"
+
+msgid "Hide input area"
+msgstr "隱藏輸入框"
+
+msgid "Hide language bar"
+msgstr "隱藏語言列"
+
+msgid "Hide language controls for selection and screenshot translations. Keep them visible for typed translations."
+msgstr "在選字與螢幕擷取翻譯中隱藏語言控制項，輸入翻譯仍顯示這些控制項。"
+
+msgid "Hide source text for selection and screenshot translations. Keep it visible for typed translations."
+msgstr "在選字與螢幕擷取翻譯中隱藏原文區域，輸入翻譯仍顯示此區域。"
+
+msgid "Join wrapped lines while preserving paragraph breaks."
+msgstr "合併文字自動換行產生的換行，同時保留段落分隔。"
+
+msgid "Languages"
+msgstr "語言"
+
+msgid "Large language model providers"
+msgstr "大型語言模型服務供應商"
+
+msgid "Not available yet"
+msgstr "尚未接入"
+
+msgid "Pin the translation window by default"
+msgstr "預設釘選翻譯視窗"
+
+msgid "Resize the translation window automatically"
+msgstr "自動調整翻譯視窗大小"
+
+msgid "Service providers"
+msgstr "服務供應商"
+
+msgid "Smart line break removal"
+msgstr "自動智慧移除換行"
+
+msgid "Source text preprocessing"
+msgstr "原文預處理"
+
+msgid "Split PascalCase"
+msgstr "拆分大駝峰命名"
+
+msgid "Split camelCase"
+msgstr "拆分小駝峰命名"
+
+msgid "Split kebab-case"
+msgstr "拆分連字號命名"
+
+msgid "Split snake_case"
+msgstr "拆分底線命名"
+
+msgid "Translation providers"
+msgstr "翻譯服務供應商"
+
+msgid "Translation settings"
+msgstr "翻譯設定"
+
+msgid "Used when the detected source language matches the default target language."
+msgstr "當偵測到的來源語言與預設目標語言相同時使用。"

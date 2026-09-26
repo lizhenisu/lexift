@@ -155,7 +155,7 @@ mod tests {
                 settings
                     .global::<crate::Colors>()
                     .set_preference(i32::from(dark));
-                for page in 0..5 {
+                for page in 0..6 {
                     settings.set_active_category(page);
                     snapshot(
                         &settings_adapter,
@@ -164,6 +164,27 @@ mod tests {
                         1000,
                     );
                 }
+            }
+            if matches!(
+                language,
+                UiLanguage::EnglishUs | UiLanguage::SimplifiedChinese | UiLanguage::German
+            ) {
+                settings.set_active_category(1);
+                settings.global::<crate::Colors>().set_preference(0);
+                snapshot(
+                    &settings_adapter,
+                    &format!("{}-translation-full", language.code()),
+                    960,
+                    1500,
+                );
+                settings.global::<crate::Colors>().set_preference(1);
+                snapshot(
+                    &settings_adapter,
+                    &format!("{}-translation-narrow-full", language.code()),
+                    580,
+                    1800,
+                );
+                settings.set_active_category(5);
             }
             for dark in [false, true] {
                 popup
@@ -209,8 +230,87 @@ mod tests {
                 650,
                 64,
             );
-            assert_eq!(settings.get_active_category(), 4);
+            assert_eq!(settings.get_active_category(), 5);
         }
+        // Exercise the migrated language controls through the rendered UI, including dismissals.
+        select(UiLanguage::EnglishUs);
+        slint::select_bundled_translation("en-US").unwrap();
+        settings.invoke_select_category(1);
+        settings_adapter.set_size(slint::PhysicalSize::new(580, 1000));
+        let render = || {
+            slint::platform::update_timers_and_animations();
+            settings_adapter.request_redraw();
+            settings_adapter.draw_if_needed(|renderer| {
+                renderer.render(&mut vec![slint::Rgb8Pixel::default(); 580 * 1000], 580);
+            });
+        };
+        let click = |x, y| {
+            use slint::platform::{PointerEventButton, WindowEvent};
+            let position = slint::LogicalPosition::new(x, y);
+            settings
+                .window()
+                .dispatch_event(WindowEvent::PointerMoved { position });
+            settings
+                .window()
+                .dispatch_event(WindowEvent::PointerPressed {
+                    position,
+                    button: PointerEventButton::Left,
+                });
+            settings
+                .window()
+                .dispatch_event(WindowEvent::PointerReleased {
+                    position,
+                    button: PointerEventButton::Left,
+                });
+            render();
+        };
+        render();
+        click(320.0, 352.0);
+        snapshot(&settings_adapter, "en-US-fallback-menu", 580, 1000);
+        click(200.0, 556.0);
+        assert_eq!(settings.get_fallback_target_index(), 4);
+        assert_eq!(settings.get_draft_target_index(), 0);
+        click(510.0, 504.0);
+        assert!(settings.get_preprocess_join_lines());
+        snapshot(&settings_adapter, "en-US-preview-changed", 580, 1000);
+        click(320.0, 352.0);
+        settings
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::Escape.into(),
+            });
+        settings
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::KeyReleased {
+                text: slint::platform::Key::Escape.into(),
+            });
+        render();
+        click(510.0, 504.0);
+        assert!(
+            !settings.get_preprocess_join_lines(),
+            "Escape must release the menu overlay"
+        );
+        click(320.0, 352.0);
+        click(70.0, 900.0);
+        click(510.0, 504.0);
+        assert!(
+            settings.get_preprocess_join_lines(),
+            "Outside click must release the menu overlay"
+        );
+        click(320.0, 352.0);
+        settings
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                position: slint::LogicalPosition::new(545.0, 700.0),
+                delta_x: 0.0,
+                delta_y: -200.0,
+            });
+        render();
+        snapshot(&settings_adapter, "en-US-preview-scrolled", 580, 1000);
+        settings.invoke_select_category(5);
+        settings.invoke_select_category(1);
+        assert_eq!(settings.get_fallback_target_index(), 4);
+        assert!(settings.get_preprocess_join_lines());
         let numeric = NumericProbe::new().unwrap();
         select(UiLanguage::German);
         assert_eq!(numeric.get_formatted(), "1,5");

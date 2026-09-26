@@ -567,3 +567,87 @@ msgstr "너비"
 
 msgid "Working…"
 msgstr "처리 중…"
+
+msgid "Adjust window height to the content. Window width is resized manually."
+msgstr "내용에 따라 창 높이를 조정합니다. 너비는 수동으로 조정합니다."
+
+msgid "Convert FooBar to foo bar before translation."
+msgstr "번역 전에 FooBar를 foo bar로 변환합니다."
+
+msgid "Convert foo-bar to foo bar before translation."
+msgstr "번역 전에 foo-bar를 foo bar로 변환합니다."
+
+msgid "Convert fooBar to foo bar before translation."
+msgstr "번역 전에 fooBar를 foo bar로 변환합니다."
+
+msgid "Convert foo_bar to foo bar before translation."
+msgstr "번역 전에 foo_bar를 foo bar로 변환합니다."
+
+msgid "Copy the first translation result automatically"
+msgstr "첫 번째 번역 결과 자동 복사"
+
+msgid "Default target language"
+msgstr "기본 대상 언어"
+
+msgid "Fallback target language"
+msgstr "대체 대상 언어"
+
+msgid "Hide input area"
+msgstr "입력 영역 숨기기"
+
+msgid "Hide language bar"
+msgstr "언어 표시줄 숨기기"
+
+msgid "Hide language controls for selection and screenshot translations. Keep them visible for typed translations."
+msgstr "선택 및 스크린샷 번역에서 언어 설정을 숨깁니다. 직접 입력한 번역에서는 표시합니다."
+
+msgid "Hide source text for selection and screenshot translations. Keep it visible for typed translations."
+msgstr "선택 및 스크린샷 번역에서 원문을 숨깁니다. 직접 입력한 번역에서는 표시합니다."
+
+msgid "Join wrapped lines while preserving paragraph breaks."
+msgstr "자동으로 줄바꿈된 행을 합치고 문단 구분은 유지합니다."
+
+msgid "Languages"
+msgstr "언어"
+
+msgid "Large language model providers"
+msgstr "대규모 언어 모델 제공업체"
+
+msgid "Not available yet"
+msgstr "아직 지원되지 않음"
+
+msgid "Pin the translation window by default"
+msgstr "기본적으로 번역 창 고정"
+
+msgid "Resize the translation window automatically"
+msgstr "번역 창 크기 자동 조정"
+
+msgid "Service providers"
+msgstr "서비스 제공업체"
+
+msgid "Smart line break removal"
+msgstr "스마트 줄바꿈 제거"
+
+msgid "Source text preprocessing"
+msgstr "원문 전처리"
+
+msgid "Split PascalCase"
+msgstr "PascalCase 분리"
+
+msgid "Split camelCase"
+msgstr "camelCase 분리"
+
+msgid "Split kebab-case"
+msgstr "kebab-case 분리"
+
+msgid "Split snake_case"
+msgstr "snake_case 분리"
+
+msgid "Translation providers"
+msgstr "번역 서비스 제공업체"
+
+msgid "Translation settings"
+msgstr "번역 설정"
+
+msgid "Used when the detected source language matches the default target language."
+msgstr "감지된 원문 언어가 기본 대상 언어와 같을 때 사용합니다."

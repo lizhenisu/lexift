@@ -567,3 +567,87 @@ msgstr "Width"
 
 msgid "Working…"
 msgstr "Working…"
+
+msgid "Adjust window height to the content. Window width is resized manually."
+msgstr "Adjust window height to the content. Window width is resized manually."
+
+msgid "Convert FooBar to foo bar before translation."
+msgstr "Convert FooBar to foo bar before translation."
+
+msgid "Convert foo-bar to foo bar before translation."
+msgstr "Convert foo-bar to foo bar before translation."
+
+msgid "Convert fooBar to foo bar before translation."
+msgstr "Convert fooBar to foo bar before translation."
+
+msgid "Convert foo_bar to foo bar before translation."
+msgstr "Convert foo_bar to foo bar before translation."
+
+msgid "Copy the first translation result automatically"
+msgstr "Copy the first translation result automatically"
+
+msgid "Default target language"
+msgstr "Default target language"
+
+msgid "Fallback target language"
+msgstr "Fallback target language"
+
+msgid "Hide input area"
+msgstr "Hide input area"
+
+msgid "Hide language bar"
+msgstr "Hide language bar"
+
+msgid "Hide language controls for selection and screenshot translations. Keep them visible for typed translations."
+msgstr "Hide language controls for selection and screenshot translations. Keep them visible for typed translations."
+
+msgid "Hide source text for selection and screenshot translations. Keep it visible for typed translations."
+msgstr "Hide source text for selection and screenshot translations. Keep it visible for typed translations."
+
+msgid "Join wrapped lines while preserving paragraph breaks."
+msgstr "Join wrapped lines while preserving paragraph breaks."
+
+msgid "Languages"
+msgstr "Languages"
+
+msgid "Large language model providers"
+msgstr "Large language model providers"
+
+msgid "Not available yet"
+msgstr "Not available yet"
+
+msgid "Pin the translation window by default"
+msgstr "Pin the translation window by default"
+
+msgid "Resize the translation window automatically"
+msgstr "Resize the translation window automatically"
+
+msgid "Service providers"
+msgstr "Service providers"
+
+msgid "Smart line break removal"
+msgstr "Smart line break removal"
+
+msgid "Source text preprocessing"
+msgstr "Source text preprocessing"
+
+msgid "Split PascalCase"
+msgstr "Split PascalCase"
+
+msgid "Split camelCase"
+msgstr "Split camelCase"
+
+msgid "Split kebab-case"
+msgstr "Split kebab-case"
+
+msgid "Split snake_case"
+msgstr "Split snake_case"
+
+msgid "Translation providers"
+msgstr "Translation providers"
+
+msgid "Translation settings"
+msgstr "Translation settings"
+
+msgid "Used when the detected source language matches the default target language."
+msgstr "Used when the detected source language matches the default target language."

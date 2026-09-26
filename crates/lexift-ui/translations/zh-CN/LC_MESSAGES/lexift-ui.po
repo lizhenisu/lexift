@@ -567,3 +567,87 @@ msgstr "宽度"
 
 msgid "Working…"
 msgstr "处理中…"
+
+msgid "Adjust window height to the content. Window width is resized manually."
+msgstr "根据内容调整窗口高度，窗口宽度需手动调整。"
+
+msgid "Convert FooBar to foo bar before translation."
+msgstr "翻译前将 FooBar 转换为 foo bar。"
+
+msgid "Convert foo-bar to foo bar before translation."
+msgstr "翻译前将 foo-bar 转换为 foo bar。"
+
+msgid "Convert fooBar to foo bar before translation."
+msgstr "翻译前将 fooBar 转换为 foo bar。"
+
+msgid "Convert foo_bar to foo bar before translation."
+msgstr "翻译前将 foo_bar 转换为 foo bar。"
+
+msgid "Copy the first translation result automatically"
+msgstr "自动复制首个翻译服务的结果"
+
+msgid "Default target language"
+msgstr "默认目标语言"
+
+msgid "Fallback target language"
+msgstr "备用目标语言"
+
+msgid "Hide input area"
+msgstr "隐藏输入框"
+
+msgid "Hide language bar"
+msgstr "隐藏语言栏"
+
+msgid "Hide language controls for selection and screenshot translations. Keep them visible for typed translations."
+msgstr "在划词和截图翻译中隐藏语言控件，输入翻译仍显示这些控件。"
+
+msgid "Hide source text for selection and screenshot translations. Keep it visible for typed translations."
+msgstr "在划词和截图翻译中隐藏原文区域，输入翻译仍显示此区域。"
+
+msgid "Join wrapped lines while preserving paragraph breaks."
+msgstr "合并文本自动换行产生的换行，同时保留段落分隔。"
+
+msgid "Languages"
+msgstr "语言"
+
+msgid "Large language model providers"
+msgstr "大模型服务提供商"
+
+msgid "Not available yet"
+msgstr "暂未接入"
+
+msgid "Pin the translation window by default"
+msgstr "默认固定翻译窗口"
+
+msgid "Resize the translation window automatically"
+msgstr "自动调整翻译窗口大小"
+
+msgid "Service providers"
+msgstr "服务提供商"
+
+msgid "Smart line break removal"
+msgstr "自动智能删除换行"
+
+msgid "Source text preprocessing"
+msgstr "原文预处理"
+
+msgid "Split PascalCase"
+msgstr "拆分大驼峰命名"
+
+msgid "Split camelCase"
+msgstr "拆分小驼峰命名"
+
+msgid "Split kebab-case"
+msgstr "拆分连字符命名"
+
+msgid "Split snake_case"
+msgstr "拆分下划线命名"
+
+msgid "Translation providers"
+msgstr "翻译服务提供商"
+
+msgid "Translation settings"
+msgstr "翻译设置"
+
+msgid "Used when the detected source language matches the default target language."
+msgstr "当检测到的源语言与默认目标语言相同时使用。"

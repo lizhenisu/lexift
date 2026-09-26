@@ -321,6 +321,36 @@ component SettingsFieldLabel inherits Rectangle {
     }
 }
 
+// Shared by preview rows so descriptions grow naturally with localized text.
+component SettingsTextBlock inherits VerticalLayout {
+    in property <string> label;
+    in property <string> description;
+    in property <string> error-text;
+    spacing: 4px;
+    Text { text: root.label; color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; wrap: word-wrap; }
+    if root.description != "" || root.error-text != "": Text {
+        text: root.error-text != "" ? root.error-text : root.description;
+        color: root.error-text != "" ? Colors.error : Colors.secondary-foreground;
+        font-size: 13px; wrap: word-wrap;
+    }
+}
+
+component SettingsPreviewToggleRow inherits Rectangle {
+    in property <string> label;
+    in property <string> description;
+    in-out property <bool> checked;
+    height: max(Metrics.settings-row-height, text-block.preferred-height + 16px);
+    text-block := SettingsTextBlock {
+        x: 0px; y: (parent.height - self.height) / 2;
+        width: parent.width - 52px - Spacing.medium; height: self.preferred-height;
+        label: root.label; description: root.description;
+    }
+    SettingsSwitch {
+        x: parent.width - self.width; y: (parent.height - self.height) / 2;
+        checked: root.checked; toggled(value) => { root.checked = value; }
+    }
+}
+
 component AppearanceThemeChoice inherits Rectangle {
     in property <int> theme-kind;
     in property <bool> selected;
@@ -599,7 +629,9 @@ component SettingsNavItem inherits Rectangle {
         height: Metrics.icon-size;
         viewbox-width: 24;
         viewbox-height: 24;
-        commands: root.icon-kind == 4
+        commands: root.icon-kind == 5
+            ? "M12 2A10 10 0 1 0 12 22A10 10 0 1 0 12 2ZM2 12H22M4 7H20M4 17H20M12 2C7 7 7 17 12 22C17 17 17 7 12 2Z"
+            : root.icon-kind == 4
             ? "M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 0h2v6h-6v-2h4v-4zM10 10h4v4h-4v-4z"
             : root.icon-kind == 3
             ? "M11 2a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7V2zm0 4a5 5 0 1 0 5 5h-2a3 3 0 1 1-3-3V6zm1 5 9 4-4 1-1 4-4-9z"
@@ -608,7 +640,9 @@ component SettingsNavItem inherits Rectangle {
             : root.icon-kind == 0
             ? "M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"
             : "M12.87 15.07 10.33 12.56l.03-.03A17.52 17.52 0 0 0 14.07 6H17V4h-7V2H8v2H1v2h11.17A15.5 15.5 0 0 1 9 11.35 15.4 15.4 0 0 1 6.91 8H4.91A17.5 17.5 0 0 0 7.67 12.56L2.58 17.58 4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7 1.62-4.33L19.12 17h-3.24z";
-        fill: root.selected ? Colors.primary : Colors.secondary-foreground;
+        fill: root.icon-kind == 5 ? transparent : root.selected ? Colors.primary : Colors.secondary-foreground;
+        stroke: root.icon-kind == 5 ? (root.selected ? Colors.primary : Colors.secondary-foreground) : transparent;
+        stroke-width: root.icon-kind == 5 ? 1.6px : 0px;
     }
 
     if root.expanded: Text {
@@ -722,6 +756,17 @@ export component SettingsWindow inherits Window {
     in-out property <int> screenshot-format-index: 0;
     in-out property <bool> screenshot-copy-as-file: false;
     in-out property <bool> screenshot-close-after-output: false;
+    in-out property <int> fallback-target-index: 2;
+    in-out property <bool> preprocess-join-lines: false;
+    in-out property <bool> preprocess-snake-case: false;
+    in-out property <bool> preprocess-camel-case: false;
+    in-out property <bool> preprocess-pascal-case: false;
+    in-out property <bool> preprocess-kebab-case: false;
+    in-out property <bool> translation-auto-copy: false;
+    in-out property <bool> translation-hide-input: false;
+    in-out property <bool> translation-hide-language-bar: false;
+    in-out property <bool> translation-auto-resize: true;
+    in-out property <bool> translation-pin-window: false;
     private property <bool> preview-menu-open: false;
     private property <int> preview-menu-kind: 0;
     private property <length> preview-menu-scroll-y: 0px;
@@ -729,11 +774,10 @@ export component SettingsWindow inherits Window {
     // Measure localized navigation text instead of breaking long words mid-label.
     navigation-measure := Text {
         visible: false; font-size: Typography.body-size; font-weight: 600;
-        text: @tr("General") + "\n" + @tr("Hotkeys") + "\n" + @tr("Selection Assistant") + "\n" + @tr("Screenshot settings") + "\n" + @tr("Translation");
+        text: @tr("General") + "\n" + @tr("Hotkeys") + "\n" + @tr("Selection Assistant") + "\n" + @tr("Screenshot settings") + "\n" + @tr("Translation settings") + "\n" + @tr("Service providers");
     }
     private property <bool> expanded-navigation: root.width >= Metrics.settings-wide-nav-breakpoint;
     private property <length> sidebar-width: root.expanded-navigation ? max(Metrics.settings-sidebar-width, navigation-measure.preferred-width + 80px) : Metrics.settings-sidebar-compact-width;
-    private property <bool> two-column-layout: root.width >= Metrics.settings-two-column-breakpoint;
     private property <bool> hotkeys-compact: root.page-width < 580px;
     private property <length> page-width: root.width - root.sidebar-width;
     private property <[string]> language-labels: [
@@ -753,29 +797,29 @@ export component SettingsWindow inherits Window {
         ? root.appearance-fonts : root.preview-menu-kind == 1 ? root.appearance-sizes
             : root.preview-menu-kind == 2 ? root.appearance-languages
                 : root.preview-menu-kind == 3 ? root.tray-click-actions
-                    : root.preview-menu-kind == 4 ? root.selection-filter-modes : root.screenshot-formats;
+                    : root.preview-menu-kind == 4 ? root.selection-filter-modes : root.preview-menu-kind == 5 ? root.screenshot-formats : root.language-labels;
     private property <length> preview-menu-anchor-x: root.preview-menu-kind == 0
         ? font-preview.absolute-position.x : root.preview-menu-kind == 1
             ? size-preview.absolute-position.x : root.preview-menu-kind == 2
                 ? app-language-preview.absolute-position.x : root.preview-menu-kind == 3
                     ? tray-click-preview.absolute-position.x : root.preview-menu-kind == 4
-                        ? filter-mode-preview.absolute-position.x : screenshot-format-preview.absolute-position.x;
+                        ? filter-mode-preview.absolute-position.x : root.preview-menu-kind == 5 ? screenshot-format-preview.absolute-position.x : fallback-language-preview.absolute-position.x;
     private property <length> preview-menu-anchor-y: root.preview-menu-kind == 0
         ? font-preview.absolute-position.y : root.preview-menu-kind == 1
             ? size-preview.absolute-position.y : root.preview-menu-kind == 2
                 ? app-language-preview.absolute-position.y : root.preview-menu-kind == 3
                     ? tray-click-preview.absolute-position.y : root.preview-menu-kind == 4
-                        ? filter-mode-preview.absolute-position.y : screenshot-format-preview.absolute-position.y;
+                        ? filter-mode-preview.absolute-position.y : root.preview-menu-kind == 5 ? screenshot-format-preview.absolute-position.y : fallback-language-preview.absolute-position.y;
     private property <length> preview-menu-anchor-width: root.preview-menu-kind == 0
         ? font-preview.width : root.preview-menu-kind == 1 ? size-preview.width
             : root.preview-menu-kind == 2 ? app-language-preview.width
                 : root.preview-menu-kind == 3 ? tray-click-preview.width
-                    : root.preview-menu-kind == 4 ? filter-mode-preview.width : screenshot-format-preview.width;
+                    : root.preview-menu-kind == 4 ? filter-mode-preview.width : root.preview-menu-kind == 5 ? screenshot-format-preview.width : fallback-language-preview.width;
     private property <length> preview-menu-anchor-height: root.preview-menu-kind == 0
         ? font-preview.height : root.preview-menu-kind == 1 ? size-preview.height
             : root.preview-menu-kind == 2 ? app-language-preview.height
                 : root.preview-menu-kind == 3 ? tray-click-preview.height
-                    : root.preview-menu-kind == 4 ? filter-mode-preview.height : screenshot-format-preview.height;
+                    : root.preview-menu-kind == 4 ? filter-mode-preview.height : root.preview-menu-kind == 5 ? screenshot-format-preview.height : fallback-language-preview.height;
     private property <length> settings-menu-anchor-x: root.settings-menu-provider-mode ? provider-selector.absolute-position.x : language-selector.absolute-position.x;
     private property <length> settings-menu-anchor-y: root.settings-menu-provider-mode ? provider-selector.absolute-position.y : language-selector.absolute-position.y;
     private property <length> settings-menu-anchor-height: root.settings-menu-provider-mode ? provider-selector.height : language-selector.height;
@@ -803,14 +847,14 @@ export component SettingsWindow inherits Window {
     public function close-preview-menu() { preview-menu-open = false; }
     public function reset-settings-view() {
         root.close-settings-menu(); root.close-preview-menu(); root.hotkey-capturing = false; root.active-category = 0;
-        general-scroll.content-y = 0px; translation-scroll.content-y = 0px;
+        general-scroll.content-y = 0px; translation-scroll.content-y = 0px; providers-scroll.content-y = 0px;
         hotkeys-scroll.content-y = 0px; selection-assistant-scroll.content-y = 0px;
         screenshot-scroll.content-y = 0px;
     }
-    function select-category(category: int) {
+    public function select-category(category: int) {
         if root.active-category == category { return; }
         root.close-settings-menu(); root.close-preview-menu(); root.hotkey-capturing = false;
-        if root.active-category == 1 { root.credential-edit-cancel-requested(); }
+        if root.active-category == 5 { root.credential-edit-cancel-requested(); }
         root.active-category = category;
     }
 
@@ -860,8 +904,15 @@ export component SettingsWindow inherits Window {
             x: root.expanded-navigation ? Spacing.medium : Spacing.small;
             y: Spacing.large + 64px + 4 * (Metrics.settings-nav-item-height + Spacing.small);
             width: parent.width - 2 * self.x;
-            label: @tr("Translation"); icon-kind: 1; selected: root.active-category == 1; expanded: root.expanded-navigation;
+            label: @tr("Translation settings"); icon-kind: 1; selected: root.active-category == 1; expanded: root.expanded-navigation;
             activated => { root.select-category(1); }
+        }
+        SettingsNavItem {
+            x: root.expanded-navigation ? Spacing.medium : Spacing.small;
+            y: Spacing.large + 64px + 5 * (Metrics.settings-nav-item-height + Spacing.small);
+            width: parent.width - 2 * self.x;
+            label: @tr("Service providers"); icon-kind: 5; selected: root.active-category == 5; expanded: root.expanded-navigation;
+            activated => { root.select-category(5); }
         }
         Rectangle { x: parent.width - 1px; width: 1px; height: parent.height; background: Colors.outline; }
     }
@@ -876,7 +927,8 @@ export component SettingsWindow inherits Window {
             x: Metrics.settings-page-padding; y: (parent.height - 32px) / 2; height: 32px;
             text: root.active-category == 0 ? @tr("General") : root.active-category == 2 ? @tr("Hotkeys")
                 : root.active-category == 3 ? @tr("Selection Assistant")
-                    : root.active-category == 4 ? @tr("Screenshot settings") : @tr("Translation");
+                    : root.active-category == 4 ? @tr("Screenshot settings")
+                        : root.active-category == 5 ? @tr("Service providers") : @tr("Translation settings");
             color: Colors.foreground; font-size: 24px; font-weight: 700; vertical-alignment: center;
         }
         Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: Colors.outline; }
@@ -893,26 +945,7 @@ export component SettingsWindow inherits Window {
             if root.settings-menu-open && (root.settings-menu-anchor-y < Metrics.settings-header-height || root.settings-menu-anchor-y + root.settings-menu-anchor-height > root.height) { root.close-settings-menu(); }
         }
 
-        language-card := SettingsCard {
-            x: Metrics.settings-page-padding;
-            y: appearance-card.y + appearance-card.height + Metrics.settings-card-gap;
-            width: general-scroll.visible-width - 2 * Metrics.settings-page-padding;
-            title: @tr("Language & region");
-            VerticalLayout {
-                width: 100%; horizontal-stretch: 1;
-                spacing: Spacing.small;
-                SettingsFieldLabel { label: @tr("Target language"); description: @tr("Language used for new translations"); error-text: root.target-language-error-text; }
-                language-selector := Rectangle {
-                    height: 40px; border-radius: 6px; border-width: 1px; border-color: Colors.outline; background: Colors.background;
-                    Text { x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 24px; text: root.language-labels[root.draft-target-index]; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; overflow: elide; }
-                    Path {
-                        x: parent.width - Spacing.medium - 16px; y: (parent.height - 8px) / 2; width: 16px; height: 8px; viewbox-width: 16; viewbox-height: 8; stroke: Colors.secondary-foreground; stroke-width: 1.5px;
-                        MoveTo { x: 1; y: root.settings-menu-open ? 7 : 1; } LineTo { x: 8; y: root.settings-menu-open ? 1 : 7; } LineTo { x: 15; y: root.settings-menu-open ? 7 : 1; }
-                    }
-                    TouchArea { clicked => { root.toggle-language-menu(); } }
-                }
-            }
-        }
+
 
         appearance-card := SettingsCard {
             x: Metrics.settings-page-padding;
@@ -975,7 +1008,7 @@ export component SettingsWindow inherits Window {
 
         startup-card := SettingsCard {
             x: Metrics.settings-page-padding;
-            y: language-card.y + language-card.height + Metrics.settings-card-gap;
+            y: appearance-card.y + appearance-card.height + Metrics.settings-card-gap;
             width: general-scroll.visible-width - 2 * Metrics.settings-page-padding;
             title: @tr("Startup & updates");
             VerticalLayout {
@@ -1464,16 +1497,99 @@ export component SettingsWindow inherits Window {
         visible: root.active-category == 1;
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
         content-width: self.visible-width;
-        content-height: max(self.visible-height, credential-card.y + credential-card.height + Metrics.settings-page-padding);
+        content-height: max(self.visible-height, translation-behavior-card.y + translation-behavior-card.height + Metrics.settings-page-padding);
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
-        scrolled => { if root.settings-menu-open && (root.settings-menu-anchor-y < Metrics.settings-header-height || root.settings-menu-anchor-y + root.settings-menu-anchor-height > root.height) { root.close-settings-menu(); } }
-
+        scrolled => { root.close-settings-menu(); root.close-preview-menu(); }
+        translation-language-card := SettingsCard {
+            x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
+            width: translation-scroll.visible-width - 2 * Metrics.settings-page-padding;
+            title: @tr("Languages");
+            VerticalLayout {
+                width: 100%; spacing: Spacing.small;
+                Rectangle {
+                    height: root.hotkeys-compact ? default-language-label.preferred-height + 52px : max(Metrics.settings-row-height, default-language-label.preferred-height + 16px);
+                    default-language-label := SettingsTextBlock {
+                        x: 0px; y: root.hotkeys-compact ? 0px : (parent.height - self.height) / 2;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.45 - Spacing.medium; height: self.preferred-height;
+                        label: @tr("Default target language"); description: @tr("Language used for new translations"); error-text: root.target-language-error-text;
+                    }
+                    language-selector := AppearancePreviewField {
+                        x: root.hotkeys-compact ? 0px : parent.width * 0.45;
+                        y: root.hotkeys-compact ? default-language-label.height + Spacing.small : (parent.height - self.height) / 2;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
+                        value: root.language-labels[root.draft-target-index]; opened: root.settings-menu-open && !root.settings-menu-provider-mode;
+                        clicked => { root.toggle-language-menu(); }
+                    }
+                }
+                Rectangle { height: 1px; background: Colors.outline; }
+                Rectangle {
+                    height: root.hotkeys-compact ? fallback-language-label.preferred-height + 52px : max(Metrics.settings-row-height, fallback-language-label.preferred-height + 16px);
+                    fallback-language-label := SettingsTextBlock {
+                        x: 0px; y: root.hotkeys-compact ? 0px : (parent.height - self.height) / 2;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.45 - Spacing.medium; height: self.preferred-height;
+                        label: @tr("Fallback target language"); description: @tr("Used when the detected source language matches the default target language."); error-text: "";
+                    }
+                    fallback-language-preview := AppearancePreviewField {
+                        x: root.hotkeys-compact ? 0px : parent.width * 0.45;
+                        y: root.hotkeys-compact ? fallback-language-label.height + Spacing.small : (parent.height - self.height) / 2;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
+                        value: root.language-labels[root.fallback-target-index]; opened: root.preview-menu-open && root.preview-menu-kind == 6;
+                        clicked => { root.toggle-preview-menu(6); }
+                    }
+                }
+            }
+        }
+        preprocess-card := SettingsCard {
+            x: Metrics.settings-page-padding; y: translation-language-card.y + translation-language-card.height + Metrics.settings-card-gap;
+            width: translation-language-card.width; title: @tr("Source text preprocessing");
+            VerticalLayout {
+                width: 100%; spacing: Spacing.small;
+                SettingsPreviewToggleRow { label: @tr("Smart line break removal"); description: @tr("Join wrapped lines while preserving paragraph breaks."); checked <=> root.preprocess-join-lines; }
+                Rectangle { height: 1px; background: Colors.outline; }
+                SettingsPreviewToggleRow { label: @tr("Split snake_case"); description: @tr("Convert foo_bar to foo bar before translation."); checked <=> root.preprocess-snake-case; }
+                Rectangle { height: 1px; background: Colors.outline; }
+                SettingsPreviewToggleRow { label: @tr("Split camelCase"); description: @tr("Convert fooBar to foo bar before translation."); checked <=> root.preprocess-camel-case; }
+                Rectangle { height: 1px; background: Colors.outline; }
+                SettingsPreviewToggleRow { label: @tr("Split PascalCase"); description: @tr("Convert FooBar to foo bar before translation."); checked <=> root.preprocess-pascal-case; }
+                Rectangle { height: 1px; background: Colors.outline; }
+                SettingsPreviewToggleRow { label: @tr("Split kebab-case"); description: @tr("Convert foo-bar to foo bar before translation."); checked <=> root.preprocess-kebab-case; }
+            }
+        }
+        translation-behavior-card := SettingsCard {
+            x: Metrics.settings-page-padding; y: preprocess-card.y + preprocess-card.height + Metrics.settings-card-gap;
+            width: translation-language-card.width; title: @tr("Behavior");
+            VerticalLayout {
+                width: 100%; spacing: Spacing.small;
+                SettingsPreviewToggleRow { label: @tr("Copy the first translation result automatically"); checked <=> root.translation-auto-copy; }
+                Rectangle { height: 1px; background: Colors.outline; }
+                SettingsPreviewToggleRow { label: @tr("Hide input area"); description: @tr("Hide source text for selection and screenshot translations. Keep it visible for typed translations."); checked <=> root.translation-hide-input; }
+                Rectangle { height: 1px; background: Colors.outline; }
+                SettingsPreviewToggleRow { label: @tr("Hide language bar"); description: @tr("Hide language controls for selection and screenshot translations. Keep them visible for typed translations."); checked <=> root.translation-hide-language-bar; }
+                Rectangle { height: 1px; background: Colors.outline; }
+                SettingsPreviewToggleRow { label: @tr("Resize the translation window automatically"); description: @tr("Adjust window height to the content. Window width is resized manually."); checked <=> root.translation-auto-resize; }
+                Rectangle { height: 1px; background: Colors.outline; }
+                SettingsPreviewToggleRow { label: @tr("Pin the translation window by default"); checked <=> root.translation-pin-window; }
+            }
+        }
+    }
+    AppVerticalScrollBar {
+        visible: root.active-category == 1;
+        x: main-pane.width - 14px; y: Metrics.settings-header-height + 4px;
+        height: main-pane.height - Metrics.settings-header-height - 8px;
+        viewport-height: translation-scroll.visible-height; content-height: translation-scroll.content-height;
+        content-y <=> translation-scroll.content-y;
+    }
+    providers-scroll := ScrollView {
+        visible: root.active-category == 5;
+        x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
+        content-width: self.visible-width;
+        content-height: max(self.visible-height, llm-provider-card.y + llm-provider-card.height + Metrics.settings-page-padding);
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
+        scrolled => { root.close-settings-menu(); root.close-preview-menu(); }
         provider-card := SettingsCard {
             x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
-            width: root.two-column-layout
-                ? (translation-scroll.visible-width - 2 * Metrics.settings-page-padding - Metrics.settings-card-gap) / 2
-                : translation-scroll.visible-width - 2 * Metrics.settings-page-padding;
-            title: @tr("Provider");
+            width: providers-scroll.visible-width - 2 * Metrics.settings-page-padding;
+            title: @tr("Translation providers");
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1;
                 spacing: Spacing.small;
@@ -1487,16 +1603,9 @@ export component SettingsWindow inherits Window {
                     }
                     TouchArea { clicked => { root.toggle-provider-menu(); } }
                 }
-            }
-        }
 
-        credential-card := SettingsCard {
-            x: root.two-column-layout ? provider-card.x + provider-card.width + Metrics.settings-card-gap : Metrics.settings-page-padding;
-            y: root.two-column-layout ? Metrics.settings-page-padding : provider-card.y + provider-card.height + Metrics.settings-card-gap;
-            width: provider-card.width; title: @tr("Credentials");
-            VerticalLayout {
-                width: 100%; horizontal-stretch: 1;
-                spacing: Spacing.small;
+                Rectangle { height: 1px; background: Colors.outline; }
+
                 HorizontalLayout {
                     width: 100%; height: 24px;
                     Text { text: @tr("DeepL API Key"); color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; vertical-alignment: center; }
@@ -1568,15 +1677,21 @@ export component SettingsWindow inherits Window {
                 }
             }
         }
+        llm-provider-card := SettingsCard {
+            x: Metrics.settings-page-padding; y: provider-card.y + provider-card.height + Metrics.settings-card-gap;
+            width: provider-card.width; title: @tr("Large language model providers");
+            Text { height: 56px; text: @tr("Not available yet"); color: Colors.secondary-foreground; font-size: Typography.body-size; wrap: word-wrap; vertical-alignment: center; }
+        }
     }
+
     AppVerticalScrollBar {
-        visible: root.active-category == 1;
+        visible: root.active-category == 5;
         x: main-pane.width - 14px;
         y: Metrics.settings-header-height + 4px;
         height: main-pane.height - Metrics.settings-header-height - 8px;
-        viewport-height: translation-scroll.visible-height;
-        content-height: translation-scroll.content-height;
-        content-y <=> translation-scroll.content-y;
+        viewport-height: providers-scroll.visible-height;
+        content-height: providers-scroll.content-height;
+        content-y <=> providers-scroll.content-y;
     }
     }
     }
@@ -1647,7 +1762,7 @@ export component SettingsWindow inherits Window {
             : root.preview-menu-kind == 1 ? root.appearance-size-index
                 : root.preview-menu-kind == 2 ? root.appearance-language-index
                     : root.preview-menu-kind == 3 ? root.tray-click-index
-                        : root.preview-menu-kind == 4 ? root.selection-filter-mode-index : root.screenshot-format-index;
+                        : root.preview-menu-kind == 4 ? root.selection-filter-mode-index : root.preview-menu-kind == 5 ? root.screenshot-format-index : root.fallback-target-index;
         scroll-y <=> root.preview-menu-scroll-y;
         selected(index) => {
             if root.preview-menu-kind == 0 { root.appearance-font-index = index; }
@@ -1655,7 +1770,8 @@ export component SettingsWindow inherits Window {
             else if root.preview-menu-kind == 2 { root.ui-language-selected(index); }
             else if root.preview-menu-kind == 3 { root.tray-click-index = index; }
             else if root.preview-menu-kind == 4 { root.selection-filter-mode-index = index; }
-            else { root.screenshot-format-index = index; }
+            else if root.preview-menu-kind == 5 { root.screenshot-format-index = index; }
+            else { root.fallback-target-index = index; }
             root.close-preview-menu();
         }
     }
