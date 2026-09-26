@@ -18,6 +18,12 @@ struct HotkeyState {
 }
 
 impl HotkeyRuntimeManager {
+    pub(crate) fn start_annotation(&self, handler: HotkeyHandler) -> Result<()> {
+        self.port
+            .as_ref()
+            .ok_or_else(|| lexift_core::Error::new("Global shortcuts are unavailable"))?
+            .register_annotation_hotkey(handler)
+    }
     pub(crate) fn new(port: Option<Arc<dyn HotkeyPort>>) -> Self {
         Self {
             port,
@@ -61,6 +67,9 @@ impl HotkeyRuntimeManager {
 
 impl Drop for HotkeyRuntimeManager {
     fn drop(&mut self) {
+        if let Some(port) = &self.port {
+            let _ = port.unregister_annotation_hotkey();
+        }
         if let Some(port) = &self.port
             && let Err(error) = port.unregister_translate_hotkey()
         {
@@ -109,6 +118,19 @@ mod tests {
             *self.active.lock().unwrap() = None;
             Ok(())
         }
+    }
+
+    #[test]
+    fn unavailable_annotation_shortcut_preserves_translation_registration() {
+        let port = Arc::new(FakeHotkeyPort::default());
+        let manager = HotkeyRuntimeManager::new(Some(port.clone()));
+        let initial = HotkeyConfig::default();
+        manager.start(initial, Arc::new(|| {})).unwrap();
+        assert!(manager.start_annotation(Arc::new(|| {})).is_err());
+        assert_eq!(*port.active.lock().unwrap(), Some(initial));
+        let replacement = "Ctrl + Shift + 7".parse().unwrap();
+        manager.apply(replacement).unwrap();
+        assert_eq!(*port.active.lock().unwrap(), Some(replacement));
     }
 
     #[test]

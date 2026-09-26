@@ -666,6 +666,7 @@ export component SettingsWindow inherits Window {
     in-out property <int> draft-target-index: 0;
     in property <string> target-language-error-text: "";
     in property <string> hotkey-error-text: "";
+    in property <string> annotation-hotkey-status: "Unavailable";
     in property <string> provider-error-text: "";
     in-out property <bool> launch-at-login: false;
     in-out property <bool> selection-toolbar: true;
@@ -1043,7 +1044,7 @@ export component SettingsWindow inherits Window {
         visible: root.active-category == 2;
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
         content-width: self.visible-width;
-        content-height: max(self.visible-height, selection-hotkeys-card.y + selection-hotkeys-card.height + Metrics.settings-page-padding);
+        content-height: max(self.visible-height, annotation-hotkeys-card.y + annotation-hotkeys-card.height + Metrics.settings-page-padding);
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
 
         behavior-hotkeys-card := SettingsCard {
@@ -1133,6 +1134,16 @@ export component SettingsWindow inherits Window {
                 UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: "Translate selection and replace"; }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
                 UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: "Read selection aloud"; }
+            }
+        }
+        annotation-hotkeys-card := SettingsCard {
+            x: Metrics.settings-page-padding;
+            y: selection-hotkeys-card.y + selection-hotkeys-card.height + Metrics.settings-card-gap;
+            width: behavior-hotkeys-card.width; title: "Annotation";
+            VerticalLayout {
+                spacing: Spacing.small;
+                Text { text: "Annotation toolbar — Alt + A"; color: Colors.foreground; font-size: Typography.body-size; }
+                Text { text: root.annotation-hotkey-status; color: Colors.secondary-foreground; font-size: 13px; wrap: word-wrap; }
             }
         }
     }

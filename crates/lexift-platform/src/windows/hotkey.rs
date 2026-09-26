@@ -26,17 +26,44 @@ use windows::Win32::{
 const TRANSLATE_HOTKEY_ID: i32 = 1;
 pub(crate) struct WindowsHotkeyPort {
     listener: Mutex<Option<HotkeyListener>>,
+    annotation_listener: Mutex<Option<HotkeyListener>>,
 }
 
 impl WindowsHotkeyPort {
     pub(crate) fn new() -> Self {
         Self {
             listener: Mutex::new(None),
+            annotation_listener: Mutex::new(None),
         }
     }
 }
 
 impl HotkeyPort for WindowsHotkeyPort {
+    fn register_annotation_hotkey(&self, handler: HotkeyHandler) -> Result<()> {
+        let mut listener = self
+            .annotation_listener
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if listener.is_some() {
+            return Err(Error::new("Annotation shortcut is already registered"));
+        }
+        // Each listener owns its registration on a separate message-loop thread.
+        *listener = Some(start_listener("Alt + A".parse()?, handler)?);
+        Ok(())
+    }
+
+    fn unregister_annotation_hotkey(&self) -> Result<()> {
+        if let Some(listener) = self
+            .annotation_listener
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+        {
+            listener.shutdown();
+        }
+        Ok(())
+    }
+
     fn register_translate_hotkey(
         &self,
         config: HotkeyConfig,
@@ -115,6 +142,14 @@ fn start_listener(config: HotkeyConfig, handler: HotkeyHandler) -> Result<Hotkey
 
 impl Drop for WindowsHotkeyPort {
     fn drop(&mut self) {
+        if let Some(listener) = self
+            .annotation_listener
+            .get_mut()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+        {
+            listener.shutdown();
+        }
         let listener = self
             .listener
             .get_mut()
@@ -250,6 +285,67 @@ mod tests {
             &handler
         ));
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    #[ignore = "requires an interactive Windows desktop session"]
+    fn annotation_and_translation_are_independent() {
+        let hotkey = WindowsHotkeyPort::new();
+        let (translate_tx, translate_rx) = mpsc::channel();
+        let (annotation_tx, annotation_rx) = mpsc::channel();
+        hotkey
+            .register_translate_hotkey(
+                HotkeyConfig::default(),
+                Arc::new(move || {
+                    let _ = translate_tx.send(());
+                }),
+            )
+            .unwrap();
+        hotkey
+            .register_annotation_hotkey(Arc::new(move || {
+                let _ = annotation_tx.send(());
+            }))
+            .unwrap();
+        let conflicting = WindowsHotkeyPort::new();
+        assert!(
+            conflicting
+                .register_annotation_hotkey(Arc::new(|| {}))
+                .is_err()
+        );
+        let translate_thread = hotkey.listener.lock().unwrap().as_ref().unwrap().thread_id;
+        let annotation_thread = hotkey
+            .annotation_listener
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .thread_id;
+        assert_ne!(translate_thread, annotation_thread);
+        unsafe {
+            PostThreadMessageW(
+                annotation_thread,
+                WM_HOTKEY,
+                WPARAM(TRANSLATE_HOTKEY_ID as usize),
+                LPARAM(0),
+            )
+            .unwrap();
+        }
+        annotation_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(translate_rx.try_recv().is_err());
+        hotkey.unregister_annotation_hotkey().unwrap();
+        conflicting
+            .register_annotation_hotkey(Arc::new(|| {}))
+            .unwrap();
+        unsafe {
+            PostThreadMessageW(
+                translate_thread,
+                WM_HOTKEY,
+                WPARAM(TRANSLATE_HOTKEY_ID as usize),
+                LPARAM(0),
+            )
+            .unwrap();
+        }
+        translate_rx.recv_timeout(Duration::from_secs(1)).unwrap();
     }
 
     #[test]

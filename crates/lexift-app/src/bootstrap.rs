@@ -326,6 +326,20 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
     if let Err(error) = services.runtime_manager.reconcile_autostart() {
         tracing::warn!(%error, "launch-at-login registration could not be reconciled");
     }
+    let annotation_ui = ui.handle();
+    let annotation_result = services
+        .runtime_manager
+        .start_annotation_hotkey(Arc::new(move || {
+            annotation_ui.toggle_annotation_toolbar();
+        }));
+    ui.handle()
+        .set_annotation_hotkey_status(match annotation_result {
+            Ok(()) => "Registered".into(),
+            Err(error) => {
+                tracing::warn!(%error, "annotation preview shortcut is unavailable");
+                format!("Unavailable: {error}")
+            }
+        });
     let tray_registered = register_tray(services.tray.as_ref(), controller.tray_handler());
     ui.set_background_mode(tray_registered);
     controller.dispatch(lexift_core::AppEvent::Started);

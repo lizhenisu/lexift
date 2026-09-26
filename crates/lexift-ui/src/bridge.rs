@@ -110,17 +110,18 @@ pub enum PassiveWindowPreparation {
     Failed,
 }
 
+#[derive(Clone)]
 pub struct WindowLifecycleCallbacks {
-    complete_passive_window_show: CompletePassiveWindowShow,
+    pub(crate) complete_passive_window_show: CompletePassiveWindowShow,
     complete_toolbar_show: CompletePassiveWindowShow,
     configure_translation_popup_corners: fn(&slint::Window) -> PopupCornerMode,
-    activate_user_requested_window: fn(&slint::Window) -> bool,
-    begin_window_drag: fn(&slint::Window) -> bool,
+    pub(crate) activate_user_requested_window: fn(&slint::Window) -> bool,
+    pub(crate) begin_window_drag: fn(&slint::Window) -> bool,
     begin_window_resize: BeginWindowResize,
-    popup_work_area: PopupWorkArea,
-    toolbar_cursor_position: ToolbarCursorPosition,
-    set_popup_dismissal: SetPopupDismissal,
-    attach_tool_window: AttachToolWindow,
+    pub(crate) popup_work_area: PopupWorkArea,
+    pub(crate) toolbar_cursor_position: ToolbarCursorPosition,
+    pub(crate) set_popup_dismissal: SetPopupDismissal,
+    pub(crate) attach_tool_window: AttachToolWindow,
     trim_process_working_set: fn() -> bool,
     configure_resize_background: ConfigureResizeBackground,
     configure_window_paint_repair: ConfigureWindowPaintRepair,
@@ -250,11 +251,11 @@ impl IdleTrimGeneration {
     }
 }
 
-fn cancel_idle_memory_trim() {
+pub(crate) fn cancel_idle_memory_trim() {
     IDLE_TRIM_GENERATION.with(|generation| generation.borrow_mut().invalidate());
 }
 
-fn schedule_idle_memory_trim() {
+pub(crate) fn schedule_idle_memory_trim() {
     let generation = IDLE_TRIM_GENERATION.with(|current| current.borrow_mut().schedule());
     slint::Timer::single_shot(NO_WINDOW_MEMORY_TRIM_DELAY, move || {
         let current = IDLE_TRIM_GENERATION.with(|current| current.borrow().is_current(generation));
@@ -280,6 +281,7 @@ fn has_live_window_instances() -> bool {
             .is_some_and(|registry| registry.main.is_some() || registry.settings.is_some())
     });
     app_window_exists
+        || crate::annotation::is_open()
         || SELECTION_TOOLBAR_REGISTRY.with(|registry| {
             registry
                 .borrow()
@@ -2013,6 +2015,7 @@ fn ensure_settings_window(
         return Ok(settings.clone_strong());
     }
     let settings = SettingsWindow::new()?;
+    settings.set_annotation_hotkey_status(crate::annotation::status().into());
     let _ = install_settings_platform_hooks(
         &registry.configure_resize_background,
         &registry.configure_window_paint_repair,
@@ -2238,6 +2241,7 @@ impl Ui {
         prepare_passive_window: fn(&slint::Window) -> PassiveWindowPreparation,
         window_lifecycle: WindowLifecycleCallbacks,
     ) -> Result<Self, slint::PlatformError> {
+        crate::annotation::init(prepare_passive_window, window_lifecycle.clone());
         SELECTION_TOOLBAR_REGISTRY.with(|registry| {
             *registry.borrow_mut() = Some(SelectionToolbarRegistry {
                 window: None,
@@ -2393,6 +2397,7 @@ impl Ui {
             })?;
         }
         slint::run_event_loop_until_quit()?;
+        crate::annotation::shutdown();
         SELECTION_TOOLBAR_REGISTRY.with(|registry| {
             if let Some(mut registry) = registry.borrow_mut().take() {
                 registry.close();
@@ -2893,6 +2898,20 @@ pub struct UiHandle {
 }
 
 impl UiHandle {
+    pub fn toggle_annotation_toolbar(&self) {
+        let _ = slint::invoke_from_event_loop(crate::annotation::toggle);
+    }
+
+    pub fn set_annotation_hotkey_status(&self, status: String) {
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::annotation::set_status(status.clone());
+            APP_WINDOW_REGISTRY.with(|s| {
+                if let Some(settings) = s.borrow().as_ref().and_then(|r| r.settings.as_ref()) {
+                    settings.set_annotation_hotkey_status(status.into());
+                }
+            });
+        });
+    }
     /// Queues state rendering on the Slint event-loop thread.
     pub fn update(&self, state: AppState) {
         let toolbar_selection = state.toolbar_selection.clone();

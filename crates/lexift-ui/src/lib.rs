@@ -1,3 +1,4 @@
+mod annotation;
 mod binding;
 mod bridge;
 mod mapper;

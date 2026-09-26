@@ -1,0 +1,175 @@
+import { Colors } from "design/colors.slint";
+import { ComboBox, SpinBox, CheckBox, Slider, LineEdit } from "annotation-fields.slint";
+
+export struct AnnotationValues {
+    size: int, rounding: int, text-size: int, start: int, strength: float,
+    shape: int, style: int, mode: int, font: int, format: int, zoom: int,
+    fill: bool, erase: bool, antialias: bool, shadow: bool,
+    text: string, color-index: int,
+}
+
+component ToolIcon inherits Path {
+    in property <int> kind;
+    in property <color> ink: Colors.foreground;
+    width: 24px; height: 24px; viewbox-width: 24; viewbox-height: 24;
+    fill: kind == 11 || kind == 12 ? root.ink : transparent; stroke: root.ink; stroke-width: 1.8px;
+    commands: kind == 0 ? "M4 4H20V20H4Z"
+        : kind == 1 ? "M12 3A9 9 0 1 0 12 21A9 9 0 1 0 12 3Z"
+        : kind == 2 ? "M8 17H16M9 20H15M8 14C2 8 7 3 12 3S22 8 16 14V17H8Z"
+        : kind == 3 ? "M4 16L15 5L19 9L8 20H4ZM13 7L17 11M15 5L17 3L21 7L19 9"
+        : kind == 4 ? "M7 5H17L19 14L14 19H8L4 15ZM8 10H16M9 19V22H13V19"
+        : kind == 5 ? "M4 20L20 4M8 4H20V16"
+        : kind == 6 ? "M3 18L9 8L15 15L21 4"
+        : kind == 7 ? "M10 3A7 7 0 1 0 10 17A7 7 0 1 0 10 3M15 15L22 22"
+        : kind == 8 ? "M3 4H21M12 4V21M8 21H16"
+        : kind == 9 ? "M12 2C10 6 5 10 5 15A7 7 0 0 0 19 15C19 10 14 6 12 2Z"
+        : kind == 10 ? "M12 3A9 9 0 1 0 12 21A9 9 0 1 0 12 3M10 9L12 7V17"
+        : kind == 11 || kind == 12 ? "M3 3H9V9H3ZM15 3H21V9H15ZM9 9H15V15H9ZM3 15H9V21H3ZM15 15H21V21H15Z"
+        : kind == 13 ? "M3 14L13 4L21 12L11 22H9ZM7 10L15 18M11 22H22"
+        : kind == 14 ? "M8 4L3 9L8 14M3 9H14C23 9 23 21 14 21H9"
+        : kind == 15 ? "M12 2V16M7 11L12 16L17 11M3 16V21H21V16"
+        : "M3 12L9 18L21 5";
+}
+
+component ToolButton inherits Rectangle {
+    in property <int> kind;
+    in property <bool> selected;
+    in property <bool> enabled: true;
+    callback clicked();
+    width: 38px; height: 38px; border-radius: 6px;
+    background: area.pressed ? Colors.icon-button-pressed : root.selected ? Colors.primary-container
+        : area.has-hover && root.enabled ? Colors.icon-button-hover : transparent;
+    ToolIcon { x: 7px; y: 7px; kind: root.kind;
+        ink: !root.enabled ? Colors.outline : root.selected ? Colors.primary : Colors.foreground; }
+    area := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+export component AnnotationToolbar inherits Window {
+    title: "Lexift Annotation Preview"; no-frame: true; always-on-top: true;
+    background: transparent; preferred-width: 590px; preferred-height: 54px;
+    min-width: 0px; max-width: 590px; min-height: 54px; max-height: 54px;
+    in property <[int]> tools: [0, 4, 7, 9, 10, 11, 13];
+    in property <int> active-group: -1;
+    callback tool-clicked(int, bool);
+    callback drag-requested();
+    callback finish-requested();
+    callback escape-requested();
+    forward-focus: keys;
+    keys := FocusScope {
+        key-pressed(event) => { if event.text == Key.Escape { root.escape-requested(); return accept; } return reject; }
+    Rectangle {
+        x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px;
+        border-radius: 10px; border-width: 1px; border-color: Colors.outline; background: Colors.surface;
+        HorizontalLayout {
+            width: 100%; height: 100%; padding: 6px; spacing: 7px;
+            Rectangle {
+                width: 20px;
+                for dot in [0,1,2,3,4,5]: Rectangle {
+                    x: 4px + Math.mod(dot,2) * 7px; y: 10px + floor(dot/2) * 7px;
+                    width: 4px; height: 4px; border-radius: 2px; background: Colors.outline;
+                }
+                TouchArea { mouse-cursor: move; pointer-event(event) => {
+                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.left { root.drag-requested(); }
+                } }
+            }
+            for tool[group] in root.tools: HorizontalLayout {
+                spacing: 0px;
+                ToolButton { kind: tool; selected: root.active-group == group;
+                    clicked => { root.tool-clicked(group, false); } }
+                if group != 4 && group != 6: Rectangle {
+                    width: 18px; height: 38px; border-radius: 5px;
+                    background: arrow.has-hover ? Colors.icon-button-hover : transparent;
+                    Path { x: 4px; y: 16px; width: 10px; height: 6px;
+                        viewbox-width: 10; viewbox-height: 6; commands: "M1 1L5 5L9 1";
+                        fill: transparent; stroke: Colors.secondary-foreground; stroke-width: 1.6px; }
+                    arrow := TouchArea { clicked => { root.tool-clicked(group, true); } }
+                }
+            }
+            Rectangle { width: 1px; background: Colors.outline; }
+            ToolButton { kind: 14; enabled: false; }
+            ToolButton { kind: 15; enabled: false; }
+            ToolButton { kind: 16; clicked => { root.finish-requested(); } }
+        }
+    }
+    }
+}
+
+export component AnnotationPanel inherits Window {
+    title: "Lexift Annotation Options"; no-frame: true; always-on-top: true;
+    background: transparent; preferred-width: 720px; preferred-height: 220px;
+    in property <bool> menu: false;
+    in property <[int]> menu-tools;
+    in property <[string]> menu-labels;
+    in property <[int]> fields;
+    in property <int> tool: 0;
+    in property <string> heading: "Rectangle";
+    in-out property <AnnotationValues> values;
+    in property <int> columns: 4;
+    callback selected(int);
+    callback escape-requested();
+    private property <[string]> labels: ["Width", "Shape", "Line style", "Corner radius", "Fill", "Intensity", "Blend mode", "Magnification", "Erase annotations", "Anti-aliasing", "Shadow", "Text", "Font", "Text size", "Arrangement", "Start at", "Sequence", "Method", "Effect"];
+    private property <[color]> palette: [#d9472b, #e5bf55, #69ad61, #598fdf, #212121, #ffffff, #32ec66, #fff400];
+    forward-focus: keys;
+    keys := FocusScope {
+        key-pressed(event) => { if event.text == Key.Escape { root.escape-requested(); return accept; } return reject; }
+    Rectangle {
+        x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px;
+        border-radius: 10px; border-width: 1px; border-color: Colors.outline; background: Colors.surface;
+        if root.menu: VerticalLayout {
+            padding: 8px; spacing: 2px;
+            for kind[i] in root.menu-tools: Rectangle {
+                height: 40px; border-radius: 5px;
+                background: option.has-hover ? Colors.icon-button-hover : transparent;
+                ToolIcon { x: 8px; y: 8px; kind: kind; ink: kind == root.tool ? Colors.primary : Colors.foreground; }
+                Text { x: 44px; height: parent.height; text: root.menu-labels[i]; color: Colors.foreground; vertical-alignment: center; font-size: 14px; }
+                option := TouchArea { clicked => { root.selected(kind); } }
+            }
+            Text { height: 28px; text: "Adjust — unavailable"; color: Colors.secondary-foreground; font-size: 12px; horizontal-alignment: right; vertical-alignment: center; }
+        }
+        if !root.menu: Rectangle {
+            x: 12px; y: 8px; width: parent.width - 24px; height: parent.height - 16px;
+            Text { x: 0px; y: 0px; text: root.heading; color: Colors.foreground; font-size: 13px; font-weight: 600; }
+            for field[i] in root.fields: Rectangle {
+                x: Math.mod(i, root.columns) * (parent.width / root.columns);
+                y: 26px + floor(i / root.columns) * 62px;
+                width: parent.width / root.columns - 10px; height: 58px;
+                Text { x: 0px; y: 0px; text: root.labels[field]; font-size: 12px; color: Colors.secondary-foreground; }
+                if field == 0: SpinBox { x: 0px; y: 22px; width: parent.width; height: 30px; minimum: 1; maximum: 100; value <=> root.values.size; }
+                if field == 1: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Rectangle", "Ellipse"]; current-index <=> root.values.shape; }
+                if field == 2: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Solid", "Dashed"]; current-index <=> root.values.style; }
+                if field == 3: SpinBox { x: 0px; y: 22px; width: parent.width; height: 30px; minimum: 0; maximum: 100; value <=> root.values.rounding; }
+                if field == 4: CheckBox { x: 0px; y: 24px; text: "Enabled"; checked <=> root.values.fill; }
+                if field == 5: Slider { x: 0px; y: 24px; width: parent.width; minimum: 0; maximum: 100; value <=> root.values.strength; }
+                if field == 6: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Normal", "Multiply"]; current-index <=> root.values.mode; }
+                if field == 7: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["1.5×", "2×", "3×", "4×"]; current-index <=> root.values.zoom; }
+                if field == 8: CheckBox { x: 0px; y: 24px; text: "Enabled"; checked <=> root.values.erase; }
+                if field == 9: CheckBox { x: 0px; y: 24px; text: "Enabled"; checked <=> root.values.antialias; }
+                if field == 10: CheckBox { x: 0px; y: 24px; text: "Enabled"; checked <=> root.values.shadow; }
+                if field == 11: LineEdit { x: 0px; y: 22px; width: parent.width; height: 30px; placeholder-text: "Enter text"; text <=> root.values.text; }
+                if field == 12: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Microsoft YaHei", "Segoe UI", "Arial"]; current-index <=> root.values.font; }
+                if field == 13: SpinBox { x: 0px; y: 22px; width: parent.width; height: 30px; minimum: 1; maximum: 144; value <=> root.values.text-size; }
+                if field == 14: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Tile", "Single"]; current-index <=> root.values.mode; }
+                if field == 15: SpinBox { x: 0px; y: 22px; width: parent.width; height: 30px; minimum: 1; maximum: 999; value <=> root.values.start; }
+                if field == 16: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["1, 2, 3", "A, B, C", "a, b, c"]; current-index <=> root.values.format; }
+                if field == 17: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Area", "Brush"]; current-index <=> root.values.shape; }
+                if field == 18: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Mosaic", "Blur"]; current-index <=> root.values.mode; }
+            }
+            if root.tool < 11: HorizontalLayout {
+                x: 0px; y: 28px + ceil(root.fields.length / root.columns) * 62px;
+                height: 30px; spacing: 8px; alignment: start;
+                for ink[i] in root.palette: Rectangle {
+                    width: 28px; height: 28px; border-radius: 8px;
+                    border-width: root.values.color-index == i ? 2px : 1px;
+                    border-color: root.values.color-index == i ? Colors.primary : Colors.outline;
+                    Rectangle { x: 4px; y: 4px; width: 20px; height: 20px; border-radius: 5px; background: ink; }
+                    TouchArea { clicked => { root.values.color-index = i; } }
+                }
+            }
+            if root.tool == 13: Text {
+                x: 0px; y: 30px + ceil(root.fields.length / root.columns) * 62px;
+                text: "Clear all — unavailable"; font-size: 13px; color: Colors.secondary-foreground;
+            }
+        }
+    }
+    }
+}

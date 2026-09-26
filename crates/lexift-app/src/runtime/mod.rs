@@ -26,6 +26,12 @@ pub(crate) struct RuntimeManager {
 }
 
 impl RuntimeManager {
+    pub(crate) fn start_annotation_hotkey(
+        &self,
+        handler: lexift_core::ports::hotkey::HotkeyHandler,
+    ) -> lexift_core::Result<()> {
+        self.hotkey.start_annotation(handler)
+    }
     #[cfg(not(feature = "m1-demo"))]
     pub(crate) fn production(
         config: RuntimeConfig,
