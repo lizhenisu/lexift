@@ -1,4 +1,5 @@
 import { Colors } from "design/colors.slint";
+export { Colors }
 import { Spacing } from "design/spacing.slint";
 import { Typography } from "design/typography.slint";
 import { AppAssets } from "design/assets.slint";
@@ -20,7 +21,7 @@ component ActionButton inherits Rectangle {
 
     Text {
         text: root.label;
-        color: root.primary ? Colors.surface : Colors.primary;
+        color: root.primary ? Colors.on-primary : Colors.primary;
         font-size: Typography.body-size;
         font-weight: 700;
         horizontal-alignment: center;

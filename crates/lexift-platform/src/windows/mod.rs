@@ -13,6 +13,7 @@ mod selection;
 pub(crate) mod selection_monitor;
 mod speech;
 mod tray;
+mod tray_menu;
 
 pub(crate) use autostart::WindowsAutostartPort;
 pub(crate) use hotkey::WindowsHotkeyPort;

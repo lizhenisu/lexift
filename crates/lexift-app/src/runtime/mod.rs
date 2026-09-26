@@ -96,7 +96,9 @@ impl RuntimeManager {
 
     pub(crate) fn apply(&self, field: SettingsField, config: RuntimeConfig) -> Result<()> {
         match field {
-            SettingsField::TargetLanguage | SettingsField::SelectionToolbar => {}
+            SettingsField::TargetLanguage
+            | SettingsField::SelectionToolbar
+            | SettingsField::Theme => {}
             SettingsField::Hotkey => self.hotkey.apply(config.hotkey)?,
             SettingsField::Provider => {
                 self.translator.validate(config.provider)?;
@@ -113,7 +115,9 @@ impl RuntimeManager {
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         match field {
-            SettingsField::TargetLanguage | SettingsField::SelectionToolbar => {}
+            SettingsField::TargetLanguage
+            | SettingsField::SelectionToolbar
+            | SettingsField::Theme => {}
             SettingsField::Hotkey => current.hotkey = config.hotkey,
             SettingsField::Provider => current.provider = config.provider,
             SettingsField::LaunchAtLogin => {

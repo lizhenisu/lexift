@@ -3,6 +3,7 @@ mod binding;
 mod bridge;
 mod mapper;
 mod placement;
+mod theme;
 
 slint::include_modules!();
 

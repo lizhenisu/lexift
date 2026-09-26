@@ -97,6 +97,38 @@ mod tests {
     }
 
     #[test]
+    fn themes_round_trip_and_legacy_config_defaults_to_light() {
+        use lexift_core::domain::settings::ThemePreference;
+        let (_directory, store) = fixture();
+        for theme in [
+            ThemePreference::Light,
+            ThemePreference::Dark,
+            ThemePreference::System,
+        ] {
+            let value = Settings {
+                theme,
+                ..Settings::default()
+            };
+            store.save(&value).unwrap();
+            assert_eq!(store.load().unwrap(), value);
+        }
+        let saved = fs::read_to_string(store.path()).unwrap();
+        let legacy = saved
+            .lines()
+            .filter(|line| !line.starts_with("theme ="))
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(store.path(), legacy).unwrap();
+        assert_eq!(store.load().unwrap().theme, ThemePreference::Light);
+        fs::write(
+            store.path(),
+            saved.replace("theme = \"system\"", "theme = \"invalid\""),
+        )
+        .unwrap();
+        assert!(store.load().is_err());
+    }
+
+    #[test]
     fn missing_file_uses_defaults_without_creating_it() {
         let (_directory, store) = fixture();
         assert_eq!(store.load().unwrap(), Settings::default());

@@ -123,6 +123,7 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) set_popup_dismissal: SetPopupDismissal,
     pub(crate) attach_tool_window: AttachToolWindow,
     trim_process_working_set: fn() -> bool,
+    theme_preference_changed: Rc<dyn Fn(lexift_core::domain::settings::ThemePreference)>,
     configure_resize_background: ConfigureResizeBackground,
     configure_window_paint_repair: ConfigureWindowPaintRepair,
 }
@@ -149,9 +150,19 @@ impl WindowLifecycleCallbacks {
             set_popup_dismissal: Rc::new(set_popup_dismissal),
             attach_tool_window: Rc::new(attach_tool_window),
             trim_process_working_set,
+            theme_preference_changed: Rc::new(|_| {}),
             configure_resize_background: Rc::new(|_, _| true),
             configure_window_paint_repair: Rc::new(|_, _| true),
         }
+    }
+
+    /// Propagates application theme preferences to native surfaces owned by the host.
+    pub fn with_theme_preference(
+        mut self,
+        changed: impl Fn(lexift_core::domain::settings::ThemePreference) + 'static,
+    ) -> Self {
+        self.theme_preference_changed = Rc::new(changed);
+        self
     }
 
     /// Resolves the monitor work area for the Popup's physical window center.
@@ -561,6 +572,18 @@ impl PopupRegistry {
             return Some(window.clone_strong());
         }
         let window = TranslationPopup::new().ok()?;
+        crate::theme::apply(&window);
+        let weak = window.as_weak();
+        let configure = self.configure_resize_background.clone();
+        window.on_theme_background_changed(move || {
+            if let Some(window) = weak.upgrade() {
+                install_resize_background(
+                    &configure,
+                    window.window(),
+                    window.get_resize_fallback_color(),
+                );
+            }
+        });
         if let Some(handler) = &self.handler {
             wire_popup_callbacks(&window, Rc::clone(handler));
             wire_popup_close(&window, Rc::clone(handler));
@@ -597,6 +620,7 @@ impl PopupRegistry {
                     tracing::error!(session_id, "popup language menu could not be created");
                     return;
                 };
+                crate::theme::apply(&menu);
                 wire_language_menu_callbacks(&menu);
                 self.language_menu = Some(menu.clone_strong());
                 menu
@@ -1704,6 +1728,7 @@ struct AppWindowRegistry {
     configure_resize_background: ConfigureResizeBackground,
     configure_window_paint_repair: ConfigureWindowPaintRepair,
     latest_state: AppState,
+    theme_preference_changed: Rc<dyn Fn(lexift_core::domain::settings::ThemePreference)>,
     show_selection_demo: bool,
     handler: Option<Rc<dyn Fn(AppEvent)>>,
     background_mode: Rc<Cell<bool>>,
@@ -1751,6 +1776,7 @@ impl SelectionToolbarRegistry {
         let Ok(window) = SelectionToolbarWindow::new() else {
             return;
         };
+        crate::theme::apply(&window);
         let Some(handler) = self.handler.as_ref() else {
             return;
         };
@@ -1960,7 +1986,6 @@ fn retry_settings_resize_background(
     configure: ConfigureResizeBackground,
     configure_repair: ConfigureWindowPaintRepair,
     settings: slint::Weak<SettingsWindow>,
-    color: slint::Color,
     attempts: u32,
 ) {
     if attempts == 0 {
@@ -1971,12 +1996,16 @@ fn retry_settings_resize_background(
         let Some(settings) = settings.upgrade() else {
             return;
         };
-        if !install_settings_platform_hooks(&configure, &configure_repair, &settings, color) {
+        if !install_settings_platform_hooks(
+            &configure,
+            &configure_repair,
+            &settings,
+            settings.get_resize_fallback_color(),
+        ) {
             retry_settings_resize_background(
                 configure,
                 configure_repair,
                 settings.as_weak(),
-                color,
                 attempts - 1,
             );
         }
@@ -1999,6 +2028,7 @@ fn ensure_main_window(registry: &mut AppWindowRegistry) -> Result<AppWindow, sli
         return Ok(main.clone_strong());
     }
     let main = AppWindow::new()?;
+    crate::theme::apply(&main);
     main.set_show_selection_demo(registry.show_selection_demo);
     binding::apply_main(&main, &mapper::view_state(&registry.latest_state));
     if let Some(handler) = registry.handler.clone() {
@@ -2015,6 +2045,18 @@ fn ensure_settings_window(
         return Ok(settings.clone_strong());
     }
     let settings = SettingsWindow::new()?;
+    crate::theme::apply(&settings);
+    let weak = settings.as_weak();
+    let configure = registry.configure_resize_background.clone();
+    settings.on_theme_background_changed(move || {
+        if let Some(settings) = weak.upgrade() {
+            install_resize_background(
+                &configure,
+                settings.window(),
+                settings.get_resize_fallback_color(),
+            );
+        }
+    });
     settings.set_annotation_hotkey_status(crate::annotation::status().into());
     let _ = install_settings_platform_hooks(
         &registry.configure_resize_background,
@@ -2154,6 +2196,12 @@ fn wire_settings_callbacks(
         });
     });
     let settings_handler = Rc::clone(&handler);
+    let theme_handler = Rc::clone(&handler);
+    settings.on_theme_selected(move |index| {
+        theme_handler(AppEvent::SettingsChangeRequested {
+            change: SettingsChange::Theme(crate::theme::from_index(index)),
+        });
+    });
     settings.on_selection_toolbar_change_requested(move |enabled| {
         settings_handler(AppEvent::SettingsChangeRequested {
             change: SettingsChange::SelectionToolbar(enabled),
@@ -2262,6 +2310,8 @@ impl Ui {
         cancel_idle_memory_trim();
         let credential_generation = Arc::new(AtomicU64::new(0));
         let toast_next_id = Arc::new(AtomicU64::new(0));
+        crate::theme::set_current(initial_state.desired_settings.theme);
+        (window_lifecycle.theme_preference_changed)(initial_state.desired_settings.theme);
         let toast_records = Arc::new(Mutex::new(Vec::new()));
         let background_mode = Rc::new(Cell::new(false));
         APP_WINDOW_REGISTRY.with(|registry| {
@@ -2275,6 +2325,7 @@ impl Ui {
                     &window_lifecycle.configure_window_paint_repair,
                 ),
                 latest_state: initial_state.clone(),
+                theme_preference_changed: Rc::clone(&window_lifecycle.theme_preference_changed),
                 show_selection_demo,
                 handler: None,
                 background_mode: Rc::clone(&background_mode),
@@ -2856,6 +2907,10 @@ fn clear_settings_toasts(
 
 fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool) {
     match feedback {
+        SettingsFeedback::SettingsSaved(SettingsField::Theme) => ("Theme saved", false),
+        SettingsFeedback::SettingsSaveFailed(SettingsField::Theme) => {
+            ("Could not save theme", true)
+        }
         SettingsFeedback::SettingsSaved(SettingsField::TargetLanguage) => {
             ("Target language saved", false)
         }
@@ -2914,12 +2969,18 @@ impl UiHandle {
     }
     /// Queues state rendering on the Slint event-loop thread.
     pub fn update(&self, state: AppState) {
+        let theme = state.desired_settings.theme;
         let toolbar_selection = state.toolbar_selection.clone();
         let view_state = mapper::view_state(&state);
         let popup_states = mapper::popup_states(&state);
         let _ = slint::invoke_from_event_loop(move || {
+            crate::theme::set_current(theme);
+            apply_window_themes();
             APP_WINDOW_REGISTRY.with(|registry| {
                 if let Some(registry) = registry.borrow_mut().as_mut() {
+                    if registry.latest_state.desired_settings.theme != theme {
+                        (registry.theme_preference_changed)(theme);
+                    }
                     registry.latest_state = state;
                     if let Some(main) = registry.main.as_ref() {
                         binding::apply_main(main, &view_state);
@@ -3044,7 +3105,6 @@ impl UiHandle {
                         Rc::clone(&registry.configure_resize_background),
                         Rc::clone(&registry.configure_window_paint_repair),
                         window.as_weak(),
-                        color,
                         RESIZE_BACKGROUND_RETRY_ATTEMPTS,
                     );
                 }
@@ -3271,6 +3331,36 @@ fn close_policy(tray_registered: bool) -> MainWindowClosePolicy {
     } else {
         MainWindowClosePolicy::Exit
     }
+}
+
+/// Refresh existing windows without changing ownership, focus, or transient content.
+fn apply_window_themes() {
+    APP_WINDOW_REGISTRY.with(|slot| {
+        if let Some(r) = slot.borrow().as_ref() {
+            if let Some(w) = &r.main {
+                crate::theme::apply(w);
+            }
+            if let Some(w) = &r.settings {
+                crate::theme::apply(w);
+            }
+        }
+    });
+    POPUP_REGISTRY.with(|slot| {
+        if let Some(r) = slot.borrow().as_ref() {
+            for w in r.windows.values() {
+                crate::theme::apply(w);
+            }
+            if let Some(w) = &r.language_menu {
+                crate::theme::apply(w);
+            }
+        }
+    });
+    SELECTION_TOOLBAR_REGISTRY.with(|slot| {
+        if let Some(w) = slot.borrow().as_ref().and_then(|r| r.window.as_ref()) {
+            crate::theme::apply(w);
+        }
+    });
+    crate::annotation::apply_theme();
 }
 
 #[cfg(test)]

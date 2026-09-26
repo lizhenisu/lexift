@@ -3,6 +3,15 @@ use super::{
     runtime_config::{HotkeyConfig, ProviderConfig, RuntimeConfig},
 };
 
+/// Persisted appearance preference; System resolves in the UI backend.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ThemePreference {
+    #[default]
+    Light,
+    Dark,
+    System,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsField {
     TargetLanguage,
@@ -10,6 +19,7 @@ pub enum SettingsField {
     Provider,
     LaunchAtLogin,
     SelectionToolbar,
+    Theme,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +39,7 @@ pub enum SettingsChange {
     Provider(ProviderConfig),
     LaunchAtLogin(bool),
     SelectionToolbar(bool),
+    Theme(ThemePreference),
 }
 
 impl SettingsChange {
@@ -39,6 +50,7 @@ impl SettingsChange {
             Self::Provider(_) => SettingsField::Provider,
             Self::LaunchAtLogin(_) => SettingsField::LaunchAtLogin,
             Self::SelectionToolbar(_) => SettingsField::SelectionToolbar,
+            Self::Theme(_) => SettingsField::Theme,
         }
     }
 
@@ -49,6 +61,7 @@ impl SettingsChange {
             Self::Provider(value) => settings.provider = *value,
             Self::LaunchAtLogin(value) => settings.launch_at_login = *value,
             Self::SelectionToolbar(value) => settings.selection_toolbar = *value,
+            Self::Theme(value) => settings.theme = *value,
         }
     }
 
@@ -59,6 +72,7 @@ impl SettingsChange {
             Self::Provider(value) => settings.provider == *value,
             Self::LaunchAtLogin(value) => settings.launch_at_login == *value,
             Self::SelectionToolbar(value) => settings.selection_toolbar == *value,
+            Self::Theme(value) => settings.theme == *value,
         }
     }
 }
@@ -70,6 +84,7 @@ pub struct Settings {
     pub provider: ProviderConfig,
     pub launch_at_login: bool,
     pub selection_toolbar: bool,
+    pub theme: ThemePreference,
     /// Reference to a system credential. This value is never the credential secret.
     pub deepl_credential_id: Option<String>,
 }
@@ -82,6 +97,7 @@ impl Default for Settings {
             provider: ProviderConfig::default(),
             launch_at_login: false,
             selection_toolbar: true,
+            theme: ThemePreference::default(),
             deepl_credential_id: None,
         }
     }

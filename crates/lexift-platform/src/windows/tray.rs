@@ -2,7 +2,11 @@ use std::{
     cell::{Cell, RefCell},
     mem::size_of,
     panic::{AssertUnwindSafe, catch_unwind},
-    sync::{Mutex, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU8, Ordering},
+        mpsc,
+    },
     thread::{self, JoinHandle},
 };
 
@@ -47,17 +51,31 @@ thread_local! {
 
 pub(crate) struct WindowsTrayPort {
     listener: Mutex<Option<TrayListener>>,
+    theme: Arc<AtomicU8>,
 }
 
 impl WindowsTrayPort {
     pub(crate) fn new() -> Self {
         Self {
             listener: Mutex::new(None),
+            theme: Arc::new(AtomicU8::new(0)),
         }
     }
 }
 
 impl TrayPort for WindowsTrayPort {
+    fn set_theme(&self, theme: lexift_core::domain::settings::ThemePreference) {
+        use lexift_core::domain::settings::ThemePreference;
+        self.theme.store(
+            match theme {
+                ThemePreference::Light => 0,
+                ThemePreference::Dark => 1,
+                ThemePreference::System => 2,
+            },
+            Ordering::Relaxed,
+        );
+    }
+
     fn register(&self, handler: TrayHandler) -> Result<()> {
         let mut listener = self
             .listener
@@ -68,9 +86,10 @@ impl TrayPort for WindowsTrayPort {
         }
 
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
+        let theme = Arc::clone(&self.theme);
         let thread = thread::Builder::new()
             .name("lexift-tray".into())
-            .spawn(move || run_tray(handler, ready_sender))
+            .spawn(move || run_tray(handler, ready_sender, theme))
             .map_err(|_| Error::new("Could not start the Windows tray thread"))?;
 
         match ready_receiver.recv() {
@@ -131,10 +150,15 @@ struct TrayWindowState {
     taskbar_created: u32,
     handler: TrayHandler,
     menu_active: Cell<bool>,
+    theme: Arc<AtomicU8>,
 }
 
-fn run_tray(handler: TrayHandler, ready_sender: mpsc::SyncSender<Result<u32>>) {
-    let result = run_tray_inner(handler, &ready_sender);
+fn run_tray(
+    handler: TrayHandler,
+    ready_sender: mpsc::SyncSender<Result<u32>>,
+    theme: Arc<AtomicU8>,
+) {
+    let result = run_tray_inner(handler, &ready_sender, theme);
     if let Err(error) = result {
         let _ = ready_sender.send(Err(error));
     }
@@ -143,6 +167,7 @@ fn run_tray(handler: TrayHandler, ready_sender: mpsc::SyncSender<Result<u32>>) {
 fn run_tray_inner(
     handler: TrayHandler,
     ready_sender: &mpsc::SyncSender<Result<u32>>,
+    theme: Arc<AtomicU8>,
 ) -> Result<()> {
     let module = unsafe { GetModuleHandleW(None) }
         .map_err(|_| Error::new("Could not get the Windows application module"))?;
@@ -186,6 +211,7 @@ fn run_tray_inner(
             taskbar_created,
             handler,
             menu_active: Cell::new(false),
+            theme,
         });
     });
     let _state = WindowStateGuard;
@@ -218,6 +244,23 @@ unsafe extern "system" fn tray_window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if message == windows::Win32::UI::WindowsAndMessaging::WM_MENUCHAR {
+        // Owner-drawn menus need an explicit mnemonic mapping; positions include the separator.
+        let index = match (wparam.0 as u8).to_ascii_lowercase() {
+            b'o' => Some(0),
+            b's' => Some(1),
+            b'q' => Some(3),
+            _ => None,
+        };
+        if let Some(index) = index {
+            return LRESULT(
+                ((windows::Win32::UI::WindowsAndMessaging::MNC_EXECUTE as isize) << 16) | index,
+            );
+        }
+    }
+    if super::tray_menu::handle_draw_message(message, lparam) {
+        return LRESULT(1);
+    }
     let handled = WINDOW_STATE.with(|state| {
         let state = state.borrow();
         let Some(state) = state.as_ref() else {
@@ -276,6 +319,7 @@ fn show_context_menu(state: &TrayWindowState) {
     let Some(_active) = MenuSession::begin(&state.menu_active) else {
         return;
     };
+    let appearance = super::tray_menu::MenuAppearance::begin(state.theme.load(Ordering::Relaxed));
     let Ok(menu) = (unsafe { CreatePopupMenu() }) else {
         tracing::warn!("Windows tray context menu could not be created");
         return;
@@ -293,6 +337,7 @@ fn show_context_menu(state: &TrayWindowState) {
         return;
     }
 
+    appearance.configure(menu);
     let mut cursor = POINT::default();
     if unsafe { GetCursorPos(&mut cursor) }.is_err() {
         tracing::warn!("Windows tray context menu cursor position is unavailable");

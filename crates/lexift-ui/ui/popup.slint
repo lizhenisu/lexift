@@ -51,7 +51,7 @@ component ActionButton inherits Rectangle {
         height: root.icon-size;
         source: root.icon;
         image-fit: contain;
-        colorize: Colors.surface;
+        colorize: Colors.on-primary;
     }
     TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }
@@ -81,6 +81,8 @@ export component TranslationPopup inherits Window {
     in-out property <length> max-popup-width: 1920px;
     in-out property <length> max-popup-height: 1080px;
     out property <color> resize-fallback-color: Colors.surface;
+    callback theme-background-changed();
+    changed resize-fallback-color => { root.theme-background-changed(); }
     // Vertical budget the source card must leave for the language row and the
     // result card. Measured from the live layout, never from a frozen size.
     out property <length> resize-layout-reserve-height:
@@ -240,7 +242,7 @@ export component TranslationPopup inherits Window {
                         single-line: false;
                         wrap: word-wrap;
                         vertical-alignment: TextVerticalAlignment.top;
-                        selection-background-color: Colors.primary-container;
+                        selection-background-color: Colors.primary-container; selection-foreground-color: Colors.foreground;
                         page-height: source-scroll.visible-height;
                         key-pressed(event) => {
                             root.interaction-requested();
@@ -531,7 +533,7 @@ export component TranslationPopup inherits Window {
             height: 38px;
             z: 30;
             border-radius: 12px;
-            background: root.feedback-error ? #fce8e6 : #e6f4ea;
+            background: root.feedback-error ? Colors.error-container : Colors.success-container;
             border-width: 1px;
             border-color: root.feedback-error ? Colors.error : Colors.success;
             feedback-label := Text {

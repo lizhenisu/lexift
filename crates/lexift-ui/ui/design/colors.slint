@@ -1,17 +1,25 @@
+import { Palette } from "std-widgets.slint";
+
 export global Colors {
-    in-out property <color> background: #f8f9fa;
-    in-out property <color> surface: #ffffff;
-    in-out property <color> foreground: #202124;
-    in-out property <color> secondary-foreground: #5f6368;
-    in-out property <color> outline: #dadce0;
-    in-out property <color> primary: #1967d2;
-    in-out property <color> primary-container: #e8f0fe;
-    in-out property <color> error: #b3261e;
-    in-out property <color> success: #137333;
-    in-out property <color> icon-button-hover: #20212414;
-    in-out property <color> icon-button-pressed: #1967d21f;
-    in-out property <color> scrollbar-track-hover: #2021240d;
-    in-out property <color> scrollbar-thumb: #5f636845;
-    in-out property <color> scrollbar-thumb-hover: #5f636870;
-    in-out property <color> scrollbar-thumb-pressed: #5f63688f;
+    // 0 = Light, 1 = Dark, 2 = System. Keep Palette's native binding intact.
+    in property <int> preference: 0;
+    out property <bool> dark: preference == 1 || (preference == 2 && Palette.color-scheme == ColorScheme.dark);
+    in-out property <color> background: dark ? #181a1e : #f8f9fa;
+    in-out property <color> surface: dark ? #24272c : #ffffff;
+    in-out property <color> foreground: dark ? #e8eaed : #202124;
+    in-out property <color> secondary-foreground: dark ? #adb4be : #5f6368;
+    in-out property <color> outline: dark ? #444a54 : #dadce0;
+    in-out property <color> primary: dark ? #8ab4f8 : #1967d2;
+    in-out property <color> primary-container: dark ? #293f60 : #e8f0fe;
+    in-out property <color> error: dark ? #ffb4ab : #b3261e;
+    in-out property <color> success: dark ? #81c995 : #137333;
+    in-out property <color> icon-button-hover: dark ? #ffffff14 : #20212414;
+    in-out property <color> icon-button-pressed: dark ? #8ab4f82b : #1967d21f;
+    in-out property <color> scrollbar-track-hover: dark ? #ffffff0d : #2021240d;
+    in-out property <color> scrollbar-thumb: dark ? #adb4be60 : #5f636845;
+    in-out property <color> scrollbar-thumb-hover: dark ? #adb4be90 : #5f636870;
+    in-out property <color> scrollbar-thumb-pressed: dark ? #adb4beb0 : #5f63688f;
+    out property <color> on-primary: dark ? #102b50 : #ffffff;
+    out property <color> error-container: dark ? #512e2e : #fce8e6;
+    out property <color> success-container: dark ? #233f30 : #e6f4ea;
 }

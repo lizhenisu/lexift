@@ -1,7 +1,7 @@
 use lexift_core::domain::{
     language::Language,
     runtime_config::{HotkeyConfig, HotkeyKey, HotkeyModifiers, ProviderConfig},
-    settings::Settings,
+    settings::{Settings, ThemePreference},
 };
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +26,8 @@ pub(crate) struct SettingsFile {
     launch_at_login: bool,
     #[serde(default = "default_selection_toolbar")]
     selection_toolbar: bool,
+    #[serde(default = "default_theme")]
+    theme: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -55,6 +57,10 @@ impl From<HotkeyConfig> for HotkeyFile {
     }
 }
 
+fn default_theme() -> String {
+    "light".into()
+}
+
 fn default_provider() -> String {
     ProviderConfig::default().id().into()
 }
@@ -79,6 +85,12 @@ impl ConfigFile {
                 provider: settings.provider.id().into(),
                 launch_at_login: settings.launch_at_login,
                 selection_toolbar: settings.selection_toolbar,
+                theme: match settings.theme {
+                    ThemePreference::Light => "light",
+                    ThemePreference::Dark => "dark",
+                    ThemePreference::System => "system",
+                }
+                .into(),
             },
             credentials: CredentialReferencesFile {
                 deepl: settings.deepl_credential_id.clone(),
@@ -103,6 +115,16 @@ impl ConfigFile {
             provider: self.settings.provider.parse()?,
             launch_at_login: self.settings.launch_at_login,
             selection_toolbar: self.settings.selection_toolbar,
+            theme: match self.settings.theme.as_str() {
+                "light" => ThemePreference::Light,
+                "dark" => ThemePreference::Dark,
+                "system" => ThemePreference::System,
+                value => {
+                    return Err(lexift_core::Error::new(format!(
+                        "Unsupported theme {value}"
+                    )));
+                }
+            },
             deepl_credential_id: self.credentials.deepl,
         })
     }

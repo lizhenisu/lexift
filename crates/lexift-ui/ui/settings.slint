@@ -21,7 +21,7 @@ component SettingsButton inherits Rectangle {
 
     Text {
         text: root.label;
-        color: !root.enabled ? Colors.secondary-foreground : root.primary ? Colors.surface : Colors.primary;
+        color: !root.enabled ? Colors.secondary-foreground : root.primary ? Colors.on-primary : Colors.primary;
         font-size: Typography.body-size;
         font-weight: 700;
         horizontal-alignment: center;
@@ -341,7 +341,7 @@ component AppearanceThemeChoice inherits Rectangle {
         Rectangle {
             x: 9px; y: 13px; width: parent.width - 18px; height: parent.height - 13px;
             border-radius: 5px;
-            background: root.theme-kind == 1 ? #25282d : Colors.surface;
+            background: root.theme-kind == 1 ? #25282d : #ffffff;
             clip: true;
             if root.theme-kind == 2: Rectangle {
                 x: parent.width / 2; width: parent.width / 2; height: parent.height;
@@ -361,12 +361,12 @@ component AppearanceThemeChoice inherits Rectangle {
                 border-radius: 2px;
                 background: root.theme-kind == 1 ? #aeb5bf : #68707a;
             }
-            Rectangle { x: 6px; y: 22px; width: 16px; height: 6px; border-radius: 2px; background: Colors.primary; }
+            Rectangle { x: 6px; y: 22px; width: 16px; height: 6px; border-radius: 2px; background: #1967d2; }
             Rectangle { x: 6px; y: 33px; width: 12px; height: 3px; border-radius: 2px; background: root.theme-kind == 1 ? #565b63 : #d4d9df; }
             Rectangle { x: 28px; y: 23px; width: parent.width - 43px; height: 4px; border-radius: 2px; background: root.theme-kind == 1 ? #aeb5bf : #68707a; }
             Rectangle { x: 28px; y: 33px; width: parent.width - 38px; height: 3px; border-radius: 2px; background: root.theme-kind == 1 ? #565b63 : #d4d9df; }
             Rectangle { x: 28px; y: 42px; width: parent.width - 48px; height: 3px; border-radius: 2px; background: root.theme-kind == 1 ? #565b63 : #d4d9df; }
-            Rectangle { x: parent.width - 27px; y: parent.height - 13px; width: 19px; height: 6px; border-radius: 3px; background: Colors.primary; }
+            Rectangle { x: parent.width - 27px; y: parent.height - 13px; width: 19px; height: 6px; border-radius: 3px; background: #1967d2; }
         }
     }
     Text {
@@ -398,7 +398,7 @@ component AppearanceAccentChoice inherits Rectangle {
         if root.selected: Path {
             x: 8px; y: 10px; width: 14px; height: 11px;
             viewbox-width: 14; viewbox-height: 11;
-            stroke: Colors.surface; stroke-width: 2px;
+            stroke: Colors.on-primary; stroke-width: 2px;
             MoveTo { x: 1; y: 5; } LineTo { x: 5; y: 9; } LineTo { x: 13; y: 1; }
         }
     }
@@ -662,6 +662,8 @@ export component SettingsWindow inherits Window {
     preferred-width: 820px; preferred-height: 680px; min-width: 520px; min-height: 520px;
     background: Colors.background;
     out property <color> resize-fallback-color: Colors.background;
+    callback theme-background-changed();
+    changed resize-fallback-color => { root.theme-background-changed(); }
 
     in-out property <int> draft-target-index: 0;
     in property <string> target-language-error-text: "";
@@ -691,6 +693,7 @@ export component SettingsWindow inherits Window {
     in-out property <[SettingsToastData]> toast-items: [];
     in-out property <int> active-category: 0;
     in-out property <int> appearance-theme-index: 0;
+    callback theme-selected(int);
     in-out property <int> appearance-accent-index: 0;
     in-out property <int> appearance-font-index: 0;
     in-out property <int> appearance-size-index: 1;
@@ -729,7 +732,7 @@ export component SettingsWindow inherits Window {
         "Deutsch", "Français", "Español", "Italiano", "Português", "Português (Brasil)"
     ];
     private property <[color]> appearance-accents: [
-        Colors.primary, #9c4da0, #ec4899, #ff5a5f, #fa8324, #ffbe0b, #5baa43
+        #1967d2, #9c4da0, #ec4899, #ff5a5f, #fa8324, #ffbe0b, #5baa43
     ];
     private property <[string]> appearance-fonts: ["System default", "Segoe UI", "Arial"];
     private property <[string]> appearance-sizes: ["Compact", "Standard", "Large"];
@@ -916,7 +919,7 @@ export component SettingsWindow inherits Window {
                     for theme in [0, 1, 2]: AppearanceThemeChoice {
                         width: (parent.width - 2 * Spacing.small) / 3;
                         theme-kind: theme; selected: root.appearance-theme-index == theme;
-                        chosen => { root.appearance-theme-index = theme; root.close-preview-menu(); }
+                        chosen => { root.theme-selected(theme); root.close-preview-menu(); }
                     }
                 }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }

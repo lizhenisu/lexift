@@ -204,6 +204,7 @@ pub(crate) fn toggle() {
         let Ok(main) = AnnotationToolbar::new() else {
             return;
         };
+        crate::theme::apply(&main);
         main.on_tool_clicked(|group, menu| later(move || open_panel(group as usize, menu)));
         main.on_finish_requested(|| later(close));
         main.on_escape_requested(|| later(escape));
@@ -338,6 +339,7 @@ fn open_panel(group: usize, menu: bool) {
         let Ok(panel) = AnnotationPanel::new() else {
             return;
         };
+        crate::theme::apply(&panel);
         let tool = r.selected[group];
         panel.set_tool(tool);
         panel.set_menu(menu);
@@ -569,6 +571,19 @@ fn pointer_panel(
             dispatch(w.window(), input);
         }
     })
+}
+
+pub(crate) fn apply_theme() {
+    REGISTRY.with(|slot| {
+        if let Some(r) = slot.borrow().as_ref() {
+            if let Some(w) = &r.main {
+                crate::theme::apply(w);
+            }
+            if let Some(w) = &r.panel {
+                crate::theme::apply(w);
+            }
+        }
+    });
 }
 
 #[cfg(test)]

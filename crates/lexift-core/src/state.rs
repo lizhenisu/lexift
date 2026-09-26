@@ -664,7 +664,7 @@ impl AppState {
             SettingsField::Hotkey => self.hotkey_settings_error.clear(),
             SettingsField::Provider => self.provider_settings_error.clear(),
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error.clear(),
-            SettingsField::SelectionToolbar => {}
+            SettingsField::SelectionToolbar | SettingsField::Theme => {}
         }
     }
 
@@ -674,7 +674,7 @@ impl AppState {
             SettingsField::Hotkey => self.hotkey_settings_error = error,
             SettingsField::Provider => self.provider_settings_error = error,
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error = error,
-            SettingsField::SelectionToolbar => {
+            SettingsField::SelectionToolbar | SettingsField::Theme => {
                 self.settings_error_message = error;
             }
         }
@@ -689,6 +689,7 @@ impl AppState {
             return;
         }
         match field {
+            SettingsField::Theme => self.desired_settings.theme = self.settings.theme,
             SettingsField::TargetLanguage => {
                 self.desired_settings.target_language = self.settings.target_language.clone();
             }
@@ -1707,6 +1708,52 @@ mod tests {
             }]
         );
         assert_eq!(state.settings, requested);
+        assert!(!state.settings_saving);
+    }
+
+    #[test]
+    fn theme_failure_restores_saved_theme_but_preserves_newer_request() {
+        use crate::domain::settings::ThemePreference;
+        let mut state = AppState::default();
+        let dark = SettingsChange::Theme(ThemePreference::Dark);
+        state.reduce(AppEvent::SettingsChangeRequested {
+            change: dark.clone(),
+        });
+        assert_eq!(state.desired_settings.theme, ThemePreference::Dark);
+        state.reduce(AppEvent::SettingsSaveFailed {
+            change: dark.clone(),
+            error: "disk full".into(),
+        });
+        assert_eq!(state.desired_settings.theme, ThemePreference::Light);
+        assert_eq!(state.settings_error_field, Some(SettingsField::Theme));
+
+        state.reduce(AppEvent::SettingsChangeRequested {
+            change: dark.clone(),
+        });
+        state.reduce(AppEvent::SettingsChangeRequested {
+            change: SettingsChange::Theme(ThemePreference::Light),
+        });
+        state.reduce(AppEvent::SettingsChangeRequested {
+            change: SettingsChange::Theme(ThemePreference::System),
+        });
+        let commands = state.reduce(AppEvent::SettingsSaveFailed {
+            change: dark,
+            error: "disk full".into(),
+        });
+        assert_eq!(state.desired_settings.theme, ThemePreference::System);
+        assert!(
+            matches!(commands.last(), Some(AppCommand::PersistSettings { settings, .. }) if settings.theme == ThemePreference::System)
+        );
+        let committed = Settings {
+            theme: ThemePreference::System,
+            ..state.settings.clone()
+        };
+        state.reduce(AppEvent::RuntimeConfigUpdated {
+            config: committed.runtime_config(),
+            settings: committed,
+            change: SettingsChange::Theme(ThemePreference::System),
+        });
+        assert_eq!(state.settings.theme, ThemePreference::System);
         assert!(!state.settings_saving);
     }
 
