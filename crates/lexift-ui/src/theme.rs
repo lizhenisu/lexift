@@ -26,6 +26,7 @@ pub(crate) fn apply<T: ComponentHandle>(window: &T)
 where
     for<'a> crate::Colors<'a>: slint::Global<'a, T>,
 {
+    crate::i18n::apply();
     window
         .global::<crate::Colors>()
         .set_preference(index(CURRENT.get()));

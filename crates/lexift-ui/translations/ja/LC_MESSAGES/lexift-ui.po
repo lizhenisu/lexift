@@ -1,0 +1,569 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\nLanguage: ja\nPlural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "API key removed"
+msgstr "API キーを削除しました"
+
+msgid "API key saved"
+msgstr "API キーを保存しました"
+
+msgid "Accent color"
+msgstr "アクセントカラー"
+
+msgid "Add app"
+msgstr "アプリを追加"
+
+msgid "Adjust — unavailable"
+msgstr "調整 — 利用不可"
+
+msgid "Annotation"
+msgstr "注釈"
+
+msgid "Annotation color"
+msgstr "注釈の色"
+
+msgid "Annotation toolbar — Alt + A"
+msgstr "注釈ツールバー — Alt + A"
+
+msgid "Anonymous usage statistics"
+msgstr "匿名の使用統計"
+
+msgid "Anti-aliasing"
+msgstr "アンチエイリアス"
+
+msgid "App filtering"
+msgstr "アプリのフィルター"
+
+msgid "App font"
+msgstr "アプリのフォント"
+
+msgid "App language"
+msgstr "アプリの言語"
+
+msgid "App list"
+msgstr "アプリ一覧"
+
+msgid "App theme"
+msgstr "アプリのテーマ"
+
+msgid "Appearance"
+msgstr "外観"
+
+msgid "Area"
+msgstr "範囲"
+
+msgid "Arrangement"
+msgstr "配置"
+
+msgid "Arrow"
+msgstr "矢印"
+
+msgid "Auto detect"
+msgstr "自動検出"
+
+msgid "Automatic mosaic"
+msgstr "自動モザイク"
+
+msgid "Basic settings"
+msgstr "基本設定"
+
+msgid "Behavior"
+msgstr "動作"
+
+msgid "Blacklist"
+msgstr "ブロックリスト"
+
+msgid "Blend mode"
+msgstr "合成モード"
+
+msgid "Blur"
+msgstr "ぼかし"
+
+msgid "Browse"
+msgstr "参照"
+
+msgid "Brush"
+msgstr "ブラシ"
+
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgid "Capturing selection…"
+msgstr "選択範囲を取得中…"
+
+msgid "Change"
+msgstr "変更"
+
+msgid "Check for updates on launch"
+msgstr "起動時に更新を確認"
+
+msgid "Choose where the assistant would appear"
+msgstr "アシスタントを表示するアプリ"
+
+msgid "Clear all — unavailable"
+msgstr "すべて消去 — 利用不可"
+
+msgid "Close after copying or saving"
+msgstr "コピーまたは保存後に閉じる"
+
+msgid "Compact"
+msgstr "コンパクト"
+
+msgid "Configured"
+msgstr "設定済み"
+
+msgid "Copied"
+msgstr "コピーしました"
+
+msgid "Copy"
+msgstr "コピー"
+
+msgid "Copy image as file"
+msgstr "画像をファイルとしてコピー"
+
+msgid "Corner radius"
+msgstr "角の丸み"
+
+msgid "Could not save interface language"
+msgstr "表示言語を保存できません"
+
+msgid "Could not save theme"
+msgstr "テーマを保存できません"
+
+msgid "Credential operation failed"
+msgstr "認証情報の操作に失敗しました"
+
+msgid "Credentials"
+msgstr "認証情報"
+
+msgid "Crosshair guides"
+msgstr "十字ガイド"
+
+msgid "Dark"
+msgstr "ダーク"
+
+msgid "Dashed"
+msgstr "破線"
+
+msgid "DeepL API Key"
+msgstr "DeepL API キー"
+
+msgid "DeepL API key cannot be empty"
+msgstr "DeepL API キーを入力してください"
+
+msgid "DeepL API key is not configured"
+msgstr "DeepL API キーが未設定です"
+
+msgid "Default annotation style"
+msgstr "注釈の既定スタイル"
+
+msgid "Detect double-click selection"
+msgstr "ダブルクリック選択を検出"
+
+msgid "Detected"
+msgstr "検出済み"
+
+msgid "Disable hotkeys in fullscreen apps"
+msgstr "全画面アプリでホットキーを無効化"
+
+msgid "Do nothing"
+msgstr "何もしない"
+
+msgid "Effect"
+msgstr "効果"
+
+msgid "Ellipse"
+msgstr "楕円"
+
+msgid "Enable selection assistant"
+msgstr "選択アシスタントを有効化"
+
+msgid "Enabled"
+msgstr "有効"
+
+msgid "Enter text"
+msgstr "テキストを入力"
+
+msgid "Erase annotations"
+msgstr "注釈を消去"
+
+msgid "Eraser"
+msgstr "消しゴム"
+
+msgid "Fill"
+msgstr "塗りつぶし"
+
+msgid "Filter mode"
+msgstr "フィルターモード"
+
+msgid "Font"
+msgstr "フォント"
+
+msgid "General"
+msgstr "一般"
+
+msgid "Highlighter"
+msgstr "蛍光ペン"
+
+msgid "Horizontal offset"
+msgstr "水平オフセット"
+
+msgid "Hotkeys"
+msgstr "ホットキー"
+
+msgid "Idle"
+msgstr "待機中"
+
+msgid "Image format"
+msgstr "画像形式"
+
+msgid "Image output"
+msgstr "画像出力"
+
+msgid "Inline input translation"
+msgstr "入力欄の翻訳"
+
+msgid "Input"
+msgstr "入力"
+
+msgid "Input translation"
+msgstr "入力翻訳"
+
+msgid "Intensity"
+msgstr "強度"
+
+msgid "Interface language saved"
+msgstr "表示言語を保存しました"
+
+msgid "Language & region"
+msgstr "言語と地域"
+
+msgid "Language used for new translations"
+msgstr "新しい翻訳に使う言語"
+
+msgid "Large"
+msgstr "大"
+
+msgid "Launch at startup"
+msgstr "ログイン時に起動"
+
+msgid "Lexift Annotation Options"
+msgstr "Lexift — 注釈オプション"
+
+msgid "Lexift Annotation Preview"
+msgstr "Lexift — 注釈プレビュー"
+
+msgid "Lexift Languages"
+msgstr "Lexift — 言語"
+
+msgid "Lexift Selection Toolbar"
+msgstr "Lexift — 選択アシスタント"
+
+msgid "Lexift Settings"
+msgstr "Lexift — 設定"
+
+msgid "Lexift Translation"
+msgstr "Lexift — 翻訳"
+
+msgid "Light"
+msgstr "ライト"
+
+msgid "Line style"
+msgstr "線のスタイル"
+
+msgid "Line width"
+msgstr "線の太さ"
+
+msgid "Loading…"
+msgstr "読み込み中…"
+
+msgid "Magnification"
+msgstr "倍率"
+
+msgid "Magnifier"
+msgstr "拡大鏡"
+
+msgid "Method"
+msgstr "方法"
+
+msgid "Mosaic"
+msgstr "モザイク"
+
+msgid "Multiply"
+msgstr "乗算"
+
+msgid "No apps added"
+msgstr "アプリがありません"
+
+msgid "No global hotkeys in fullscreen apps."
+msgstr "全画面アプリではグローバルホットキーを使用しません。"
+
+msgid "No selection"
+msgstr "選択されていません"
+
+msgid "No shortcut"
+msgstr "ショートカットなし"
+
+msgid "No translation text or personal data."
+msgstr "翻訳内容や個人情報は収集しません。"
+
+msgid "Normal"
+msgstr "通常"
+
+msgid "Not configured"
+msgstr "未設定"
+
+msgid "Notifications & privacy"
+msgstr "通知とプライバシー"
+
+msgid "On tray icon click"
+msgstr "トレイアイコンのクリック時"
+
+msgid "Open Lexift"
+msgstr "Lexift を開く"
+
+msgid "Open main window"
+msgstr "メインウィンドウを開く"
+
+msgid "Open settings"
+msgstr "設定を開く"
+
+msgid "Open settings on launch"
+msgstr "起動時に設定を開く"
+
+msgid "Operation failed: {0}"
+msgstr "操作に失敗しました：{0}"
+
+msgid "Paste"
+msgstr "貼り付け"
+
+msgid "Pencil"
+msgstr "鉛筆"
+
+msgid "Polyline"
+msgstr "折れ線"
+
+msgid "Positive values move the toolbar down"
+msgstr "正の値でツールバーを下に移動"
+
+msgid "Positive values move the toolbar right"
+msgstr "正の値でツールバーを右に移動"
+
+msgid "Press a key combination"
+msgstr "キーの組み合わせを押してください"
+
+msgid "Press shortcut…"
+msgstr "ショートカットを押す…"
+
+msgid "Provider"
+msgstr "プロバイダー"
+
+msgid "Provider saved"
+msgstr "プロバイダーを保存しました"
+
+msgid "Provider wasn't saved"
+msgstr "プロバイダーは保存されませんでした"
+
+msgid "Quit"
+msgstr "終了"
+
+msgid "Read aloud"
+msgstr "読み上げ"
+
+msgid "Read selection aloud"
+msgstr "選択範囲を読み上げ"
+
+msgid "Rectangle"
+msgstr "四角形"
+
+msgid "Registered"
+msgstr "登録済み"
+
+msgid "Required"
+msgstr "必須"
+
+msgid "Save key"
+msgstr "キーを保存"
+
+msgid "Save location"
+msgstr "保存先"
+
+msgid "Screenshot settings"
+msgstr "スクリーンショット設定"
+
+msgid "Select color"
+msgstr "色を選択"
+
+msgid "Selection"
+msgstr "選択範囲"
+
+msgid "Selection Assistant"
+msgstr "選択アシスタント"
+
+msgid "Selection actions"
+msgstr "選択時の操作"
+
+msgid "Selection toolbar preference saved"
+msgstr "選択ツールバー設定を保存しました"
+
+msgid "Selection toolbar preference wasn't saved"
+msgstr "選択ツールバー設定は保存されませんでした"
+
+msgid "Sequence"
+msgstr "連番"
+
+msgid "Settings"
+msgstr "設定"
+
+msgid "Shadow"
+msgstr "影"
+
+msgid "Shape"
+msgstr "形状"
+
+msgid "Shortcut saved"
+msgstr "ショートカットを保存しました"
+
+msgid "Shortcut wasn't saved"
+msgstr "ショートカットは保存されませんでした"
+
+msgid "Show Translate and Copy after selecting text"
+msgstr "選択後に翻訳とコピーを表示"
+
+msgid "Show background copy notifications"
+msgstr "バックグラウンドコピーを通知"
+
+msgid "Show selection dimensions"
+msgstr "選択範囲のサイズを表示"
+
+msgid "Show the assistant after selecting a word by double-clicking"
+msgstr "ダブルクリックで単語を選ぶと表示"
+
+msgid "Shows background copy results and errors."
+msgstr "バックグラウンドコピーの結果とエラーを表示します。"
+
+msgid "Single"
+msgstr "単一"
+
+msgid "Solid"
+msgstr "実線"
+
+msgid "Spotlight"
+msgstr "スポットライト"
+
+msgid "Standard"
+msgstr "標準"
+
+msgid "Start at"
+msgstr "開始値"
+
+msgid "Start in the background when this is off."
+msgstr "オフの場合はバックグラウンドで起動します。"
+
+msgid "Startup & updates"
+msgstr "起動と更新"
+
+msgid "Startup preference saved"
+msgstr "起動設定を保存しました"
+
+msgid "Startup preference wasn't saved"
+msgstr "起動設定は保存されませんでした"
+
+msgid "System"
+msgstr "システム"
+
+msgid "System default"
+msgstr "システム既定"
+
+msgid "Target"
+msgstr "翻訳先"
+
+msgid "Target language"
+msgstr "翻訳先の言語"
+
+msgid "Target language saved"
+msgstr "翻訳先言語を保存しました"
+
+msgid "Target language wasn't saved"
+msgstr "翻訳先言語は保存されませんでした"
+
+msgid "Text"
+msgstr "テキスト"
+
+msgid "Text size"
+msgstr "文字サイズ"
+
+msgid "Theme saved"
+msgstr "テーマを保存しました"
+
+msgid "There is no text to read"
+msgstr "読み上げるテキストがありません"
+
+msgid "Tile"
+msgstr "タイル"
+
+msgid "Translate"
+msgstr "翻訳"
+
+msgid "Translate and copy"
+msgstr "翻訳してコピー"
+
+msgid "Translate and replace"
+msgstr "翻訳して置換"
+
+msgid "Translate selection"
+msgstr "選択範囲を翻訳"
+
+msgid "Translate selection (demo)"
+msgstr "選択範囲を翻訳（デモ）"
+
+msgid "Translate selection and copy"
+msgstr "選択範囲を翻訳してコピー"
+
+msgid "Translate selection and replace"
+msgstr "選択範囲を翻訳して置換"
+
+msgid "Translate the current selection"
+msgstr "現在の選択範囲を翻訳"
+
+msgid "Translating…"
+msgstr "翻訳中…"
+
+msgid "Translation"
+msgstr "翻訳"
+
+msgid "Translation complete"
+msgstr "翻訳が完了しました"
+
+msgid "Translation failed"
+msgstr "翻訳に失敗しました"
+
+msgid "Translation provider"
+msgstr "翻訳プロバイダー"
+
+msgid "Translation text cannot be empty"
+msgstr "翻訳するテキストを入力してください"
+
+msgid "Translation will appear here"
+msgstr "翻訳はここに表示されます"
+
+msgid "Unavailable"
+msgstr "利用不可"
+
+msgid "Unavailable: {0}"
+msgstr "利用不可：{0}"
+
+msgid "Vertical offset"
+msgstr "垂直オフセット"
+
+msgid "Watermark"
+msgstr "透かし"
+
+msgid "Whitelist"
+msgstr "許可リスト"
+
+msgid "Width"
+msgstr "幅"
+
+msgid "Working…"
+msgstr "処理中…"

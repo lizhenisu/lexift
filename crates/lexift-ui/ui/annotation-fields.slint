@@ -42,6 +42,8 @@ export component SpinBox inherits Rectangle {
 }
 
 export component ComboBox inherits Rectangle {
+    in property <int> language-revision;
+    changed language-revision => { options.close(); }
     in property <[string]> model;
     in-out property <int> current-index;
     height: 30px; border-radius: 5px; border-width: 1px;

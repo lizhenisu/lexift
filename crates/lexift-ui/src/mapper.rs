@@ -10,6 +10,7 @@ pub(crate) struct UiState {
     pub provider: String,
     pub launch_at_login: bool,
     pub selection_toolbar: bool,
+    pub ui_language: lexift_core::domain::ui_language::UiLanguage,
     pub theme: lexift_core::domain::settings::ThemePreference,
     pub target_language_error: String,
     pub hotkey_error: String,
@@ -45,34 +46,27 @@ pub(crate) struct PopupUiState {
 
 pub(crate) fn view_state(state: &AppState) -> UiState {
     UiState {
-        status: match state.phase {
-            TranslationPhase::Idle => "Idle",
-            TranslationPhase::NoSelection => "No selection",
-            TranslationPhase::Capturing => "Capturing selection…",
-            TranslationPhase::Translating => "Translating…",
-            TranslationPhase::Success => "Translation complete",
-            TranslationPhase::Error => "Translation failed",
-        }
-        .into(),
+        status: crate::i18n::tr(phase_label(state.phase)),
         busy: matches!(
             state.phase,
             TranslationPhase::Capturing | TranslationPhase::Translating
         ),
         target_language: state.desired_settings.target_language.0.clone(),
         translated: state.translated_text.clone(),
-        error: state.error_message.clone(),
+        error: crate::i18n::error(&state.error_message),
         hotkey: state.desired_settings.hotkey.to_string(),
         provider: state.desired_settings.provider.id().into(),
         launch_at_login: state.desired_settings.launch_at_login,
         selection_toolbar: state.desired_settings.selection_toolbar,
         theme: state.desired_settings.theme,
-        target_language_error: state.target_language_settings_error.clone(),
-        hotkey_error: state.hotkey_settings_error.clone(),
-        provider_error: state.provider_settings_error.clone(),
-        launch_at_login_error: state.launch_at_login_settings_error.clone(),
+        ui_language: state.desired_settings.ui_language,
+        target_language_error: crate::i18n::error(&state.target_language_settings_error),
+        hotkey_error: crate::i18n::error(&state.hotkey_settings_error),
+        provider_error: crate::i18n::error(&state.provider_settings_error),
+        launch_at_login_error: crate::i18n::error(&state.launch_at_login_settings_error),
         credential_configured: state.credential_configured,
         credential_busy: state.credential_busy,
-        credential_error: state.credential_error_message.clone(),
+        credential_error: crate::i18n::error(&state.credential_error_message),
     }
 }
 
@@ -83,28 +77,28 @@ pub(crate) fn popup_states(state: &AppState) -> Vec<PopupUiState> {
 fn popup_state(session: &PopupSessionState) -> PopupUiState {
     PopupUiState {
         session_id: session.id.value(),
-        status: phase_label(session.phase).into(),
+        status: crate::i18n::tr(phase_label(session.phase)),
         busy: matches!(
             session.phase,
             TranslationPhase::Capturing | TranslationPhase::Translating
         ),
         source: session.source_text.clone(),
         translated: session.translated_text.clone(),
-        error: session.error_message.clone(),
+        error: crate::i18n::error(&session.error_message),
         source_index: source_language_index(session.source_language.as_ref()),
         source_label: session
             .source_language
             .as_ref()
             .map(|language| source_language_label(&language.0))
-            .unwrap_or("Auto detect")
-            .into(),
+            .map(crate::i18n::tr)
+            .unwrap_or_else(|| crate::i18n::tr("Auto detect")),
         source_language: session
             .source_language
             .as_ref()
             .map(|language| language.0.clone())
             .unwrap_or_default(),
         target_index: language_index(&session.target_language.0),
-        target_label: language_label(&session.target_language.0).into(),
+        target_label: crate::i18n::tr(language_label(&session.target_language.0)),
         detected_language: session
             .detected_source_language
             .as_ref()
@@ -113,7 +107,7 @@ fn popup_state(session: &PopupSessionState) -> PopupUiState {
         pinned: session.pinned,
         speaking_source: session.speaking_source,
         speaking_translation: session.speaking_translation,
-        feedback: session.feedback_message.clone(),
+        feedback: crate::i18n::error(&session.feedback_message),
         feedback_error: session.feedback_error,
         height: popup_height(
             &session.source_text,
@@ -279,7 +273,7 @@ mod tests {
             assert_eq!(mapped.status, expected_status);
             assert_eq!(mapped.busy, expected_busy);
             assert_eq!(mapped.translated, "translated");
-            assert_eq!(mapped.error, "error");
+            assert_eq!(mapped.error, "Operation failed: error");
         }
     }
 
@@ -294,11 +288,14 @@ mod tests {
         state.credential_error_message = "credential failed".into();
         let mapped = view_state(&state);
         assert_eq!(mapped.hotkey, "Ctrl + Shift + Y");
-        assert_eq!(mapped.hotkey_error, "save failed");
-        assert_eq!(mapped.provider_error, "runtime failed");
+        assert_eq!(mapped.hotkey_error, "Operation failed: save failed");
+        assert_eq!(mapped.provider_error, "Operation failed: runtime failed");
         assert!(mapped.credential_configured);
         assert!(mapped.credential_busy);
-        assert_eq!(mapped.credential_error, "credential failed");
+        assert_eq!(
+            mapped.credential_error,
+            "Operation failed: credential failed"
+        );
         assert!(mapped.error.is_empty());
     }
 }

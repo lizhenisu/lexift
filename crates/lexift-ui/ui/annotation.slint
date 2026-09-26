@@ -45,7 +45,7 @@ component ToolButton inherits Rectangle {
 }
 
 export component AnnotationToolbar inherits Window {
-    title: "Lexift Annotation Preview"; no-frame: true; always-on-top: true;
+    title: @tr("Lexift Annotation Preview"); no-frame: true; always-on-top: true;
     background: transparent; preferred-width: 590px; preferred-height: 54px;
     min-width: 0px; max-width: 590px; min-height: 54px; max-height: 54px;
     in property <[int]> tools: [0, 4, 7, 9, 10, 11, 13];
@@ -95,19 +95,20 @@ export component AnnotationToolbar inherits Window {
 }
 
 export component AnnotationPanel inherits Window {
-    title: "Lexift Annotation Options"; no-frame: true; always-on-top: true;
+    in property <int> language-revision;
+    title: @tr("Lexift Annotation Options"); no-frame: true; always-on-top: true;
     background: transparent; preferred-width: 720px; preferred-height: 220px;
     in property <bool> menu: false;
     in property <[int]> menu-tools;
     in property <[string]> menu-labels;
     in property <[int]> fields;
     in property <int> tool: 0;
-    in property <string> heading: "Rectangle";
+    in property <string> heading: @tr("Rectangle");
     in-out property <AnnotationValues> values;
     in property <int> columns: 4;
     callback selected(int);
     callback escape-requested();
-    private property <[string]> labels: ["Width", "Shape", "Line style", "Corner radius", "Fill", "Intensity", "Blend mode", "Magnification", "Erase annotations", "Anti-aliasing", "Shadow", "Text", "Font", "Text size", "Arrangement", "Start at", "Sequence", "Method", "Effect"];
+    private property <[string]> labels: [@tr("Width"), @tr("Shape"), @tr("Line style"), @tr("Corner radius"), @tr("Fill"), @tr("Intensity"), @tr("Blend mode"), @tr("Magnification"), @tr("Erase annotations"), @tr("Anti-aliasing"), @tr("Shadow"), @tr("Text"), @tr("Font"), @tr("Text size"), @tr("Arrangement"), @tr("Start at"), @tr("Sequence"), @tr("Method"), @tr("Effect")];
     private property <[color]> palette: [#d9472b, #e5bf55, #69ad61, #598fdf, #212121, #ffffff, #32ec66, #fff400];
     forward-focus: keys;
     keys := FocusScope {
@@ -124,7 +125,7 @@ export component AnnotationPanel inherits Window {
                 Text { x: 44px; height: parent.height; text: root.menu-labels[i]; color: Colors.foreground; vertical-alignment: center; font-size: 14px; }
                 option := TouchArea { clicked => { root.selected(kind); } }
             }
-            Text { height: 28px; text: "Adjust — unavailable"; color: Colors.secondary-foreground; font-size: 12px; horizontal-alignment: right; vertical-alignment: center; }
+            Text { height: 28px; text: @tr("Adjust — unavailable"); color: Colors.secondary-foreground; font-size: 12px; horizontal-alignment: right; vertical-alignment: center; }
         }
         if !root.menu: Rectangle {
             x: 12px; y: 8px; width: parent.width - 24px; height: parent.height - 16px;
@@ -135,24 +136,24 @@ export component AnnotationPanel inherits Window {
                 width: parent.width / root.columns - 10px; height: 58px;
                 Text { x: 0px; y: 0px; text: root.labels[field]; font-size: 12px; color: Colors.secondary-foreground; }
                 if field == 0: SpinBox { x: 0px; y: 22px; width: parent.width; height: 30px; minimum: 1; maximum: 100; value <=> root.values.size; }
-                if field == 1: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Rectangle", "Ellipse"]; current-index <=> root.values.shape; }
-                if field == 2: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Solid", "Dashed"]; current-index <=> root.values.style; }
+                if field == 1: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Rectangle"), @tr("Ellipse")]; current-index <=> root.values.shape; }
+                if field == 2: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Solid"), @tr("Dashed")]; current-index <=> root.values.style; }
                 if field == 3: SpinBox { x: 0px; y: 22px; width: parent.width; height: 30px; minimum: 0; maximum: 100; value <=> root.values.rounding; }
-                if field == 4: CheckBox { x: 0px; y: 24px; text: "Enabled"; checked <=> root.values.fill; }
+                if field == 4: CheckBox { x: 0px; y: 24px; text: @tr("Enabled"); checked <=> root.values.fill; }
                 if field == 5: Slider { x: 0px; y: 24px; width: parent.width; minimum: 0; maximum: 100; value <=> root.values.strength; }
-                if field == 6: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Normal", "Multiply"]; current-index <=> root.values.mode; }
-                if field == 7: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["1.5×", "2×", "3×", "4×"]; current-index <=> root.values.zoom; }
-                if field == 8: CheckBox { x: 0px; y: 24px; text: "Enabled"; checked <=> root.values.erase; }
-                if field == 9: CheckBox { x: 0px; y: 24px; text: "Enabled"; checked <=> root.values.antialias; }
-                if field == 10: CheckBox { x: 0px; y: 24px; text: "Enabled"; checked <=> root.values.shadow; }
-                if field == 11: LineEdit { x: 0px; y: 22px; width: parent.width; height: 30px; placeholder-text: "Enter text"; text <=> root.values.text; }
-                if field == 12: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Microsoft YaHei", "Segoe UI", "Arial"]; current-index <=> root.values.font; }
+                if field == 6: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Normal"), @tr("Multiply")]; current-index <=> root.values.mode; }
+                if field == 7: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: ["\{1.5}×", "2×", "3×", "4×"]; current-index <=> root.values.zoom; }
+                if field == 8: CheckBox { x: 0px; y: 24px; text: @tr("Enabled"); checked <=> root.values.erase; }
+                if field == 9: CheckBox { x: 0px; y: 24px; text: @tr("Enabled"); checked <=> root.values.antialias; }
+                if field == 10: CheckBox { x: 0px; y: 24px; text: @tr("Enabled"); checked <=> root.values.shadow; }
+                if field == 11: LineEdit { x: 0px; y: 22px; width: parent.width; height: 30px; placeholder-text: @tr("Enter text"); text <=> root.values.text; }
+                if field == 12: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Microsoft YaHei", "Segoe UI", "Arial"]; current-index <=> root.values.font; }
                 if field == 13: SpinBox { x: 0px; y: 22px; width: parent.width; height: 30px; minimum: 1; maximum: 144; value <=> root.values.text-size; }
-                if field == 14: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Tile", "Single"]; current-index <=> root.values.mode; }
+                if field == 14: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Tile"), @tr("Single")]; current-index <=> root.values.mode; }
                 if field == 15: SpinBox { x: 0px; y: 22px; width: parent.width; height: 30px; minimum: 1; maximum: 999; value <=> root.values.start; }
-                if field == 16: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["1, 2, 3", "A, B, C", "a, b, c"]; current-index <=> root.values.format; }
-                if field == 17: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Area", "Brush"]; current-index <=> root.values.shape; }
-                if field == 18: ComboBox { x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Mosaic", "Blur"]; current-index <=> root.values.mode; }
+                if field == 16: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: ["1, 2, 3", "A, B, C", "a, b, c"]; current-index <=> root.values.format; }
+                if field == 17: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Area"), @tr("Brush")]; current-index <=> root.values.shape; }
+                if field == 18: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Mosaic"), @tr("Blur")]; current-index <=> root.values.mode; }
             }
             if root.tool < 11: HorizontalLayout {
                 x: 0px; y: 28px + ceil(root.fields.length / root.columns) * 62px;
@@ -167,7 +168,7 @@ export component AnnotationPanel inherits Window {
             }
             if root.tool == 13: Text {
                 x: 0px; y: 30px + ceil(root.fields.length / root.columns) * 62px;
-                text: "Clear all — unavailable"; font-size: 13px; color: Colors.secondary-foreground;
+                text: @tr("Clear all — unavailable"); font-size: 13px; color: Colors.secondary-foreground;
             }
         }
     }

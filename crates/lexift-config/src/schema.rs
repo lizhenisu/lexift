@@ -28,6 +28,8 @@ pub(crate) struct SettingsFile {
     selection_toolbar: bool,
     #[serde(default = "default_theme")]
     theme: String,
+    #[serde(default = "default_ui_language")]
+    ui_language: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -57,6 +59,10 @@ impl From<HotkeyConfig> for HotkeyFile {
     }
 }
 
+fn default_ui_language() -> String {
+    "en-US".into()
+}
+
 fn default_theme() -> String {
     "light".into()
 }
@@ -81,6 +87,7 @@ impl ConfigFile {
             schema_version: CURRENT_SCHEMA_VERSION,
             settings: SettingsFile {
                 target_language: settings.target_language.0.clone(),
+                ui_language: settings.ui_language.code().into(),
                 hotkey: settings.hotkey.into(),
                 provider: settings.provider.id().into(),
                 launch_at_login: settings.launch_at_login,
@@ -111,6 +118,7 @@ impl ConfigFile {
         )?;
         Ok(Settings {
             target_language: Language(self.settings.target_language),
+            ui_language: self.settings.ui_language.parse()?,
             hotkey,
             provider: self.settings.provider.parse()?,
             launch_at_login: self.settings.launch_at_login,
@@ -127,5 +135,40 @@ impl ConfigFile {
             },
             deepl_credential_id: self.credentials.deepl,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lexift_core::domain::ui_language::UiLanguage;
+    #[test]
+    fn all_ui_languages_round_trip_independently_of_target() {
+        for ui_language in UiLanguage::ALL {
+            let settings = Settings {
+                ui_language,
+                target_language: Language("fr".into()),
+                ..Default::default()
+            };
+            let text = toml::to_string(&ConfigFile::from_settings(&settings)).unwrap();
+            let loaded: ConfigFile = toml::from_str(&text).unwrap();
+            assert_eq!(loaded.into_settings().unwrap(), settings);
+        }
+    }
+    #[test]
+    fn old_config_defaults_to_english_and_unknown_language_is_rejected() {
+        let text = toml::to_string(&ConfigFile::from_settings(&Settings::default())).unwrap();
+        let legacy = text
+            .lines()
+            .filter(|s| !s.starts_with("ui_language"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let file: ConfigFile = toml::from_str(&legacy).unwrap();
+        assert_eq!(
+            file.into_settings().unwrap().ui_language,
+            UiLanguage::EnglishUs
+        );
+        let invalid: ConfigFile = toml::from_str(&text.replace("en-US", "unknown")).unwrap();
+        assert!(invalid.into_settings().is_err());
     }
 }

@@ -111,8 +111,14 @@ pub(crate) fn status() -> String {
     REGISTRY.with(|s| {
         s.borrow()
             .as_ref()
-            .map(|r| r.status.clone())
-            .unwrap_or_else(|| "Unavailable".into())
+            .map(|r| {
+                if let Some(detail) = r.status.strip_prefix("Unavailable: ") {
+                    crate::i18n::detail("Unavailable: {0}", detail)
+                } else {
+                    crate::i18n::tr(&r.status)
+                }
+            })
+            .unwrap_or_else(|| crate::i18n::tr("Unavailable"))
     })
 }
 pub(crate) fn set_status(value: String) {
@@ -343,14 +349,14 @@ fn open_panel(group: usize, menu: bool) {
         let tool = r.selected[group];
         panel.set_tool(tool);
         panel.set_menu(menu);
-        panel.set_heading(NAMES[tool as usize].into());
+        panel.set_heading(crate::i18n::tr(NAMES[tool as usize]).into());
         panel.set_values(r.values[tool as usize].clone());
         panel.set_fields(ModelRc::new(VecModel::from(fields(tool))));
         panel.set_menu_tools(ModelRc::new(VecModel::from(GROUPS[group].to_vec())));
         panel.set_menu_labels(ModelRc::new(VecModel::from(
             GROUPS[group]
                 .iter()
-                .map(|&t| NAMES[t as usize].into())
+                .map(|&t| crate::i18n::tr(NAMES[t as usize]).into())
                 .collect::<Vec<_>>(),
         )));
         panel.on_selected(move |tool| {
@@ -571,6 +577,19 @@ fn pointer_panel(
             dispatch(w.window(), input);
         }
     })
+}
+
+pub(crate) fn refresh_language() {
+    REGISTRY.with(|slot| {
+        if let Some(r) = slot.borrow_mut().as_mut() {
+            if r.panel.as_ref().is_some_and(|p| p.get_menu()) {
+                r.close_panel();
+            } else if let Some(panel) = &r.panel {
+                panel.set_heading(crate::i18n::tr(NAMES[panel.get_tool() as usize]).into());
+                panel.set_language_revision(panel.get_language_revision().wrapping_add(1));
+            }
+        }
+    });
 }
 
 pub(crate) fn apply_theme() {

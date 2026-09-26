@@ -1,0 +1,569 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\nLanguage: fr\nPlural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "API key removed"
+msgstr "Clé API supprimée"
+
+msgid "API key saved"
+msgstr "Clé API enregistrée"
+
+msgid "Accent color"
+msgstr "Couleur d’accentuation"
+
+msgid "Add app"
+msgstr "Ajouter une application"
+
+msgid "Adjust — unavailable"
+msgstr "Ajuster — indisponible"
+
+msgid "Annotation"
+msgstr "Annotation"
+
+msgid "Annotation color"
+msgstr "Couleur d’annotation"
+
+msgid "Annotation toolbar — Alt + A"
+msgstr "Barre d’annotation — Alt + A"
+
+msgid "Anonymous usage statistics"
+msgstr "Statistiques anonymes"
+
+msgid "Anti-aliasing"
+msgstr "Anticrénelage"
+
+msgid "App filtering"
+msgstr "Filtrage des applications"
+
+msgid "App font"
+msgstr "Police de l’application"
+
+msgid "App language"
+msgstr "Langue de l’application"
+
+msgid "App list"
+msgstr "Liste des applications"
+
+msgid "App theme"
+msgstr "Thème de l’application"
+
+msgid "Appearance"
+msgstr "Apparence"
+
+msgid "Area"
+msgstr "Zone"
+
+msgid "Arrangement"
+msgstr "Disposition"
+
+msgid "Arrow"
+msgstr "Flèche"
+
+msgid "Auto detect"
+msgstr "Détection automatique"
+
+msgid "Automatic mosaic"
+msgstr "Mosaïque automatique"
+
+msgid "Basic settings"
+msgstr "Réglages de base"
+
+msgid "Behavior"
+msgstr "Comportement"
+
+msgid "Blacklist"
+msgstr "Liste de blocage"
+
+msgid "Blend mode"
+msgstr "Mode de fusion"
+
+msgid "Blur"
+msgstr "Flou"
+
+msgid "Browse"
+msgstr "Parcourir"
+
+msgid "Brush"
+msgstr "Pinceau"
+
+msgid "Cancel"
+msgstr "Annuler"
+
+msgid "Capturing selection…"
+msgstr "Lecture de la sélection…"
+
+msgid "Change"
+msgstr "Modifier"
+
+msgid "Check for updates on launch"
+msgstr "Vérifier les mises à jour au démarrage"
+
+msgid "Choose where the assistant would appear"
+msgstr "Choisir où afficher l’assistant"
+
+msgid "Clear all — unavailable"
+msgstr "Tout effacer — indisponible"
+
+msgid "Close after copying or saving"
+msgstr "Fermer après copie ou enregistrement"
+
+msgid "Compact"
+msgstr "Compact"
+
+msgid "Configured"
+msgstr "Configuré"
+
+msgid "Copied"
+msgstr "Copié"
+
+msgid "Copy"
+msgstr "Copier"
+
+msgid "Copy image as file"
+msgstr "Copier l’image comme fichier"
+
+msgid "Corner radius"
+msgstr "Rayon des coins"
+
+msgid "Could not save interface language"
+msgstr "Impossible d’enregistrer la langue de l’interface"
+
+msgid "Could not save theme"
+msgstr "Impossible d’enregistrer le thème"
+
+msgid "Credential operation failed"
+msgstr "Échec de l’opération sur les identifiants"
+
+msgid "Credentials"
+msgstr "Identifiants"
+
+msgid "Crosshair guides"
+msgstr "Repères en croix"
+
+msgid "Dark"
+msgstr "Sombre"
+
+msgid "Dashed"
+msgstr "Pointillés"
+
+msgid "DeepL API Key"
+msgstr "Clé API DeepL"
+
+msgid "DeepL API key cannot be empty"
+msgstr "La clé API DeepL ne peut pas être vide"
+
+msgid "DeepL API key is not configured"
+msgstr "La clé API DeepL n’est pas configurée"
+
+msgid "Default annotation style"
+msgstr "Style d’annotation par défaut"
+
+msgid "Detect double-click selection"
+msgstr "Détecter la sélection par double-clic"
+
+msgid "Detected"
+msgstr "Détecté"
+
+msgid "Disable hotkeys in fullscreen apps"
+msgstr "Désactiver les raccourcis en plein écran"
+
+msgid "Do nothing"
+msgstr "Ne rien faire"
+
+msgid "Effect"
+msgstr "Effet"
+
+msgid "Ellipse"
+msgstr "Ellipse"
+
+msgid "Enable selection assistant"
+msgstr "Activer l’assistant de sélection"
+
+msgid "Enabled"
+msgstr "Activé"
+
+msgid "Enter text"
+msgstr "Saisir du texte"
+
+msgid "Erase annotations"
+msgstr "Effacer les annotations"
+
+msgid "Eraser"
+msgstr "Gomme"
+
+msgid "Fill"
+msgstr "Remplissage"
+
+msgid "Filter mode"
+msgstr "Mode de filtrage"
+
+msgid "Font"
+msgstr "Police"
+
+msgid "General"
+msgstr "Général"
+
+msgid "Highlighter"
+msgstr "Surligneur"
+
+msgid "Horizontal offset"
+msgstr "Décalage horizontal"
+
+msgid "Hotkeys"
+msgstr "Raccourcis clavier"
+
+msgid "Idle"
+msgstr "Prêt"
+
+msgid "Image format"
+msgstr "Format d’image"
+
+msgid "Image output"
+msgstr "Sortie d’image"
+
+msgid "Inline input translation"
+msgstr "Traduction dans le champ de saisie"
+
+msgid "Input"
+msgstr "Saisie"
+
+msgid "Input translation"
+msgstr "Traduire la saisie"
+
+msgid "Intensity"
+msgstr "Intensité"
+
+msgid "Interface language saved"
+msgstr "Langue de l’interface enregistrée"
+
+msgid "Language & region"
+msgstr "Langue et région"
+
+msgid "Language used for new translations"
+msgstr "Langue des nouvelles traductions"
+
+msgid "Large"
+msgstr "Grand"
+
+msgid "Launch at startup"
+msgstr "Lancer à la connexion"
+
+msgid "Lexift Annotation Options"
+msgstr "Lexift — Options d’annotation"
+
+msgid "Lexift Annotation Preview"
+msgstr "Lexift — Aperçu d’annotation"
+
+msgid "Lexift Languages"
+msgstr "Lexift — Langues"
+
+msgid "Lexift Selection Toolbar"
+msgstr "Lexift — Assistant de sélection"
+
+msgid "Lexift Settings"
+msgstr "Lexift — Paramètres"
+
+msgid "Lexift Translation"
+msgstr "Lexift — Traduction"
+
+msgid "Light"
+msgstr "Clair"
+
+msgid "Line style"
+msgstr "Style de ligne"
+
+msgid "Line width"
+msgstr "Épaisseur du trait"
+
+msgid "Loading…"
+msgstr "Chargement…"
+
+msgid "Magnification"
+msgstr "Grossissement"
+
+msgid "Magnifier"
+msgstr "Loupe"
+
+msgid "Method"
+msgstr "Méthode"
+
+msgid "Mosaic"
+msgstr "Mosaïque"
+
+msgid "Multiply"
+msgstr "Produit"
+
+msgid "No apps added"
+msgstr "Aucune application ajoutée"
+
+msgid "No global hotkeys in fullscreen apps."
+msgstr "Aucun raccourci global en plein écran."
+
+msgid "No selection"
+msgstr "Aucune sélection"
+
+msgid "No shortcut"
+msgstr "Aucun raccourci"
+
+msgid "No translation text or personal data."
+msgstr "Aucun texte traduit ni donnée personnelle."
+
+msgid "Normal"
+msgstr "Normal"
+
+msgid "Not configured"
+msgstr "Non configuré"
+
+msgid "Notifications & privacy"
+msgstr "Notifications et confidentialité"
+
+msgid "On tray icon click"
+msgstr "Au clic sur l’icône de notification"
+
+msgid "Open Lexift"
+msgstr "Ouvrir Lexift"
+
+msgid "Open main window"
+msgstr "Ouvrir la fenêtre principale"
+
+msgid "Open settings"
+msgstr "Ouvrir les paramètres"
+
+msgid "Open settings on launch"
+msgstr "Ouvrir les paramètres au démarrage"
+
+msgid "Operation failed: {0}"
+msgstr "Échec de l’opération : {0}"
+
+msgid "Paste"
+msgstr "Coller"
+
+msgid "Pencil"
+msgstr "Crayon"
+
+msgid "Polyline"
+msgstr "Polyligne"
+
+msgid "Positive values move the toolbar down"
+msgstr "Les valeurs positives déplacent la barre vers le bas"
+
+msgid "Positive values move the toolbar right"
+msgstr "Les valeurs positives déplacent la barre vers la droite"
+
+msgid "Press a key combination"
+msgstr "Appuyez sur une combinaison de touches"
+
+msgid "Press shortcut…"
+msgstr "Appuyez sur le raccourci…"
+
+msgid "Provider"
+msgstr "Fournisseur"
+
+msgid "Provider saved"
+msgstr "Fournisseur enregistré"
+
+msgid "Provider wasn't saved"
+msgstr "Fournisseur non enregistré"
+
+msgid "Quit"
+msgstr "Quitter"
+
+msgid "Read aloud"
+msgstr "Lire à voix haute"
+
+msgid "Read selection aloud"
+msgstr "Lire la sélection à voix haute"
+
+msgid "Rectangle"
+msgstr "Rectangle"
+
+msgid "Registered"
+msgstr "Enregistré"
+
+msgid "Required"
+msgstr "Obligatoire"
+
+msgid "Save key"
+msgstr "Enregistrer la clé"
+
+msgid "Save location"
+msgstr "Emplacement de sauvegarde"
+
+msgid "Screenshot settings"
+msgstr "Capture d’écran"
+
+msgid "Select color"
+msgstr "Choisir une couleur"
+
+msgid "Selection"
+msgstr "Sélection"
+
+msgid "Selection Assistant"
+msgstr "Assistant de sélection"
+
+msgid "Selection actions"
+msgstr "Actions de sélection"
+
+msgid "Selection toolbar preference saved"
+msgstr "Préférence de barre de sélection enregistrée"
+
+msgid "Selection toolbar preference wasn't saved"
+msgstr "Préférence de barre de sélection non enregistrée"
+
+msgid "Sequence"
+msgstr "Numérotation"
+
+msgid "Settings"
+msgstr "Paramètres"
+
+msgid "Shadow"
+msgstr "Ombre"
+
+msgid "Shape"
+msgstr "Forme"
+
+msgid "Shortcut saved"
+msgstr "Raccourci enregistré"
+
+msgid "Shortcut wasn't saved"
+msgstr "Raccourci non enregistré"
+
+msgid "Show Translate and Copy after selecting text"
+msgstr "Afficher Traduire et Copier après sélection"
+
+msgid "Show background copy notifications"
+msgstr "Notifier les copies en arrière-plan"
+
+msgid "Show selection dimensions"
+msgstr "Afficher les dimensions de sélection"
+
+msgid "Show the assistant after selecting a word by double-clicking"
+msgstr "Afficher l’assistant après sélection par double-clic"
+
+msgid "Shows background copy results and errors."
+msgstr "Affiche les résultats et erreurs des copies en arrière-plan."
+
+msgid "Single"
+msgstr "Unique"
+
+msgid "Solid"
+msgstr "Continu"
+
+msgid "Spotlight"
+msgstr "Projecteur"
+
+msgid "Standard"
+msgstr "Standard"
+
+msgid "Start at"
+msgstr "Valeur de départ"
+
+msgid "Start in the background when this is off."
+msgstr "Démarre en arrière-plan si désactivé."
+
+msgid "Startup & updates"
+msgstr "Démarrage et mises à jour"
+
+msgid "Startup preference saved"
+msgstr "Préférence de démarrage enregistrée"
+
+msgid "Startup preference wasn't saved"
+msgstr "Préférence de démarrage non enregistrée"
+
+msgid "System"
+msgstr "Système"
+
+msgid "System default"
+msgstr "Valeur système"
+
+msgid "Target"
+msgstr "Cible"
+
+msgid "Target language"
+msgstr "Langue cible"
+
+msgid "Target language saved"
+msgstr "Langue cible enregistrée"
+
+msgid "Target language wasn't saved"
+msgstr "Langue cible non enregistrée"
+
+msgid "Text"
+msgstr "Texte"
+
+msgid "Text size"
+msgstr "Taille du texte"
+
+msgid "Theme saved"
+msgstr "Thème enregistré"
+
+msgid "There is no text to read"
+msgstr "Aucun texte à lire"
+
+msgid "Tile"
+msgstr "Mosaïque"
+
+msgid "Translate"
+msgstr "Traduire"
+
+msgid "Translate and copy"
+msgstr "Traduire et copier"
+
+msgid "Translate and replace"
+msgstr "Traduire et remplacer"
+
+msgid "Translate selection"
+msgstr "Traduire la sélection"
+
+msgid "Translate selection (demo)"
+msgstr "Traduire la sélection (démo)"
+
+msgid "Translate selection and copy"
+msgstr "Traduire et copier la sélection"
+
+msgid "Translate selection and replace"
+msgstr "Traduire et remplacer la sélection"
+
+msgid "Translate the current selection"
+msgstr "Traduire la sélection actuelle"
+
+msgid "Translating…"
+msgstr "Traduction…"
+
+msgid "Translation"
+msgstr "Traduction"
+
+msgid "Translation complete"
+msgstr "Traduction terminée"
+
+msgid "Translation failed"
+msgstr "Échec de la traduction"
+
+msgid "Translation provider"
+msgstr "Fournisseur de traduction"
+
+msgid "Translation text cannot be empty"
+msgstr "Le texte à traduire ne peut pas être vide"
+
+msgid "Translation will appear here"
+msgstr "La traduction s’affichera ici"
+
+msgid "Unavailable"
+msgstr "Indisponible"
+
+msgid "Unavailable: {0}"
+msgstr "Indisponible : {0}"
+
+msgid "Vertical offset"
+msgstr "Décalage vertical"
+
+msgid "Watermark"
+msgstr "Filigrane"
+
+msgid "Whitelist"
+msgstr "Liste d’autorisation"
+
+msgid "Width"
+msgstr "Largeur"
+
+msgid "Working…"
+msgstr "Traitement…"

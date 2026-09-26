@@ -41,7 +41,7 @@ export component AppWindow inherits Window {
     background: Colors.background;
 
     in-out property <string> input-text: "";
-    in property <string> status-text: "Idle";
+    in property <string> status-text: @tr("Idle");
     in property <bool> translation-busy: false;
     in property <string> target-language: "";
     in property <string> translated-text: "";
@@ -66,14 +66,14 @@ export component AppWindow inherits Window {
 
             ActionButton {
                 width: 96px;
-                label: "Settings";
+                label: @tr("Settings");
                 clicked => { root.settings-window-requested(); }
             }
         }
 
         HorizontalLayout {
             Text {
-                text: "Target";
+                text: @tr("Target");
                 color: Colors.secondary-foreground;
                 font-size: Typography.body-size;
             }
@@ -118,14 +118,14 @@ export component AppWindow inherits Window {
             ActionButton {
                 width: 220px;
                 visible: root.show-selection-demo;
-                label: "Translate selection (demo)";
+                label: @tr("Translate selection (demo)");
                 clicked => { root.selection-translation-requested(); }
             }
 
             ActionButton {
                 width: 120px;
                 primary: true;
-                label: root.translation-busy ? "Translating…" : "Translate";
+                label: root.translation-busy ? @tr("Translating…") : @tr("Translate");
                 clicked => { root.input-translation-requested(root.input-text); }
             }
         }
@@ -145,7 +145,7 @@ export component AppWindow inherits Window {
                 spacing: Spacing.small;
 
                 Text {
-                    text: "Translation";
+                    text: @tr("Translation");
                     color: Colors.secondary-foreground;
                     font-size: Typography.body-size;
                     font-weight: 700;
@@ -155,9 +155,9 @@ export component AppWindow inherits Window {
                     text: root.error-text != ""
                         ? root.error-text
                         : root.translation-busy
-                            ? "Translating…"
+                            ? @tr("Translating…")
                             : root.translated-text == ""
-                                ? "Translation will appear here"
+                                ? @tr("Translation will appear here")
                                 : root.translated-text;
                     color: root.error-text != "" ? Colors.error : Colors.foreground;
                     font-size: Typography.body-size;

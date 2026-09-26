@@ -57,7 +57,7 @@ component ActionButton inherits Rectangle {
 }
 
 export component TranslationPopup inherits Window {
-    title: "Lexift Translation";
+    title: @tr("Lexift Translation");
     icon: AppAssets.app-icon;
     no-frame: true;
     always-on-top: true;
@@ -103,13 +103,13 @@ export component TranslationPopup inherits Window {
     property <length> corner-cue-size: root.corner-mode == PopupCornerMode.slint-rounded
         ? Metrics.popup-shell-radius * 2 : Metrics.popup-native-corner-radius * 2;
     property <float> corner-cue-viewbox-size: root.corner-mode == PopupCornerMode.slint-rounded ? 32 : 16;
-    in property <string> phase-text: "Idle";
+    in property <string> phase-text: @tr("Idle");
     in-out property <string> source-text: "";
     in property <string> translated-text: "";
     in property <string> error-text: "";
     in property <string> target-label: "简体中文";
     in property <int> target-index: 0;
-    in property <string> source-label: "Auto detect";
+    in property <string> source-label: @tr("Auto detect");
     in property <string> source-language: "";
     in property <int> source-index: 0;
     in property <string> detected-language: "";
@@ -119,7 +119,7 @@ export component TranslationPopup inherits Window {
     in property <bool> speaking-translation: false;
     in property <string> feedback-text: "";
     in property <bool> feedback-error: false;
-    in property <[string]> source-language-options: ["Auto detect", "English", "中文", "日本語", "한국어", "Deutsch", "Français", "Español", "Italiano", "Português"];
+    in property <[string]> source-language-options: [@tr("Auto detect"), "English", "中文", "日本語", "한국어", "Deutsch", "Français", "Español", "Italiano", "Português"];
     in property <[string]> target-language-options: ["简体中文", "繁體中文", "English (US)", "English (UK)", "日本語", "한국어", "Deutsch", "Français", "Español", "Italiano", "Português (Portugal)", "Português (Brasil)"];
     in-out property <bool> source-menu-open: false;
     in-out property <bool> target-menu-open: false;
@@ -368,7 +368,7 @@ export component TranslationPopup inherits Window {
                 background: Colors.background;
                 Text {
                     x: 14px; y: 8px; width: parent.width - 28px; height: 24px;
-                    text: root.busy ? "Translating…" : root.error-text != "" ? "Translation failed" : "Translation";
+                    text: root.busy ? @tr("Translating…") : root.error-text != "" ? @tr("Translation failed") : @tr("Translation");
                     color: root.error-text != "" ? Colors.error : Colors.secondary-foreground;
                     font-size: 13px;
                     font-weight: 600;
@@ -380,7 +380,7 @@ export component TranslationPopup inherits Window {
                     vertical-scrollbar-policy: ScrollBarPolicy.always-off;
                     Text {
                         width: result-scroll.visible-width;
-                        text: root.error-text != "" ? root.error-text : root.translated-text == "" ? "Translation will appear here" : root.translated-text;
+                        text: root.error-text != "" ? root.error-text : root.translated-text == "" ? @tr("Translation will appear here") : root.translated-text;
                         color: root.error-text != "" ? Colors.error : root.translated-text == "" ? Colors.secondary-foreground : Colors.foreground;
                         font-size: Typography.body-size;
                         wrap: word-wrap;
@@ -550,7 +550,7 @@ export component TranslationPopup inherits Window {
 }
 
 export component PopupLanguageMenuWindow inherits Window {
-    title: "Lexift Languages";
+    title: @tr("Lexift Languages");
     icon: AppAssets.app-icon;
     no-frame: true;
     always-on-top: true;

@@ -67,6 +67,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
     let screen_for_popup = services.screen.clone();
     let screen_for_toolbar = services.screen.clone();
     let tray_for_theme = services.tray.clone();
+    let tray_for_language = services.tray.clone();
     let ui = lexift_ui::Ui::new(
         &initial_state,
         cfg!(feature = "m1-demo"),
@@ -178,6 +179,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 }
             },
         )
+        .with_language(move |labels| { if let Some(tray) = &tray_for_language { tray.set_menu_labels(labels); } })
         .with_theme_preference(move |theme| {
             if let Some(tray) = &tray_for_theme { tray.set_theme(theme); }
         })

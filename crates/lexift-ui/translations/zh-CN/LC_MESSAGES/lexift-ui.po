@@ -1,0 +1,569 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\nLanguage: zh-CN\nPlural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "API key removed"
+msgstr "API 密钥已移除"
+
+msgid "API key saved"
+msgstr "API 密钥已保存"
+
+msgid "Accent color"
+msgstr "主题色"
+
+msgid "Add app"
+msgstr "添加应用"
+
+msgid "Adjust — unavailable"
+msgstr "调整 — 不可用"
+
+msgid "Annotation"
+msgstr "标注"
+
+msgid "Annotation color"
+msgstr "标注颜色"
+
+msgid "Annotation toolbar — Alt + A"
+msgstr "标注工具条 — Alt + A"
+
+msgid "Anonymous usage statistics"
+msgstr "匿名使用统计"
+
+msgid "Anti-aliasing"
+msgstr "抗锯齿"
+
+msgid "App filtering"
+msgstr "应用过滤"
+
+msgid "App font"
+msgstr "应用字体"
+
+msgid "App language"
+msgstr "应用语言"
+
+msgid "App list"
+msgstr "应用名单"
+
+msgid "App theme"
+msgstr "应用主题"
+
+msgid "Appearance"
+msgstr "外观"
+
+msgid "Area"
+msgstr "区域"
+
+msgid "Arrangement"
+msgstr "排列"
+
+msgid "Arrow"
+msgstr "箭头"
+
+msgid "Auto detect"
+msgstr "自动检测"
+
+msgid "Automatic mosaic"
+msgstr "自动马赛克"
+
+msgid "Basic settings"
+msgstr "基本设置"
+
+msgid "Behavior"
+msgstr "行为"
+
+msgid "Blacklist"
+msgstr "黑名单"
+
+msgid "Blend mode"
+msgstr "混合模式"
+
+msgid "Blur"
+msgstr "模糊"
+
+msgid "Browse"
+msgstr "浏览"
+
+msgid "Brush"
+msgstr "画笔"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Capturing selection…"
+msgstr "正在读取选中文字…"
+
+msgid "Change"
+msgstr "修改"
+
+msgid "Check for updates on launch"
+msgstr "启动时检查更新"
+
+msgid "Choose where the assistant would appear"
+msgstr "选择助手可运行的应用"
+
+msgid "Clear all — unavailable"
+msgstr "清除全部 — 不可用"
+
+msgid "Close after copying or saving"
+msgstr "复制或保存后关闭"
+
+msgid "Compact"
+msgstr "紧凑"
+
+msgid "Configured"
+msgstr "已配置"
+
+msgid "Copied"
+msgstr "已复制"
+
+msgid "Copy"
+msgstr "复制"
+
+msgid "Copy image as file"
+msgstr "以文件形式复制图片"
+
+msgid "Corner radius"
+msgstr "圆角半径"
+
+msgid "Could not save interface language"
+msgstr "无法保存界面语言"
+
+msgid "Could not save theme"
+msgstr "无法保存主题"
+
+msgid "Credential operation failed"
+msgstr "凭证操作失败"
+
+msgid "Credentials"
+msgstr "凭证"
+
+msgid "Crosshair guides"
+msgstr "十字参考线"
+
+msgid "Dark"
+msgstr "深色"
+
+msgid "Dashed"
+msgstr "虚线"
+
+msgid "DeepL API Key"
+msgstr "DeepL API 密钥"
+
+msgid "DeepL API key cannot be empty"
+msgstr "DeepL API 密钥不能为空"
+
+msgid "DeepL API key is not configured"
+msgstr "尚未配置 DeepL API 密钥"
+
+msgid "Default annotation style"
+msgstr "默认标注样式"
+
+msgid "Detect double-click selection"
+msgstr "监听双击选词"
+
+msgid "Detected"
+msgstr "已检测"
+
+msgid "Disable hotkeys in fullscreen apps"
+msgstr "在全屏应用中禁用快捷键"
+
+msgid "Do nothing"
+msgstr "不执行操作"
+
+msgid "Effect"
+msgstr "效果"
+
+msgid "Ellipse"
+msgstr "椭圆"
+
+msgid "Enable selection assistant"
+msgstr "启用划词助手"
+
+msgid "Enabled"
+msgstr "已启用"
+
+msgid "Enter text"
+msgstr "输入文字"
+
+msgid "Erase annotations"
+msgstr "擦除标注"
+
+msgid "Eraser"
+msgstr "橡皮擦"
+
+msgid "Fill"
+msgstr "填充"
+
+msgid "Filter mode"
+msgstr "过滤模式"
+
+msgid "Font"
+msgstr "字体"
+
+msgid "General"
+msgstr "常规"
+
+msgid "Highlighter"
+msgstr "荧光笔"
+
+msgid "Horizontal offset"
+msgstr "水平偏移"
+
+msgid "Hotkeys"
+msgstr "热键设置"
+
+msgid "Idle"
+msgstr "就绪"
+
+msgid "Image format"
+msgstr "图片格式"
+
+msgid "Image output"
+msgstr "图片输出"
+
+msgid "Inline input translation"
+msgstr "输入框快捷翻译"
+
+msgid "Input"
+msgstr "输入"
+
+msgid "Input translation"
+msgstr "输入翻译"
+
+msgid "Intensity"
+msgstr "强度"
+
+msgid "Interface language saved"
+msgstr "界面语言已保存"
+
+msgid "Language & region"
+msgstr "语言与地区"
+
+msgid "Language used for new translations"
+msgstr "新翻译使用的语言"
+
+msgid "Large"
+msgstr "大"
+
+msgid "Launch at startup"
+msgstr "开机自启动"
+
+msgid "Lexift Annotation Options"
+msgstr "Lexift — 标注选项"
+
+msgid "Lexift Annotation Preview"
+msgstr "Lexift — 标注预览"
+
+msgid "Lexift Languages"
+msgstr "Lexift — 语言"
+
+msgid "Lexift Selection Toolbar"
+msgstr "Lexift — 划词助手"
+
+msgid "Lexift Settings"
+msgstr "Lexift — 设置"
+
+msgid "Lexift Translation"
+msgstr "Lexift — 翻译"
+
+msgid "Light"
+msgstr "浅色"
+
+msgid "Line style"
+msgstr "线条样式"
+
+msgid "Line width"
+msgstr "线条粗细"
+
+msgid "Loading…"
+msgstr "加载中…"
+
+msgid "Magnification"
+msgstr "倍率"
+
+msgid "Magnifier"
+msgstr "放大镜"
+
+msgid "Method"
+msgstr "方式"
+
+msgid "Mosaic"
+msgstr "马赛克"
+
+msgid "Multiply"
+msgstr "正片叠底"
+
+msgid "No apps added"
+msgstr "尚未添加应用"
+
+msgid "No global hotkeys in fullscreen apps."
+msgstr "全屏应用中不触发全局快捷键。"
+
+msgid "No selection"
+msgstr "未选中文字"
+
+msgid "No shortcut"
+msgstr "未设置快捷键"
+
+msgid "No translation text or personal data."
+msgstr "不收集翻译内容或个人信息。"
+
+msgid "Normal"
+msgstr "正常"
+
+msgid "Not configured"
+msgstr "未配置"
+
+msgid "Notifications & privacy"
+msgstr "通知与隐私"
+
+msgid "On tray icon click"
+msgstr "单击托盘图标时"
+
+msgid "Open Lexift"
+msgstr "打开 Lexift"
+
+msgid "Open main window"
+msgstr "打开主窗口"
+
+msgid "Open settings"
+msgstr "打开设置"
+
+msgid "Open settings on launch"
+msgstr "启动时打开设置"
+
+msgid "Operation failed: {0}"
+msgstr "操作失败：{0}"
+
+msgid "Paste"
+msgstr "粘贴"
+
+msgid "Pencil"
+msgstr "铅笔"
+
+msgid "Polyline"
+msgstr "折线"
+
+msgid "Positive values move the toolbar down"
+msgstr "正值使工具条向下移动"
+
+msgid "Positive values move the toolbar right"
+msgstr "正值使工具条向右移动"
+
+msgid "Press a key combination"
+msgstr "请按下组合键"
+
+msgid "Press shortcut…"
+msgstr "请按下快捷键…"
+
+msgid "Provider"
+msgstr "服务商"
+
+msgid "Provider saved"
+msgstr "服务商已保存"
+
+msgid "Provider wasn't saved"
+msgstr "服务商未保存"
+
+msgid "Quit"
+msgstr "退出"
+
+msgid "Read aloud"
+msgstr "朗读"
+
+msgid "Read selection aloud"
+msgstr "朗读选中文字"
+
+msgid "Rectangle"
+msgstr "矩形"
+
+msgid "Registered"
+msgstr "已注册"
+
+msgid "Required"
+msgstr "必选"
+
+msgid "Save key"
+msgstr "保存密钥"
+
+msgid "Save location"
+msgstr "保存位置"
+
+msgid "Screenshot settings"
+msgstr "截图设置"
+
+msgid "Select color"
+msgstr "选择颜色"
+
+msgid "Selection"
+msgstr "选区"
+
+msgid "Selection Assistant"
+msgstr "划词助手"
+
+msgid "Selection actions"
+msgstr "划词动作"
+
+msgid "Selection toolbar preference saved"
+msgstr "划词工具条设置已保存"
+
+msgid "Selection toolbar preference wasn't saved"
+msgstr "划词工具条设置未保存"
+
+msgid "Sequence"
+msgstr "序号"
+
+msgid "Settings"
+msgstr "设置"
+
+msgid "Shadow"
+msgstr "阴影"
+
+msgid "Shape"
+msgstr "形状"
+
+msgid "Shortcut saved"
+msgstr "快捷键已保存"
+
+msgid "Shortcut wasn't saved"
+msgstr "快捷键未保存"
+
+msgid "Show Translate and Copy after selecting text"
+msgstr "选中文字后显示翻译和复制"
+
+msgid "Show background copy notifications"
+msgstr "显示后台复制通知"
+
+msgid "Show selection dimensions"
+msgstr "显示选区像素尺寸"
+
+msgid "Show the assistant after selecting a word by double-clicking"
+msgstr "双击选中文字后显示助手"
+
+msgid "Shows background copy results and errors."
+msgstr "显示后台复制的结果与错误。"
+
+msgid "Single"
+msgstr "单个"
+
+msgid "Solid"
+msgstr "实线"
+
+msgid "Spotlight"
+msgstr "聚光灯"
+
+msgid "Standard"
+msgstr "标准"
+
+msgid "Start at"
+msgstr "起始值"
+
+msgid "Start in the background when this is off."
+msgstr "关闭后将在后台启动。"
+
+msgid "Startup & updates"
+msgstr "启动与更新"
+
+msgid "Startup preference saved"
+msgstr "启动设置已保存"
+
+msgid "Startup preference wasn't saved"
+msgstr "启动设置未保存"
+
+msgid "System"
+msgstr "跟随系统"
+
+msgid "System default"
+msgstr "系统默认"
+
+msgid "Target"
+msgstr "目标"
+
+msgid "Target language"
+msgstr "目标语言"
+
+msgid "Target language saved"
+msgstr "目标语言已保存"
+
+msgid "Target language wasn't saved"
+msgstr "目标语言未保存"
+
+msgid "Text"
+msgstr "文字"
+
+msgid "Text size"
+msgstr "文字字号"
+
+msgid "Theme saved"
+msgstr "主题已保存"
+
+msgid "There is no text to read"
+msgstr "没有可朗读的文本"
+
+msgid "Tile"
+msgstr "平铺"
+
+msgid "Translate"
+msgstr "翻译"
+
+msgid "Translate and copy"
+msgstr "翻译并复制"
+
+msgid "Translate and replace"
+msgstr "翻译并替换"
+
+msgid "Translate selection"
+msgstr "划词翻译"
+
+msgid "Translate selection (demo)"
+msgstr "翻译选中文字（演示）"
+
+msgid "Translate selection and copy"
+msgstr "划词翻译并复制"
+
+msgid "Translate selection and replace"
+msgstr "划词翻译并替换"
+
+msgid "Translate the current selection"
+msgstr "翻译当前选中文字"
+
+msgid "Translating…"
+msgstr "翻译中…"
+
+msgid "Translation"
+msgstr "翻译"
+
+msgid "Translation complete"
+msgstr "翻译完成"
+
+msgid "Translation failed"
+msgstr "翻译失败"
+
+msgid "Translation provider"
+msgstr "翻译服务商"
+
+msgid "Translation text cannot be empty"
+msgstr "待翻译文本不能为空"
+
+msgid "Translation will appear here"
+msgstr "译文将显示在这里"
+
+msgid "Unavailable"
+msgstr "不可用"
+
+msgid "Unavailable: {0}"
+msgstr "不可用：{0}"
+
+msgid "Vertical offset"
+msgstr "垂直偏移"
+
+msgid "Watermark"
+msgstr "水印"
+
+msgid "Whitelist"
+msgstr "白名单"
+
+msgid "Width"
+msgstr "宽度"
+
+msgid "Working…"
+msgstr "处理中…"

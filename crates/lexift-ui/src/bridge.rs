@@ -20,7 +20,7 @@ use lexift_core::{
         settings::{Settings, SettingsChange, SettingsFeedback, SettingsField},
     },
 };
-use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use crate::{
     AppWindow, PopupCornerMode, PopupLanguageMenuWindow, SelectionToolbarWindow, SettingsToastData,
@@ -124,6 +124,7 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) attach_tool_window: AttachToolWindow,
     trim_process_working_set: fn() -> bool,
     theme_preference_changed: Rc<dyn Fn(lexift_core::domain::settings::ThemePreference)>,
+    language_changed: Rc<dyn Fn(lexift_core::ports::tray::TrayMenuLabels)>,
     configure_resize_background: ConfigureResizeBackground,
     configure_window_paint_repair: ConfigureWindowPaintRepair,
 }
@@ -151,9 +152,19 @@ impl WindowLifecycleCallbacks {
             attach_tool_window: Rc::new(attach_tool_window),
             trim_process_working_set,
             theme_preference_changed: Rc::new(|_| {}),
+            language_changed: Rc::new(|_| {}),
             configure_resize_background: Rc::new(|_, _| true),
             configure_window_paint_repair: Rc::new(|_, _| true),
         }
+    }
+
+    /// Updates native surfaces without giving the UI a platform dependency.
+    pub fn with_language(
+        mut self,
+        changed: impl Fn(lexift_core::ports::tray::TrayMenuLabels) + 'static,
+    ) -> Self {
+        self.language_changed = Rc::new(changed);
+        self
     }
 
     /// Propagates application theme preferences to native surfaces owned by the host.
@@ -1729,6 +1740,7 @@ struct AppWindowRegistry {
     configure_window_paint_repair: ConfigureWindowPaintRepair,
     latest_state: AppState,
     theme_preference_changed: Rc<dyn Fn(lexift_core::domain::settings::ThemePreference)>,
+    language_changed: Rc<dyn Fn(lexift_core::ports::tray::TrayMenuLabels)>,
     show_selection_demo: bool,
     handler: Option<Rc<dyn Fn(AppEvent)>>,
     background_mode: Rc<Cell<bool>>,
@@ -2196,6 +2208,14 @@ fn wire_settings_callbacks(
         });
     });
     let settings_handler = Rc::clone(&handler);
+    let language_handler = Rc::clone(&handler);
+    settings.on_ui_language_selected(move |index| {
+        language_handler(AppEvent::SettingsChangeRequested {
+            change: SettingsChange::UiLanguage(
+                lexift_core::domain::ui_language::UiLanguage::from_index(index),
+            ),
+        });
+    });
     let theme_handler = Rc::clone(&handler);
     settings.on_theme_selected(move |index| {
         theme_handler(AppEvent::SettingsChangeRequested {
@@ -2310,6 +2330,8 @@ impl Ui {
         cancel_idle_memory_trim();
         let credential_generation = Arc::new(AtomicU64::new(0));
         let toast_next_id = Arc::new(AtomicU64::new(0));
+        crate::i18n::select(initial_state.desired_settings.ui_language);
+        (window_lifecycle.language_changed)(crate::i18n::tray_labels());
         crate::theme::set_current(initial_state.desired_settings.theme);
         (window_lifecycle.theme_preference_changed)(initial_state.desired_settings.theme);
         let toast_records = Arc::new(Mutex::new(Vec::new()));
@@ -2326,6 +2348,7 @@ impl Ui {
                 ),
                 latest_state: initial_state.clone(),
                 theme_preference_changed: Rc::clone(&window_lifecycle.theme_preference_changed),
+                language_changed: Rc::clone(&window_lifecycle.language_changed),
                 show_selection_demo,
                 handler: None,
                 background_mode: Rc::clone(&background_mode),
@@ -2866,7 +2889,7 @@ fn render_settings_toasts(
         .iter()
         .map(|record| SettingsToastData {
             id: record.id,
-            message: SharedString::from(record.message.as_str()),
+            message: crate::i18n::tr(&record.message).into(),
             error: record.error,
         })
         .collect::<Vec<_>>();
@@ -2907,6 +2930,12 @@ fn clear_settings_toasts(
 
 fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool) {
     match feedback {
+        SettingsFeedback::SettingsSaved(SettingsField::UiLanguage) => {
+            ("Interface language saved", false)
+        }
+        SettingsFeedback::SettingsSaveFailed(SettingsField::UiLanguage) => {
+            ("Could not save interface language", true)
+        }
         SettingsFeedback::SettingsSaved(SettingsField::Theme) => ("Theme saved", false),
         SettingsFeedback::SettingsSaveFailed(SettingsField::Theme) => {
             ("Could not save theme", true)
@@ -2962,7 +2991,7 @@ impl UiHandle {
             crate::annotation::set_status(status.clone());
             APP_WINDOW_REGISTRY.with(|s| {
                 if let Some(settings) = s.borrow().as_ref().and_then(|r| r.settings.as_ref()) {
-                    settings.set_annotation_hotkey_status(status.into());
+                    settings.set_annotation_hotkey_status(crate::annotation::status().into());
                 }
             });
         });
@@ -2971,15 +3000,28 @@ impl UiHandle {
     pub fn update(&self, state: AppState) {
         let theme = state.desired_settings.theme;
         let toolbar_selection = state.toolbar_selection.clone();
-        let view_state = mapper::view_state(&state);
-        let popup_states = mapper::popup_states(&state);
+        let toast_records = Arc::clone(&self.toast_records);
         let _ = slint::invoke_from_event_loop(move || {
+            let language_changed = crate::i18n::select(state.desired_settings.ui_language);
+            let view_state = mapper::view_state(&state);
+            let popup_states = mapper::popup_states(&state);
+            if language_changed {
+                crate::annotation::refresh_language();
+            }
             crate::theme::set_current(theme);
             apply_window_themes();
             APP_WINDOW_REGISTRY.with(|registry| {
                 if let Some(registry) = registry.borrow_mut().as_mut() {
                     if registry.latest_state.desired_settings.theme != theme {
                         (registry.theme_preference_changed)(theme);
+                    }
+                    if language_changed {
+                        (registry.language_changed)(crate::i18n::tray_labels());
+                        if let Some(settings) = &registry.settings {
+                            settings.invoke_close_settings_menu();
+                            settings.invoke_close_preview_menu();
+                            render_settings_toasts(settings, &toast_records);
+                        }
                     }
                     registry.latest_state = state;
                     if let Some(main) = registry.main.as_ref() {
@@ -2992,6 +3034,9 @@ impl UiHandle {
             });
             POPUP_REGISTRY.with(|registry| {
                 if let Some(registry) = registry.borrow_mut().as_mut() {
+                    if language_changed {
+                        registry.close_language_menu(false);
+                    }
                     registry.update(popup_states);
                 }
             });

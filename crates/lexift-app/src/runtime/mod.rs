@@ -98,7 +98,8 @@ impl RuntimeManager {
         match field {
             SettingsField::TargetLanguage
             | SettingsField::SelectionToolbar
-            | SettingsField::Theme => {}
+            | SettingsField::Theme
+            | SettingsField::UiLanguage => {}
             SettingsField::Hotkey => self.hotkey.apply(config.hotkey)?,
             SettingsField::Provider => {
                 self.translator.validate(config.provider)?;
@@ -117,7 +118,8 @@ impl RuntimeManager {
         match field {
             SettingsField::TargetLanguage
             | SettingsField::SelectionToolbar
-            | SettingsField::Theme => {}
+            | SettingsField::Theme
+            | SettingsField::UiLanguage => {}
             SettingsField::Hotkey => current.hotkey = config.hotkey,
             SettingsField::Provider => current.provider = config.provider,
             SettingsField::LaunchAtLogin => {

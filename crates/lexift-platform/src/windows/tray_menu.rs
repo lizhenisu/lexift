@@ -26,6 +26,8 @@ struct Style {
     bold: HFONT,
     // Boxed so Win32's itemData pointers remain stable even if Style moves.
     names: Box<[MSAAMENUINFO; 3]>,
+    _text: [Vec<u16>; 3],
+    width: u32,
 }
 impl Drop for Style {
     fn drop(&mut self) {
@@ -66,7 +68,7 @@ fn system_light() -> Option<u32> {
 
 pub(super) struct MenuAppearance;
 impl MenuAppearance {
-    pub(super) fn begin(preference: u8) -> Self {
+    pub(super) fn begin(preference: u8, labels: &lexift_core::ports::tray::TrayMenuLabels) -> Self {
         let dark = resolve_dark(
             preference,
             if preference == 2 {
@@ -88,6 +90,25 @@ impl MenuAppearance {
                 );
             }
         }
+        let letters = format!("{}{}{}", labels.open, labels.settings, labels.quit);
+        let face = if letters
+            .chars()
+            .any(|c| ('\u{3040}'..='\u{30ff}').contains(&c))
+        {
+            w!("Yu Gothic UI")
+        } else if letters
+            .chars()
+            .any(|c| ('\u{ac00}'..='\u{d7af}').contains(&c))
+        {
+            w!("Malgun Gothic")
+        } else if letters
+            .chars()
+            .any(|c| ('\u{3400}'..='\u{9fff}').contains(&c))
+        {
+            w!("Microsoft YaHei UI")
+        } else {
+            w!("Segoe UI")
+        };
         let font = |weight| unsafe {
             CreateFontW(
                 -(pixels(14, dpi) as i32),
@@ -103,14 +124,45 @@ impl MenuAppearance {
                 CLIP_DEFAULT_PRECIS,
                 CLEARTYPE_QUALITY,
                 0,
-                w!("Segoe UI"),
+                face,
             )
         };
-        let names = [w!("Open Lexift"), w!("Settings"), w!("Quit")].map(|text| MSAAMENUINFO {
+        let text = [&labels.open, &labels.settings, &labels.quit]
+            .map(|s| s.encode_utf16().chain(Some(0)).collect::<Vec<_>>());
+        let names = std::array::from_fn(|i| MSAAMENUINFO {
             dwMSAASignature: MSAA_MENU_SIG as u32,
-            cchWText: unsafe { text.as_wide().len() } as u32,
-            pszWText: PWSTR(text.as_ptr().cast_mut()),
+            cchWText: text[i].len() as u32 - 1,
+            pszWText: PWSTR(text[i].as_ptr().cast_mut()),
         });
+        let font = font(400);
+        let bold = unsafe {
+            let mut description = LOGFONTW::default();
+            GetObjectW(
+                font.into(),
+                size_of::<LOGFONTW>() as i32,
+                Some((&mut description as *mut LOGFONTW).cast()),
+            );
+            description.lfWeight = 600;
+            CreateFontIndirectW(&description)
+        };
+        // Use the same fonts and monitor DPI as drawing, including the bold default item.
+        let width = unsafe {
+            let dc = GetDC(None);
+            let previous = SelectObject(dc, bold.into());
+            let width = text
+                .iter()
+                .map(|text| {
+                    let mut size = windows::Win32::Foundation::SIZE::default();
+                    let _ = GetTextExtentPoint32W(dc, &text[..text.len() - 1], &mut size);
+                    size.cx.max(0) as u32
+                })
+                .max()
+                .unwrap_or(0)
+                + pixels(48, dpi);
+            SelectObject(dc, previous);
+            ReleaseDC(None, dc);
+            width.max(pixels(176, dpi))
+        };
         STYLE.with(|slot| {
             *slot.borrow_mut() = Some(Style {
                 dark,
@@ -119,8 +171,10 @@ impl MenuAppearance {
                     CreateSolidBrush(rgb(if dark { 0x24272c } else { 0xffffff }))
                 },
                 hover: unsafe { CreateSolidBrush(rgb(if dark { 0x293f60 } else { 0xe8f0fe })) },
-                font: font(400),
-                bold: font(600),
+                font,
+                bold,
+                width,
+                _text: text,
                 names: Box::new(names),
             })
         });
@@ -168,6 +222,50 @@ impl Drop for MenuAppearance {
     }
 }
 
+/// Match the displayed label's initial; cycle duplicate initials without executing.
+pub(super) fn menu_character(
+    key: u16,
+    menu: LPARAM,
+) -> Option<windows::Win32::Foundation::LRESULT> {
+    let key = char::from_u32(key as u32)?.to_lowercase().to_string();
+    STYLE.with(|slot| {
+        let slot = slot.borrow();
+        let style = slot.as_ref()?;
+        let matches: Vec<_> = style
+            ._text
+            .iter()
+            .enumerate()
+            .filter_map(|(i, text)| {
+                let initial = String::from_utf16_lossy(text)
+                    .chars()
+                    .next()?
+                    .to_lowercase()
+                    .to_string();
+                (initial == key).then_some(if i == 2 { 3 } else { i as u32 })
+            })
+            .collect();
+        let mut chosen = *matches.first()?;
+        if matches.len() > 1 {
+            for (i, position) in matches.iter().enumerate() {
+                let flags =
+                    unsafe { GetMenuState(HMENU(menu.0 as *mut _), *position, MF_BYPOSITION) };
+                if flags & MF_HILITE.0 != 0 {
+                    chosen = matches[(i + 1) % matches.len()];
+                    break;
+                }
+            }
+        }
+        let action = if matches.len() == 1 {
+            MNC_EXECUTE
+        } else {
+            MNC_SELECT
+        };
+        Some(windows::Win32::Foundation::LRESULT(
+            ((action as isize) << 16) | chosen as isize,
+        ))
+    })
+}
+
 /// Only dereference Win32's draw structures for the messages and menu we own.
 pub(super) fn handle_draw_message(message: u32, lparam: LPARAM) -> bool {
     if !matches!(message, WM_MEASUREITEM | WM_DRAWITEM) || lparam.0 == 0 {
@@ -184,7 +282,7 @@ pub(super) fn handle_draw_message(message: u32, lparam: LPARAM) -> bool {
                 if item.CtlType != ODT_MENU {
                     return false;
                 }
-                item.itemWidth = pixels(176, style.dpi);
+                item.itemWidth = style.width;
                 item.itemHeight = pixels(if item.itemID == 0 { 9 } else { 34 }, style.dpi);
             } else {
                 let item = &*(lparam.0 as *const DRAWITEMSTRUCT);
@@ -257,7 +355,7 @@ mod tests {
     }
     #[test]
     fn native_menu_exposes_accessible_labels_and_cleans_up() {
-        let appearance = MenuAppearance::begin(1);
+        let appearance = MenuAppearance::begin(1, &Default::default());
         let menu = unsafe { CreatePopupMenu().unwrap() };
         unsafe {
             AppendMenuW(menu, MF_STRING, 1, w!("Open Lexift")).unwrap();
@@ -291,6 +389,29 @@ mod tests {
         }
         drop(appearance);
         STYLE.with(|slot| assert!(slot.borrow().is_none()));
+    }
+
+    #[test]
+    fn localized_labels_are_owned_and_long_labels_expand_the_menu() {
+        use lexift_core::ports::tray::TrayMenuLabels;
+        let labels = TrayMenuLabels {
+            open: "打开 Lexift".into(),
+            settings: "Paramètres et préférences de l’application".into(),
+            quit: "退出".into(),
+        };
+        let appearance = MenuAppearance::begin(0, &labels);
+        drop(labels);
+        STYLE.with(|slot| {
+            let slot = slot.borrow();
+            let style = slot.as_ref().unwrap();
+            assert!(style.width > pixels(176, style.dpi));
+            let name = &style.names[0];
+            let text = unsafe {
+                std::slice::from_raw_parts(name.pszWText.as_ptr(), name.cchWText as usize)
+            };
+            assert_eq!(String::from_utf16_lossy(text), "打开 Lexift");
+        });
+        drop(appearance);
     }
 
     #[test]

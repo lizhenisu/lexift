@@ -12,7 +12,7 @@ use std::{
 
 use lexift_core::{
     Error, Result,
-    ports::tray::{TrayAction, TrayHandler, TrayPort},
+    ports::tray::{TrayAction, TrayHandler, TrayMenuLabels, TrayPort},
 };
 use windows::{
     Win32::{
@@ -52,6 +52,7 @@ thread_local! {
 pub(crate) struct WindowsTrayPort {
     listener: Mutex<Option<TrayListener>>,
     theme: Arc<AtomicU8>,
+    labels: Arc<Mutex<TrayMenuLabels>>,
 }
 
 impl WindowsTrayPort {
@@ -59,11 +60,15 @@ impl WindowsTrayPort {
         Self {
             listener: Mutex::new(None),
             theme: Arc::new(AtomicU8::new(0)),
+            labels: Arc::new(Mutex::new(TrayMenuLabels::default())),
         }
     }
 }
 
 impl TrayPort for WindowsTrayPort {
+    fn set_menu_labels(&self, labels: TrayMenuLabels) {
+        *self.labels.lock().unwrap_or_else(|p| p.into_inner()) = labels;
+    }
     fn set_theme(&self, theme: lexift_core::domain::settings::ThemePreference) {
         use lexift_core::domain::settings::ThemePreference;
         self.theme.store(
@@ -87,9 +92,10 @@ impl TrayPort for WindowsTrayPort {
 
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let theme = Arc::clone(&self.theme);
+        let labels = Arc::clone(&self.labels);
         let thread = thread::Builder::new()
             .name("lexift-tray".into())
-            .spawn(move || run_tray(handler, ready_sender, theme))
+            .spawn(move || run_tray(handler, ready_sender, theme, labels))
             .map_err(|_| Error::new("Could not start the Windows tray thread"))?;
 
         match ready_receiver.recv() {
@@ -151,14 +157,16 @@ struct TrayWindowState {
     handler: TrayHandler,
     menu_active: Cell<bool>,
     theme: Arc<AtomicU8>,
+    labels: Arc<Mutex<TrayMenuLabels>>,
 }
 
 fn run_tray(
     handler: TrayHandler,
     ready_sender: mpsc::SyncSender<Result<u32>>,
     theme: Arc<AtomicU8>,
+    labels: Arc<Mutex<TrayMenuLabels>>,
 ) {
-    let result = run_tray_inner(handler, &ready_sender, theme);
+    let result = run_tray_inner(handler, &ready_sender, theme, labels);
     if let Err(error) = result {
         let _ = ready_sender.send(Err(error));
     }
@@ -168,6 +176,7 @@ fn run_tray_inner(
     handler: TrayHandler,
     ready_sender: &mpsc::SyncSender<Result<u32>>,
     theme: Arc<AtomicU8>,
+    labels: Arc<Mutex<TrayMenuLabels>>,
 ) -> Result<()> {
     let module = unsafe { GetModuleHandleW(None) }
         .map_err(|_| Error::new("Could not get the Windows application module"))?;
@@ -212,6 +221,7 @@ fn run_tray_inner(
             handler,
             menu_active: Cell::new(false),
             theme,
+            labels,
         });
     });
     let _state = WindowStateGuard;
@@ -244,19 +254,10 @@ unsafe extern "system" fn tray_window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    if message == windows::Win32::UI::WindowsAndMessaging::WM_MENUCHAR {
-        // Owner-drawn menus need an explicit mnemonic mapping; positions include the separator.
-        let index = match (wparam.0 as u8).to_ascii_lowercase() {
-            b'o' => Some(0),
-            b's' => Some(1),
-            b'q' => Some(3),
-            _ => None,
-        };
-        if let Some(index) = index {
-            return LRESULT(
-                ((windows::Win32::UI::WindowsAndMessaging::MNC_EXECUTE as isize) << 16) | index,
-            );
-        }
+    if message == windows::Win32::UI::WindowsAndMessaging::WM_MENUCHAR
+        && let Some(result) = super::tray_menu::menu_character(wparam.0 as u16, lparam)
+    {
+        return result;
     }
     if super::tray_menu::handle_draw_message(message, lparam) {
         return LRESULT(1);
@@ -319,17 +320,32 @@ fn show_context_menu(state: &TrayWindowState) {
     let Some(_active) = MenuSession::begin(&state.menu_active) else {
         return;
     };
-    let appearance = super::tray_menu::MenuAppearance::begin(state.theme.load(Ordering::Relaxed));
+    let labels = state
+        .labels
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    let appearance =
+        super::tray_menu::MenuAppearance::begin(state.theme.load(Ordering::Relaxed), &labels);
+    let text = [&labels.open, &labels.settings, &labels.quit]
+        .map(|s| s.encode_utf16().chain(Some(0)).collect::<Vec<_>>());
     let Ok(menu) = (unsafe { CreatePopupMenu() }) else {
         tracing::warn!("Windows tray context menu could not be created");
         return;
     };
     let _menu = TrayMenu(menu);
     let built = unsafe {
-        AppendMenuW(menu, MF_STRING, OPEN_COMMAND_ID, w!("Open Lexift"))
-            .and_then(|_| AppendMenuW(menu, MF_STRING, SETTINGS_COMMAND_ID, w!("Settings")))
+        AppendMenuW(menu, MF_STRING, OPEN_COMMAND_ID, PCWSTR(text[0].as_ptr()))
+            .and_then(|_| {
+                AppendMenuW(
+                    menu,
+                    MF_STRING,
+                    SETTINGS_COMMAND_ID,
+                    PCWSTR(text[1].as_ptr()),
+                )
+            })
             .and_then(|_| AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null()))
-            .and_then(|_| AppendMenuW(menu, MF_STRING, QUIT_COMMAND_ID, w!("Quit")))
+            .and_then(|_| AppendMenuW(menu, MF_STRING, QUIT_COMMAND_ID, PCWSTR(text[2].as_ptr())))
             .and_then(|_| SetMenuDefaultItem(menu, OPEN_COMMAND_ID as u32, 0))
     };
     if built.is_err() {
@@ -464,7 +480,7 @@ fn notify_data(hwnd: HWND) -> NOTIFYICONDATAW {
         uCallbackMessage: TRAY_CALLBACK_MESSAGE,
         ..Default::default()
     };
-    let tooltip: Vec<_> = "Lexift — Translate Everywhere\0".encode_utf16().collect();
+    let tooltip: Vec<_> = "Lexift\0".encode_utf16().collect();
     data.szTip[..tooltip.len()].copy_from_slice(&tooltip);
     data
 }

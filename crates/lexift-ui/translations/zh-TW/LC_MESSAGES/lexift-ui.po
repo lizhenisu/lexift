@@ -1,0 +1,569 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\nLanguage: zh-TW\nPlural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "API key removed"
+msgstr "API 金鑰已移除"
+
+msgid "API key saved"
+msgstr "API 金鑰已儲存"
+
+msgid "Accent color"
+msgstr "主題色"
+
+msgid "Add app"
+msgstr "新增應用程式"
+
+msgid "Adjust — unavailable"
+msgstr "調整 — 無法使用"
+
+msgid "Annotation"
+msgstr "標註"
+
+msgid "Annotation color"
+msgstr "標註顏色"
+
+msgid "Annotation toolbar — Alt + A"
+msgstr "標註工具列 — Alt + A"
+
+msgid "Anonymous usage statistics"
+msgstr "匿名使用統計"
+
+msgid "Anti-aliasing"
+msgstr "反鋸齒"
+
+msgid "App filtering"
+msgstr "應用程式篩選"
+
+msgid "App font"
+msgstr "應用程式字型"
+
+msgid "App language"
+msgstr "應用程式語言"
+
+msgid "App list"
+msgstr "應用程式清單"
+
+msgid "App theme"
+msgstr "應用程式佈景主題"
+
+msgid "Appearance"
+msgstr "外觀"
+
+msgid "Area"
+msgstr "區域"
+
+msgid "Arrangement"
+msgstr "排列"
+
+msgid "Arrow"
+msgstr "箭頭"
+
+msgid "Auto detect"
+msgstr "自動偵測"
+
+msgid "Automatic mosaic"
+msgstr "自動馬賽克"
+
+msgid "Basic settings"
+msgstr "基本設定"
+
+msgid "Behavior"
+msgstr "行為"
+
+msgid "Blacklist"
+msgstr "封鎖清單"
+
+msgid "Blend mode"
+msgstr "混合模式"
+
+msgid "Blur"
+msgstr "模糊"
+
+msgid "Browse"
+msgstr "瀏覽"
+
+msgid "Brush"
+msgstr "筆刷"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Capturing selection…"
+msgstr "正在讀取選取文字…"
+
+msgid "Change"
+msgstr "變更"
+
+msgid "Check for updates on launch"
+msgstr "啟動時檢查更新"
+
+msgid "Choose where the assistant would appear"
+msgstr "選擇助手可執行的應用程式"
+
+msgid "Clear all — unavailable"
+msgstr "全部清除 — 無法使用"
+
+msgid "Close after copying or saving"
+msgstr "複製或儲存後關閉"
+
+msgid "Compact"
+msgstr "緊湊"
+
+msgid "Configured"
+msgstr "已設定"
+
+msgid "Copied"
+msgstr "已複製"
+
+msgid "Copy"
+msgstr "複製"
+
+msgid "Copy image as file"
+msgstr "以檔案形式複製圖片"
+
+msgid "Corner radius"
+msgstr "圓角半徑"
+
+msgid "Could not save interface language"
+msgstr "無法儲存介面語言"
+
+msgid "Could not save theme"
+msgstr "無法儲存佈景主題"
+
+msgid "Credential operation failed"
+msgstr "認證資訊操作失敗"
+
+msgid "Credentials"
+msgstr "認證資訊"
+
+msgid "Crosshair guides"
+msgstr "十字參考線"
+
+msgid "Dark"
+msgstr "深色"
+
+msgid "Dashed"
+msgstr "虛線"
+
+msgid "DeepL API Key"
+msgstr "DeepL API 金鑰"
+
+msgid "DeepL API key cannot be empty"
+msgstr "DeepL API 金鑰不能為空"
+
+msgid "DeepL API key is not configured"
+msgstr "尚未設定 DeepL API 金鑰"
+
+msgid "Default annotation style"
+msgstr "預設標註樣式"
+
+msgid "Detect double-click selection"
+msgstr "偵測雙擊選詞"
+
+msgid "Detected"
+msgstr "已偵測"
+
+msgid "Disable hotkeys in fullscreen apps"
+msgstr "在全螢幕應用程式中停用快速鍵"
+
+msgid "Do nothing"
+msgstr "不執行動作"
+
+msgid "Effect"
+msgstr "效果"
+
+msgid "Ellipse"
+msgstr "橢圓"
+
+msgid "Enable selection assistant"
+msgstr "啟用選字助手"
+
+msgid "Enabled"
+msgstr "已啟用"
+
+msgid "Enter text"
+msgstr "輸入文字"
+
+msgid "Erase annotations"
+msgstr "擦除標註"
+
+msgid "Eraser"
+msgstr "橡皮擦"
+
+msgid "Fill"
+msgstr "填滿"
+
+msgid "Filter mode"
+msgstr "篩選模式"
+
+msgid "Font"
+msgstr "字型"
+
+msgid "General"
+msgstr "一般"
+
+msgid "Highlighter"
+msgstr "螢光筆"
+
+msgid "Horizontal offset"
+msgstr "水平位移"
+
+msgid "Hotkeys"
+msgstr "快速鍵設定"
+
+msgid "Idle"
+msgstr "就緒"
+
+msgid "Image format"
+msgstr "圖片格式"
+
+msgid "Image output"
+msgstr "圖片輸出"
+
+msgid "Inline input translation"
+msgstr "輸入框快速翻譯"
+
+msgid "Input"
+msgstr "輸入"
+
+msgid "Input translation"
+msgstr "輸入翻譯"
+
+msgid "Intensity"
+msgstr "強度"
+
+msgid "Interface language saved"
+msgstr "介面語言已儲存"
+
+msgid "Language & region"
+msgstr "語言與地區"
+
+msgid "Language used for new translations"
+msgstr "新翻譯使用的語言"
+
+msgid "Large"
+msgstr "大"
+
+msgid "Launch at startup"
+msgstr "開機時自動啟動"
+
+msgid "Lexift Annotation Options"
+msgstr "Lexift — 標註選項"
+
+msgid "Lexift Annotation Preview"
+msgstr "Lexift — 標註預覽"
+
+msgid "Lexift Languages"
+msgstr "Lexift — 語言"
+
+msgid "Lexift Selection Toolbar"
+msgstr "Lexift — 選字助手"
+
+msgid "Lexift Settings"
+msgstr "Lexift — 設定"
+
+msgid "Lexift Translation"
+msgstr "Lexift — 翻譯"
+
+msgid "Light"
+msgstr "淺色"
+
+msgid "Line style"
+msgstr "線條樣式"
+
+msgid "Line width"
+msgstr "線條粗細"
+
+msgid "Loading…"
+msgstr "載入中…"
+
+msgid "Magnification"
+msgstr "倍率"
+
+msgid "Magnifier"
+msgstr "放大鏡"
+
+msgid "Method"
+msgstr "方式"
+
+msgid "Mosaic"
+msgstr "馬賽克"
+
+msgid "Multiply"
+msgstr "色彩增值"
+
+msgid "No apps added"
+msgstr "尚未新增應用程式"
+
+msgid "No global hotkeys in fullscreen apps."
+msgstr "全螢幕應用程式中不觸發全域快速鍵。"
+
+msgid "No selection"
+msgstr "未選取文字"
+
+msgid "No shortcut"
+msgstr "未設定快速鍵"
+
+msgid "No translation text or personal data."
+msgstr "不收集翻譯內容或個人資料。"
+
+msgid "Normal"
+msgstr "正常"
+
+msgid "Not configured"
+msgstr "未設定"
+
+msgid "Notifications & privacy"
+msgstr "通知與隱私"
+
+msgid "On tray icon click"
+msgstr "按一下系統匣圖示時"
+
+msgid "Open Lexift"
+msgstr "開啟 Lexift"
+
+msgid "Open main window"
+msgstr "開啟主視窗"
+
+msgid "Open settings"
+msgstr "開啟設定"
+
+msgid "Open settings on launch"
+msgstr "啟動時開啟設定"
+
+msgid "Operation failed: {0}"
+msgstr "操作失敗：{0}"
+
+msgid "Paste"
+msgstr "貼上"
+
+msgid "Pencil"
+msgstr "鉛筆"
+
+msgid "Polyline"
+msgstr "折線"
+
+msgid "Positive values move the toolbar down"
+msgstr "正值使工具列向下移動"
+
+msgid "Positive values move the toolbar right"
+msgstr "正值使工具列向右移動"
+
+msgid "Press a key combination"
+msgstr "請按下組合鍵"
+
+msgid "Press shortcut…"
+msgstr "請按下快速鍵…"
+
+msgid "Provider"
+msgstr "服務供應商"
+
+msgid "Provider saved"
+msgstr "服務供應商已儲存"
+
+msgid "Provider wasn't saved"
+msgstr "服務供應商未儲存"
+
+msgid "Quit"
+msgstr "結束"
+
+msgid "Read aloud"
+msgstr "朗讀"
+
+msgid "Read selection aloud"
+msgstr "朗讀選取文字"
+
+msgid "Rectangle"
+msgstr "矩形"
+
+msgid "Registered"
+msgstr "已註冊"
+
+msgid "Required"
+msgstr "必選"
+
+msgid "Save key"
+msgstr "儲存金鑰"
+
+msgid "Save location"
+msgstr "儲存位置"
+
+msgid "Screenshot settings"
+msgstr "螢幕擷取設定"
+
+msgid "Select color"
+msgstr "選擇顏色"
+
+msgid "Selection"
+msgstr "選取範圍"
+
+msgid "Selection Assistant"
+msgstr "選字助手"
+
+msgid "Selection actions"
+msgstr "選字動作"
+
+msgid "Selection toolbar preference saved"
+msgstr "選字工具列設定已儲存"
+
+msgid "Selection toolbar preference wasn't saved"
+msgstr "選字工具列設定未儲存"
+
+msgid "Sequence"
+msgstr "序號"
+
+msgid "Settings"
+msgstr "設定"
+
+msgid "Shadow"
+msgstr "陰影"
+
+msgid "Shape"
+msgstr "形狀"
+
+msgid "Shortcut saved"
+msgstr "快速鍵已儲存"
+
+msgid "Shortcut wasn't saved"
+msgstr "快速鍵未儲存"
+
+msgid "Show Translate and Copy after selecting text"
+msgstr "選取文字後顯示翻譯與複製"
+
+msgid "Show background copy notifications"
+msgstr "顯示背景複製通知"
+
+msgid "Show selection dimensions"
+msgstr "顯示選取範圍像素尺寸"
+
+msgid "Show the assistant after selecting a word by double-clicking"
+msgstr "雙擊選取文字後顯示助手"
+
+msgid "Shows background copy results and errors."
+msgstr "顯示背景複製的結果與錯誤。"
+
+msgid "Single"
+msgstr "單一"
+
+msgid "Solid"
+msgstr "實線"
+
+msgid "Spotlight"
+msgstr "聚光燈"
+
+msgid "Standard"
+msgstr "標準"
+
+msgid "Start at"
+msgstr "起始值"
+
+msgid "Start in the background when this is off."
+msgstr "關閉後將在背景啟動。"
+
+msgid "Startup & updates"
+msgstr "啟動與更新"
+
+msgid "Startup preference saved"
+msgstr "啟動設定已儲存"
+
+msgid "Startup preference wasn't saved"
+msgstr "啟動設定未儲存"
+
+msgid "System"
+msgstr "跟隨系統"
+
+msgid "System default"
+msgstr "系統預設"
+
+msgid "Target"
+msgstr "目標"
+
+msgid "Target language"
+msgstr "目標語言"
+
+msgid "Target language saved"
+msgstr "目標語言已儲存"
+
+msgid "Target language wasn't saved"
+msgstr "目標語言未儲存"
+
+msgid "Text"
+msgstr "文字"
+
+msgid "Text size"
+msgstr "文字大小"
+
+msgid "Theme saved"
+msgstr "佈景主題已儲存"
+
+msgid "There is no text to read"
+msgstr "沒有可朗讀的文字"
+
+msgid "Tile"
+msgstr "並排"
+
+msgid "Translate"
+msgstr "翻譯"
+
+msgid "Translate and copy"
+msgstr "翻譯並複製"
+
+msgid "Translate and replace"
+msgstr "翻譯並取代"
+
+msgid "Translate selection"
+msgstr "選字翻譯"
+
+msgid "Translate selection (demo)"
+msgstr "翻譯選取文字（示範）"
+
+msgid "Translate selection and copy"
+msgstr "選字翻譯並複製"
+
+msgid "Translate selection and replace"
+msgstr "選字翻譯並取代"
+
+msgid "Translate the current selection"
+msgstr "翻譯目前選取文字"
+
+msgid "Translating…"
+msgstr "翻譯中…"
+
+msgid "Translation"
+msgstr "翻譯"
+
+msgid "Translation complete"
+msgstr "翻譯完成"
+
+msgid "Translation failed"
+msgstr "翻譯失敗"
+
+msgid "Translation provider"
+msgstr "翻譯服務供應商"
+
+msgid "Translation text cannot be empty"
+msgstr "待翻譯文字不能為空"
+
+msgid "Translation will appear here"
+msgstr "譯文將顯示於此"
+
+msgid "Unavailable"
+msgstr "無法使用"
+
+msgid "Unavailable: {0}"
+msgstr "無法使用：{0}"
+
+msgid "Vertical offset"
+msgstr "垂直位移"
+
+msgid "Watermark"
+msgstr "浮水印"
+
+msgid "Whitelist"
+msgstr "允許清單"
+
+msgid "Width"
+msgstr "寬度"
+
+msgid "Working…"
+msgstr "處理中…"

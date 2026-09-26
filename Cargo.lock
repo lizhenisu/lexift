@@ -2552,6 +2552,7 @@ version = "0.1.0"
 dependencies = [
  "i-slint-core",
  "lexift-core",
+ "rspolib",
  "slint",
  "slint-build",
  "tracing",

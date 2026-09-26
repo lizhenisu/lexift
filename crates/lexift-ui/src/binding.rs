@@ -9,6 +9,8 @@ pub(crate) fn apply_main(main: &AppWindow, state: &UiState) {
 }
 
 pub(crate) fn apply_settings(settings: &SettingsWindow, state: &UiState) {
+    settings.set_appearance_language_index(state.ui_language.index());
+    settings.set_annotation_hotkey_status(crate::annotation::status().into());
     settings.set_appearance_theme_index(crate::theme::index(state.theme));
     let target_index = language_index(&state.target_language);
     if settings.get_draft_target_index() != target_index {

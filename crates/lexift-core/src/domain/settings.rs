@@ -1,6 +1,7 @@
 use super::{
     language::Language,
     runtime_config::{HotkeyConfig, ProviderConfig, RuntimeConfig},
+    ui_language::UiLanguage,
 };
 
 /// Persisted appearance preference; System resolves in the UI backend.
@@ -20,6 +21,7 @@ pub enum SettingsField {
     LaunchAtLogin,
     SelectionToolbar,
     Theme,
+    UiLanguage,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +42,7 @@ pub enum SettingsChange {
     LaunchAtLogin(bool),
     SelectionToolbar(bool),
     Theme(ThemePreference),
+    UiLanguage(UiLanguage),
 }
 
 impl SettingsChange {
@@ -51,6 +54,7 @@ impl SettingsChange {
             Self::LaunchAtLogin(_) => SettingsField::LaunchAtLogin,
             Self::SelectionToolbar(_) => SettingsField::SelectionToolbar,
             Self::Theme(_) => SettingsField::Theme,
+            Self::UiLanguage(_) => SettingsField::UiLanguage,
         }
     }
 
@@ -62,6 +66,7 @@ impl SettingsChange {
             Self::LaunchAtLogin(value) => settings.launch_at_login = *value,
             Self::SelectionToolbar(value) => settings.selection_toolbar = *value,
             Self::Theme(value) => settings.theme = *value,
+            Self::UiLanguage(value) => settings.ui_language = *value,
         }
     }
 
@@ -73,6 +78,7 @@ impl SettingsChange {
             Self::LaunchAtLogin(value) => settings.launch_at_login == *value,
             Self::SelectionToolbar(value) => settings.selection_toolbar == *value,
             Self::Theme(value) => settings.theme == *value,
+            Self::UiLanguage(value) => settings.ui_language == *value,
         }
     }
 }
@@ -85,6 +91,7 @@ pub struct Settings {
     pub launch_at_login: bool,
     pub selection_toolbar: bool,
     pub theme: ThemePreference,
+    pub ui_language: UiLanguage,
     /// Reference to a system credential. This value is never the credential secret.
     pub deepl_credential_id: Option<String>,
 }
@@ -98,6 +105,7 @@ impl Default for Settings {
             launch_at_login: false,
             selection_toolbar: true,
             theme: ThemePreference::default(),
+            ui_language: UiLanguage::default(),
             deepl_credential_id: None,
         }
     }

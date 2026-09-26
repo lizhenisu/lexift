@@ -1,3 +1,4 @@
+use crate::domain::message::MessageId;
 use crate::{
     AppCommand, AppEvent,
     domain::{
@@ -388,7 +389,8 @@ impl AppState {
             AppEvent::PopupCopyFinished { session_id, error } => {
                 if let Some(session) = self.popup_session_mut(session_id) {
                     session.feedback_error = error.is_some();
-                    session.feedback_message = error.unwrap_or_else(|| "Copied".into());
+                    session.feedback_message =
+                        error.unwrap_or_else(|| MessageId::Copied.id().into());
                 }
                 Vec::new()
             }
@@ -512,7 +514,7 @@ impl AppState {
             AppEvent::CredentialSaveRequested { secret } if !self.credential_busy => {
                 let secret = secret.expose().trim().to_owned();
                 if secret.is_empty() {
-                    self.credential_error_message = "DeepL API key cannot be empty".into();
+                    self.credential_error_message = MessageId::EmptyApiKey.id().into();
                     return Vec::new();
                 }
                 self.credential_busy = true;
@@ -589,7 +591,7 @@ impl AppState {
             } if !self.credential_busy => {
                 let Some(credential_id) = self.settings.deepl_credential_id.clone() else {
                     self.credential_configured = false;
-                    self.credential_error_message = "DeepL API key is not configured".into();
+                    self.credential_error_message = MessageId::MissingApiKey.id().into();
                     return Vec::new();
                 };
                 self.credential_busy = true;
@@ -664,7 +666,7 @@ impl AppState {
             SettingsField::Hotkey => self.hotkey_settings_error.clear(),
             SettingsField::Provider => self.provider_settings_error.clear(),
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error.clear(),
-            SettingsField::SelectionToolbar | SettingsField::Theme => {}
+            SettingsField::SelectionToolbar | SettingsField::Theme | SettingsField::UiLanguage => {}
         }
     }
 
@@ -674,7 +676,7 @@ impl AppState {
             SettingsField::Hotkey => self.hotkey_settings_error = error,
             SettingsField::Provider => self.provider_settings_error = error,
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error = error,
-            SettingsField::SelectionToolbar | SettingsField::Theme => {
+            SettingsField::SelectionToolbar | SettingsField::Theme | SettingsField::UiLanguage => {
                 self.settings_error_message = error;
             }
         }
@@ -690,6 +692,9 @@ impl AppState {
         }
         match field {
             SettingsField::Theme => self.desired_settings.theme = self.settings.theme,
+            SettingsField::UiLanguage => {
+                self.desired_settings.ui_language = self.settings.ui_language
+            }
             SettingsField::TargetLanguage => {
                 self.desired_settings.target_language = self.settings.target_language.clone();
             }
@@ -718,7 +723,7 @@ impl AppState {
             self.phase = TranslationPhase::Error;
             self.source_text.clear();
             self.translated_text.clear();
-            self.error_message = "Translation text cannot be empty".into();
+            self.error_message = MessageId::EmptyTranslation.id().into();
             return Vec::new();
         }
 
@@ -746,7 +751,7 @@ impl AppState {
         if text.is_empty() {
             if let Some(session) = self.popup_session_mut(session_id) {
                 session.phase = TranslationPhase::Error;
-                session.error_message = "Translation text cannot be empty".into();
+                session.error_message = MessageId::EmptyTranslation.id().into();
             }
             return Vec::new();
         }
@@ -789,7 +794,7 @@ impl AppState {
             return Vec::new();
         };
         if text.is_empty() {
-            session.feedback_message = "There is no text to read".into();
+            session.feedback_message = MessageId::NothingToRead.id().into();
             session.feedback_error = true;
             return Vec::new();
         }
@@ -1212,7 +1217,7 @@ mod tests {
         assert_eq!(state.current_translation_task, None);
         assert!(state.source_text.is_empty());
         assert!(state.translated_text.is_empty());
-        assert_eq!(state.error_message, "Translation text cannot be empty");
+        assert_eq!(state.error_message, MessageId::EmptyTranslation.id());
     }
 
     #[test]
@@ -1712,6 +1717,56 @@ mod tests {
     }
 
     #[test]
+    fn ui_language_failure_and_rapid_changes_preserve_translation_target() {
+        use crate::domain::ui_language::UiLanguage;
+        let mut state = AppState::default();
+        let japanese_request = SettingsChange::UiLanguage(UiLanguage::Japanese);
+        state.reduce(AppEvent::SettingsChangeRequested {
+            change: japanese_request.clone(),
+        });
+        assert_eq!(state.desired_settings.ui_language, UiLanguage::Japanese);
+        state.reduce(AppEvent::SettingsSaveFailed {
+            change: japanese_request.clone(),
+            error: "disk full".into(),
+        });
+        assert_eq!(state.desired_settings.ui_language, UiLanguage::EnglishUs);
+        assert_eq!(state.settings_error_field, Some(SettingsField::UiLanguage));
+
+        state.reduce(AppEvent::SettingsChangeRequested {
+            change: japanese_request.clone(),
+        });
+        state.reduce(AppEvent::SettingsChangeRequested {
+            change: SettingsChange::UiLanguage(UiLanguage::EnglishUs),
+        });
+        state.reduce(AppEvent::SettingsChangeRequested {
+            change: SettingsChange::UiLanguage(UiLanguage::German),
+        });
+        let commands = state.reduce(AppEvent::SettingsSaveFailed {
+            change: japanese_request,
+            error: "disk full".into(),
+        });
+        assert_eq!(state.desired_settings.ui_language, UiLanguage::German);
+        assert!(
+            matches!(commands.last(), Some(AppCommand::PersistSettings { settings, .. }) if settings.ui_language == UiLanguage::German)
+        );
+        let committed = Settings {
+            ui_language: UiLanguage::German,
+            ..state.settings.clone()
+        };
+        state.reduce(AppEvent::RuntimeConfigUpdated {
+            config: committed.runtime_config(),
+            settings: committed,
+            change: SettingsChange::UiLanguage(UiLanguage::German),
+        });
+        assert_eq!(state.settings.ui_language, UiLanguage::German);
+        assert!(!state.settings_saving);
+        assert_eq!(
+            state.settings.target_language,
+            Settings::default().target_language
+        );
+    }
+
+    #[test]
     fn theme_failure_restores_saved_theme_but_preserves_newer_request() {
         use crate::domain::settings::ThemePreference;
         let mut state = AppState::default();
@@ -2007,7 +2062,7 @@ mod tests {
         assert!(!state.credential_busy);
         assert_eq!(
             state.credential_error_message,
-            "DeepL API key is not configured"
+            MessageId::MissingApiKey.id()
         );
     }
 

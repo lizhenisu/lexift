@@ -12,14 +12,16 @@ component SettingsButton inherits Rectangle {
     in property <bool> enabled: true;
     callback clicked();
 
-    width: 104px;
+    width: max(104px, button-label.preferred-width + 2 * Spacing.medium);
     height: 40px;
     border-radius: 20px;
     border-width: primary ? 0px : 1px;
     border-color: Colors.outline;
     background: !enabled ? Colors.outline : primary ? Colors.primary : Colors.surface;
 
-    Text {
+    button-label := Text {
+        x: 8px; width: parent.width - 16px; height: parent.height;
+        wrap: word-wrap;
         text: root.label;
         color: !root.enabled ? Colors.secondary-foreground : root.primary ? Colors.on-primary : Colors.primary;
         font-size: Typography.body-size;
@@ -169,6 +171,7 @@ component SettingsToast inherits Rectangle {
         font-size: Typography.body-size;
         font-weight: 700;
         vertical-alignment: center;
+        wrap: word-wrap;
         overflow: elide;
     }
 
@@ -371,7 +374,7 @@ component AppearanceThemeChoice inherits Rectangle {
     }
     Text {
         y: 82px; width: parent.width; height: 24px;
-        text: root.theme-kind == 0 ? "Light" : root.theme-kind == 1 ? "Dark" : "System";
+        text: root.theme-kind == 0 ? @tr("Light") : root.theme-kind == 1 ? @tr("Dark") : @tr("System");
         color: root.selected ? Colors.primary : Colors.foreground;
         font-size: Typography.compact-size;
         font-weight: root.selected ? 700 : 500;
@@ -441,7 +444,7 @@ component UnavailableHotkeyRow inherits Rectangle {
         x: 0px; y: 0px;
         width: root.compact ? parent.width : parent.width * 0.45 - Spacing.small;
         height: root.compact ? 32px : parent.height;
-        text: root.label; color: Colors.secondary-foreground;
+        text: root.label; color: Colors.secondary-foreground; wrap: word-wrap;
         font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
     }
     Rectangle {
@@ -452,7 +455,7 @@ component UnavailableHotkeyRow inherits Rectangle {
         border-color: Colors.outline; background: Colors.background;
         Text {
             x: Spacing.medium; width: parent.width - 2 * Spacing.medium; height: parent.height;
-            text: "No shortcut"; color: Colors.secondary-foreground;
+            text: @tr("No shortcut"); color: Colors.secondary-foreground;
             font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
         }
     }
@@ -460,7 +463,7 @@ component UnavailableHotkeyRow inherits Rectangle {
         x: parent.width - 100px; y: root.compact ? 38px : (parent.height - 40px) / 2;
         width: 100px; height: 40px; border-radius: 6px; background: Colors.background;
         Text {
-            text: "Unavailable"; color: Colors.secondary-foreground;
+            width: parent.width - 8px; x: 4px; height: parent.height; wrap: word-wrap; text: @tr("Unavailable"); color: Colors.secondary-foreground;
             font-size: 13px; horizontal-alignment: center; vertical-alignment: center;
         }
     }
@@ -553,7 +556,7 @@ component SelectionActionRow inherits Rectangle {
     }
     Text {
         x: 56px; width: parent.width - 56px - (root.status == 1 ? 64px : 112px);
-        height: parent.height; text: root.label;
+        height: parent.height; text: root.label; wrap: word-wrap;
         color: root.status == 2 ? Colors.secondary-foreground : Colors.foreground;
         font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
     }
@@ -561,7 +564,7 @@ component SelectionActionRow inherits Rectangle {
         x: parent.width - 94px; y: (parent.height - 32px) / 2;
         width: 94px; height: 32px; border-radius: 6px;
         background: Colors.primary-container;
-        Text { text: "Required"; color: Colors.primary; font-size: 13px;
+        Text { width: parent.width - 8px; x: 4px; height: parent.height; wrap: word-wrap; text: @tr("Required"); color: Colors.primary; font-size: 13px;
             horizontal-alignment: center; vertical-alignment: center; }
     }
     if root.status == 1: SettingsSwitch {
@@ -571,7 +574,7 @@ component SelectionActionRow inherits Rectangle {
     if root.status == 2: Rectangle {
         x: parent.width - 100px; y: (parent.height - 36px) / 2;
         width: 100px; height: 36px; border-radius: 6px; background: Colors.background;
-        Text { text: "Unavailable"; color: Colors.secondary-foreground; font-size: 13px;
+        Text { width: parent.width - 8px; x: 4px; height: parent.height; wrap: word-wrap; text: @tr("Unavailable"); color: Colors.secondary-foreground; font-size: 13px;
             horizontal-alignment: center; vertical-alignment: center; }
     }
 }
@@ -658,7 +661,7 @@ component SettingsNavItem inherits Rectangle {
 }
 
 export component SettingsWindow inherits Window {
-    title: "Lexift Settings"; icon: AppAssets.app-icon;
+    title: @tr("Lexift Settings"); icon: AppAssets.app-icon;
     preferred-width: 820px; preferred-height: 680px; min-width: 520px; min-height: 520px;
     background: Colors.background;
     out property <color> resize-fallback-color: Colors.background;
@@ -668,7 +671,7 @@ export component SettingsWindow inherits Window {
     in-out property <int> draft-target-index: 0;
     in property <string> target-language-error-text: "";
     in property <string> hotkey-error-text: "";
-    in property <string> annotation-hotkey-status: "Unavailable";
+    in property <string> annotation-hotkey-status: @tr("Unavailable");
     in property <string> provider-error-text: "";
     in-out property <bool> launch-at-login: false;
     in-out property <bool> selection-toolbar: true;
@@ -694,10 +697,11 @@ export component SettingsWindow inherits Window {
     in-out property <int> active-category: 0;
     in-out property <int> appearance-theme-index: 0;
     callback theme-selected(int);
+    callback ui-language-selected(int);
     in-out property <int> appearance-accent-index: 0;
     in-out property <int> appearance-font-index: 0;
     in-out property <int> appearance-size-index: 1;
-    in-out property <int> appearance-language-index: 0;
+    in-out property <int> appearance-language-index: 2;
     in-out property <int> tray-click-index: 0;
     in-out property <bool> open-settings-on-launch: true;
     in-out property <bool> check-updates-on-launch: true;
@@ -722,23 +726,28 @@ export component SettingsWindow inherits Window {
     private property <int> preview-menu-kind: 0;
     private property <length> preview-menu-scroll-y: 0px;
 
+    // Measure localized navigation text instead of breaking long words mid-label.
+    navigation-measure := Text {
+        visible: false; font-size: Typography.body-size; font-weight: 600;
+        text: @tr("General") + "\n" + @tr("Hotkeys") + "\n" + @tr("Selection Assistant") + "\n" + @tr("Screenshot settings") + "\n" + @tr("Translation");
+    }
     private property <bool> expanded-navigation: root.width >= Metrics.settings-wide-nav-breakpoint;
-    private property <length> sidebar-width: root.expanded-navigation ? Metrics.settings-sidebar-width : Metrics.settings-sidebar-compact-width;
+    private property <length> sidebar-width: root.expanded-navigation ? max(Metrics.settings-sidebar-width, navigation-measure.preferred-width + 80px) : Metrics.settings-sidebar-compact-width;
     private property <bool> two-column-layout: root.width >= Metrics.settings-two-column-breakpoint;
-    private property <bool> hotkeys-compact: root.width < Metrics.settings-wide-nav-breakpoint;
+    private property <bool> hotkeys-compact: root.page-width < 580px;
     private property <length> page-width: root.width - root.sidebar-width;
     private property <[string]> language-labels: [
         "简体中文", "繁體中文", "English (US)", "English (UK)", "日本語", "한국어",
-        "Deutsch", "Français", "Español", "Italiano", "Português", "Português (Brasil)"
+        "Deutsch", "Français", "Español", "Italiano", "Português (Portugal)", "Português (Brasil)"
     ];
     private property <[color]> appearance-accents: [
         #1967d2, #9c4da0, #ec4899, #ff5a5f, #fa8324, #ffbe0b, #5baa43
     ];
-    private property <[string]> appearance-fonts: ["System default", "Segoe UI", "Arial"];
-    private property <[string]> appearance-sizes: ["Compact", "Standard", "Large"];
-    private property <[string]> appearance-languages: ["Simplified Chinese", "English", "Japanese"];
-    private property <[string]> tray-click-actions: ["Open settings", "Open main window", "Do nothing"];
-    private property <[string]> selection-filter-modes: ["Blacklist", "Whitelist"];
+    private property <[string]> appearance-fonts: [@tr("System default"), "Segoe UI", "Arial"];
+    private property <[string]> appearance-sizes: [@tr("Compact"), @tr("Standard"), @tr("Large")];
+    private property <[string]> appearance-languages: root.language-labels;
+    private property <[string]> tray-click-actions: [@tr("Open settings"), @tr("Open main window"), @tr("Do nothing")];
+    private property <[string]> selection-filter-modes: [@tr("Blacklist"), @tr("Whitelist")];
     private property <[string]> screenshot-formats: ["PNG", "JPEG", "WebP"];
     private property <[string]> preview-menu-options: root.preview-menu-kind == 0
         ? root.appearance-fonts : root.preview-menu-kind == 1 ? root.appearance-sizes
@@ -823,35 +832,35 @@ export component SettingsWindow inherits Window {
         SettingsNavItem {
             x: root.expanded-navigation ? Spacing.medium : Spacing.small;
             y: Spacing.large + 64px; width: parent.width - 2 * self.x;
-            label: "General"; icon-kind: 0; selected: root.active-category == 0; expanded: root.expanded-navigation;
+            label: @tr("General"); icon-kind: 0; selected: root.active-category == 0; expanded: root.expanded-navigation;
             activated => { root.select-category(0); }
         }
         SettingsNavItem {
             x: root.expanded-navigation ? Spacing.medium : Spacing.small;
             y: Spacing.large + 64px + Metrics.settings-nav-item-height + Spacing.small;
             width: parent.width - 2 * self.x;
-            label: "Hotkeys"; icon-kind: 2; selected: root.active-category == 2; expanded: root.expanded-navigation;
+            label: @tr("Hotkeys"); icon-kind: 2; selected: root.active-category == 2; expanded: root.expanded-navigation;
             activated => { root.select-category(2); }
         }
         SettingsNavItem {
             x: root.expanded-navigation ? Spacing.medium : Spacing.small;
             y: Spacing.large + 64px + 2 * (Metrics.settings-nav-item-height + Spacing.small);
             width: parent.width - 2 * self.x;
-            label: "Selection Assistant"; icon-kind: 3; selected: root.active-category == 3; expanded: root.expanded-navigation;
+            label: @tr("Selection Assistant"); icon-kind: 3; selected: root.active-category == 3; expanded: root.expanded-navigation;
             activated => { root.select-category(3); }
         }
         SettingsNavItem {
             x: root.expanded-navigation ? Spacing.medium : Spacing.small;
             y: Spacing.large + 64px + 3 * (Metrics.settings-nav-item-height + Spacing.small);
             width: parent.width - 2 * self.x;
-            label: "Screenshot settings"; icon-kind: 4; selected: root.active-category == 4; expanded: root.expanded-navigation;
+            label: @tr("Screenshot settings"); icon-kind: 4; selected: root.active-category == 4; expanded: root.expanded-navigation;
             activated => { root.select-category(4); }
         }
         SettingsNavItem {
             x: root.expanded-navigation ? Spacing.medium : Spacing.small;
             y: Spacing.large + 64px + 4 * (Metrics.settings-nav-item-height + Spacing.small);
             width: parent.width - 2 * self.x;
-            label: "Translation"; icon-kind: 1; selected: root.active-category == 1; expanded: root.expanded-navigation;
+            label: @tr("Translation"); icon-kind: 1; selected: root.active-category == 1; expanded: root.expanded-navigation;
             activated => { root.select-category(1); }
         }
         Rectangle { x: parent.width - 1px; width: 1px; height: parent.height; background: Colors.outline; }
@@ -865,9 +874,9 @@ export component SettingsWindow inherits Window {
         x: 0px; y: 0px; width: main-pane.width; height: Metrics.settings-header-height; z: 5; background: Colors.surface;
         Text {
             x: Metrics.settings-page-padding; y: (parent.height - 32px) / 2; height: 32px;
-            text: root.active-category == 0 ? "General" : root.active-category == 2 ? "Hotkeys"
-                : root.active-category == 3 ? "Selection Assistant"
-                    : root.active-category == 4 ? "Screenshot settings" : "Translation";
+            text: root.active-category == 0 ? @tr("General") : root.active-category == 2 ? @tr("Hotkeys")
+                : root.active-category == 3 ? @tr("Selection Assistant")
+                    : root.active-category == 4 ? @tr("Screenshot settings") : @tr("Translation");
             color: Colors.foreground; font-size: 24px; font-weight: 700; vertical-alignment: center;
         }
         Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: Colors.outline; }
@@ -888,11 +897,11 @@ export component SettingsWindow inherits Window {
             x: Metrics.settings-page-padding;
             y: appearance-card.y + appearance-card.height + Metrics.settings-card-gap;
             width: general-scroll.visible-width - 2 * Metrics.settings-page-padding;
-            title: "Language & region";
+            title: @tr("Language & region");
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1;
                 spacing: Spacing.small;
-                SettingsFieldLabel { label: "Target language"; description: "Language used for new translations"; error-text: root.target-language-error-text; }
+                SettingsFieldLabel { label: @tr("Target language"); description: @tr("Language used for new translations"); error-text: root.target-language-error-text; }
                 language-selector := Rectangle {
                     height: 40px; border-radius: 6px; border-width: 1px; border-color: Colors.outline; background: Colors.background;
                     Text { x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 24px; text: root.language-labels[root.draft-target-index]; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; overflow: elide; }
@@ -909,11 +918,11 @@ export component SettingsWindow inherits Window {
             x: Metrics.settings-page-padding;
             y: Metrics.settings-page-padding;
             width: general-scroll.visible-width - 2 * Metrics.settings-page-padding;
-            title: "Appearance";
+            title: @tr("Appearance");
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1;
                 spacing: Spacing.medium;
-                Text { height: 22px; text: "App theme"; color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; vertical-alignment: center; }
+                Text { height: 22px; text: @tr("App theme"); color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; vertical-alignment: center; }
                 HorizontalLayout {
                     width: 100%; height: 106px; spacing: Spacing.small;
                     for theme in [0, 1, 2]: AppearanceThemeChoice {
@@ -923,7 +932,7 @@ export component SettingsWindow inherits Window {
                     }
                 }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                Text { height: 22px; text: "Accent color"; color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; vertical-alignment: center; }
+                Text { height: 22px; text: @tr("Accent color"); color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; vertical-alignment: center; }
                 HorizontalLayout {
                     width: 100%; height: 36px; spacing: Spacing.small;
                     for accent[index] in root.appearance-accents: AppearanceAccentChoice {
@@ -934,7 +943,7 @@ export component SettingsWindow inherits Window {
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
                 HorizontalLayout {
                     width: 100%; height: 56px; spacing: Spacing.small; alignment: center;
-                    Text { width: parent.width * 0.36 - Spacing.small; text: "App font"; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
+                    Text { width: parent.width * 0.36 - Spacing.small; wrap: word-wrap; text: @tr("App font"); color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
                     font-preview := AppearancePreviewField {
                         width: parent.width * 0.64; value: root.appearance-fonts[root.appearance-font-index];
                         opened: root.preview-menu-open && root.preview-menu-kind == 0;
@@ -944,7 +953,7 @@ export component SettingsWindow inherits Window {
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
                 HorizontalLayout {
                     width: 100%; height: 56px; spacing: Spacing.small; alignment: center;
-                    Text { width: parent.width * 0.36 - Spacing.small; text: "Text size"; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
+                    Text { width: parent.width * 0.36 - Spacing.small; wrap: word-wrap; text: @tr("Text size"); color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
                     size-preview := AppearancePreviewField {
                         width: parent.width * 0.64; value: root.appearance-sizes[root.appearance-size-index];
                         opened: root.preview-menu-open && root.preview-menu-kind == 1;
@@ -954,7 +963,7 @@ export component SettingsWindow inherits Window {
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
                 HorizontalLayout {
                     width: 100%; height: 56px; spacing: Spacing.small; alignment: center;
-                    Text { width: parent.width * 0.36 - Spacing.small; text: "App language"; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
+                    Text { width: parent.width * 0.36 - Spacing.small; wrap: word-wrap; text: @tr("App language"); color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
                     app-language-preview := AppearancePreviewField {
                         width: parent.width * 0.64; value: root.appearance-languages[root.appearance-language-index];
                         opened: root.preview-menu-open && root.preview-menu-kind == 2;
@@ -968,18 +977,18 @@ export component SettingsWindow inherits Window {
             x: Metrics.settings-page-padding;
             y: language-card.y + language-card.height + Metrics.settings-card-gap;
             width: general-scroll.visible-width - 2 * Metrics.settings-page-padding;
-            title: "Startup & updates";
+            title: @tr("Startup & updates");
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
                 HorizontalLayout {
                     width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: "Launch at startup"; description: ""; error-text: root.launch-at-login-error-text; }
+                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: @tr("Launch at startup"); description: ""; error-text: root.launch-at-login-error-text; }
                     SettingsSwitch { checked: root.launch-at-login; toggled(value) => { root.launch-at-login = value; root.launch-at-login-change-requested(value); } }
                 }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
                 HorizontalLayout {
                     width: 100%; height: 56px; spacing: Spacing.small; alignment: center;
-                    Text { width: parent.width * 0.36 - Spacing.small; text: "On tray icon click"; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
+                    Text { width: parent.width * 0.36 - Spacing.small; wrap: word-wrap; text: @tr("On tray icon click"); color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
                     tray-click-preview := AppearancePreviewField {
                         width: parent.width * 0.64; value: root.tray-click-actions[root.tray-click-index];
                         opened: root.preview-menu-open && root.preview-menu-kind == 3;
@@ -991,15 +1000,15 @@ export component SettingsWindow inherits Window {
                     width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
                     SettingsFieldLabel {
                         width: parent.width - 52px - Spacing.medium;
-                        label: "Open settings on launch";
-                        description: "Start in the background when this is off."; error-text: "";
+                        label: @tr("Open settings on launch");
+                        description: @tr("Start in the background when this is off."); error-text: "";
                     }
                     SettingsSwitch { checked: root.open-settings-on-launch; toggled(value) => { root.open-settings-on-launch = value; } }
                 }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
                 HorizontalLayout {
                     width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: "Check for updates on launch"; description: ""; error-text: ""; }
+                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: @tr("Check for updates on launch"); description: ""; error-text: ""; }
                     SettingsSwitch { checked: root.check-updates-on-launch; toggled(value) => { root.check-updates-on-launch = value; } }
                 }
             }
@@ -1009,15 +1018,15 @@ export component SettingsWindow inherits Window {
             x: Metrics.settings-page-padding;
             y: startup-card.y + startup-card.height + Metrics.settings-card-gap;
             width: general-scroll.visible-width - 2 * Metrics.settings-page-padding;
-            title: "Notifications & privacy";
+            title: @tr("Notifications & privacy");
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
                 HorizontalLayout {
                     width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
                     SettingsFieldLabel {
                         width: parent.width - 52px - Spacing.medium;
-                        label: "Show background copy notifications";
-                        description: "Shows background copy results and errors."; error-text: "";
+                        label: @tr("Show background copy notifications");
+                        description: @tr("Shows background copy results and errors."); error-text: "";
                     }
                     SettingsSwitch { checked: root.background-copy-notifications; toggled(value) => { root.background-copy-notifications = value; } }
                 }
@@ -1026,8 +1035,8 @@ export component SettingsWindow inherits Window {
                     width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
                     SettingsFieldLabel {
                         width: parent.width - 52px - Spacing.medium;
-                        label: "Anonymous usage statistics";
-                        description: "No translation text or personal data."; error-text: "";
+                        label: @tr("Anonymous usage statistics");
+                        description: @tr("No translation text or personal data."); error-text: "";
                     }
                     SettingsSwitch { checked: root.anonymous-usage-statistics; toggled(value) => { root.anonymous-usage-statistics = value; } }
                 }
@@ -1053,13 +1062,13 @@ export component SettingsWindow inherits Window {
         behavior-hotkeys-card := SettingsCard {
             x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
             width: hotkeys-scroll.visible-width - 2 * Metrics.settings-page-padding;
-            title: "Behavior";
+            title: @tr("Behavior");
             HorizontalLayout {
                 width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
                 SettingsFieldLabel {
                     width: parent.width - 52px - Spacing.medium;
-                    label: "Disable hotkeys in fullscreen apps";
-                    description: "No global hotkeys in fullscreen apps.";
+                    label: @tr("Disable hotkeys in fullscreen apps");
+                    description: @tr("No global hotkeys in fullscreen apps.");
                     error-text: "";
                 }
                 SettingsSwitch {
@@ -1073,12 +1082,12 @@ export component SettingsWindow inherits Window {
             x: Metrics.settings-page-padding;
             y: behavior-hotkeys-card.y + behavior-hotkeys-card.height + Metrics.settings-card-gap;
             width: behavior-hotkeys-card.width;
-            title: "Input";
+            title: @tr("Input");
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
-                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: "Input translation"; }
+                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: @tr("Input translation"); }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: "Inline input translation"; }
+                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: @tr("Inline input translation"); }
             }
         }
 
@@ -1086,7 +1095,7 @@ export component SettingsWindow inherits Window {
             x: Metrics.settings-page-padding;
             y: input-hotkeys-card.y + input-hotkeys-card.height + Metrics.settings-card-gap;
             width: behavior-hotkeys-card.width;
-            title: "Selection";
+            title: @tr("Selection");
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
                 Rectangle {
@@ -1094,8 +1103,8 @@ export component SettingsWindow inherits Window {
                     SettingsFieldLabel {
                         x: 0px; y: root.hotkeys-compact ? 0px : (parent.height - self.height) / 2;
                         width: root.hotkeys-compact ? parent.width : parent.width * 0.45 - Spacing.small;
-                        label: "Translate selection";
-                        description: root.hotkey-capturing ? "Press a key combination" : "Translate the current selection";
+                        label: @tr("Translate selection");
+                        description: root.hotkey-capturing ? @tr("Press a key combination") : @tr("Translate the current selection");
                         error-text: root.hotkey-error-text;
                     }
                     hotkey-field := Rectangle {
@@ -1108,7 +1117,7 @@ export component SettingsWindow inherits Window {
                         background: Colors.background;
                         Text {
                             x: Spacing.medium; width: parent.width - 2 * Spacing.medium; height: parent.height;
-                            text: root.hotkey-capturing ? "Press shortcut…" : root.draft-hotkey-label;
+                            text: root.hotkey-capturing ? @tr("Press shortcut…") : root.draft-hotkey-label;
                             color: root.hotkey-capturing ? Colors.primary : Colors.foreground;
                             font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
                         }
@@ -1124,7 +1133,7 @@ export component SettingsWindow inherits Window {
                     }
                     SettingsButton {
                         x: parent.width - 84px; y: root.hotkeys-compact ? 58px : (parent.height - 40px) / 2;
-                        width: 84px; label: root.hotkey-capturing ? "Cancel" : "Change";
+                        width: 84px; label: root.hotkey-capturing ? @tr("Cancel") : @tr("Change");
                         clicked => {
                             root.hotkey-capturing = !root.hotkey-capturing;
                             if root.hotkey-capturing { root.focus-hotkey-capture(); }
@@ -1132,20 +1141,20 @@ export component SettingsWindow inherits Window {
                     }
                 }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: "Translate selection and copy"; }
+                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: @tr("Translate selection and copy"); }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: "Translate selection and replace"; }
+                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: @tr("Translate selection and replace"); }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: "Read selection aloud"; }
+                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: @tr("Read selection aloud"); }
             }
         }
         annotation-hotkeys-card := SettingsCard {
             x: Metrics.settings-page-padding;
             y: selection-hotkeys-card.y + selection-hotkeys-card.height + Metrics.settings-card-gap;
-            width: behavior-hotkeys-card.width; title: "Annotation";
+            width: behavior-hotkeys-card.width; title: @tr("Annotation");
             VerticalLayout {
                 spacing: Spacing.small;
-                Text { text: "Annotation toolbar — Alt + A"; color: Colors.foreground; font-size: Typography.body-size; }
+                Text { text: @tr("Annotation toolbar — Alt + A"); color: Colors.foreground; font-size: Typography.body-size; }
                 Text { text: root.annotation-hotkey-status; color: Colors.secondary-foreground; font-size: 13px; wrap: word-wrap; }
             }
         }
@@ -1170,13 +1179,13 @@ export component SettingsWindow inherits Window {
         selection-basic-card := SettingsCard {
             x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
             width: selection-assistant-scroll.visible-width - 2 * Metrics.settings-page-padding;
-            title: "Basic settings";
+            title: @tr("Basic settings");
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
                 HorizontalLayout {
                     width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
                     SettingsFieldLabel { width: parent.width - 52px - Spacing.medium;
-                        label: "Enable selection assistant"; description: "Show Translate and Copy after selecting text"; error-text: ""; }
+                        label: @tr("Enable selection assistant"); description: @tr("Show Translate and Copy after selecting text"); error-text: ""; }
                     SettingsSwitch { checked: root.selection-toolbar;
                         toggled(value) => { root.selection-toolbar = value; root.selection-toolbar-change-requested(value); } }
                 }
@@ -1184,7 +1193,7 @@ export component SettingsWindow inherits Window {
                 HorizontalLayout {
                     width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
                     SettingsFieldLabel { width: parent.width - 52px - Spacing.medium;
-                        label: "Detect double-click selection"; description: "Show the assistant after selecting a word by double-clicking"; error-text: ""; }
+                        label: @tr("Detect double-click selection"); description: @tr("Show the assistant after selecting a word by double-clicking"); error-text: ""; }
                     SettingsSwitch { checked: root.selection-double-click;
                         toggled(value) => { root.selection-double-click = value; } }
                 }
@@ -1194,7 +1203,7 @@ export component SettingsWindow inherits Window {
                     SettingsFieldLabel {
                         x: 0px; y: root.hotkeys-compact ? 0px : 10px;
                         width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
-                        label: "Horizontal offset"; description: "Positive values move the toolbar right"; error-text: "";
+                        label: @tr("Horizontal offset"); description: @tr("Positive values move the toolbar right"); error-text: "";
                     }
                     OffsetPreviewField {
                         x: root.hotkeys-compact ? 0px : parent.width * 0.58;
@@ -1209,7 +1218,7 @@ export component SettingsWindow inherits Window {
                     SettingsFieldLabel {
                         x: 0px; y: root.hotkeys-compact ? 0px : 10px;
                         width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
-                        label: "Vertical offset"; description: "Positive values move the toolbar down"; error-text: "";
+                        label: @tr("Vertical offset"); description: @tr("Positive values move the toolbar down"); error-text: "";
                     }
                     OffsetPreviewField {
                         x: root.hotkeys-compact ? 0px : parent.width * 0.58;
@@ -1225,13 +1234,13 @@ export component SettingsWindow inherits Window {
             x: Metrics.settings-page-padding;
             y: selection-basic-card.y + selection-basic-card.height + Metrics.settings-card-gap;
             width: selection-basic-card.width;
-            title: "App filtering";
+            title: @tr("App filtering");
             Rectangle {
                 width: 100%; height: root.hotkeys-compact ? 102px : 64px;
                 SettingsFieldLabel {
                     x: 0px; y: root.hotkeys-compact ? 0px : 10px;
                     width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
-                    label: "Filter mode"; description: "Choose where the assistant would appear"; error-text: "";
+                    label: @tr("Filter mode"); description: @tr("Choose where the assistant would appear"); error-text: "";
                 }
                 filter-mode-preview := AppearancePreviewField {
                     x: root.hotkeys-compact ? 0px : parent.width * 0.58;
@@ -1247,16 +1256,16 @@ export component SettingsWindow inherits Window {
             x: Metrics.settings-page-padding;
             y: selection-filter-card.y + selection-filter-card.height + Metrics.settings-card-gap;
             width: selection-basic-card.width; height: 40px;
-            Text { width: parent.width - 120px; height: parent.height; text: "App list";
+            Text { width: parent.width - 120px; height: parent.height; text: @tr("App list");
                 color: Colors.secondary-foreground; font-size: Typography.body-size; vertical-alignment: center; }
-            SettingsButton { x: parent.width - 104px; width: 104px; label: "Add app"; enabled: false; }
+            SettingsButton { x: parent.width - self.width; label: @tr("Add app"); enabled: false; }
         }
         selection-app-list-empty := Rectangle {
             x: Metrics.settings-page-padding;
             y: selection-app-list-heading.y + selection-app-list-heading.height + Spacing.small;
             width: selection-basic-card.width; height: 68px;
             border-radius: Metrics.settings-card-radius; background: Colors.surface;
-            Text { text: "No apps added"; color: Colors.secondary-foreground;
+            Text { text: @tr("No apps added"); color: Colors.secondary-foreground;
                 font-size: Typography.body-size; horizontal-alignment: center; vertical-alignment: center; }
         }
 
@@ -1264,21 +1273,21 @@ export component SettingsWindow inherits Window {
             x: Metrics.settings-page-padding;
             y: selection-app-list-empty.y + selection-app-list-empty.height + Metrics.settings-card-gap;
             width: selection-basic-card.width;
-            title: "Selection actions";
+            title: @tr("Selection actions");
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
-                SelectionActionRow { width: 100%; label: "Translate"; icon: AppAssets.icon-translate; status: 0; }
+                SelectionActionRow { width: 100%; label: @tr("Translate"); icon: AppAssets.icon-translate; status: 0; }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                SelectionActionRow { width: 100%; label: "Translate and copy"; icon: AppAssets.icon-copy; status: 2; }
+                SelectionActionRow { width: 100%; label: @tr("Translate and copy"); icon: AppAssets.icon-copy; status: 2; }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                SelectionActionRow { width: 100%; label: "Translate and replace"; icon: AppAssets.icon-refresh; status: 2; }
+                SelectionActionRow { width: 100%; label: @tr("Translate and replace"); icon: AppAssets.icon-refresh; status: 2; }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                SelectionActionRow { width: 100%; label: "Read aloud"; icon: AppAssets.icon-volume; status: 2; }
+                SelectionActionRow { width: 100%; label: @tr("Read aloud"); icon: AppAssets.icon-volume; status: 2; }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                SelectionActionRow { width: 100%; label: "Copy"; icon: AppAssets.icon-copy; status: 1;
+                SelectionActionRow { width: 100%; label: @tr("Copy"); icon: AppAssets.icon-copy; status: 1;
                     checked: root.selection-copy-action; toggled(value) => { root.selection-copy-action = value; } }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                SelectionActionRow { width: 100%; label: "Paste"; icon: AppAssets.icon-paste; status: 2; }
+                SelectionActionRow { width: 100%; label: @tr("Paste"); icon: AppAssets.icon-paste; status: 2; }
             }
         }
     }
@@ -1302,24 +1311,24 @@ export component SettingsWindow inherits Window {
         screenshot-selection-card := SettingsCard {
             x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
             width: screenshot-scroll.visible-width - 2 * Metrics.settings-page-padding;
-            title: "Selection";
+            title: @tr("Selection");
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
                 HorizontalLayout {
                     width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: "Crosshair guides"; description: ""; error-text: ""; }
+                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: @tr("Crosshair guides"); description: ""; error-text: ""; }
                     SettingsSwitch { checked: root.screenshot-crosshair-guides; toggled(value) => { root.screenshot-crosshair-guides = value; } }
                 }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
                 HorizontalLayout {
                     width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: "Magnifier"; description: ""; error-text: ""; }
+                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: @tr("Magnifier"); description: ""; error-text: ""; }
                     SettingsSwitch { checked: root.screenshot-magnifier; toggled(value) => { root.screenshot-magnifier = value; } }
                 }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
                 HorizontalLayout {
                     width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: "Show selection dimensions"; description: ""; error-text: ""; }
+                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: @tr("Show selection dimensions"); description: ""; error-text: ""; }
                     SettingsSwitch { checked: root.screenshot-selection-dimensions; toggled(value) => { root.screenshot-selection-dimensions = value; } }
                 }
             }
@@ -1329,7 +1338,7 @@ export component SettingsWindow inherits Window {
             x: Metrics.settings-page-padding;
             y: screenshot-selection-card.y + screenshot-selection-card.height + Metrics.settings-card-gap;
             width: screenshot-selection-card.width;
-            title: "Default annotation style";
+            title: @tr("Default annotation style");
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
                 Rectangle {
@@ -1337,13 +1346,13 @@ export component SettingsWindow inherits Window {
                     Text { x: 0px; y: root.hotkeys-compact ? 0px : 0px;
                         width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
                         height: root.hotkeys-compact ? 36px : parent.height;
-                        text: "Annotation color"; color: Colors.foreground;
+                        text: @tr("Annotation color"); color: Colors.foreground;
                         font-size: Typography.body-size; vertical-alignment: center; }
                     SettingsButton {
                         x: root.hotkeys-compact ? 0px : parent.width * 0.58;
                         y: root.hotkeys-compact ? 44px : 8px;
                         width: root.hotkeys-compact ? parent.width : parent.width * 0.42;
-                        label: "Select color"; clicked => { }
+                        label: @tr("Select color"); clicked => { }
                     }
                 }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
@@ -1351,7 +1360,7 @@ export component SettingsWindow inherits Window {
                     width: 100%; height: root.hotkeys-compact ? 92px : 56px;
                     Text { x: 0px; y: 0px; width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
                         height: root.hotkeys-compact ? 36px : parent.height;
-                        text: "Line width"; color: Colors.foreground;
+                        text: @tr("Line width"); color: Colors.foreground;
                         font-size: Typography.body-size; vertical-alignment: center; }
                     OffsetPreviewField {
                         x: root.hotkeys-compact ? 0px : parent.width * 0.58;
@@ -1366,7 +1375,7 @@ export component SettingsWindow inherits Window {
                     width: 100%; height: root.hotkeys-compact ? 92px : 56px;
                     Text { x: 0px; y: 0px; width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
                         height: root.hotkeys-compact ? 36px : parent.height;
-                        text: "Text size"; color: Colors.foreground;
+                        text: @tr("Text size"); color: Colors.foreground;
                         font-size: Typography.body-size; vertical-alignment: center; }
                     OffsetPreviewField {
                         x: root.hotkeys-compact ? 0px : parent.width * 0.58;
@@ -1383,14 +1392,14 @@ export component SettingsWindow inherits Window {
             x: Metrics.settings-page-padding;
             y: screenshot-annotation-card.y + screenshot-annotation-card.height + Metrics.settings-card-gap;
             width: screenshot-selection-card.width;
-            title: "Image output";
+            title: @tr("Image output");
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
                 Rectangle {
                     width: 100%; height: root.hotkeys-compact ? 92px : 56px;
                     Text { x: 0px; y: 0px; width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
                         height: root.hotkeys-compact ? 36px : parent.height;
-                        text: "Save location"; color: Colors.foreground;
+                        text: @tr("Save location"); color: Colors.foreground;
                         font-size: Typography.body-size; vertical-alignment: center; }
                     Rectangle {
                         x: root.hotkeys-compact ? 0px : parent.width * 0.58;
@@ -1408,7 +1417,7 @@ export component SettingsWindow inherits Window {
                     }
                     SettingsButton {
                         x: parent.width - 84px; y: root.hotkeys-compact ? 44px : 8px;
-                        width: 84px; label: "Browse"; clicked => { }
+                        width: 84px; label: @tr("Browse"); clicked => { }
                     }
                 }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
@@ -1416,7 +1425,7 @@ export component SettingsWindow inherits Window {
                     width: 100%; height: root.hotkeys-compact ? 92px : 56px;
                     Text { x: 0px; y: 0px; width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
                         height: root.hotkeys-compact ? 36px : parent.height;
-                        text: "Image format"; color: Colors.foreground;
+                        text: @tr("Image format"); color: Colors.foreground;
                         font-size: Typography.body-size; vertical-alignment: center; }
                     screenshot-format-preview := AppearancePreviewField {
                         x: root.hotkeys-compact ? 0px : parent.width * 0.58;
@@ -1430,13 +1439,13 @@ export component SettingsWindow inherits Window {
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
                 HorizontalLayout {
                     width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: "Copy image as file"; description: ""; error-text: ""; }
+                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: @tr("Copy image as file"); description: ""; error-text: ""; }
                     SettingsSwitch { checked: root.screenshot-copy-as-file; toggled(value) => { root.screenshot-copy-as-file = value; } }
                 }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
                 HorizontalLayout {
                     width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: "Close after copying or saving"; description: ""; error-text: ""; }
+                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: @tr("Close after copying or saving"); description: ""; error-text: ""; }
                     SettingsSwitch { checked: root.screenshot-close-after-output; toggled(value) => { root.screenshot-close-after-output = value; } }
                 }
             }
@@ -1464,11 +1473,11 @@ export component SettingsWindow inherits Window {
             width: root.two-column-layout
                 ? (translation-scroll.visible-width - 2 * Metrics.settings-page-padding - Metrics.settings-card-gap) / 2
                 : translation-scroll.visible-width - 2 * Metrics.settings-page-padding;
-            title: "Provider";
+            title: @tr("Provider");
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1;
                 spacing: Spacing.small;
-                SettingsFieldLabel { label: "Translation provider"; description: ""; error-text: root.provider-error-text; }
+                SettingsFieldLabel { label: @tr("Translation provider"); description: ""; error-text: root.provider-error-text; }
                 provider-selector := Rectangle {
                     height: 40px; border-radius: 6px; border-width: 1px; border-color: Colors.outline; background: Colors.background;
                     Text { x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 24px; text: "DeepL"; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
@@ -1484,14 +1493,14 @@ export component SettingsWindow inherits Window {
         credential-card := SettingsCard {
             x: root.two-column-layout ? provider-card.x + provider-card.width + Metrics.settings-card-gap : Metrics.settings-page-padding;
             y: root.two-column-layout ? Metrics.settings-page-padding : provider-card.y + provider-card.height + Metrics.settings-card-gap;
-            width: provider-card.width; title: "Credentials";
+            width: provider-card.width; title: @tr("Credentials");
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1;
                 spacing: Spacing.small;
                 HorizontalLayout {
                     width: 100%; height: 24px;
-                    Text { text: "DeepL API Key"; color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; vertical-alignment: center; }
-                    Text { text: root.credential-configured ? "Configured" : "Not configured"; color: root.credential-configured ? Colors.primary : Colors.secondary-foreground; font-size: 13px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; }
+                    Text { text: @tr("DeepL API Key"); color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; vertical-alignment: center; }
+                    Text { text: root.credential-configured ? @tr("Configured") : @tr("Not configured"); color: root.credential-configured ? Colors.primary : Colors.secondary-foreground; font-size: 13px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; }
                 }
 
                 credential-field := Rectangle {
@@ -1538,7 +1547,7 @@ export component SettingsWindow inherits Window {
                         CredentialActionButton { icon-kind: 3; interactive: false; highlighted: field-hover.mouse-x >= credential-field.width - Metrics.icon-button-size - 4px && field-hover.mouse-x < credential-field.width - 4px; pressed: field-hover.pressed && self.highlighted; }
                     }
                     if root.credential-configured && root.credential-request-pending && !root.credential-editing: Text {
-                        x: parent.width - Spacing.medium - 88px; width: 88px; height: parent.height; text: "Loading…"; color: Colors.secondary-foreground; font-size: 13px; horizontal-alignment: right; vertical-alignment: center;
+                        x: parent.width - Spacing.medium - 88px; width: 88px; height: parent.height; text: @tr("Loading…"); color: Colors.secondary-foreground; font-size: 13px; horizontal-alignment: right; vertical-alignment: center;
                     }
                     if root.credential-configured && (root.credential-editing || root.credential-revealed): CredentialActionButton {
                         x: parent.width - Metrics.icon-button-size - 4px; y: (parent.height - Metrics.icon-button-size) / 2;
@@ -1550,10 +1559,10 @@ export component SettingsWindow inherits Window {
                 Text { height: 18px; text: root.credential-error-text; color: Colors.error; font-size: 13px; overflow: elide; }
                 HorizontalLayout {
                     width: 100%; height: 40px; spacing: Spacing.small; alignment: end;
-                    SettingsButton { width: 96px; visible: root.credential-editing; label: "Cancel"; enabled: !root.credential-busy; clicked => { root.credential-edit-cancel-requested(); } }
+                    SettingsButton { width: 96px; visible: root.credential-editing; label: @tr("Cancel"); enabled: !root.credential-busy; clicked => { root.credential-edit-cancel-requested(); } }
                     SettingsButton {
                         width: 128px; visible: root.credential-editing || (!root.credential-configured && (root.credential-draft != "" || root.credential-busy));
-                        primary: true; label: root.credential-busy ? "Working…" : "Save key"; enabled: root.credential-draft != "" && !root.credential-busy;
+                        primary: true; label: root.credential-busy ? @tr("Working…") : @tr("Save key"); enabled: root.credential-draft != "" && !root.credential-busy;
                         clicked => { root.credential-save-requested(root.credential-draft); }
                     }
                 }
@@ -1643,7 +1652,7 @@ export component SettingsWindow inherits Window {
         selected(index) => {
             if root.preview-menu-kind == 0 { root.appearance-font-index = index; }
             else if root.preview-menu-kind == 1 { root.appearance-size-index = index; }
-            else if root.preview-menu-kind == 2 { root.appearance-language-index = index; }
+            else if root.preview-menu-kind == 2 { root.ui-language-selected(index); }
             else if root.preview-menu-kind == 3 { root.tray-click-index = index; }
             else if root.preview-menu-kind == 4 { root.selection-filter-mode-index = index; }
             else { root.screenshot-format-index = index; }

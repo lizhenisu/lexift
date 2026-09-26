@@ -13,3 +13,4 @@ tracing.workspace = true
 
 [build-dependencies]
 slint-build.workspace = true
+rspolib = "0.1.2"

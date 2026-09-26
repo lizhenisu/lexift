@@ -1,6 +1,7 @@
 mod annotation;
 mod binding;
 mod bridge;
+mod i18n;
 mod mapper;
 mod placement;
 mod theme;
