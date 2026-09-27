@@ -22,8 +22,8 @@ msgstr "標註"
 msgid "Annotation color"
 msgstr "標註顏色"
 
-msgid "Annotation toolbar — Alt + A"
-msgstr "標註工具列 — Alt + A"
+msgid "Annotation toolbar"
+msgstr "標註工具列"
 
 msgid "Anonymous usage statistics"
 msgstr "匿名使用統計"
@@ -651,3 +651,9 @@ msgstr "翻譯設定"
 
 msgid "Used when the detected source language matches the default target language."
 msgstr "當偵測到的來源語言與預設目標語言相同時使用。"
+
+msgid "Outline"
+msgstr "描邊"
+
+msgid "Geometry"
+msgstr "幾何圖形"

@@ -32,6 +32,7 @@ use crate::runtime::RuntimeManager;
 
 pub(crate) trait ViewPort: Send + Sync {
     fn update(&self, state: AppState);
+    fn set_annotation_hotkey_status(&self, _status: String) {}
     fn show_popup(
         &self,
         session_id: PopupSessionId,
@@ -56,6 +57,10 @@ pub(crate) trait ViewPort: Send + Sync {
 impl ViewPort for lexift_ui::UiHandle {
     fn update(&self, state: AppState) {
         self.update(state);
+    }
+
+    fn set_annotation_hotkey_status(&self, status: String) {
+        lexift_ui::UiHandle::set_annotation_hotkey_status(self, status);
     }
 
     fn show_popup(
@@ -120,6 +125,7 @@ pub(crate) struct AppController {
     speech: Option<Arc<dyn SpeechPort>>,
     ui: Arc<dyn ViewPort>,
     selection_capture_in_flight: AtomicBool,
+    #[cfg(not(feature = "m1-demo"))]
     selection_toolbar_enabled: AtomicBool,
     state_changed: Arc<Notify>,
 }
@@ -134,6 +140,7 @@ impl AppController {
         settings_store: Arc<dyn SettingsStore>,
         ui: Arc<dyn ViewPort>,
     ) -> Self {
+        #[cfg(not(feature = "m1-demo"))]
         let selection_toolbar_enabled = state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -153,6 +160,7 @@ impl AppController {
             speech: None,
             ui,
             selection_capture_in_flight: AtomicBool::new(false),
+            #[cfg(not(feature = "m1-demo"))]
             selection_toolbar_enabled: AtomicBool::new(selection_toolbar_enabled),
             state_changed: Arc::new(Notify::new()),
         }
@@ -213,6 +221,7 @@ impl AppController {
             );
             (state.clone(), commands)
         };
+        #[cfg(not(feature = "m1-demo"))]
         self.selection_toolbar_enabled.store(
             snapshot.desired_settings.selection_toolbar,
             Ordering::Release,
@@ -225,6 +234,7 @@ impl AppController {
         }
     }
 
+    #[cfg(not(feature = "m1-demo"))]
     pub(crate) fn selection_toolbar_enabled(&self) -> bool {
         self.selection_toolbar_enabled.load(Ordering::Acquire)
     }
@@ -560,11 +570,18 @@ impl AppController {
             })
             .await;
             match result {
-                Ok(Ok(config)) => controller.dispatch(AppEvent::RuntimeConfigUpdated {
-                    settings,
-                    config,
-                    change,
-                }),
+                Ok(Ok(config)) => {
+                    if field == lexift_core::domain::settings::SettingsField::AnnotationHotkey {
+                        controller
+                            .ui
+                            .set_annotation_hotkey_status("Registered".into());
+                    }
+                    controller.dispatch(AppEvent::RuntimeConfigUpdated {
+                        settings,
+                        config,
+                        change,
+                    });
+                }
                 Ok(Err(error)) => {
                     let message = error.to_string();
                     let rollback =

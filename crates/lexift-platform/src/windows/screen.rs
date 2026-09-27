@@ -21,6 +21,45 @@ impl WindowsScreenPort {
 }
 
 impl ScreenPort for WindowsScreenPort {
+    fn displays(&self) -> Result<Vec<Rect>> {
+        use windows::{
+            Win32::{
+                Foundation::{LPARAM, RECT},
+                Graphics::Gdi::{EnumDisplayMonitors, HDC, HMONITOR},
+            },
+            core::BOOL,
+        };
+        unsafe extern "system" fn collect(
+            _: HMONITOR,
+            _: HDC,
+            area: *mut RECT,
+            data: LPARAM,
+        ) -> BOOL {
+            let displays = unsafe { &mut *(data.0 as *mut Vec<Rect>) };
+            let area = unsafe { &*area };
+            displays.push(Rect {
+                left: area.left,
+                top: area.top,
+                right: area.right,
+                bottom: area.bottom,
+            });
+            true.into()
+        }
+        let mut displays: Vec<Rect> = Vec::new();
+        let result = unsafe {
+            EnumDisplayMonitors(
+                None,
+                None,
+                Some(collect),
+                LPARAM((&mut displays as *mut Vec<Rect>) as isize),
+            )
+        };
+        if !result.as_bool() || displays.is_empty() {
+            return Err(Error::new("Could not enumerate displays"));
+        }
+        displays.sort_by_key(|rect| (rect.left, rect.top));
+        Ok(displays)
+    }
     fn cursor_position(&self) -> Result<Point> {
         cursor_position()
     }

@@ -39,7 +39,11 @@ impl WindowsHotkeyPort {
 }
 
 impl HotkeyPort for WindowsHotkeyPort {
-    fn register_annotation_hotkey(&self, handler: HotkeyHandler) -> Result<()> {
+    fn register_annotation_hotkey(
+        &self,
+        config: HotkeyConfig,
+        handler: HotkeyHandler,
+    ) -> Result<()> {
         let mut listener = self
             .annotation_listener
             .lock()
@@ -48,7 +52,29 @@ impl HotkeyPort for WindowsHotkeyPort {
             return Err(Error::new("Annotation shortcut is already registered"));
         }
         // Each listener owns its registration on a separate message-loop thread.
-        *listener = Some(start_listener("Alt + A".parse()?, handler)?);
+        *listener = Some(start_listener(config, handler)?);
+        Ok(())
+    }
+
+    fn replace_annotation_hotkey(
+        &self,
+        config: HotkeyConfig,
+        handler: HotkeyHandler,
+    ) -> Result<()> {
+        let mut listener = self
+            .annotation_listener
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if listener
+            .as_ref()
+            .is_some_and(|current| current.config == config)
+        {
+            return Ok(());
+        }
+        let replacement = start_listener(config, handler)?;
+        if let Some(previous) = listener.replace(replacement) {
+            previous.shutdown();
+        }
         Ok(())
     }
 
@@ -302,14 +328,17 @@ mod tests {
             )
             .unwrap();
         hotkey
-            .register_annotation_hotkey(Arc::new(move || {
-                let _ = annotation_tx.send(());
-            }))
+            .register_annotation_hotkey(
+                "Alt + A".parse().unwrap(),
+                Arc::new(move || {
+                    let _ = annotation_tx.send(());
+                }),
+            )
             .unwrap();
         let conflicting = WindowsHotkeyPort::new();
         assert!(
             conflicting
-                .register_annotation_hotkey(Arc::new(|| {}))
+                .register_annotation_hotkey("Alt + A".parse().unwrap(), Arc::new(|| {}))
                 .is_err()
         );
         let translate_thread = hotkey.listener.lock().unwrap().as_ref().unwrap().thread_id;
@@ -334,7 +363,7 @@ mod tests {
         assert!(translate_rx.try_recv().is_err());
         hotkey.unregister_annotation_hotkey().unwrap();
         conflicting
-            .register_annotation_hotkey(Arc::new(|| {}))
+            .register_annotation_hotkey("Alt + A".parse().unwrap(), Arc::new(|| {}))
             .unwrap();
         unsafe {
             PostThreadMessageW(
@@ -346,6 +375,48 @@ mod tests {
             .unwrap();
         }
         translate_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires an interactive Windows desktop session"]
+    fn annotation_replacement_keeps_old_registration_when_windows_rejects_new_one() {
+        let hotkey = WindowsHotkeyPort::new();
+        let conflicting = WindowsHotkeyPort::new();
+        let original: HotkeyConfig = "Alt + Shift + F11".parse().unwrap();
+        let blocked: HotkeyConfig = "Alt + Shift + F12".parse().unwrap();
+        hotkey
+            .register_annotation_hotkey(original, Arc::new(|| {}))
+            .unwrap();
+        conflicting
+            .register_translate_hotkey(blocked, Arc::new(|| {}))
+            .unwrap();
+        assert!(
+            hotkey
+                .replace_annotation_hotkey(blocked, Arc::new(|| {}))
+                .is_err()
+        );
+        assert_eq!(
+            hotkey
+                .annotation_listener
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|l| l.config),
+            Some(original)
+        );
+        conflicting.unregister_translate_hotkey().unwrap();
+        hotkey
+            .replace_annotation_hotkey(blocked, Arc::new(|| {}))
+            .unwrap();
+        assert_eq!(
+            hotkey
+                .annotation_listener
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|l| l.config),
+            Some(blocked)
+        );
     }
 
     #[test]

@@ -1,3 +1,4 @@
+pub mod annotation;
 pub mod geometry;
 pub mod language;
 pub mod message;

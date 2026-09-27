@@ -19,6 +19,9 @@ pub(crate) fn apply_settings(settings: &SettingsWindow, state: &UiState) {
     if settings.get_draft_hotkey_label().as_str() != state.hotkey {
         settings.set_draft_hotkey_label(state.hotkey.clone().into());
     }
+    if settings.get_draft_annotation_hotkey_label().as_str() != state.annotation_hotkey {
+        settings.set_draft_annotation_hotkey_label(state.annotation_hotkey.clone().into());
+    }
     if settings.get_draft_provider_id().as_str() != state.provider {
         settings.set_draft_provider_id(state.provider.clone().into());
     }
@@ -33,6 +36,9 @@ pub(crate) fn apply_settings(settings: &SettingsWindow, state: &UiState) {
     }
     if settings.get_hotkey_error_text().as_str() != state.hotkey_error {
         settings.set_hotkey_error_text(state.hotkey_error.clone().into());
+    }
+    if settings.get_annotation_hotkey_error_text().as_str() != state.annotation_hotkey_error {
+        settings.set_annotation_hotkey_error_text(state.annotation_hotkey_error.clone().into());
     }
     if settings.get_provider_error_text().as_str() != state.provider_error {
         settings.set_provider_error_text(state.provider_error.clone().into());

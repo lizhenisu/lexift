@@ -30,7 +30,12 @@ impl RuntimeManager {
         &self,
         handler: lexift_core::ports::hotkey::HotkeyHandler,
     ) -> lexift_core::Result<()> {
-        self.hotkey.start_annotation(handler)
+        let hotkey = self
+            .current
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .annotation_hotkey;
+        self.hotkey.start_annotation(hotkey, handler)
     }
     #[cfg(not(feature = "m1-demo"))]
     pub(crate) fn production(
@@ -85,22 +90,33 @@ impl RuntimeManager {
         &self,
         handler: lexift_core::ports::hotkey::HotkeyHandler,
     ) -> Result<()> {
-        self.hotkey.start(
-            self.current
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .hotkey,
-            handler,
-        )
+        let hotkey = self
+            .current
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .hotkey;
+        self.hotkey.start(hotkey, handler)
     }
 
     pub(crate) fn apply(&self, field: SettingsField, config: RuntimeConfig) -> Result<()> {
+        if matches!(
+            field,
+            SettingsField::Hotkey | SettingsField::AnnotationHotkey
+        ) && config.hotkey == config.annotation_hotkey
+        {
+            return Err(lexift_core::Error::new(
+                "Translation and annotation shortcuts must differ",
+            ));
+        }
         match field {
             SettingsField::TargetLanguage
             | SettingsField::SelectionToolbar
             | SettingsField::Theme
             | SettingsField::UiLanguage => {}
             SettingsField::Hotkey => self.hotkey.apply(config.hotkey)?,
+            SettingsField::AnnotationHotkey => {
+                self.hotkey.apply_annotation(config.annotation_hotkey)?
+            }
             SettingsField::Provider => {
                 self.translator.validate(config.provider)?;
                 self.translator.commit(config.provider);
@@ -121,6 +137,7 @@ impl RuntimeManager {
             | SettingsField::Theme
             | SettingsField::UiLanguage => {}
             SettingsField::Hotkey => current.hotkey = config.hotkey,
+            SettingsField::AnnotationHotkey => current.annotation_hotkey = config.annotation_hotkey,
             SettingsField::Provider => current.provider = config.provider,
             SettingsField::LaunchAtLogin => {
                 current.launch_at_login = config.launch_at_login;

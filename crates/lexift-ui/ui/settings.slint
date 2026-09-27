@@ -705,13 +705,16 @@ export component SettingsWindow inherits Window {
     in-out property <int> draft-target-index: 0;
     in property <string> target-language-error-text: "";
     in property <string> hotkey-error-text: "";
+    in property <string> annotation-hotkey-error-text: "";
     in property <string> annotation-hotkey-status: @tr("Unavailable");
     in property <string> provider-error-text: "";
     in-out property <bool> launch-at-login: false;
     in-out property <bool> selection-toolbar: true;
     in property <string> launch-at-login-error-text: "";
     in-out property <string> draft-hotkey-label: "Alt + X";
+    in-out property <string> draft-annotation-hotkey-label: "Alt + A";
     in-out property <bool> hotkey-capturing: false;
+    in-out property <bool> annotation-hotkey-capturing: false;
     in-out property <string> draft-provider-id: "deepl";
     in property <bool> credential-configured: false;
     in property <bool> credential-busy: false;
@@ -827,6 +830,7 @@ export component SettingsWindow inherits Window {
 
     callback hotkey-key-pressed(string, bool, bool, bool, bool) -> string;
     callback hotkey-change-requested(string);
+    callback annotation-hotkey-change-requested(string);
     callback launch-at-login-change-requested(bool);
     callback selection-toolbar-change-requested(bool);
     callback credential-save-requested(string);
@@ -842,18 +846,19 @@ export component SettingsWindow inherits Window {
     public function focus-credential-reveal() { credential-reveal-input.focus(); }
     public function focus-credential-edit() { credential-edit-input.focus(); }
     public function focus-hotkey-capture() { hotkey-capture.focus(); }
+    public function focus-annotation-hotkey-capture() { annotation-hotkey-capture.focus(); }
     public function focus-settings-menu() { settings-menu-focus.focus(); }
     public function close-settings-menu() { settings-menu-open = false; settings-menu-dismiss-armed = false; }
     public function close-preview-menu() { preview-menu-open = false; }
     public function reset-settings-view() {
-        root.close-settings-menu(); root.close-preview-menu(); root.hotkey-capturing = false; root.active-category = 0;
+        root.close-settings-menu(); root.close-preview-menu(); root.hotkey-capturing = false; root.annotation-hotkey-capturing = false; root.active-category = 0;
         general-scroll.content-y = 0px; translation-scroll.content-y = 0px; providers-scroll.content-y = 0px;
         hotkeys-scroll.content-y = 0px; selection-assistant-scroll.content-y = 0px;
         screenshot-scroll.content-y = 0px;
     }
     public function select-category(category: int) {
         if root.active-category == category { return; }
-        root.close-settings-menu(); root.close-preview-menu(); root.hotkey-capturing = false;
+        root.close-settings-menu(); root.close-preview-menu(); root.hotkey-capturing = false; root.annotation-hotkey-capturing = false;
         if root.active-category == 5 { root.credential-edit-cancel-requested(); }
         root.active-category = category;
     }
@@ -1168,6 +1173,7 @@ export component SettingsWindow inherits Window {
                         x: parent.width - 84px; y: root.hotkeys-compact ? 58px : (parent.height - 40px) / 2;
                         width: 84px; label: root.hotkey-capturing ? @tr("Cancel") : @tr("Change");
                         clicked => {
+                            root.annotation-hotkey-capturing = false;
                             root.hotkey-capturing = !root.hotkey-capturing;
                             if root.hotkey-capturing { root.focus-hotkey-capture(); }
                         }
@@ -1187,8 +1193,49 @@ export component SettingsWindow inherits Window {
             width: behavior-hotkeys-card.width; title: @tr("Annotation");
             VerticalLayout {
                 spacing: Spacing.small;
-                Text { text: @tr("Annotation toolbar — Alt + A"); color: Colors.foreground; font-size: Typography.body-size; }
-                Text { text: root.annotation-hotkey-status; color: Colors.secondary-foreground; font-size: 13px; wrap: word-wrap; }
+                Rectangle {
+                    width: 100%; height: root.hotkeys-compact ? 126px : 92px;
+                    SettingsFieldLabel {
+                        x: 0px; y: root.hotkeys-compact ? 0px : (parent.height - self.height) / 2;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.45 - Spacing.small;
+                        label: @tr("Annotation toolbar");
+                        description: root.annotation-hotkey-capturing ? @tr("Press a key combination") : root.annotation-hotkey-status;
+                        error-text: root.annotation-hotkey-error-text;
+                    }
+                    Rectangle {
+                        x: root.hotkeys-compact ? 0px : parent.width * 0.45;
+                        y: root.hotkeys-compact ? 70px : (parent.height - 40px) / 2;
+                        width: root.hotkeys-compact ? parent.width - 96px : parent.width * 0.55 - 96px;
+                        height: 40px; border-radius: 6px;
+                        border-width: root.annotation-hotkey-capturing ? 2px : 1px;
+                        border-color: root.annotation-hotkey-capturing ? Colors.primary : Colors.outline;
+                        background: Colors.background;
+                        Text {
+                            x: Spacing.medium; width: parent.width - 2 * Spacing.medium; height: parent.height;
+                            text: root.annotation-hotkey-capturing ? @tr("Press shortcut…") : root.draft-annotation-hotkey-label;
+                            color: root.annotation-hotkey-capturing ? Colors.primary : Colors.foreground;
+                            font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
+                        }
+                        annotation-hotkey-capture := FocusScope {
+                            key-pressed(event) => {
+                                if !root.annotation-hotkey-capturing || root.active-category != 2 { return reject; }
+                                if event.text == Key.Escape { root.annotation-hotkey-capturing = false; return accept; }
+                                let captured = root.hotkey-key-pressed(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta);
+                                if captured != "" { root.annotation-hotkey-change-requested(captured); root.draft-annotation-hotkey-label = captured; root.annotation-hotkey-capturing = false; }
+                                return accept;
+                            }
+                        }
+                    }
+                    SettingsButton {
+                        x: parent.width - 84px; y: root.hotkeys-compact ? 70px : (parent.height - 40px) / 2;
+                        width: 84px; label: root.annotation-hotkey-capturing ? @tr("Cancel") : @tr("Change");
+                        clicked => {
+                            root.hotkey-capturing = false;
+                            root.annotation-hotkey-capturing = !root.annotation-hotkey-capturing;
+                            if root.annotation-hotkey-capturing { root.focus-annotation-hotkey-capture(); }
+                        }
+                    }
+                }
             }
         }
     }

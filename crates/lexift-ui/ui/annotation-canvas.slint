@@ -1,0 +1,34 @@
+// A transparent, live-desktop overlay. Pixel content is produced from Core objects in Rust.
+export component AnnotationCanvas inherits Window {
+    title: "Lexift Annotation Canvas";
+    no-frame: true;
+    always-on-top: true;
+    // A one-step alpha keeps the layered HWND hittable while remaining visually transparent.
+    background: #00000001;
+    in property <image> frame;
+    callback pointer(int, float, float);
+    callback escape-requested();
+    callback undo-requested();
+    callback delete-requested();
+    forward-focus: keys;
+    Image { source: root.frame; width: 100%; height: 100%; image-fit: fill; }
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: crosshair;
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.pointer(0, self.mouse-x / 1px, self.mouse-y / 1px); }
+            if event.kind == PointerEventKind.move { root.pointer(1, self.mouse-x / 1px, self.mouse-y / 1px); }
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.up { root.pointer(2, self.mouse-x / 1px, self.mouse-y / 1px); }
+            if event.kind == PointerEventKind.cancel { root.pointer(3, self.mouse-x / 1px, self.mouse-y / 1px); }
+        }
+    }
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape { root.escape-requested(); return accept; }
+            if event.text == Key.Delete { root.delete-requested(); return accept; }
+            if event.text == "z" && event.modifiers.control { root.undo-requested(); return accept; }
+            return reject;
+        }
+    }
+}

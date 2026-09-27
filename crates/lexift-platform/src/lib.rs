@@ -177,6 +177,44 @@ pub fn configure_passive_tool_window(
     }
 }
 
+/// Lets the annotation canvas pass mouse input to the live desktop in operate mode.
+pub fn set_annotation_click_through(
+    window: &impl raw_window_handle::HasWindowHandle,
+    enabled: bool,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::popup::set_click_through(window, enabled)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, enabled);
+        Err(lexift_core::Error::new(
+            "Screen annotations are unavailable on this platform",
+        ))
+    }
+}
+
+/// Presents a premultiplied RGBA frame on a transparent annotation window.
+pub fn present_annotation_frame(
+    window: &impl raw_window_handle::HasWindowHandle,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::popup::present_annotation_frame(window, rgba, width, height)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, rgba, width, height);
+        Err(lexift_core::Error::new(
+            "Screen annotations are unavailable on this platform",
+        ))
+    }
+}
+
 /// Configures the Translation Popup's one outer-corner treatment.
 ///
 /// Windows uses DWM clipping when available and reports an opaque square fallback when it is not.

@@ -10,6 +10,7 @@ i-slint-core.workspace = true
 lexift-core.workspace = true
 slint = { workspace = true, features = ["raw-window-handle-06"] }
 tracing.workspace = true
+tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd"] }
 
 [build-dependencies]
 slint-build.workspace = true

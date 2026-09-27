@@ -5,8 +5,21 @@ use crate::{Result, domain::runtime_config::HotkeyConfig};
 pub type HotkeyHandler = Arc<dyn Fn() + Send + Sync + 'static>;
 
 pub trait HotkeyPort: Send + Sync {
-    /// Registers the independent, fixed annotation preview shortcut.
-    fn register_annotation_hotkey(&self, _handler: HotkeyHandler) -> Result<()> {
+    /// Registers the independent annotation toolbar shortcut.
+    fn register_annotation_hotkey(
+        &self,
+        _config: HotkeyConfig,
+        _handler: HotkeyHandler,
+    ) -> Result<()> {
+        Err(crate::Error::new(
+            "Annotation shortcut is unavailable on this platform",
+        ))
+    }
+    fn replace_annotation_hotkey(
+        &self,
+        _config: HotkeyConfig,
+        _handler: HotkeyHandler,
+    ) -> Result<()> {
         Err(crate::Error::new(
             "Annotation shortcut is unavailable on this platform",
         ))

@@ -94,6 +94,13 @@ pub struct HotkeyConfig {
 }
 
 impl HotkeyConfig {
+    pub const fn annotation_default() -> Self {
+        Self {
+            modifiers: HotkeyModifiers::alt(),
+            key: HotkeyKey::Letter('A'),
+        }
+    }
+
     pub fn new(modifiers: HotkeyModifiers, key: HotkeyKey) -> Result<Self> {
         if modifiers.is_empty() {
             return Err(Error::new("Hotkey must include Ctrl, Alt, Shift, or Win"));
@@ -216,11 +223,23 @@ impl FromStr for ProviderConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeConfig {
     pub hotkey: HotkeyConfig,
+    pub annotation_hotkey: HotkeyConfig,
     pub provider: ProviderConfig,
     pub launch_at_login: bool,
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        Self {
+            hotkey: HotkeyConfig::default(),
+            annotation_hotkey: HotkeyConfig::annotation_default(),
+            provider: ProviderConfig::default(),
+            launch_at_login: false,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -22,8 +22,8 @@ msgstr "주석"
 msgid "Annotation color"
 msgstr "주석 색상"
 
-msgid "Annotation toolbar — Alt + A"
-msgstr "주석 도구 모음 — Alt + A"
+msgid "Annotation toolbar"
+msgstr "주석 도구 모음"
 
 msgid "Anonymous usage statistics"
 msgstr "익명 사용 통계"
@@ -651,3 +651,9 @@ msgstr "번역 설정"
 
 msgid "Used when the detected source language matches the default target language."
 msgstr "감지된 원문 언어가 기본 대상 언어와 같을 때 사용합니다."
+
+msgid "Outline"
+msgstr "윤곽선"
+
+msgid "Geometry"
+msgstr "도형"

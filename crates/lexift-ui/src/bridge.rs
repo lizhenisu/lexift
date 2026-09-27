@@ -99,6 +99,9 @@ type AttachToolWindow = Rc<dyn Fn(&slint::Window, &slint::Window) -> bool>;
 type BeginWindowResize = Rc<dyn Fn(&slint::Window, PopupResizeEdge, bool) -> bool>;
 type PopupWorkArea = Rc<dyn Fn(Point) -> Option<Rect>>;
 type ToolbarCursorPosition = Rc<dyn Fn() -> Option<Point>>;
+type AnnotationDisplays = Rc<dyn Fn() -> Vec<Rect>>;
+type AnnotationClickThrough = Rc<dyn Fn(&slint::Window, bool) -> bool>;
+type AnnotationFramePresenter = Rc<dyn Fn(&slint::Window, &[u8], u32, u32) -> bool>;
 type ConfigureResizeBackground = Rc<dyn Fn(&slint::Window, [u8; 3]) -> bool>;
 type WindowPaintRepair = Rc<dyn Fn()>;
 type ConfigureWindowPaintRepair = Rc<dyn Fn(&slint::Window, WindowPaintRepair) -> bool>;
@@ -122,6 +125,9 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) toolbar_cursor_position: ToolbarCursorPosition,
     pub(crate) set_popup_dismissal: SetPopupDismissal,
     pub(crate) attach_tool_window: AttachToolWindow,
+    pub(crate) annotation_displays: AnnotationDisplays,
+    pub(crate) annotation_click_through: AnnotationClickThrough,
+    pub(crate) annotation_frame_presenter: AnnotationFramePresenter,
     trim_process_working_set: fn() -> bool,
     theme_preference_changed: Rc<dyn Fn(lexift_core::domain::settings::ThemePreference)>,
     language_changed: Rc<dyn Fn(lexift_core::ports::tray::TrayMenuLabels)>,
@@ -150,6 +156,9 @@ impl WindowLifecycleCallbacks {
             toolbar_cursor_position: Rc::new(|| None),
             set_popup_dismissal: Rc::new(set_popup_dismissal),
             attach_tool_window: Rc::new(attach_tool_window),
+            annotation_displays: Rc::new(Vec::new),
+            annotation_click_through: Rc::new(|_, _| false),
+            annotation_frame_presenter: Rc::new(|_, _, _, _| false),
             trim_process_working_set,
             theme_preference_changed: Rc::new(|_| {}),
             language_changed: Rc::new(|_| {}),
@@ -179,6 +188,19 @@ impl WindowLifecycleCallbacks {
     /// Resolves the monitor work area for the Popup's physical window center.
     pub fn with_popup_work_area(mut self, query: impl Fn(Point) -> Option<Rect> + 'static) -> Self {
         self.popup_work_area = Rc::new(query);
+        self
+    }
+
+    /// Supplies native monitor bounds and canvas hit-testing without exposing platform APIs to UI.
+    pub fn with_annotation_canvas(
+        mut self,
+        displays: impl Fn() -> Vec<Rect> + 'static,
+        click_through: impl Fn(&slint::Window, bool) -> bool + 'static,
+        present: impl Fn(&slint::Window, &[u8], u32, u32) -> bool + 'static,
+    ) -> Self {
+        self.annotation_displays = Rc::new(displays);
+        self.annotation_click_through = Rc::new(click_through);
+        self.annotation_frame_presenter = Rc::new(present);
         self
     }
 
@@ -2201,6 +2223,14 @@ fn wire_settings_callbacks(
             });
         }
     });
+    let annotation_settings_handler = Rc::clone(&handler);
+    settings.on_annotation_hotkey_change_requested(move |hotkey| {
+        if let Ok(hotkey) = hotkey.to_string().parse::<HotkeyConfig>() {
+            annotation_settings_handler(AppEvent::SettingsChangeRequested {
+                change: SettingsChange::AnnotationHotkey(hotkey),
+            });
+        }
+    });
     let settings_handler = Rc::clone(&handler);
     settings.on_launch_at_login_change_requested(move |enabled| {
         settings_handler(AppEvent::SettingsChangeRequested {
@@ -2944,6 +2974,9 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
             ("Target language saved", false)
         }
         SettingsFeedback::SettingsSaved(SettingsField::Hotkey) => ("Shortcut saved", false),
+        SettingsFeedback::SettingsSaved(SettingsField::AnnotationHotkey) => {
+            ("Shortcut saved", false)
+        }
         SettingsFeedback::SettingsSaved(SettingsField::Provider) => ("Provider saved", false),
         SettingsFeedback::SettingsSaved(SettingsField::LaunchAtLogin) => {
             ("Startup preference saved", false)
@@ -2955,6 +2988,9 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
             ("Target language wasn't saved", true)
         }
         SettingsFeedback::SettingsSaveFailed(SettingsField::Hotkey) => {
+            ("Shortcut wasn't saved", true)
+        }
+        SettingsFeedback::SettingsSaveFailed(SettingsField::AnnotationHotkey) => {
             ("Shortcut wasn't saved", true)
         }
         SettingsFeedback::SettingsSaveFailed(SettingsField::Provider) => {
@@ -3129,10 +3165,14 @@ impl UiHandle {
                 window.invoke_reset_settings_view();
                 window.set_draft_target_index(language_index(&settings.target_language));
                 window.set_draft_hotkey_label(settings.hotkey.to_string().into());
+                window.set_draft_annotation_hotkey_label(
+                    settings.annotation_hotkey.to_string().into(),
+                );
                 window.set_draft_provider_id(settings.provider.id().into());
                 window.set_launch_at_login(settings.launch_at_login);
                 window.set_selection_toolbar(settings.selection_toolbar);
                 window.set_hotkey_capturing(false);
+                window.set_annotation_hotkey_capturing(false);
                 clear_credential_transient(&window, &credential_generation);
                 clear_settings_toasts(&window, &toast_records);
                 if window.window().is_minimized() {

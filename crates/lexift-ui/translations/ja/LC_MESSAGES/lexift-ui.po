@@ -22,8 +22,8 @@ msgstr "注釈"
 msgid "Annotation color"
 msgstr "注釈の色"
 
-msgid "Annotation toolbar — Alt + A"
-msgstr "注釈ツールバー — Alt + A"
+msgid "Annotation toolbar"
+msgstr "注釈ツールバー"
 
 msgid "Anonymous usage statistics"
 msgstr "匿名の使用統計"
@@ -651,3 +651,9 @@ msgstr "翻訳設定"
 
 msgid "Used when the detected source language matches the default target language."
 msgstr "検出された原文の言語が既定の翻訳先と同じ場合に使用します。"
+
+msgid "Outline"
+msgstr "輪郭線"
+
+msgid "Geometry"
+msgstr "図形"

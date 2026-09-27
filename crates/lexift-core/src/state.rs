@@ -56,6 +56,7 @@ pub struct AppState {
     pub runtime_config_error_message: String,
     pub target_language_settings_error: String,
     pub hotkey_settings_error: String,
+    pub annotation_hotkey_settings_error: String,
     pub provider_settings_error: String,
     pub launch_at_login_settings_error: String,
     pub credential_configured: bool,
@@ -94,6 +95,7 @@ impl AppState {
             runtime_config_error_message: String::new(),
             target_language_settings_error: String::new(),
             hotkey_settings_error: String::new(),
+            annotation_hotkey_settings_error: String::new(),
             provider_settings_error: String::new(),
             launch_at_login_settings_error: String::new(),
             credential_configured: false,
@@ -664,6 +666,7 @@ impl AppState {
         match field {
             SettingsField::TargetLanguage => self.target_language_settings_error.clear(),
             SettingsField::Hotkey => self.hotkey_settings_error.clear(),
+            SettingsField::AnnotationHotkey => self.annotation_hotkey_settings_error.clear(),
             SettingsField::Provider => self.provider_settings_error.clear(),
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error.clear(),
             SettingsField::SelectionToolbar | SettingsField::Theme | SettingsField::UiLanguage => {}
@@ -674,6 +677,7 @@ impl AppState {
         match field {
             SettingsField::TargetLanguage => self.target_language_settings_error = error,
             SettingsField::Hotkey => self.hotkey_settings_error = error,
+            SettingsField::AnnotationHotkey => self.annotation_hotkey_settings_error = error,
             SettingsField::Provider => self.provider_settings_error = error,
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error = error,
             SettingsField::SelectionToolbar | SettingsField::Theme | SettingsField::UiLanguage => {
@@ -699,6 +703,9 @@ impl AppState {
                 self.desired_settings.target_language = self.settings.target_language.clone();
             }
             SettingsField::Hotkey => self.desired_settings.hotkey = self.settings.hotkey,
+            SettingsField::AnnotationHotkey => {
+                self.desired_settings.annotation_hotkey = self.settings.annotation_hotkey
+            }
             SettingsField::Provider => self.desired_settings.provider = self.settings.provider,
             SettingsField::LaunchAtLogin => {
                 self.desired_settings.launch_at_login = self.settings.launch_at_login;

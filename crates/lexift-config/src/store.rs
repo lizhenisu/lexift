@@ -136,11 +136,11 @@ mod tests {
     }
 
     #[test]
-    fn save_creates_parent_and_v4_file() {
+    fn save_creates_parent_and_v5_file() {
         let (_directory, store) = fixture();
         store.save(&settings("ja")).unwrap();
         let contents = fs::read_to_string(store.path()).unwrap();
-        assert!(contents.contains("schema_version = 4"));
+        assert!(contents.contains("schema_version = 5"));
         assert!(contents.contains("target_language = \"ja\""));
         assert!(contents.contains("provider = \"deepl\""));
         assert!(contents.contains("key = \"X\""));
@@ -192,6 +192,7 @@ mod tests {
         let loaded = store.load().unwrap();
         assert_eq!(loaded.target_language.0, "de");
         assert_eq!(loaded.hotkey.to_string(), "Alt + X");
+        assert_eq!(loaded.annotation_hotkey.to_string(), "Alt + A");
         assert_eq!(loaded.provider.to_string(), "DeepL");
         assert!(!loaded.launch_at_login);
         assert!(loaded.selection_toolbar);
@@ -211,6 +212,25 @@ mod tests {
     }
 
     #[test]
+    fn v4_schema_defaults_annotation_hotkey_and_new_value_round_trips() {
+        let (_directory, store) = fixture();
+        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+        fs::write(
+            store.path(),
+            "schema_version = 4\n\n[settings]\ntarget_language = \"de\"\n",
+        )
+        .unwrap();
+        let mut loaded = store.load().unwrap();
+        assert_eq!(loaded.annotation_hotkey.to_string(), "Alt + A");
+        loaded.annotation_hotkey = "Ctrl + Shift + 9".parse().unwrap();
+        store.save(&loaded).unwrap();
+        assert_eq!(
+            store.load().unwrap().annotation_hotkey,
+            loaded.annotation_hotkey
+        );
+    }
+
+    #[test]
     fn credential_reference_round_trips_without_a_secret() {
         let (_directory, store) = fixture();
         let settings = Settings {
@@ -220,7 +240,7 @@ mod tests {
         };
         store.save(&settings).unwrap();
         let contents = fs::read_to_string(store.path()).unwrap();
-        assert!(contents.contains("schema_version = 4"));
+        assert!(contents.contains("schema_version = 5"));
         assert!(contents.contains("[credentials]"));
         assert!(contents.contains("deepl = \"deepl-primary\""));
         assert!(!contents.contains("api_key"));

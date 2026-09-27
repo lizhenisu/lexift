@@ -20,6 +20,8 @@ pub(crate) struct SettingsFile {
     target_language: String,
     #[serde(default)]
     hotkey: HotkeyFile,
+    #[serde(default = "default_annotation_hotkey")]
+    annotation_hotkey: HotkeyFile,
     #[serde(default = "default_provider")]
     provider: String,
     #[serde(default)]
@@ -45,6 +47,10 @@ impl Default for HotkeyFile {
     fn default() -> Self {
         Self::from(HotkeyConfig::default())
     }
+}
+
+fn default_annotation_hotkey() -> HotkeyFile {
+    HotkeyFile::from(HotkeyConfig::annotation_default())
 }
 
 impl From<HotkeyConfig> for HotkeyFile {
@@ -89,6 +95,7 @@ impl ConfigFile {
                 target_language: settings.target_language.0.clone(),
                 ui_language: settings.ui_language.code().into(),
                 hotkey: settings.hotkey.into(),
+                annotation_hotkey: settings.annotation_hotkey.into(),
                 provider: settings.provider.id().into(),
                 launch_at_login: settings.launch_at_login,
                 selection_toolbar: settings.selection_toolbar,
@@ -116,10 +123,21 @@ impl ConfigFile {
             },
             key,
         )?;
+        let annotation_key: HotkeyKey = self.settings.annotation_hotkey.key.parse()?;
+        let annotation_hotkey = HotkeyConfig::new(
+            HotkeyModifiers {
+                control: self.settings.annotation_hotkey.control,
+                alt: self.settings.annotation_hotkey.alt,
+                shift: self.settings.annotation_hotkey.shift,
+                meta: self.settings.annotation_hotkey.meta,
+            },
+            annotation_key,
+        )?;
         Ok(Settings {
             target_language: Language(self.settings.target_language),
             ui_language: self.settings.ui_language.parse()?,
             hotkey,
+            annotation_hotkey,
             provider: self.settings.provider.parse()?,
             launch_at_login: self.settings.launch_at_login,
             selection_toolbar: self.settings.selection_toolbar,

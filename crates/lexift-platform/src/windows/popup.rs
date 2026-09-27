@@ -91,7 +91,10 @@ pub(crate) fn attach_owner(
 ) -> lexift_core::Result<()> {
     use windows::Win32::{
         Foundation::{GetLastError, SetLastError, WIN32_ERROR},
-        UI::WindowsAndMessaging::{GWLP_HWNDPARENT, SetWindowLongPtrW},
+        UI::WindowsAndMessaging::{
+            GWLP_HWNDPARENT, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+            SetWindowLongPtrW, SetWindowPos,
+        },
     };
     let child = required_hwnd(child)?;
     let owner = required_hwnd(owner)?;
@@ -103,6 +106,16 @@ pub(crate) fn attach_owner(
                 "Could not attach tool window to its owner",
             ));
         }
+        SetWindowPos(
+            child,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+        )
+        .map_err(|_| lexift_core::Error::new("Could not raise tool window above its owner"))?;
     }
     Ok(())
 }
@@ -1043,6 +1056,126 @@ fn window_hwnd(
 fn passive_extended_style(style: isize) -> isize {
     use windows::Win32::UI::WindowsAndMessaging::{WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW};
     style | WS_EX_NOACTIVATE.0 as isize | WS_EX_TOOLWINDOW.0 as isize
+}
+
+pub(crate) fn set_click_through(
+    window: &impl raw_window_handle::HasWindowHandle,
+    enabled: bool,
+) -> lexift_core::Result<()> {
+    use windows::Win32::UI::WindowsAndMessaging::WS_EX_TRANSPARENT;
+    let hwnd = required_hwnd(window)?;
+    if enabled {
+        configure_hwnd_extended_style(hwnd, |style| style | WS_EX_TRANSPARENT.0 as isize)
+    } else {
+        configure_hwnd_extended_style(hwnd, |style| style & !(WS_EX_TRANSPARENT.0 as isize))
+    }
+}
+
+/// UpdateLayeredWindow owns the annotation pixels; Slint only owns input and window lifetime.
+/// Its OpenGL swap chain does not reliably advance a transparent layered HWND during a drag.
+pub(crate) fn present_annotation_frame(
+    window: &impl raw_window_handle::HasWindowHandle,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+) -> lexift_core::Result<()> {
+    use windows::Win32::{
+        Foundation::{COLORREF, POINT, RECT, SIZE},
+        Graphics::Gdi::{
+            AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
+            CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, HGDIOBJ,
+            SelectObject,
+        },
+        UI::WindowsAndMessaging::{
+            GWL_EXSTYLE, GetWindowLongPtrW, GetWindowRect, ULW_ALPHA, UpdateLayeredWindow,
+            WS_EX_LAYERED,
+        },
+    };
+
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| lexift_core::Error::new("Annotation frame is too large"))?;
+    if width == 0 || height == 0 || rgba.len() != expected {
+        return Err(lexift_core::Error::new("Annotation frame size is invalid"));
+    }
+    let hwnd = required_hwnd(window)?;
+    let style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
+    if style & WS_EX_LAYERED.0 as isize == 0 {
+        configure_hwnd_extended_style(hwnd, |style| style | WS_EX_LAYERED.0 as isize)?;
+    }
+
+    let mut bounds = RECT::default();
+    unsafe { GetWindowRect(hwnd, &mut bounds) }
+        .map_err(|_| lexift_core::Error::new("Could not position annotation canvas"))?;
+    let info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width as i32,
+            biHeight: -(height as i32),
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut bits = std::ptr::null_mut();
+    let bitmap = unsafe { CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0) }
+        .map_err(|_| lexift_core::Error::new("Could not allocate annotation bitmap"))?;
+    let dc = unsafe { CreateCompatibleDC(None) };
+    if dc.0.is_null() {
+        let _ = unsafe { DeleteObject(HGDIOBJ(bitmap.0)) };
+        return Err(lexift_core::Error::new("Could not allocate annotation DC"));
+    }
+    let previous = unsafe { SelectObject(dc, HGDIOBJ(bitmap.0)) };
+    let destination = unsafe { std::slice::from_raw_parts_mut(bits.cast::<u8>(), expected) };
+    for (source, output) in rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(destination.as_chunks_mut::<4>().0.iter_mut())
+    {
+        output[0] = source[2];
+        output[1] = source[1];
+        output[2] = source[0];
+        // A visually transparent pixel still needs to receive mouse input in edit mode.
+        output[3] = source[3].max(1);
+    }
+    let origin = POINT {
+        x: bounds.left,
+        y: bounds.top,
+    };
+    let size = SIZE {
+        cx: width as i32,
+        cy: height as i32,
+    };
+    let source = POINT { x: 0, y: 0 };
+    let blend = BLENDFUNCTION {
+        BlendOp: AC_SRC_OVER as u8,
+        BlendFlags: 0,
+        SourceConstantAlpha: 255,
+        AlphaFormat: AC_SRC_ALPHA as u8,
+    };
+    let result = unsafe {
+        UpdateLayeredWindow(
+            hwnd,
+            None,
+            Some(&origin),
+            Some(&size),
+            Some(dc),
+            Some(&source),
+            COLORREF(0),
+            Some(&blend),
+            ULW_ALPHA,
+        )
+    };
+    unsafe {
+        SelectObject(dc, previous);
+        let _ = DeleteObject(HGDIOBJ(bitmap.0));
+        let _ = DeleteDC(dc);
+    }
+    result.map_err(|_| lexift_core::Error::new("Could not present annotation frame"))
 }
 
 fn interactive_extended_style(style: isize) -> isize {

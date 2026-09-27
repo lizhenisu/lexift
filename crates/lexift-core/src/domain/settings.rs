@@ -17,6 +17,7 @@ pub enum ThemePreference {
 pub enum SettingsField {
     TargetLanguage,
     Hotkey,
+    AnnotationHotkey,
     Provider,
     LaunchAtLogin,
     SelectionToolbar,
@@ -38,6 +39,7 @@ pub enum SettingsFeedback {
 pub enum SettingsChange {
     TargetLanguage(Language),
     Hotkey(HotkeyConfig),
+    AnnotationHotkey(HotkeyConfig),
     Provider(ProviderConfig),
     LaunchAtLogin(bool),
     SelectionToolbar(bool),
@@ -50,6 +52,7 @@ impl SettingsChange {
         match self {
             Self::TargetLanguage(_) => SettingsField::TargetLanguage,
             Self::Hotkey(_) => SettingsField::Hotkey,
+            Self::AnnotationHotkey(_) => SettingsField::AnnotationHotkey,
             Self::Provider(_) => SettingsField::Provider,
             Self::LaunchAtLogin(_) => SettingsField::LaunchAtLogin,
             Self::SelectionToolbar(_) => SettingsField::SelectionToolbar,
@@ -62,6 +65,7 @@ impl SettingsChange {
         match self {
             Self::TargetLanguage(value) => settings.target_language = value.clone(),
             Self::Hotkey(value) => settings.hotkey = *value,
+            Self::AnnotationHotkey(value) => settings.annotation_hotkey = *value,
             Self::Provider(value) => settings.provider = *value,
             Self::LaunchAtLogin(value) => settings.launch_at_login = *value,
             Self::SelectionToolbar(value) => settings.selection_toolbar = *value,
@@ -74,6 +78,7 @@ impl SettingsChange {
         match self {
             Self::TargetLanguage(value) => settings.target_language == *value,
             Self::Hotkey(value) => settings.hotkey == *value,
+            Self::AnnotationHotkey(value) => settings.annotation_hotkey == *value,
             Self::Provider(value) => settings.provider == *value,
             Self::LaunchAtLogin(value) => settings.launch_at_login == *value,
             Self::SelectionToolbar(value) => settings.selection_toolbar == *value,
@@ -87,6 +92,7 @@ impl SettingsChange {
 pub struct Settings {
     pub target_language: Language,
     pub hotkey: HotkeyConfig,
+    pub annotation_hotkey: HotkeyConfig,
     pub provider: ProviderConfig,
     pub launch_at_login: bool,
     pub selection_toolbar: bool,
@@ -101,6 +107,7 @@ impl Default for Settings {
         Self {
             target_language: Language("zh-CN".into()),
             hotkey: HotkeyConfig::default(),
+            annotation_hotkey: HotkeyConfig::annotation_default(),
             provider: ProviderConfig::default(),
             launch_at_login: false,
             selection_toolbar: true,
@@ -115,6 +122,7 @@ impl Settings {
     pub fn runtime_config(&self) -> RuntimeConfig {
         RuntimeConfig {
             hotkey: self.hotkey,
+            annotation_hotkey: self.annotation_hotkey,
             provider: self.provider,
             launch_at_login: self.launch_at_login,
         }

@@ -132,6 +132,8 @@ mod tests {
         let toolbar = crate::AnnotationToolbar::new().unwrap();
         let toolbar_adapter = last.borrow().as_ref().unwrap().clone();
         let selection = crate::SelectionToolbarWindow::new().unwrap();
+        let canvas = crate::AnnotationCanvas::new().unwrap();
+        let canvas_adapter = last.borrow().as_ref().unwrap().clone();
         popup.set_source_text("Unchanged input".into());
         popup.set_translated_text("Unchanged result".into());
         settings.set_screenshot_line_width("7".into());
@@ -185,6 +187,57 @@ mod tests {
                     1800,
                 );
                 settings.set_active_category(5);
+                panel.set_tool(0);
+                panel.set_menu(false);
+                panel.set_values(crate::AnnotationValues {
+                    size: 4,
+                    rounding: 21,
+                    ..Default::default()
+                });
+                snapshot(
+                    &panel_adapter,
+                    &format!("{}-geometry-wide", language.code()),
+                    960,
+                    68,
+                );
+                snapshot(
+                    &panel_adapter,
+                    &format!("{}-geometry-narrow", language.code()),
+                    440,
+                    158,
+                );
+                panel.set_tool(2);
+                panel.set_values(crate::AnnotationValues {
+                    size: 4,
+                    rounding: 21,
+                    shape: 1,
+                    strength: 50.,
+                    ..Default::default()
+                });
+                snapshot(
+                    &panel_adapter,
+                    &format!("{}-spotlight-wide", language.code()),
+                    960,
+                    68,
+                );
+                snapshot(
+                    &panel_adapter,
+                    &format!("{}-spotlight-narrow", language.code()),
+                    440,
+                    158,
+                );
+                toolbar.set_can_undo(true);
+                snapshot(
+                    &toolbar_adapter,
+                    &format!("{}-toolbar-active", language.code()),
+                    650,
+                    54,
+                );
+                panel.set_values(crate::AnnotationValues {
+                    size: 12,
+                    text: "Keep watermark".into(),
+                    ..Default::default()
+                });
             }
             for dark in [false, true] {
                 popup
@@ -311,6 +364,53 @@ mod tests {
         settings.invoke_select_category(1);
         assert_eq!(settings.get_fallback_target_index(), 4);
         assert!(settings.get_preprocess_join_lines());
+        let canvas_events = Rc::new(RefCell::new(Vec::new()));
+        let recorded = canvas_events.clone();
+        canvas.on_pointer(move |kind, _, _| recorded.borrow_mut().push(kind));
+        let mut document = lexift_core::domain::annotation::Session::new();
+        document.add(lexift_core::domain::annotation::Object {
+            bounds: lexift_core::domain::annotation::Bounds::from_corners((20., 20.), (140., 90.)),
+            kind: lexift_core::domain::annotation::Kind::Rectangle,
+            style: Default::default(),
+        });
+        canvas.set_frame(crate::annotation_render::preview_image(
+            &crate::annotation_render::render(
+                &document,
+                lexift_core::domain::geometry::Rect {
+                    left: 0,
+                    top: 0,
+                    right: 200,
+                    bottom: 120,
+                },
+                1.,
+                None,
+            )
+            .unwrap(),
+        ));
+        canvas_adapter.set_size(slint::PhysicalSize::new(200, 120));
+        snapshot(&canvas_adapter, "annotation-canvas", 200, 120);
+        use slint::platform::{PointerEventButton, WindowEvent};
+        let a = slint::LogicalPosition::new(20., 20.);
+        let b = slint::LogicalPosition::new(140., 90.);
+        canvas
+            .window()
+            .dispatch_event(WindowEvent::PointerMoved { position: a });
+        canvas.window().dispatch_event(WindowEvent::PointerPressed {
+            position: a,
+            button: PointerEventButton::Left,
+        });
+        canvas
+            .window()
+            .dispatch_event(WindowEvent::PointerMoved { position: b });
+        canvas
+            .window()
+            .dispatch_event(WindowEvent::PointerReleased {
+                position: b,
+                button: PointerEventButton::Left,
+            });
+        assert!(canvas_events.borrow().contains(&0));
+        assert!(canvas_events.borrow().contains(&1));
+        assert!(canvas_events.borrow().contains(&2));
         let numeric = NumericProbe::new().unwrap();
         select(UiLanguage::German);
         assert_eq!(numeric.get_formatted(), "1,5");
@@ -326,7 +426,9 @@ mod tests {
         );
         assert_eq!(error("HTTP 503"), "操作失败：HTTP 503");
         select(UiLanguage::EnglishUs);
-        drop((settings, popup, panel, main, menu, toolbar, selection));
+        drop((
+            settings, popup, panel, main, menu, toolbar, selection, canvas,
+        ));
         let reopened = crate::SettingsWindow::new().unwrap();
         apply();
         assert_eq!(reopened.get_screenshot_line_width(), "3");

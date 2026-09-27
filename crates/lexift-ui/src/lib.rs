@@ -1,4 +1,5 @@
 mod annotation;
+mod annotation_render;
 mod binding;
 mod bridge;
 mod i18n;

@@ -15,14 +15,16 @@ export component LineEdit inherits Rectangle {
 
 export component SpinBox inherits Rectangle {
     in-out property <int> value;
+    in property <bool> enabled: true;
     in property <int> minimum: 1;
     in property <int> maximum: 100;
-    height: 30px; background: Colors.background; border-radius: 5px;
+    height: 30px; background: Colors.background; border-radius: 5px; opacity: root.enabled ? 1 : 0.45;
     border-width: 1px; border-color: input.has-focus ? Colors.primary : Colors.outline;
     forward-focus: input;
     function commit() { root.value = input.text.is-float() ? clamp(round(input.text.to-float()), root.minimum, root.maximum) : root.value; input.text = root.value; }
     changed value => { input.text = root.value; }
     input := TextInput { x: 9px; width: parent.width - 44px; height: parent.height;
+        enabled: root.enabled;
         text: root.value; font-size: 13px; color: Colors.foreground; vertical-alignment: center;
         selection-background-color: Colors.primary-container; selection-foreground-color: Colors.foreground;
         edited => { if self.text.is-float() { root.value = clamp(round(self.text.to-float()),root.minimum,root.maximum); } }
@@ -36,7 +38,7 @@ export component SpinBox inherits Rectangle {
         Path { x: 8px; y: 5px; width: 10px; height: 5px; viewbox-width: 10; viewbox-height: 5;
             commands: i == 0 ? "M1 4L5 1L9 4" : "M1 1L5 4L9 1";
             fill: transparent; stroke: Colors.secondary-foreground; stroke-width: 1.5px; }
-        hit := TouchArea { clicked => { root.commit(); root.value = clamp(root.value + direction,root.minimum,root.maximum); } }
+        hit := TouchArea { enabled: root.enabled; clicked => { root.commit(); root.value = clamp(root.value + direction,root.minimum,root.maximum); } }
     }
     Rectangle { x: parent.width - 27px; y: 15px; width: 27px; height: 1px; background: Colors.outline; }
 }

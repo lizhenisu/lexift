@@ -66,6 +66,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         .clone();
     let screen_for_popup = services.screen.clone();
     let screen_for_toolbar = services.screen.clone();
+    let screen_for_annotation = services.screen.clone();
     let tray_for_theme = services.tray.clone();
     let tray_for_language = services.tray.clone();
     let ui = lexift_ui::Ui::new(
@@ -189,6 +190,24 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 .work_area_for_point(point)
                 .ok()
         })
+        .with_annotation_canvas(
+            move || screen_for_annotation.as_ref().and_then(|screen| screen.displays().ok()).unwrap_or_default(),
+            |window, enabled| match lexift_platform::set_annotation_click_through(&window.window_handle(), enabled) {
+                Ok(()) => true,
+                Err(error) => { tracing::warn!(%error, "annotation canvas input mode could not be changed"); false }
+            },
+            |window, rgba, width, height| {
+                match lexift_platform::present_annotation_frame(
+                    &window.window_handle(), rgba, width, height,
+                ) {
+                    Ok(()) => true,
+                    Err(error) => {
+                        tracing::warn!(%error, "annotation canvas frame could not be presented");
+                        false
+                    }
+                }
+            },
+        )
         .with_toolbar_cursor_position(move || {
             screen_for_toolbar.as_ref()?.cursor_position().ok()
         })

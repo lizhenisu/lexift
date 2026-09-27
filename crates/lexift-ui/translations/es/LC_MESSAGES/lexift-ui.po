@@ -22,8 +22,8 @@ msgstr "Anotación"
 msgid "Annotation color"
 msgstr "Color de anotación"
 
-msgid "Annotation toolbar — Alt + A"
-msgstr "Barra de anotación — Alt + A"
+msgid "Annotation toolbar"
+msgstr "Barra de anotación"
 
 msgid "Anonymous usage statistics"
 msgstr "Estadísticas anónimas"
@@ -651,3 +651,9 @@ msgstr "Ajustes de traducción"
 
 msgid "Used when the detected source language matches the default target language."
 msgstr "Se usa cuando el idioma de origen detectado coincide con el idioma de destino predeterminado."
+
+msgid "Outline"
+msgstr "Contorno"
+
+msgid "Geometry"
+msgstr "Formas geométricas"
