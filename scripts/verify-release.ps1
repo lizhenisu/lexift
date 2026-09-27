@@ -1,16 +1,19 @@
 param(
     [string]$Executable = "target/release/lexift.exe",
     [string]$RenderedInstallerScript = "dist/installer/.cargo-packager/nsis/x64/installer.nsi",
+    [string]$PortableDirectory = "dist/portable",
     [string]$InstalledExecutable = ""
 )
 
 $ErrorActionPreference = "Stop"
 if (-not (Test-Path -LiteralPath $Executable)) { throw "Missing executable: $Executable" }
 
+$manifestVersion = ((Select-String -Path "Cargo.toml" -Pattern '^version = "([^"]+)"$').Matches.Groups[1].Value)
+
 $item = Get-Item -LiteralPath $Executable
 $version = $item.VersionInfo
 if ($version.ProductName -ne "Lexift") { throw "Unexpected ProductName: $($version.ProductName)" }
-if ($version.ProductVersion -notlike "0.1.0*") { throw "Unexpected ProductVersion: $($version.ProductVersion)" }
+if ($version.ProductVersion -notlike "$manifestVersion*") { throw "Unexpected ProductVersion: $($version.ProductVersion)" }
 if ($version.FileDescription -ne "Lexift — Translate Everywhere") { throw "Unexpected FileDescription: $($version.FileDescription)" }
 if ($version.OriginalFilename -ne "lexift.exe") { throw "Unexpected OriginalFilename: $($version.OriginalFilename)" }
 
@@ -23,7 +26,7 @@ if ([Text.Encoding]::ASCII.GetString($bytes).Contains("GetWindowSubclass")) {
     throw "Executable imports unsupported GetWindowSubclass entry point"
 }
 
-$portableExecutable = Get-ChildItem -Path "dist/portable/Lexift-*-windows-x86_64/lexift.exe" -ErrorAction SilentlyContinue |
+$portableExecutable = Get-ChildItem -Path (Join-Path $PortableDirectory "Lexift-*-windows-x86_64/lexift.exe") -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 if ($portableExecutable) {

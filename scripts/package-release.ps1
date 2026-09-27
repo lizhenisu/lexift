@@ -1,5 +1,6 @@
 param(
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [string]$OutputDirectory
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,7 +37,12 @@ Set-Location $root
 $version = ((Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"$').Matches.Groups[1].Value)
 if (-not $version) { throw "Could not read workspace version" }
 
-$dist = Join-Path $root "dist"
+$dist = if ($OutputDirectory) {
+    if ([IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory } else { Join-Path $root $OutputDirectory }
+} else {
+    Join-Path $root "dist"
+}
+$dist = [IO.Path]::GetFullPath($dist)
 $installerDir = Join-Path $dist "installer"
 $portableDir = Join-Path $dist "portable\Lexift-$version-windows-x86_64"
 Remove-Item -LiteralPath $installerDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -51,7 +57,7 @@ if (-not $SkipBuild) {
 $exe = Join-Path $root "target\release\lexift.exe"
 & "$PSScriptRoot\sign-windows.ps1" -Path $exe
 
-cargo packager --release
+cargo packager --release --out-dir $installerDir
 if ($LASTEXITCODE -ne 0) { throw "cargo-packager failed" }
 
 $generatedInstaller = Get-ChildItem -LiteralPath $installerDir -Filter *.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1
