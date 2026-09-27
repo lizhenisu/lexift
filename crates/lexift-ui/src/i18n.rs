@@ -131,6 +131,8 @@ mod tests {
         let menu_adapter = last.borrow().as_ref().unwrap().clone();
         let toolbar = crate::AnnotationToolbar::new().unwrap();
         let toolbar_adapter = last.borrow().as_ref().unwrap().clone();
+        let tray = crate::TrayMenuWindow::new().unwrap();
+        let tray_adapter = last.borrow().as_ref().unwrap().clone();
         let selection = crate::SelectionToolbarWindow::new().unwrap();
         let canvas = crate::AnnotationCanvas::new().unwrap();
         let canvas_adapter = last.borrow().as_ref().unwrap().clone();
@@ -150,7 +152,23 @@ mod tests {
             assert_eq!(panel.get_values().text, "Keep watermark");
             assert_eq!(panel.get_values().size, 12);
             assert_eq!(popup.get_translated_text(), "Unchanged result");
-            assert!(!tray_labels().settings.is_empty());
+            let labels = tray_labels();
+            assert!(!labels.settings.is_empty());
+            tray.set_open_label(labels.open.into());
+            tray.set_settings_label(labels.settings.into());
+            tray.set_quit_label(labels.quit.into());
+            for dark in [false, true] {
+                tray.global::<crate::Colors>()
+                    .set_preference(i32::from(dark));
+                tray.set_selected(if dark { 1 } else { -1 });
+                assert!(tray.get_menu_width() >= 236.);
+                snapshot(
+                    &tray_adapter,
+                    &format!("{}-tray-{dark}", language.code()),
+                    tray.get_menu_width().ceil() as u32,
+                    tray.get_menu_height().ceil() as u32,
+                );
+            }
             assert_eq!(tr("unknown fallback"), "unknown fallback");
             settings.set_appearance_language_index(language.index());
             for (width, dark) in [(960, false), (580, true)] {
@@ -427,7 +445,7 @@ mod tests {
         assert_eq!(error("HTTP 503"), "操作失败：HTTP 503");
         select(UiLanguage::EnglishUs);
         drop((
-            settings, popup, panel, main, menu, toolbar, selection, canvas,
+            settings, popup, panel, main, menu, toolbar, selection, canvas, tray,
         ));
         let reopened = crate::SettingsWindow::new().unwrap();
         apply();

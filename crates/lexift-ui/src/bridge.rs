@@ -129,8 +129,8 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) annotation_click_through: AnnotationClickThrough,
     pub(crate) annotation_frame_presenter: AnnotationFramePresenter,
     trim_process_working_set: fn() -> bool,
-    theme_preference_changed: Rc<dyn Fn(lexift_core::domain::settings::ThemePreference)>,
-    language_changed: Rc<dyn Fn(lexift_core::ports::tray::TrayMenuLabels)>,
+    pub(crate) configure_menu_window: Rc<dyn Fn(&slint::Window) -> bool>,
+    pub(crate) tray_menu_cancelled: Rc<dyn Fn()>,
     configure_resize_background: ConfigureResizeBackground,
     configure_window_paint_repair: ConfigureWindowPaintRepair,
 }
@@ -160,28 +160,25 @@ impl WindowLifecycleCallbacks {
             annotation_click_through: Rc::new(|_, _| false),
             annotation_frame_presenter: Rc::new(|_, _, _, _| false),
             trim_process_working_set,
-            theme_preference_changed: Rc::new(|_| {}),
-            language_changed: Rc::new(|_| {}),
+            configure_menu_window: Rc::new(|_| true),
+            tray_menu_cancelled: Rc::new(|| {}),
             configure_resize_background: Rc::new(|_, _| true),
             configure_window_paint_repair: Rc::new(|_, _| true),
         }
     }
 
-    /// Updates native surfaces without giving the UI a platform dependency.
-    pub fn with_language(
+    /// Prepares floating menus without changing ordinary application windows.
+    pub fn with_menu_window_preparation(
         mut self,
-        changed: impl Fn(lexift_core::ports::tray::TrayMenuLabels) + 'static,
+        callback: impl Fn(&slint::Window) -> bool + 'static,
     ) -> Self {
-        self.language_changed = Rc::new(changed);
+        self.configure_menu_window = Rc::new(callback);
         self
     }
 
-    /// Propagates application theme preferences to native surfaces owned by the host.
-    pub fn with_theme_preference(
-        mut self,
-        changed: impl Fn(lexift_core::domain::settings::ThemePreference) + 'static,
-    ) -> Self {
-        self.theme_preference_changed = Rc::new(changed);
+    /// Returns focus to the tray only after explicit menu cancellation.
+    pub fn with_tray_menu_cancelled(mut self, callback: impl Fn() + 'static) -> Self {
+        self.tray_menu_cancelled = Rc::new(callback);
         self
     }
 
@@ -326,6 +323,7 @@ fn has_live_window_instances() -> bool {
     });
     app_window_exists
         || crate::annotation::is_open()
+        || crate::tray_menu::is_open()
         || SELECTION_TOOLBAR_REGISTRY.with(|registry| {
             registry
                 .borrow()
@@ -1761,8 +1759,6 @@ struct AppWindowRegistry {
     configure_resize_background: ConfigureResizeBackground,
     configure_window_paint_repair: ConfigureWindowPaintRepair,
     latest_state: AppState,
-    theme_preference_changed: Rc<dyn Fn(lexift_core::domain::settings::ThemePreference)>,
-    language_changed: Rc<dyn Fn(lexift_core::ports::tray::TrayMenuLabels)>,
     show_selection_demo: bool,
     handler: Option<Rc<dyn Fn(AppEvent)>>,
     background_mode: Rc<Cell<bool>>,
@@ -2340,6 +2336,7 @@ impl Ui {
         window_lifecycle: WindowLifecycleCallbacks,
     ) -> Result<Self, slint::PlatformError> {
         crate::annotation::init(prepare_passive_window, window_lifecycle.clone());
+        crate::tray_menu::init(prepare_passive_window, window_lifecycle.clone());
         SELECTION_TOOLBAR_REGISTRY.with(|registry| {
             *registry.borrow_mut() = Some(SelectionToolbarRegistry {
                 window: None,
@@ -2361,9 +2358,7 @@ impl Ui {
         let credential_generation = Arc::new(AtomicU64::new(0));
         let toast_next_id = Arc::new(AtomicU64::new(0));
         crate::i18n::select(initial_state.desired_settings.ui_language);
-        (window_lifecycle.language_changed)(crate::i18n::tray_labels());
         crate::theme::set_current(initial_state.desired_settings.theme);
-        (window_lifecycle.theme_preference_changed)(initial_state.desired_settings.theme);
         let toast_records = Arc::new(Mutex::new(Vec::new()));
         let background_mode = Rc::new(Cell::new(false));
         APP_WINDOW_REGISTRY.with(|registry| {
@@ -2377,8 +2372,6 @@ impl Ui {
                     &window_lifecycle.configure_window_paint_repair,
                 ),
                 latest_state: initial_state.clone(),
-                theme_preference_changed: Rc::clone(&window_lifecycle.theme_preference_changed),
-                language_changed: Rc::clone(&window_lifecycle.language_changed),
                 show_selection_demo,
                 handler: None,
                 background_mode: Rc::clone(&background_mode),
@@ -2451,6 +2444,7 @@ impl Ui {
         _screen_context: impl Fn() -> Option<(Point, Rect)> + 'static,
     ) {
         let handler: Rc<dyn Fn(AppEvent)> = Rc::new(handler);
+        crate::tray_menu::set_handler(Rc::clone(&handler));
         APP_WINDOW_REGISTRY.with(|registry| {
             if let Some(registry) = registry.borrow_mut().as_mut() {
                 registry.handler = Some(Rc::clone(&handler));
@@ -2501,6 +2495,7 @@ impl Ui {
             })?;
         }
         slint::run_event_loop_until_quit()?;
+        crate::tray_menu::close(false);
         crate::annotation::shutdown();
         SELECTION_TOOLBAR_REGISTRY.with(|registry| {
             if let Some(mut registry) = registry.borrow_mut().take() {
@@ -3018,6 +3013,10 @@ pub struct UiHandle {
 }
 
 impl UiHandle {
+    pub fn show_tray_menu(&self, request: lexift_core::ports::tray::TrayMenuRequest) {
+        let _ = slint::invoke_from_event_loop(move || crate::tray_menu::show(request));
+    }
+
     pub fn toggle_annotation_toolbar(&self) {
         let _ = slint::invoke_from_event_loop(crate::annotation::toggle);
     }
@@ -3042,22 +3041,17 @@ impl UiHandle {
             let view_state = mapper::view_state(&state);
             let popup_states = mapper::popup_states(&state);
             if language_changed {
+                crate::tray_menu::close(false);
                 crate::annotation::refresh_language();
             }
             crate::theme::set_current(theme);
             apply_window_themes();
             APP_WINDOW_REGISTRY.with(|registry| {
                 if let Some(registry) = registry.borrow_mut().as_mut() {
-                    if registry.latest_state.desired_settings.theme != theme {
-                        (registry.theme_preference_changed)(theme);
-                    }
-                    if language_changed {
-                        (registry.language_changed)(crate::i18n::tray_labels());
-                        if let Some(settings) = &registry.settings {
-                            settings.invoke_close_settings_menu();
-                            settings.invoke_close_preview_menu();
-                            render_settings_toasts(settings, &toast_records);
-                        }
+                    if language_changed && let Some(settings) = &registry.settings {
+                        settings.invoke_close_settings_menu();
+                        settings.invoke_close_preview_menu();
+                        render_settings_toasts(settings, &toast_records);
                     }
                     registry.latest_state = state;
                     if let Some(main) = registry.main.as_ref() {
@@ -3446,6 +3440,39 @@ fn apply_window_themes() {
         }
     });
     crate::annotation::apply_theme();
+    crate::tray_menu::apply_theme();
+}
+
+pub(crate) fn dispatch_pointer_input(window: &slint::Window, input: PopupPointerInput) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let scale = window.scale_factor().max(0.1);
+    let pos = |x, y| slint::LogicalPosition::new(x / scale, y / scale);
+    let event = match input {
+        PopupPointerInput::Moved { x, y } => WindowEvent::PointerMoved {
+            position: pos(x, y),
+        },
+        PopupPointerInput::Exited => WindowEvent::PointerExited,
+        PopupPointerInput::LeftPressed { x, y } => WindowEvent::PointerPressed {
+            position: pos(x, y),
+            button: PointerEventButton::Left,
+        },
+        PopupPointerInput::LeftReleased { x, y } => WindowEvent::PointerReleased {
+            position: pos(x, y),
+            button: PointerEventButton::Left,
+        },
+        PopupPointerInput::Scrolled {
+            x,
+            y,
+            delta_x,
+            delta_y,
+        } => WindowEvent::PointerScrolled {
+            position: pos(x, y),
+            delta_x: delta_x / scale,
+            delta_y: delta_y / scale,
+        },
+        _ => return,
+    };
+    let _ = window.dispatch_event_with_result(event);
 }
 
 #[cfg(test)]

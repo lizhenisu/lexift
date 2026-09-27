@@ -1,4 +1,5 @@
 //! Owns the ephemeral annotation preview windows and per-tool UI values.
+use crate::bridge::dispatch_pointer_input as dispatch;
 use crate::{
     AnnotationCanvas, AnnotationPanel, AnnotationToolbar, AnnotationValues,
     bridge::{PassiveWindowPreparation, PopupPointerInput, WindowLifecycleCallbacks},
@@ -16,11 +17,20 @@ use std::{
     time::Duration,
 };
 
+#[path = "annotation_choice.rs"]
+mod choice;
+#[path = "annotation_color.rs"]
+mod color;
+#[path = "annotation_cursor.rs"]
+mod cursor;
+
 thread_local! { static REGISTRY: RefCell<Option<Registry>> = const { RefCell::new(None) }; }
 
 struct Registry {
     main: Option<AnnotationToolbar>,
     panel: Option<AnnotationPanel>,
+    choice: Option<choice::Menu>,
+    choice_revision: u64,
     canvases: Vec<CanvasLayer>,
     toolbar_owner: Option<usize>,
     session: Session,
@@ -44,6 +54,7 @@ struct Registry {
 }
 
 struct CanvasLayer {
+    last_pointer: Option<(f32, f32)>,
     window: AnnotationCanvas,
     bounds: Rect,
     signature: Option<u64>,
@@ -165,6 +176,8 @@ pub(crate) fn init(
         *slot.borrow_mut() = Some(Registry {
             main: None,
             panel: None,
+            choice: None,
+            choice_revision: 0,
             canvases: Vec::new(),
             toolbar_owner: None,
             session: Session::new(),
@@ -252,6 +265,7 @@ impl Registry {
             }
         }
         self.mode = mode;
+        cursor::refresh(self);
         self.sync_mode_display();
         true
     }
@@ -268,6 +282,7 @@ impl Registry {
     }
 
     fn close_panel(&mut self) {
+        choice::close(self);
         self.finish_style_edit();
         self.panel_revision = self.panel_revision.wrapping_add(1);
         if let Some(panel) = self.panel.take() {
@@ -320,6 +335,9 @@ pub(crate) fn close() {
     crate::bridge::schedule_idle_memory_trim();
 }
 pub(crate) fn escape() {
+    if choice::dismiss() {
+        return;
+    }
     let first = REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
         let r = slot.as_mut()?;
@@ -380,6 +398,7 @@ pub(crate) fn toggle() {
         main.on_escape_requested(|| later(escape));
         main.on_drag_requested(|| {
             later(|| {
+                choice::dismiss();
                 let target = REGISTRY.with(|s| {
                     let slot = s.borrow();
                     let r = slot.as_ref()?;
@@ -415,6 +434,7 @@ pub(crate) fn toggle() {
                     slint::CloseRequestResponse::KeepWindowShown
                 });
                 r.canvases.push(CanvasLayer {
+                    last_pointer: None,
                     window,
                     bounds,
                     signature: None,
@@ -581,6 +601,8 @@ fn adopt_selected_style(r: &mut Registry, index: usize) -> bool {
         && panel.get_tool() == tool as i32
     {
         panel.set_values(r.values[tool].clone());
+        let [red, green, blue] = object.style.color;
+        panel.set_custom_preview(slint::Color::from_rgb_u8(red, green, blue));
     }
     !r.panel
         .as_ref()
@@ -588,15 +610,7 @@ fn adopt_selected_style(r: &mut Registry, index: usize) -> bool {
 }
 
 fn parse_hex_color(input: &str) -> Option<[u8; 3]> {
-    let code = input.strip_prefix('#')?;
-    if code.len() != 6 {
-        return None;
-    }
-    Some([
-        u8::from_str_radix(&code[0..2], 16).ok()?,
-        u8::from_str_radix(&code[2..4], 16).ok()?,
-        u8::from_str_radix(&code[4..6], 16).ok()?,
-    ])
+    color::parse_hex(input)
 }
 
 fn active_kind(r: &Registry) -> Option<Kind> {
@@ -639,6 +653,13 @@ fn update_geometry_values(generation: u64, tool: i32, values: AnnotationValues) 
             main.set_tools(ModelRc::new(VecModel::from(toolbar_tools(r))));
         }
         let style = current_style(r, tool);
+        if let Some(panel) = &r.panel {
+            panel.set_custom_preview(slint::Color::from_rgb_u8(
+                style.color[0],
+                style.color[1],
+                style.color[2],
+            ));
+        }
         let kind = active_kind(r);
         if tool == 2 {
             r.session.set_spotlight_opacity(r.values[2].strength / 100.);
@@ -660,11 +681,11 @@ fn update_geometry_values(generation: u64, tool: i32, values: AnnotationValues) 
         schedule_render(generation);
         slint::Timer::single_shot(Duration::from_millis(300), move || {
             REGISTRY.with(|s| {
-                if let Some(r) = s
-                    .borrow_mut()
-                    .as_mut()
-                    .filter(|r| r.generation == generation && r.style_edit_revision == revision)
-                {
+                if let Some(r) = s.borrow_mut().as_mut().filter(|r| {
+                    r.generation == generation
+                        && r.style_edit_revision == revision
+                        && !choice::color_dragging(r)
+                }) {
                     r.finish_style_edit();
                 }
             });
@@ -681,10 +702,8 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
         }
         let layer = r.canvases.get(index)?;
         let scale = layer.window.window().scale_factor().max(0.1);
-        let point = (
-            layer.bounds.left as f32 + x * scale,
-            layer.bounds.top as f32 + y * scale,
-        );
+        let point = cursor::screen_point(layer.bounds, (x, y), scale);
+        r.canvases[index].last_pointer = Some(point);
         let mut open_geometry_panel = false;
         match event {
             0 => {
@@ -749,7 +768,10 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 }) => {
                     r.session.objects[index].bounds = initial.resized(handle, point);
                 }
-                None => return None,
+                None => {
+                    cursor::refresh(r);
+                    return None;
+                }
             },
             2 => {
                 open_geometry_panel = std::mem::take(&mut r.pending_edit_panel);
@@ -776,6 +798,7 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
         if let Some(main) = &r.main {
             main.set_can_undo(r.session.can_undo());
         }
+        cursor::refresh(r);
         Some((r.generation, open_geometry_panel))
     });
     if let Some((generation, open)) = result {
@@ -792,6 +815,7 @@ fn schedule_render(generation: u64) {
         let Some(r) = slot.as_mut().filter(|r| r.generation == generation) else {
             return false;
         };
+        cursor::refresh(r);
         if r.render_queued {
             false
         } else {
@@ -909,6 +933,11 @@ fn undo() {
         r.finish_style_edit();
         if !r.session.undo() {
             return None;
+        }
+        if r.mode == InteractionMode::Tool(0)
+            && let Some(index) = r.session.selected
+        {
+            adopt_selected_style(r, index);
         }
         if let Some(main) = &r.main {
             main.set_can_undo(r.session.can_undo());
@@ -1063,6 +1092,8 @@ fn open_panel(group: usize, menu: bool) {
         panel.set_menu(menu);
         panel.set_heading(crate::i18n::tr(NAMES[tool as usize]).into());
         panel.set_values(r.values[tool as usize].clone());
+        let [red, green, blue] = current_style(r, tool).color;
+        panel.set_custom_preview(slint::Color::from_rgb_u8(red, green, blue));
         panel.set_fields(ModelRc::new(VecModel::from(fields(tool))));
         panel.set_menu_tools(ModelRc::new(VecModel::from(GROUPS[group].to_vec())));
         panel.set_menu_labels(ModelRc::new(VecModel::from(
@@ -1103,6 +1134,9 @@ fn open_panel(group: usize, menu: bool) {
                     open_panel(group, false);
                 }
             })
+        });
+        panel.on_choice_requested(move |request| {
+            later(move || choice::open(generation, panel_revision, request));
         });
         panel.on_escape_requested(|| later(escape));
         panel.window().on_close_requested(|| {
@@ -1162,6 +1196,7 @@ fn reposition_panel() {
         if let Some(r) = s.borrow_mut().as_mut() {
             sync_toolbar_owner(r);
             position_panel(r);
+            choice::close_if_moved(r);
         }
     });
 }
@@ -1269,37 +1304,6 @@ fn panel_position(
     }
 }
 
-fn dispatch(window: &slint::Window, input: PopupPointerInput) {
-    use slint::platform::{PointerEventButton, WindowEvent};
-    let scale = window.scale_factor().max(0.1);
-    let pos = |x, y| slint::LogicalPosition::new(x / scale, y / scale);
-    let event = match input {
-        PopupPointerInput::Moved { x, y } => WindowEvent::PointerMoved {
-            position: pos(x, y),
-        },
-        PopupPointerInput::Exited => WindowEvent::PointerExited,
-        PopupPointerInput::LeftPressed { x, y } => WindowEvent::PointerPressed {
-            position: pos(x, y),
-            button: PointerEventButton::Left,
-        },
-        PopupPointerInput::LeftReleased { x, y } => WindowEvent::PointerReleased {
-            position: pos(x, y),
-            button: PointerEventButton::Left,
-        },
-        PopupPointerInput::Scrolled {
-            x,
-            y,
-            delta_x,
-            delta_y,
-        } => WindowEvent::PointerScrolled {
-            position: pos(x, y),
-            delta_x: delta_x / scale,
-            delta_y: delta_y / scale,
-        },
-        _ => return,
-    };
-    let _ = window.dispatch_event_with_result(event);
-}
 fn pointer_main(weak: slint::Weak<AnnotationToolbar>) -> crate::bridge::PopupPointerSink {
     Rc::new(move |input| {
         if let Some(w) = weak.upgrade() {
@@ -1319,6 +1323,10 @@ fn pointer_panel(
                     if let Some(r) = s.borrow_mut().as_mut().filter(|r| {
                         r.generation == generation && r.panel_revision == panel_revision
                     }) {
+                        if choice::cursor_inside(r) {
+                            choice::rearm_panel(r);
+                            return;
+                        }
                         let on_main = (r.lifecycle.toolbar_cursor_position)()
                             .zip(r.main.as_ref())
                             .is_some_and(|(cursor, main)| {
@@ -1341,6 +1349,7 @@ fn pointer_panel(
                 })
             });
         } else if let Some(w) = weak.upgrade() {
+            choice::panel_pointer(input);
             dispatch(w.window(), input);
         }
     })
@@ -1349,6 +1358,7 @@ fn pointer_panel(
 pub(crate) fn refresh_language() {
     REGISTRY.with(|slot| {
         if let Some(r) = slot.borrow_mut().as_mut() {
+            choice::close(r);
             if r.panel.as_ref().is_some_and(|p| p.get_menu()) {
                 r.close_panel();
             } else if let Some(panel) = &r.panel {
@@ -1367,6 +1377,9 @@ pub(crate) fn apply_theme() {
             }
             if let Some(w) = &r.panel {
                 crate::theme::apply(w);
+            }
+            if let Some(menu) = &r.choice {
+                crate::theme::apply(&menu.window);
             }
         }
     });

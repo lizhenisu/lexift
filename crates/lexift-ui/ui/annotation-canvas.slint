@@ -1,3 +1,5 @@
+export enum AnnotationCursor { idle, drawing, moving, horizontal, vertical, diagonal-down, diagonal-up }
+
 // A transparent, live-desktop overlay. Pixel content is produced from Core objects in Rust.
 export component AnnotationCanvas inherits Window {
     title: "Lexift Annotation Canvas";
@@ -6,6 +8,7 @@ export component AnnotationCanvas inherits Window {
     // A one-step alpha keeps the layered HWND hittable while remaining visually transparent.
     background: #00000001;
     in property <image> frame;
+    in property <AnnotationCursor> cursor: AnnotationCursor.drawing;
     callback pointer(int, float, float);
     callback escape-requested();
     callback undo-requested();
@@ -15,7 +18,12 @@ export component AnnotationCanvas inherits Window {
     TouchArea {
         width: 100%;
         height: 100%;
-        mouse-cursor: crosshair;
+        mouse-cursor: root.cursor == AnnotationCursor.moving ? move
+            : root.cursor == AnnotationCursor.horizontal ? ew-resize
+            : root.cursor == AnnotationCursor.vertical ? ns-resize
+            : root.cursor == AnnotationCursor.diagonal-down ? nwse-resize
+            : root.cursor == AnnotationCursor.diagonal-up ? nesw-resize
+            : root.cursor == AnnotationCursor.drawing ? crosshair : default;
         pointer-event(event) => {
             if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.pointer(0, self.mouse-x / 1px, self.mouse-y / 1px); }
             if event.kind == PointerEventKind.move { root.pointer(1, self.mouse-x / 1px, self.mouse-y / 1px); }

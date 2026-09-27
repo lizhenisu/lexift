@@ -1,5 +1,5 @@
 import { Colors } from "design/colors.slint";
-import { ComboBox, SpinBox, CheckBox, Slider, LineEdit } from "annotation-fields.slint";
+import { ComboBox, SpinBox, CheckBox, Slider, LineEdit, AnnotationChoiceRequest } from "annotation-fields.slint";
 
 export struct AnnotationValues {
     size: int, rounding: int, text-size: int, start: int, strength: float,
@@ -120,6 +120,9 @@ export component AnnotationPanel inherits Window {
     callback values-changed(AnnotationValues);
     changed values => { root.values-changed(root.values); }
     in property <int> columns: 4;
+    in property <int> active-choice: -1;
+    in property <color> custom-preview: #d9472b;
+    callback choice-requested(AnnotationChoiceRequest);
     callback selected(int);
     callback escape-requested();
     private property <[string]> labels: [@tr("Width"), @tr("Shape"), @tr("Line style"), @tr("Corner radius"), @tr("Fill"), @tr("Intensity"), @tr("Blend mode"), @tr("Magnification"), @tr("Erase annotations"), @tr("Anti-aliasing"), @tr("Shadow"), @tr("Text"), @tr("Font"), @tr("Text size"), @tr("Arrangement"), @tr("Start at"), @tr("Sequence"), @tr("Method"), @tr("Effect")];
@@ -156,8 +159,9 @@ export component AnnotationPanel inherits Window {
                 x: 82px; y: 7px; width: 100px;
                 text: @tr("Outline"); checked <=> root.values.erase;
             }
-            if root.tool != 2: ComboBox {
+            if root.tool != 2: ComboBox { field: 2; lines: true; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); }
                 x: 184px; y: 4px; width: 105px; height: 30px;
+                language-revision: root.language-revision;
                 model: ["────", "— —", "····", "— ·", "— · ·"];
                 current-index <=> root.values.style;
             }
@@ -193,23 +197,19 @@ export component AnnotationPanel inherits Window {
                 Rectangle { x: 4px; y: 4px; width: 20px; height: 20px; border-radius: 5px; background: ink; }
                 TouchArea { clicked => { root.values.color-index = i; } }
             }
-            Rectangle {
+            custom-color := Rectangle {
                 x: compact ? 272px : (root.tool == 2 ? 830px : 752px);
                 y: compact ? 90px : 5px; width: 28px; height: 28px;
                 border-radius: 8px; border-width: root.values.color-index == 8 ? 2px : 1px;
-                border-color: root.values.color-index == 8 ? Colors.primary : Colors.outline;
-                background: root.values.color-index == 8 ? Colors.primary-container : Colors.surface;
-                TouchArea { clicked => { color-picker.show(); } }
-            }
-            color-picker := PopupWindow {
-                x: compact ? 160px : 680px; y: compact ? 126px : 38px;
-                width: 170px; height: 62px;
-                Rectangle { background: Colors.surface; border-color: Colors.outline; border-width: 1px; border-radius: 6px;
-                    LineEdit { x: 8px; y: 15px; width: parent.width - 16px; height: 30px;
-                        placeholder-text: "#RRGGBB"; text <=> root.values.custom-color;
-                        changed text => { if self.text != "" { root.values.color-index = 8; } }
-                    }
-                }
+                border-color: root.values.color-index == 8 || root.active-choice == -2 ? Colors.primary : Colors.outline;
+                background: custom-hit.has-hover ? Colors.icon-button-hover : Colors.surface;
+                accessible-role: button; accessible-label: @tr("Custom color");
+                Image { x: 4px; y: 4px; width: 20px; height: 20px; source: @image-url("icons/custom-color.svg"); }
+                custom-hit := TouchArea { clicked => {
+                    root.choice-requested({field: -2, options: [], selected: 0, lines: false,
+                        x: custom-color.absolute-position.x / 1px, y: custom-color.absolute-position.y / 1px,
+                        width: custom-color.width / 1px, height: custom-color.height / 1px});
+                } }
             }
         }
         if !root.menu && root.tool > 2: Rectangle {
@@ -221,24 +221,24 @@ export component AnnotationPanel inherits Window {
                 width: parent.width / root.columns - 10px; height: 58px;
                 Text { x: 0px; y: 0px; text: root.labels[field]; font-size: 12px; color: Colors.secondary-foreground; }
                 if field == 0: SpinBox { x: 0px; y: 22px; width: parent.width; height: 30px; minimum: 1; maximum: 100; value <=> root.values.size; }
-                if field == 1: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Rectangle"), @tr("Ellipse")]; current-index <=> root.values.shape; }
-                if field == 2: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Solid"), @tr("Dashed")]; current-index <=> root.values.style; }
+                if field == 1: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Rectangle"), @tr("Ellipse")]; current-index <=> root.values.shape; }
+                if field == 2: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Solid"), @tr("Dashed")]; current-index <=> root.values.style; }
                 if field == 3: SpinBox { x: 0px; y: 22px; width: parent.width; height: 30px; minimum: 0; maximum: 100; value <=> root.values.rounding; }
                 if field == 4: CheckBox { x: 0px; y: 24px; text: @tr("Enabled"); checked <=> root.values.fill; }
                 if field == 5: Slider { x: 0px; y: 24px; width: parent.width; minimum: 0; maximum: 100; value <=> root.values.strength; }
-                if field == 6: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Normal"), @tr("Multiply")]; current-index <=> root.values.mode; }
-                if field == 7: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: ["\{1.5}×", "2×", "3×", "4×"]; current-index <=> root.values.zoom; }
+                if field == 6: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Normal"), @tr("Multiply")]; current-index <=> root.values.mode; }
+                if field == 7: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: ["\{1.5}×", "2×", "3×", "4×"]; current-index <=> root.values.zoom; }
                 if field == 8: CheckBox { x: 0px; y: 24px; text: @tr("Enabled"); checked <=> root.values.erase; }
                 if field == 9: CheckBox { x: 0px; y: 24px; text: @tr("Enabled"); checked <=> root.values.antialias; }
                 if field == 10: CheckBox { x: 0px; y: 24px; text: @tr("Enabled"); checked <=> root.values.shadow; }
                 if field == 11: LineEdit { x: 0px; y: 22px; width: parent.width; height: 30px; placeholder-text: @tr("Enter text"); text <=> root.values.text; }
-                if field == 12: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Microsoft YaHei", "Segoe UI", "Arial"]; current-index <=> root.values.font; }
+                if field == 12: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Microsoft YaHei", "Segoe UI", "Arial"]; current-index <=> root.values.font; }
                 if field == 13: SpinBox { x: 0px; y: 22px; width: parent.width; height: 30px; minimum: 1; maximum: 144; value <=> root.values.text-size; }
-                if field == 14: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Tile"), @tr("Single")]; current-index <=> root.values.mode; }
+                if field == 14: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Tile"), @tr("Single")]; current-index <=> root.values.mode; }
                 if field == 15: SpinBox { x: 0px; y: 22px; width: parent.width; height: 30px; minimum: 1; maximum: 999; value <=> root.values.start; }
-                if field == 16: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: ["1, 2, 3", "A, B, C", "a, b, c"]; current-index <=> root.values.format; }
-                if field == 17: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Area"), @tr("Brush")]; current-index <=> root.values.shape; }
-                if field == 18: ComboBox { language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Mosaic"), @tr("Blur")]; current-index <=> root.values.mode; }
+                if field == 16: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: ["1, 2, 3", "A, B, C", "a, b, c"]; current-index <=> root.values.format; }
+                if field == 17: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Area"), @tr("Brush")]; current-index <=> root.values.shape; }
+                if field == 18: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Mosaic"), @tr("Blur")]; current-index <=> root.values.mode; }
             }
             if root.tool < 11: HorizontalLayout {
                 x: 0px; y: 28px + ceil(root.fields.length / root.columns) * 62px;

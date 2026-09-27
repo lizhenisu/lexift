@@ -177,6 +177,23 @@ pub fn configure_passive_tool_window(
     }
 }
 
+/// Keeps transient menus out of the taskbar and task switcher.
+/// Updating Winit's policy also preserves this behavior after Explorer restarts.
+#[cfg(target_os = "windows")]
+pub fn configure_menu_window(window: &winit::window::Window) -> lexift_core::Result<()> {
+    use winit::platform::windows::WindowExtWindows;
+    window.set_skip_taskbar(true);
+    windows::popup::configure_menu_window(window)
+}
+
+/// Menu taskbar exclusion is currently specific to Windows.
+#[cfg(not(target_os = "windows"))]
+pub fn configure_menu_window(
+    _window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    Ok(())
+}
+
 /// Lets the annotation canvas pass mouse input to the live desktop in operate mode.
 pub fn set_annotation_click_through(
     window: &impl raw_window_handle::HasWindowHandle,

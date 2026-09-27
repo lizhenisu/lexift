@@ -6,6 +6,7 @@ mod i18n;
 mod mapper;
 mod placement;
 mod theme;
+mod tray_menu;
 
 slint::include_modules!();
 

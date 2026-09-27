@@ -67,8 +67,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
     let screen_for_popup = services.screen.clone();
     let screen_for_toolbar = services.screen.clone();
     let screen_for_annotation = services.screen.clone();
-    let tray_for_theme = services.tray.clone();
-    let tray_for_language = services.tray.clone();
+    let tray_for_cancel = services.tray.clone();
     let ui = lexift_ui::Ui::new(
         &initial_state,
         cfg!(feature = "m1-demo"),
@@ -180,9 +179,18 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 }
             },
         )
-        .with_language(move |labels| { if let Some(tray) = &tray_for_language { tray.set_menu_labels(labels); } })
-        .with_theme_preference(move |theme| {
-            if let Some(tray) = &tray_for_theme { tray.set_theme(theme); }
+        .with_menu_window_preparation(|window| {
+            match window.with_winit_window(lexift_platform::configure_menu_window) {
+                Some(Ok(())) => true,
+                Some(Err(error)) => {
+                    tracing::warn!(%error, "menu taskbar policy could not be configured");
+                    false
+                }
+                None => false,
+            }
+        })
+        .with_tray_menu_cancelled(move || {
+            if let Some(tray) = &tray_for_cancel { tray.menu_cancelled(); }
         })
         .with_popup_work_area(move |point| {
             screen_for_popup
@@ -365,6 +373,10 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 format!("Unavailable: {error}")
             }
         });
+    if let Some(tray) = &services.tray {
+        let menu_ui = ui.handle();
+        tray.set_menu_handler(Arc::new(move |request| menu_ui.show_tray_menu(request)));
+    }
     let tray_registered = register_tray(services.tray.as_ref(), controller.tray_handler());
     ui.set_background_mode(tray_registered);
     controller.dispatch(lexift_core::AppEvent::Started);

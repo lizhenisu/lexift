@@ -7,7 +7,7 @@ export { PopupLanguageMenuWindow, TranslationPopup } from "popup.slint";
 export { SettingsToastData, SettingsWindow } from "settings.slint";
 export { SelectionToolbarWindow } from "selection-toolbar.slint";
 export { AnnotationToolbar, AnnotationPanel, AnnotationValues } from "annotation.slint";
-export { AnnotationCanvas } from "annotation-canvas.slint";
+export { AnnotationCanvas, AnnotationCursor } from "annotation-canvas.slint";
 
 component ActionButton inherits Rectangle {
     in property <string> label;
@@ -175,3 +175,8 @@ export component AppWindow inherits Window {
         }
     }
 }
+
+export { TrayMenuWindow } from "tray-menu.slint";
+
+export { AnnotationChoiceWindow } from "annotation-choice.slint";
+export { AnnotationChoiceRequest } from "annotation-fields.slint";

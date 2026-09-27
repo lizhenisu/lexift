@@ -1,0 +1,75 @@
+import { Colors } from "design/colors.slint";
+export component AnnotationColorPicker inherits Rectangle {
+    in-out property <float> hue;
+    in-out property <float> saturation;
+    in-out property <float> value;
+    in property <color> preview;
+    in property <color> bright;
+    in-out property <string> hex-text;
+    in property <bool> invalid;
+    callback hsv-edited(float,float,float);
+    callback hex-edited(string,bool);
+    callback dragging(bool);
+    function select-color(x: length, y: length) {
+        root.hue = clamp(x / spectrum.width,0,1) * 360;
+        root.saturation = 1 - clamp(y / spectrum.height,0,1);
+        root.hsv-edited(root.hue,root.saturation,root.value);
+    }
+    spectrum := Rectangle {
+        x: 12px; y: 12px; width: parent.width - 72px; height: parent.height - 104px;
+        background: @linear-gradient(90deg, #ff0000 0%, #ffff00 16.667%, #00ff00 33.333%, #00ffff 50%, #0000ff 66.667%, #ff00ff 83.333%, #ff0000 100%);
+        Rectangle { background: @linear-gradient(180deg, #ffffff00, #ffffffff); }
+        Rectangle { background: #000; opacity: 1 - root.value; }
+        Rectangle {
+            x: clamp(root.hue / 360 * parent.width - 5px,0px,parent.width - 10px);
+            y: clamp((1-root.saturation) * parent.height - 5px,0px,parent.height - 10px);
+            width: 10px; height: 10px; border-radius: 5px; border-width: 2px; border-color: white;
+            Rectangle { x: 2px; y: 2px; width: 6px; height: 6px; border-radius: 3px; border-width: 1px; border-color: black; }
+        }
+        TouchArea {
+            mouse-cursor: default;
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left { root.dragging(true); root.select-color(self.mouse-x,self.mouse-y); }
+                if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel { root.dragging(false); }
+            }
+            moved => { root.select-color(self.mouse-x,self.mouse-y); }
+        }
+    }
+    Rectangle {
+        x: parent.width - 48px; y: 12px; width: 36px; height: spectrum.height;
+        border-width: 1px; border-color: Colors.outline; border-radius: 5px; background: root.preview;
+    }
+    brightness := Rectangle {
+        x: 12px; y: spectrum.y + spectrum.height + 15px; width: parent.width - 24px; height: 14px;
+        background: @linear-gradient(90deg, black, root.bright); border-radius: 7px;
+        Rectangle { x: clamp(root.value * parent.width - 7px,0px,parent.width - 14px); y: 0px;
+            width: 14px; height: 14px; border-radius: 7px; background: root.preview; border-width: 2px; border-color: white; }
+        TouchArea {
+            mouse-cursor: default;
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                    root.dragging(true); root.value = clamp(self.mouse-x / self.width,0,1); root.hsv-edited(root.hue,root.saturation,root.value);
+                }
+                if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel { root.dragging(false); }
+            }
+            moved => { root.value = clamp(self.mouse-x / self.width,0,1); root.hsv-edited(root.hue,root.saturation,root.value); }
+        }
+    }
+    Rectangle {
+        x: 12px; y: brightness.y + 25px; width: parent.width - 24px; height: 30px;
+        border-radius: 5px; border-width: 1px; border-color: root.invalid ? Colors.error : Colors.outline; background: Colors.background;
+        Text { x: 9px; width: 34px; height: parent.height; text: "HEX"; color: Colors.secondary-foreground; vertical-alignment: center; font-size: 12px; }
+        TextInput {
+            single-line: true;
+            x: 46px; width: parent.width - 54px; height: parent.height; text <=> root.hex-text;
+            font-size: 13px; color: Colors.foreground; vertical-alignment: center;
+            selection-background-color: Colors.primary-container; selection-foreground-color: Colors.foreground;
+            edited => { root.hex-edited(self.text,false); }
+            accepted => { root.hex-edited(self.text,true); }
+        }
+    }
+    if root.invalid: Text {
+        x: 12px; y: parent.height - 19px; width: parent.width - 24px; height: 16px;
+        text: @tr("Enter a six-digit HEX color."); font-size: 11px; color: Colors.error; overflow: elide;
+    }
+}

@@ -657,3 +657,9 @@ msgstr "Outline"
 
 msgid "Geometry"
 msgstr "Geometry"
+
+msgid "Custom color"
+msgstr "Custom color"
+
+msgid "Enter a six-digit HEX color."
+msgstr "Enter a six-digit HEX color."

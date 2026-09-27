@@ -14,6 +14,8 @@ tracing.workspace = true
 raw-window-handle = "0.6"
 
 [target.'cfg(target_os = "windows")'.dependencies]
+# Shares the existing Slint backend version; taskbar policy must also update Winit state.
+winit = { version = "0.30.13", default-features = false }
 windows = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",

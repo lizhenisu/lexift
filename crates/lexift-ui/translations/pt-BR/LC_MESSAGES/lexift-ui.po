@@ -657,3 +657,9 @@ msgstr "Contorno"
 
 msgid "Geometry"
 msgstr "Formas geométricas"
+
+msgid "Custom color"
+msgstr "Cor personalizada"
+
+msgid "Enter a six-digit HEX color."
+msgstr "Insira uma cor HEX de seis dígitos."

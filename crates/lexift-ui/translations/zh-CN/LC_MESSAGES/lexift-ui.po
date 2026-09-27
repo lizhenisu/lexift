@@ -657,3 +657,9 @@ msgstr "描边"
 
 msgid "Geometry"
 msgstr "几何图形"
+
+msgid "Custom color"
+msgstr "自定义颜色"
+
+msgid "Enter a six-digit HEX color."
+msgstr "请输入六位十六进制颜色。"

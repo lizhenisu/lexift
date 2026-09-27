@@ -1,6 +1,6 @@
 name = "lexift"
 productName = "Lexift"
-version = "0.0.1-rc.1"
+version = "0.0.1-rc.2"
 identifier = "com.lexift.app"
 publisher = "Lexift"
 description = "A fast native desktop translator for Windows"

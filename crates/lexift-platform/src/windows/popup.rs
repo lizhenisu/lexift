@@ -31,6 +31,18 @@ pub(crate) fn configure_passive(
     Ok(PassiveToolWindowPreparation::Ready)
 }
 
+/// Applies to floating menus; normal application windows retain their taskbar policy.
+pub(crate) fn configure_menu_window(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    configure_extended_style(window, menu_window_extended_style)
+}
+
+fn menu_window_extended_style(style: isize) -> isize {
+    use windows::Win32::UI::WindowsAndMessaging::{WS_EX_APPWINDOW, WS_EX_TOOLWINDOW};
+    (style & !(WS_EX_APPWINDOW.0 as isize)) | WS_EX_TOOLWINDOW.0 as isize
+}
+
 /// Requests Windows 11's native rounded outer corners for the translation popup.
 ///
 /// The caller selects an opaque square shell if the DWM preference is unavailable, avoiding a
@@ -1207,6 +1219,25 @@ mod tests {
     use windows::Win32::UI::WindowsAndMessaging::{
         SWP_FRAMECHANGED, SWP_NOACTIVATE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     };
+
+    #[test]
+    fn tray_menu_style_excludes_taskbar_without_changing_activation_or_other_flags() {
+        use windows::Win32::UI::WindowsAndMessaging::WS_EX_APPWINDOW;
+        let unrelated = 0x80000; // WS_EX_LAYERED
+        for activation in [0, WS_EX_NOACTIVATE.0 as isize] {
+            let original = WS_EX_APPWINDOW.0 as isize | unrelated | activation;
+            let menu = super::menu_window_extended_style(original);
+            assert_eq!(menu & WS_EX_APPWINDOW.0 as isize, 0);
+            assert_ne!(menu & WS_EX_TOOLWINDOW.0 as isize, 0);
+            assert_eq!(menu & unrelated, unrelated);
+            assert_eq!(menu & WS_EX_NOACTIVATE.0 as isize, activation);
+            assert_eq!(super::menu_window_extended_style(menu), menu);
+            assert_eq!(
+                interactive_extended_style(menu) & WS_EX_APPWINDOW.0 as isize,
+                0
+            );
+        }
+    }
 
     #[test]
     fn physical_wheel_delta_tracks_window_dpi() {

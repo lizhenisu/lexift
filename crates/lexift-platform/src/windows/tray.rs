@@ -2,17 +2,14 @@ use std::{
     cell::{Cell, RefCell},
     mem::size_of,
     panic::{AssertUnwindSafe, catch_unwind},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicU8, Ordering},
-        mpsc,
-    },
+    sync::{Arc, Mutex, mpsc},
     thread::{self, JoinHandle},
+    time::{Duration, Instant},
 };
 
 use lexift_core::{
     Error, Result,
-    ports::tray::{TrayAction, TrayHandler, TrayMenuLabels, TrayPort},
+    ports::tray::{TrayAction, TrayHandler, TrayMenuHandler, TrayMenuRequest, TrayPort},
 };
 use windows::{
     Win32::{
@@ -22,16 +19,14 @@ use windows::{
             Shell::{
                 NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETFOCUS,
                 NIM_SETVERSION, NIN_SELECT, NOTIFYICON_VERSION_4, NOTIFYICONDATAW,
-                Shell_NotifyIconW,
+                NOTIFYICONIDENTIFIER, Shell_NotifyIconGetRect, Shell_NotifyIconW,
             },
             WindowsAndMessaging::{
-                AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-                DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW, IDI_APPLICATION,
-                LoadIconW, MF_SEPARATOR, MF_STRING, MSG, PostMessageW, PostQuitMessage,
-                RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, SetMenuDefaultItem,
-                TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, UnregisterClassW,
-                WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_CONTEXTMENU, WM_DESTROY,
-                WM_NULL, WNDCLASSW,
+                CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetCursorPos,
+                GetMessageW, IDI_APPLICATION, LoadIconW, MSG, PostQuitMessage, PostThreadMessageW,
+                RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, TranslateMessage,
+                UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_CONTEXTMENU,
+                WM_DESTROY, WNDCLASSW,
             },
         },
     },
@@ -40,9 +35,7 @@ use windows::{
 
 const TRAY_ICON_ID: u32 = 1;
 const TRAY_CALLBACK_MESSAGE: u32 = WM_APP + 1;
-const OPEN_COMMAND_ID: usize = 1;
-const SETTINGS_COMMAND_ID: usize = 2;
-const QUIT_COMMAND_ID: usize = 3;
+const MENU_CANCELLED_MESSAGE: u32 = WM_APP + 2;
 const NIN_KEYSELECT: u32 = NIN_SELECT + 1;
 
 thread_local! {
@@ -51,34 +44,39 @@ thread_local! {
 
 pub(crate) struct WindowsTrayPort {
     listener: Mutex<Option<TrayListener>>,
-    theme: Arc<AtomicU8>,
-    labels: Arc<Mutex<TrayMenuLabels>>,
+    menu_handler: Arc<Mutex<Option<TrayMenuHandler>>>,
 }
 
 impl WindowsTrayPort {
     pub(crate) fn new() -> Self {
         Self {
             listener: Mutex::new(None),
-            theme: Arc::new(AtomicU8::new(0)),
-            labels: Arc::new(Mutex::new(TrayMenuLabels::default())),
+            menu_handler: Arc::new(Mutex::new(None)),
         }
     }
 }
 
 impl TrayPort for WindowsTrayPort {
-    fn set_menu_labels(&self, labels: TrayMenuLabels) {
-        *self.labels.lock().unwrap_or_else(|p| p.into_inner()) = labels;
+    fn set_menu_handler(&self, handler: TrayMenuHandler) {
+        *self.menu_handler.lock().unwrap_or_else(|p| p.into_inner()) = Some(handler);
     }
-    fn set_theme(&self, theme: lexift_core::domain::settings::ThemePreference) {
-        use lexift_core::domain::settings::ThemePreference;
-        self.theme.store(
-            match theme {
-                ThemePreference::Light => 0,
-                ThemePreference::Dark => 1,
-                ThemePreference::System => 2,
-            },
-            Ordering::Relaxed,
-        );
+
+    fn menu_cancelled(&self) {
+        if let Some(listener) = self
+            .listener
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+        {
+            unsafe {
+                let _ = PostThreadMessageW(
+                    listener.thread_id,
+                    MENU_CANCELLED_MESSAGE,
+                    WPARAM(0),
+                    LPARAM(0),
+                );
+            }
+        }
     }
 
     fn register(&self, handler: TrayHandler) -> Result<()> {
@@ -91,11 +89,10 @@ impl TrayPort for WindowsTrayPort {
         }
 
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
-        let theme = Arc::clone(&self.theme);
-        let labels = Arc::clone(&self.labels);
+        let menu_handler = Arc::clone(&self.menu_handler);
         let thread = thread::Builder::new()
             .name("lexift-tray".into())
-            .spawn(move || run_tray(handler, ready_sender, theme, labels))
+            .spawn(move || run_tray(handler, ready_sender, menu_handler))
             .map_err(|_| Error::new("Could not start the Windows tray thread"))?;
 
         match ready_receiver.recv() {
@@ -155,18 +152,16 @@ struct TrayWindowState {
     hwnd: HWND,
     taskbar_created: u32,
     handler: TrayHandler,
-    menu_active: Cell<bool>,
-    theme: Arc<AtomicU8>,
-    labels: Arc<Mutex<TrayMenuLabels>>,
+    last_right_click: Cell<Option<(Instant, lexift_core::domain::geometry::Point)>>,
+    menu_handler: Arc<Mutex<Option<TrayMenuHandler>>>,
 }
 
 fn run_tray(
     handler: TrayHandler,
     ready_sender: mpsc::SyncSender<Result<u32>>,
-    theme: Arc<AtomicU8>,
-    labels: Arc<Mutex<TrayMenuLabels>>,
+    menu_handler: Arc<Mutex<Option<TrayMenuHandler>>>,
 ) {
-    let result = run_tray_inner(handler, &ready_sender, theme, labels);
+    let result = run_tray_inner(handler, &ready_sender, menu_handler);
     if let Err(error) = result {
         let _ = ready_sender.send(Err(error));
     }
@@ -175,8 +170,7 @@ fn run_tray(
 fn run_tray_inner(
     handler: TrayHandler,
     ready_sender: &mpsc::SyncSender<Result<u32>>,
-    theme: Arc<AtomicU8>,
-    labels: Arc<Mutex<TrayMenuLabels>>,
+    menu_handler: Arc<Mutex<Option<TrayMenuHandler>>>,
 ) -> Result<()> {
     let module = unsafe { GetModuleHandleW(None) }
         .map_err(|_| Error::new("Could not get the Windows application module"))?;
@@ -219,9 +213,8 @@ fn run_tray_inner(
             hwnd,
             taskbar_created,
             handler,
-            menu_active: Cell::new(false),
-            theme,
-            labels,
+            last_right_click: Cell::new(None),
+            menu_handler,
         });
     });
     let _state = WindowStateGuard;
@@ -237,6 +230,13 @@ fn run_tray_inner(
         let result = unsafe { GetMessageW(&mut message, None, 0, 0) }.0;
         if result <= 0 {
             break;
+        }
+        if message.message == MENU_CANCELLED_MESSAGE {
+            // Explicit Escape cancellation only; focus-loss dismissal never posts this.
+            unsafe {
+                let _ = Shell_NotifyIconW(NIM_SETFOCUS, &notify_data(hwnd));
+            }
+            continue;
         }
         unsafe {
             let _ = TranslateMessage(&message);
@@ -254,14 +254,6 @@ unsafe extern "system" fn tray_window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    if message == windows::Win32::UI::WindowsAndMessaging::WM_MENUCHAR
-        && let Some(result) = super::tray_menu::menu_character(wparam.0 as u16, lparam)
-    {
-        return result;
-    }
-    if super::tray_menu::handle_draw_message(message, lparam) {
-        return LRESULT(1);
-    }
     let handled = WINDOW_STATE.with(|state| {
         let state = state.borrow();
         let Some(state) = state.as_ref() else {
@@ -274,7 +266,7 @@ unsafe extern "system" fn tray_window_proc(
             return true;
         }
         if message == TRAY_CALLBACK_MESSAGE {
-            handle_tray_notification(state, lparam.0 as u32);
+            handle_tray_notification(state, lparam.0 as u32, wparam);
             return true;
         }
         false
@@ -291,7 +283,27 @@ unsafe extern "system" fn tray_window_proc(
     }
 }
 
-fn handle_tray_notification(state: &TrayWindowState, raw_event: u32) {
+fn handle_tray_notification(state: &TrayWindowState, raw_event: u32, position: WPARAM) {
+    use windows::Win32::UI::WindowsAndMessaging::{WM_RBUTTONDOWN, WM_RBUTTONUP};
+    if raw_event & 0xffff == WM_RBUTTONDOWN {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{
+            GetAsyncKeyState, VK_APPS, VK_F10, VK_RBUTTON,
+        };
+        // Explorer synthesizes right-button notifications for keyboard menus too.
+        // Capture the source on the first notification: Apps may already be up
+        // by WM_CONTEXTMENU, while a physical right click has its own input state.
+        let right = unsafe { GetAsyncKeyState(VK_RBUTTON.0 as i32) };
+        let apps = unsafe { GetAsyncKeyState(VK_APPS.0 as i32) };
+        let f10 = unsafe { GetAsyncKeyState(VK_F10.0 as i32) };
+        let keyboard = f10 < 0 || (apps != 0 && right == 0);
+        state
+            .last_right_click
+            .set((!keyboard).then(|| (Instant::now(), notification_anchor(position))));
+    } else if raw_event & 0xffff == WM_RBUTTONUP && state.last_right_click.get().is_some() {
+        state
+            .last_right_click
+            .set(Some((Instant::now(), notification_anchor(position))));
+    }
     match notification_for_event(raw_event) {
         Some(TrayNotification::Open) => {
             invoke_handler(&state.handler, TrayAction::OpenMainWindow);
@@ -315,105 +327,55 @@ fn notification_for_event(raw_event: u32) -> Option<TrayNotification> {
     }
 }
 
-fn show_context_menu(state: &TrayWindowState) {
-    // TrackPopupMenu pumps messages recursively. Never open another menu inside it.
-    let Some(_active) = MenuSession::begin(&state.menu_active) else {
-        return;
-    };
-    let labels = state
-        .labels
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .clone();
-    let appearance =
-        super::tray_menu::MenuAppearance::begin(state.theme.load(Ordering::Relaxed), &labels);
-    let text = [&labels.open, &labels.settings, &labels.quit]
-        .map(|s| s.encode_utf16().chain(Some(0)).collect::<Vec<_>>());
-    let Ok(menu) = (unsafe { CreatePopupMenu() }) else {
-        tracing::warn!("Windows tray context menu could not be created");
-        return;
-    };
-    let _menu = TrayMenu(menu);
-    let built = unsafe {
-        AppendMenuW(menu, MF_STRING, OPEN_COMMAND_ID, PCWSTR(text[0].as_ptr()))
-            .and_then(|_| {
-                AppendMenuW(
-                    menu,
-                    MF_STRING,
-                    SETTINGS_COMMAND_ID,
-                    PCWSTR(text[1].as_ptr()),
-                )
-            })
-            .and_then(|_| AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null()))
-            .and_then(|_| AppendMenuW(menu, MF_STRING, QUIT_COMMAND_ID, PCWSTR(text[2].as_ptr())))
-            .and_then(|_| SetMenuDefaultItem(menu, OPEN_COMMAND_ID as u32, 0))
-    };
-    if built.is_err() {
-        tracing::warn!("Windows tray context menu could not be populated");
-        return;
+fn notification_anchor(position: WPARAM) -> lexift_core::domain::geometry::Point {
+    lexift_core::domain::geometry::Point {
+        x: position.0 as u16 as i16 as i32,
+        y: (position.0 >> 16) as u16 as i16 as i32,
     }
+}
 
-    appearance.configure(menu);
-    let mut cursor = POINT::default();
-    if unsafe { GetCursorPos(&mut cursor) }.is_err() {
-        tracing::warn!("Windows tray context menu cursor position is unavailable");
-        return;
-    }
-    unsafe {
-        let _ = SetForegroundWindow(state.hwnd);
-    }
-    let command = unsafe {
-        TrackPopupMenu(
-            menu,
-            TPM_RETURNCMD | TPM_RIGHTBUTTON,
-            cursor.x,
-            cursor.y,
-            None,
-            state.hwnd,
-            None,
-        )
-    }
-    .0 as usize;
-    unsafe {
-        let _ = PostMessageW(Some(state.hwnd), WM_NULL, WPARAM(0), LPARAM(0));
-        let data = NOTIFYICONDATAW {
-            cbSize: size_of::<NOTIFYICONDATAW>() as u32,
+fn show_context_menu(state: &TrayWindowState) {
+    // Version 4 defines wParam coordinates for mouse notifications, but not
+    // WM_CONTEXTMENU. Preserve the preceding right-button anchor instead.
+    let mouse = state
+        .last_right_click
+        .take()
+        .filter(|(time, _)| time.elapsed() < Duration::from_secs(5));
+    let keyboard = mouse.is_none();
+    let mut anchor = mouse.map(|(_, point)| point).unwrap_or_default();
+    if keyboard {
+        let id = NOTIFYICONIDENTIFIER {
+            cbSize: size_of::<NOTIFYICONIDENTIFIER>() as u32,
             hWnd: state.hwnd,
             uID: TRAY_ICON_ID,
             ..Default::default()
         };
-        let _ = Shell_NotifyIconW(NIM_SETFOCUS, &data);
-    }
-    // Return focus to the tray before Open/Quit transfers control to the app.
-    if let Some(action) = action_for_command(command) {
-        invoke_handler(&state.handler, action);
-    }
-}
-
-struct MenuSession<'a>(&'a Cell<bool>);
-
-impl<'a> MenuSession<'a> {
-    fn begin(active: &'a Cell<bool>) -> Option<Self> {
-        if active.replace(true) {
-            None
+        if let Ok(rect) = unsafe { Shell_NotifyIconGetRect(&id) } {
+            anchor.x = rect.left;
+            anchor.y = rect.top;
         } else {
-            Some(Self(active))
+            let mut cursor = POINT::default();
+            if unsafe { GetCursorPos(&mut cursor) }.is_err() {
+                return;
+            }
+            anchor.x = cursor.x;
+            anchor.y = cursor.y;
         }
     }
-}
-
-impl Drop for MenuSession<'_> {
-    fn drop(&mut self) {
-        self.0.set(false);
+    // The shell grants foreground permission to its notification recipient.
+    // Transfer it within our process before dispatching to the UI event loop.
+    unsafe {
+        let _ = SetForegroundWindow(state.hwnd);
     }
-}
-
-fn action_for_command(command: usize) -> Option<TrayAction> {
-    match command {
-        OPEN_COMMAND_ID => Some(TrayAction::OpenMainWindow),
-        SETTINGS_COMMAND_ID => Some(TrayAction::OpenSettings),
-        QUIT_COMMAND_ID => Some(TrayAction::Quit),
-        _ => None,
+    let handler = state
+        .menu_handler
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    if let Some(handler) = handler {
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            handler(TrayMenuRequest { anchor, keyboard })
+        }));
     }
 }
 
@@ -485,16 +447,6 @@ fn notify_data(hwnd: HWND) -> NOTIFYICONDATAW {
     data
 }
 
-struct TrayMenu(windows::Win32::UI::WindowsAndMessaging::HMENU);
-
-impl Drop for TrayMenu {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = DestroyMenu(self.0);
-        }
-    }
-}
-
 struct TrayWindow(HWND);
 
 impl Drop for TrayWindow {
@@ -530,17 +482,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn maps_only_supported_menu_commands() {
+    fn notification_coordinates_preserve_negative_monitor_positions() {
+        let packed = ((-120i16 as u16 as usize) << 16) | (-1920i16 as u16 as usize);
         assert_eq!(
-            action_for_command(OPEN_COMMAND_ID),
-            Some(TrayAction::OpenMainWindow)
+            notification_anchor(WPARAM(packed)),
+            lexift_core::domain::geometry::Point { x: -1920, y: -120 }
         );
-        assert_eq!(action_for_command(QUIT_COMMAND_ID), Some(TrayAction::Quit));
-        assert_eq!(
-            action_for_command(SETTINGS_COMMAND_ID),
-            Some(TrayAction::OpenSettings)
-        );
-        assert_eq!(action_for_command(999), None);
     }
 
     #[test]
@@ -557,7 +504,10 @@ mod tests {
             notification_for_event(WM_CONTEXTMENU),
             Some(TrayNotification::ContextMenu)
         );
-        assert_eq!(notification_for_event(WM_NULL), None);
+        assert_eq!(
+            notification_for_event(windows::Win32::UI::WindowsAndMessaging::WM_NULL),
+            None
+        );
         // Version 4 emits semantic events; raw button-up notifications must not
         // start a second menu or activate the main window during menu tracking.
         use windows::Win32::UI::WindowsAndMessaging::{WM_LBUTTONUP, WM_RBUTTONUP};
@@ -577,17 +527,6 @@ mod tests {
             .expect("the native tray should register");
         drop(tray);
     }
-    #[test]
-    fn menu_tracking_rejects_reentry_and_releases_on_close() {
-        let active = Cell::new(false);
-        let session = MenuSession::begin(&active).unwrap();
-        assert!(MenuSession::begin(&active).is_none());
-        assert!(active.get());
-        drop(session);
-        assert!(!active.get());
-        assert!(MenuSession::begin(&active).is_some());
-    }
-
     #[test]
     fn version_four_icon_requests_standard_tooltip() {
         let data = notify_data(HWND::default());

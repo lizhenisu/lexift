@@ -59,6 +59,7 @@ mod tests {
         let toolbar = crate::AnnotationToolbar::new().unwrap();
         let panel = crate::AnnotationPanel::new().unwrap();
         let main = crate::AppWindow::new().unwrap();
+        let tray = crate::TrayMenuWindow::new().unwrap();
         popup.set_source_text("unsaved input".into());
         let set_system = |scheme| {
             i_slint_core::context::with_global_context(
@@ -76,6 +77,7 @@ mod tests {
                 assert_eq!(toolbar.global::<crate::Colors>().get_dark(), $dark);
                 assert_eq!(panel.global::<crate::Colors>().get_dark(), $dark);
                 assert_eq!(main.global::<crate::Colors>().get_dark(), $dark);
+                assert_eq!(tray.global::<crate::Colors>().get_dark(), $dark);
                 assert_eq!(
                     settings.get_resize_fallback_color(),
                     settings.global::<crate::Colors>().get_background()
@@ -100,6 +102,7 @@ mod tests {
             apply(&toolbar);
             apply(&panel);
             apply(&main);
+            apply(&tray);
             for scheme in [ColorScheme::Unknown, ColorScheme::Dark, ColorScheme::Light] {
                 set_system(scheme);
                 check!(

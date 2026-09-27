@@ -1,0 +1,73 @@
+import { AnnotationColorPicker } from "annotation-color.slint";
+import { Colors } from "design/colors.slint";
+import { MenuMetrics } from "design/menu.slint";
+import { LineStylePreview } from "annotation-fields.slint";
+
+export component AnnotationChoiceWindow inherits Window {
+    title: "Lexift"; no-frame: true; always-on-top: true; background: transparent;
+    in property <[string]> options;
+    in property <bool> lines;
+    in property <bool> color-mode;
+    in-out property <float> hue;
+    in-out property <float> saturation;
+    in-out property <float> value;
+    in property <color> preview;
+    in property <color> bright;
+    in-out property <string> hex-text;
+    in property <bool> invalid;
+    callback hsv-edited(float,float,float);
+    callback hex-edited(string,bool);
+    callback color-dragging(bool);
+    in-out property <int> selected;
+    out property <length> menu-height: root.color-mode ? 300px : root.options.length * MenuMetrics.row-height + 8px;
+    callback chosen(int);
+    callback cancel();
+    forward-focus: keys;
+    keys := FocusScope {
+        capture-key-pressed(event) => { if event.text == Key.Escape { root.cancel(); return accept; } if root.color-mode && event.text == Key.Return { root.hex-edited(root.hex-text,true); return accept; } return reject; }
+        key-pressed(event) => {
+            if event.text == Key.Escape { root.cancel(); }
+            else if root.color-mode { return reject; }
+            else if event.text == Key.DownArrow { root.selected = mod(root.selected + 1, root.options.length); }
+            else if event.text == Key.UpArrow { root.selected = mod(root.selected + root.options.length - 1, root.options.length); }
+            else if event.text == Key.Home { root.selected = 0; }
+            else if event.text == Key.End { root.selected = root.options.length - 1; }
+            else if event.text == Key.Return || event.text == " " { root.chosen(root.selected); }
+            else { return reject; }
+            accept
+        }
+    Rectangle {
+        border-radius: MenuMetrics.row-radius; border-width: 1px;
+        border-color: Colors.outline; background: Colors.surface;
+        accessible-role: list;
+        if root.color-mode: AnnotationColorPicker {
+            width: parent.width; height: parent.height;
+            hue <=> root.hue; saturation <=> root.saturation; value <=> root.value;
+            preview: root.preview; bright: root.bright; hex-text <=> root.hex-text; invalid: root.invalid;
+            hsv-edited(h,s,v) => { root.hsv-edited(h,s,v); }
+            hex-edited(text,commit) => { root.hex-edited(text,commit); }
+            dragging(active) => { root.color-dragging(active); }
+        }
+        for label[i] in root.options: Rectangle {
+            x: 4px; y: 4px + i * MenuMetrics.row-height;
+            width: parent.width - 8px; height: MenuMetrics.row-height;
+            border-radius: MenuMetrics.row-radius;
+            background: root.selected == i ? Colors.primary : hit.has-hover ? Colors.menu-hover : transparent;
+            accessible-role: list-item; accessible-label: label;
+            accessible-item-selected: root.selected == i;
+            accessible-action-default => { root.chosen(i); }
+            if root.lines: LineStylePreview {
+                x: 8px; y: (parent.height - 4px) / 2; width: parent.width - 16px; height: 4px;
+                style: i; ink: root.selected == i ? Colors.on-primary : Colors.foreground;
+            }
+            if !root.lines: Text {
+                x: 8px; width: parent.width - 16px; height: parent.height;
+                text: label; font-size: 13px; vertical-alignment: center; overflow: elide;
+                color: root.selected == i ? Colors.on-primary : Colors.foreground;
+            }
+            hit := TouchArea { clicked => { root.chosen(i); } }
+        }
+    }
+}
+
+}

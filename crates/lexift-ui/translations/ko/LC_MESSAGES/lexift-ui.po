@@ -657,3 +657,9 @@ msgstr "윤곽선"
 
 msgid "Geometry"
 msgstr "도형"
+
+msgid "Custom color"
+msgstr "사용자 지정 색상"
+
+msgid "Enter a six-digit HEX color."
+msgstr "6자리 HEX 색상을 입력하세요."

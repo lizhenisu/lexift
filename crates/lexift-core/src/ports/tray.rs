@@ -9,7 +9,15 @@ pub enum TrayAction {
     Quit,
 }
 
-/// Localized labels supplied by the presentation layer, owned by the native adapter.
+/// Where and how the notification-area menu was requested.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrayMenuRequest {
+    pub anchor: crate::domain::geometry::Point,
+    pub keyboard: bool,
+}
+pub type TrayMenuHandler = Arc<dyn Fn(TrayMenuRequest) + Send + Sync + 'static>;
+
+/// Localized menu labels supplied by the presentation layer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrayMenuLabels {
     pub open: String,
@@ -32,8 +40,9 @@ pub type TrayHandler = Arc<dyn Fn(TrayAction) + Send + Sync + 'static>;
 pub trait TrayPort: Send + Sync {
     fn register(&self, handler: TrayHandler) -> Result<()>;
 
-    fn set_menu_labels(&self, _labels: TrayMenuLabels) {}
+    fn set_menu_handler(&self, _handler: TrayMenuHandler) {}
 
-    /// Updates the preference used the next time the native context menu opens.
-    fn set_theme(&self, _theme: crate::domain::settings::ThemePreference) {}
+    /// Returns keyboard focus to the notification area after explicit cancellation.
+    /// Do not call when another window has already gained focus.
+    fn menu_cancelled(&self) {}
 }
