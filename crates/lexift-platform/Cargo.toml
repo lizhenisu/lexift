@@ -13,6 +13,9 @@ lexift-core.workspace = true
 tracing.workspace = true
 raw-window-handle = "0.6"
 
+[build-dependencies]
+resvg = { version = "0.48.1", default-features = false }
+
 [target.'cfg(target_os = "windows")'.dependencies]
 # Shares the existing Slint backend version; taskbar policy must also update Winit state.
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }

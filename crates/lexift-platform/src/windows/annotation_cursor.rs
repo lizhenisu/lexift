@@ -54,9 +54,18 @@ fn cursor_size(hwnd: HWND) -> i32 {
 
 fn pixels(size: i32) -> &'static [u8] {
     match size {
-        64 => include_bytes!("../../assets/annotation-corner-radius-64.rgba"),
-        48 => include_bytes!("../../assets/annotation-corner-radius-48.rgba"),
-        _ => include_bytes!("../../assets/annotation-corner-radius-32.rgba"),
+        64 => include_bytes!(concat!(
+            env!("OUT_DIR"),
+            "/annotation-corner-radius-64.rgba"
+        )),
+        48 => include_bytes!(concat!(
+            env!("OUT_DIR"),
+            "/annotation-corner-radius-48.rgba"
+        )),
+        _ => include_bytes!(concat!(
+            env!("OUT_DIR"),
+            "/annotation-corner-radius-32.rgba"
+        )),
     }
 }
 
@@ -78,16 +87,16 @@ fn make_cursor(size: i32) -> lexift_core::Result<HCURSOR> {
         .map_err(|_| lexift_core::Error::new("Could not create annotation cursor bitmap"))?;
     let source = pixels(size);
     let destination = unsafe { std::slice::from_raw_parts_mut(bits.cast::<u8>(), source.len()) };
+    // resvg's output is already premultiplied RGBA; only reorder for Win32 BGRA.
     for (rgba, bgra) in source
         .as_chunks::<4>()
         .0
         .iter()
         .zip(destination.as_chunks_mut::<4>().0.iter_mut())
     {
-        let alpha = u16::from(rgba[3]);
-        bgra[0] = (u16::from(rgba[2]) * alpha / 255) as u8;
-        bgra[1] = (u16::from(rgba[1]) * alpha / 255) as u8;
-        bgra[2] = (u16::from(rgba[0]) * alpha / 255) as u8;
+        bgra[0] = rgba[2];
+        bgra[1] = rgba[1];
+        bgra[2] = rgba[0];
         bgra[3] = rgba[3];
     }
     let mask_bytes = vec![0u8; (size as usize).div_ceil(16) * 2 * size as usize];
@@ -236,6 +245,23 @@ mod tests {
             let _ = unsafe { DeleteObject(HGDIOBJ(info.hbmMask.0)) };
             let _ = unsafe { DeleteObject(HGDIOBJ(info.hbmColor.0)) };
             unsafe { DestroyCursor(cursor) }.unwrap();
+        }
+    }
+
+    #[test]
+    fn generated_cursor_pixels_are_premultiplied_at_all_dpi_sizes() {
+        for size in [32, 48, 64] {
+            let rgba = pixels(size);
+            assert_eq!(rgba.len(), (size * size * 4) as usize);
+            let (pixels, remainder) = rgba.as_chunks::<4>();
+            assert!(remainder.is_empty());
+            assert!(pixels.iter().any(|pixel| pixel[3] == 255));
+            assert!(pixels.iter().any(|pixel| pixel[3] > 0 && pixel[3] < 255));
+            assert!(
+                pixels
+                    .iter()
+                    .all(|pixel| pixel[..3].iter().all(|channel| *channel <= pixel[3]))
+            );
         }
     }
 }

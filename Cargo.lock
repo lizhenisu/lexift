@@ -2531,6 +2531,7 @@ version = "0.0.1-rc.3"
 dependencies = [
  "lexift-core",
  "raw-window-handle",
+ "resvg",
  "tracing",
  "windows",
  "winit",
