@@ -63,6 +63,11 @@ pub(super) fn open(generation: u64, panel_revision: u64, request: AnnotationChoi
         crate::theme::apply(&window);
         window.set_options(request.options.clone());
         window.set_lines(request.lines);
+        window.set_disabled_index(if panel.get_tool() == 4 && request.field == 6 {
+            1
+        } else {
+            -1
+        });
         window.set_selected(request.selected);
         window.set_color_mode(request.field == -2);
         if request.field == -2 {
@@ -214,6 +219,9 @@ fn finish(generation: u64, panel_revision: u64, revision: u64, index: Option<i32
             && index >= 0
             && (index as usize) < menu.request.options.row_count()
         {
+            if panel.get_tool() == 4 && menu.request.field == 6 && index == 1 {
+                return;
+            }
             let mut values = panel.get_values();
             set_value(&mut values, menu.request.field, index);
             panel.set_values(values);

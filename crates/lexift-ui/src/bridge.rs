@@ -101,6 +101,7 @@ type PopupWorkArea = Rc<dyn Fn(Point) -> Option<Rect>>;
 type ToolbarCursorPosition = Rc<dyn Fn() -> Option<Point>>;
 type AnnotationDisplays = Rc<dyn Fn() -> Vec<Rect>>;
 type AnnotationClickThrough = Rc<dyn Fn(&slint::Window, bool) -> bool>;
+type AnnotationCornerCursor = Rc<dyn Fn(&slint::Window, bool) -> bool>;
 type AnnotationFramePresenter = Rc<dyn Fn(&slint::Window, &[u8], u32, u32) -> bool>;
 type ConfigureResizeBackground = Rc<dyn Fn(&slint::Window, [u8; 3]) -> bool>;
 type WindowPaintRepair = Rc<dyn Fn()>;
@@ -127,6 +128,7 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) attach_tool_window: AttachToolWindow,
     pub(crate) annotation_displays: AnnotationDisplays,
     pub(crate) annotation_click_through: AnnotationClickThrough,
+    pub(crate) annotation_corner_cursor: AnnotationCornerCursor,
     pub(crate) annotation_frame_presenter: AnnotationFramePresenter,
     trim_process_working_set: fn() -> bool,
     pub(crate) configure_menu_window: Rc<dyn Fn(&slint::Window) -> bool>,
@@ -158,6 +160,7 @@ impl WindowLifecycleCallbacks {
             attach_tool_window: Rc::new(attach_tool_window),
             annotation_displays: Rc::new(Vec::new),
             annotation_click_through: Rc::new(|_, _| false),
+            annotation_corner_cursor: Rc::new(|_, _| false),
             annotation_frame_presenter: Rc::new(|_, _, _, _| false),
             trim_process_working_set,
             configure_menu_window: Rc::new(|_| true),
@@ -198,6 +201,15 @@ impl WindowLifecycleCallbacks {
         self.annotation_displays = Rc::new(displays);
         self.annotation_click_through = Rc::new(click_through);
         self.annotation_frame_presenter = Rc::new(present);
+        self
+    }
+
+    /// Installs the DPI-aware corner-radius cursor only on annotation canvases.
+    pub fn with_annotation_corner_cursor(
+        mut self,
+        cursor: impl Fn(&slint::Window, bool) -> bool + 'static,
+    ) -> Self {
+        self.annotation_corner_cursor = Rc::new(cursor);
         self
     }
 

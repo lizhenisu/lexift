@@ -75,6 +75,9 @@ pub enum Kind {
     Ellipse,
     SpotlightRectangle,
     SpotlightEllipse,
+    Pencil,
+    HighlightLine,
+    HighlightRectangle,
 }
 impl Kind {
     pub fn is_spotlight(self) -> bool {
@@ -109,6 +112,133 @@ pub struct Object {
     pub bounds: Bounds,
     pub kind: Kind,
     pub style: Style,
+    /// Physical desktop points for pencil strokes and line endpoints.
+    pub points: Vec<(f32, f32)>,
+}
+
+impl Kind {
+    pub fn tool(self) -> usize {
+        match self {
+            Self::Pencil => 3,
+            Self::HighlightLine | Self::HighlightRectangle => 4,
+            Self::SpotlightRectangle | Self::SpotlightEllipse => 2,
+            _ => 0,
+        }
+    }
+}
+
+impl Object {
+    pub fn refresh_bounds(&mut self) {
+        if let Some(&(x, y)) = self.points.first() {
+            self.bounds = Bounds::from_corners((x, y), (x, y));
+            for &(x, y) in &self.points {
+                self.bounds.left = self.bounds.left.min(x);
+                self.bounds.top = self.bounds.top.min(y);
+                self.bounds.right = self.bounds.right.max(x);
+                self.bounds.bottom = self.bounds.bottom.max(y);
+            }
+        }
+    }
+    /// Drops redundant samples while retaining corners and the newest endpoint.
+    pub fn append_point(&mut self, point: (f32, f32), tolerance: f32) {
+        if self
+            .points
+            .last()
+            .is_some_and(|p| distance(*p, point) < tolerance)
+        {
+            return;
+        }
+        let n = self.points.len();
+        if n >= 2
+            && segment_distance(self.points[n - 1], self.points[n - 2], point) < tolerance * 0.25
+        {
+            self.points.pop();
+        }
+        self.points.push(point);
+        self.refresh_bounds();
+    }
+    pub fn hit_path(&self, point: (f32, f32), scale: f32) -> bool {
+        let tolerance = (self.style.width / 2. + 6.) * scale;
+        self.points
+            .first()
+            .is_some_and(|p| distance(*p, point) <= tolerance)
+            || self
+                .points
+                .windows(2)
+                .any(|p| segment_distance(point, p[0], p[1]) <= tolerance)
+    }
+    pub fn edit_handles(&self, scale: f32) -> Vec<(f32, f32)> {
+        if self.kind == Kind::HighlightLine {
+            return self.points.clone();
+        }
+        let mut handles = self.bounds.handles().to_vec();
+        if self.kind == Kind::HighlightRectangle {
+            let b = self.bounds;
+            let r = (self.style.rounding * scale)
+                .min(b.width() / 2.)
+                .min(b.height() / 2.);
+            let inset = (r * 0.5 + 10. * scale)
+                .min(b.width() / 2.)
+                .min(b.height() / 2.);
+            handles.extend([
+                (b.left + inset, b.top + inset),
+                (b.right - inset, b.top + inset),
+                (b.left + inset, b.bottom - inset),
+                (b.right - inset, b.bottom - inset),
+            ]);
+        }
+        handles
+    }
+    pub fn move_by(&mut self, dx: f32, dy: f32) {
+        self.bounds = self.bounds.moved(dx, dy);
+        for p in &mut self.points {
+            p.0 += dx;
+            p.1 += dy;
+        }
+    }
+    pub fn resize_to(&mut self, target: Bounds) {
+        let b = self.bounds;
+        for p in &mut self.points {
+            p.0 = target.left + (p.0 - b.left) / b.width().max(1.) * target.width();
+            p.1 = target.top + (p.1 - b.top) / b.height().max(1.) * target.height();
+        }
+        self.bounds = target;
+    }
+    pub fn edit_handle(&mut self, handle: usize, point: (f32, f32), scale: f32) {
+        if self.kind == Kind::HighlightLine {
+            if let Some(p) = self.points.get_mut(handle) {
+                *p = point;
+            }
+            self.refresh_bounds();
+        } else if handle >= 8 && self.kind == Kind::HighlightRectangle {
+            let b = self.bounds;
+            let x = if handle == 8 || handle == 10 {
+                point.0 - b.left
+            } else {
+                b.right - point.0
+            };
+            let y = if handle < 10 {
+                point.1 - b.top
+            } else {
+                b.bottom - point.1
+            };
+            self.style.rounding = ((x.min(y) - 10. * scale) * 2. / scale)
+                .clamp(0., b.width().min(b.height()) / 2. / scale);
+        } else {
+            self.resize_to(self.bounds.resized(handle, point));
+        }
+    }
+}
+
+fn distance(a: (f32, f32), b: (f32, f32)) -> f32 {
+    (a.0 - b.0).hypot(a.1 - b.1)
+}
+fn segment_distance(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
+    let dx = b.0 - a.0;
+    let dy = b.1 - a.1;
+    let t = (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / (dx * dx + dy * dy).max(f32::EPSILON))
+        .clamp(0., 1.);
+    distance(p, (a.0 + t * dx, a.1 + t * dy))
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -161,7 +291,9 @@ impl Session {
         !self.undo.is_empty()
     }
     pub fn add(&mut self, object: Object) -> bool {
-        if object.bounds.width() < 2. || object.bounds.height() < 2. {
+        if !matches!(object.kind, Kind::Pencil | Kind::HighlightLine)
+            && (object.bounds.width() < 2. || object.bounds.height() < 2.)
+        {
             return false;
         }
         self.undo.push(self.snapshot());
@@ -216,7 +348,7 @@ impl Session {
     }
     pub fn hit(&self, point: (f32, f32), scale: f32) -> Option<Hit> {
         if let Some(index) = self.selected {
-            for (handle, (x, y)) in self.objects[index].bounds.handles().iter().enumerate() {
+            for (handle, (x, y)) in self.objects[index].edit_handles(scale).iter().enumerate() {
                 if (point.0 - x).abs() <= 6. * scale && (point.1 - y).abs() <= 6. * scale {
                     return Some(Hit::Handle(handle));
                 }
@@ -227,6 +359,9 @@ impl Session {
             .enumerate()
             .rev()
             .find_map(|(index, object)| {
+                if matches!(object.kind, Kind::Pencil | Kind::HighlightLine) {
+                    return object.hit_path(point, scale).then_some(Hit::Object(index));
+                }
                 let b = object.bounds;
                 if point.0 < b.left - 6. * scale
                     || point.0 > b.right + 6. * scale
@@ -235,7 +370,10 @@ impl Session {
                 {
                     return None;
                 }
-                if object.style.fill || object.kind.is_spotlight() {
+                if object.style.fill
+                    || object.kind.is_spotlight()
+                    || object.kind == Kind::HighlightRectangle
+                {
                     return Some(Hit::Object(index));
                 }
                 let x = ((point.0 - b.left) / b.width().max(1.) * 2. - 1.).abs();
@@ -255,6 +393,65 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn brush(kind: Kind, points: Vec<(f32, f32)>) -> Object {
+        let mut o = Object {
+            kind,
+            points,
+            style: Style {
+                width: 12.,
+                ..Style::default()
+            },
+            bounds: Bounds::from_corners((0., 0.), (0., 0.)),
+        };
+        o.refresh_bounds();
+        o
+    }
+    #[test]
+    fn pencil_sampling_hit_transform_and_undo() {
+        let mut o = brush(Kind::Pencil, vec![(-100., -100.)]);
+        o.append_point((-100., -100.), 0.5);
+        o.append_point((-50., -100.), 0.5);
+        o.append_point((0., -100.), 0.5);
+        o.append_point((0., 0.), 0.5);
+        assert_eq!(o.points.len(), 3);
+        assert!(o.hit_path((-50., -100.), 1.));
+        assert!(!o.hit_path((-50., -50.), 1.));
+        let mut s = Session::new();
+        assert!(s.add(o.clone()));
+        s.begin_drag();
+        s.objects[0].move_by(10., 20.);
+        s.finish_drag();
+        assert!(s.undo());
+        assert_eq!(s.objects[0], o);
+        o.resize_to(Bounds::from_corners((0., 0.), (200., 200.)));
+        assert_eq!(o.points, vec![(0., 0.), (200., 0.), (200., 200.)]);
+        assert_eq!(o.style.width, 12.);
+        assert!(s.add(brush(Kind::Pencil, vec![(20., 20.)])));
+    }
+    #[test]
+    fn highlight_endpoints_rounding_and_cancel() {
+        let mut line = brush(Kind::HighlightLine, vec![(0., 0.), (100., 0.)]);
+        assert_eq!(line.edit_handles(1.).len(), 2);
+        line.edit_handle(0, (-50., 20.), 1.);
+        assert_eq!(line.points[0], (-50., 20.));
+        let mut s = Session::new();
+        assert!(s.add(line.clone()));
+        s.begin_drag();
+        s.objects[0].edit_handle(1, (200., 100.), 1.);
+        s.cancel_drag();
+        assert_eq!(s.objects[0], line);
+        let mut rect = Object {
+            kind: Kind::HighlightRectangle,
+            points: vec![],
+            style: Style::default(),
+            bounds: Bounds::from_corners((0., 0.), (100., 80.)),
+        };
+        rect.edit_handle(8, (200., 200.), 2.);
+        assert_eq!(rect.style.rounding, 20.);
+        assert_eq!(rect.edit_handles(2.).len(), 12);
+        rect.edit_handle(8, (-50., -50.), 2.);
+        assert_eq!(rect.style.rounding, 0.);
+    }
     #[test]
     fn drawing_selection_and_undo() {
         let mut s = Session::new();
@@ -262,6 +459,7 @@ mod tests {
             bounds: Bounds::from_corners((120., 80.), (-30., -20.)),
             kind: Kind::Rectangle,
             style: Style::default(),
+            points: Vec::new(),
         };
         assert!(s.add(obj));
         assert_eq!(s.objects[0].bounds.left, -30.);
@@ -284,6 +482,7 @@ mod tests {
             bounds: Bounds::from_corners((0., 0.), (100., 100.)),
             kind: Kind::SpotlightRectangle,
             style: Style::default(),
+            points: Vec::new(),
         });
         s.begin_drag();
         s.set_spotlight_opacity(0.6);

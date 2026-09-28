@@ -663,3 +663,9 @@ msgstr "Couleur personnalisée"
 
 msgid "Enter a six-digit HEX color."
 msgstr "Saisissez une couleur HEX à six chiffres."
+
+msgid "Translucent"
+msgstr "Translucide"
+
+msgid "Multiply — unavailable"
+msgstr "Produit — indisponible"

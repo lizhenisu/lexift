@@ -212,6 +212,24 @@ pub fn set_annotation_click_through(
     }
 }
 
+/// Enables the curved edit cursor on one annotation canvas HWND.
+pub fn set_annotation_corner_cursor(
+    window: &impl raw_window_handle::HasWindowHandle,
+    active: bool,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::annotation_cursor::set(window, active)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, active);
+        Err(lexift_core::Error::new(
+            "Custom annotation cursors are unavailable on this platform",
+        ))
+    }
+}
+
 /// Presents a premultiplied RGBA frame on a transparent annotation window.
 pub fn present_annotation_frame(
     window: &impl raw_window_handle::HasWindowHandle,

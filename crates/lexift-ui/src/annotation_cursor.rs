@@ -2,7 +2,7 @@
 use super::{Gesture, InteractionMode, Registry};
 use crate::AnnotationCursor;
 use lexift_core::domain::{
-    annotation::{Hit, Session},
+    annotation::{Hit, Kind, Session},
     geometry::Rect,
 };
 use slint::ComponentHandle;
@@ -52,6 +52,25 @@ fn at_point(
     } else {
         None
     };
+    if let Some(index) = session.selected {
+        let object = &session.objects[index];
+        let handle = match gesture {
+            Some(Gesture::Resize { handle, .. }) => Some(handle),
+            None => match hit {
+                Some(Hit::Handle(h)) => Some(h),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(handle) = handle {
+            if object.kind == Kind::HighlightRectangle && handle >= 8 {
+                return AnnotationCursor::CornerRadius;
+            }
+            if object.kind == Kind::HighlightLine {
+                return AnnotationCursor::Vertical;
+            }
+        }
+    }
     resolve(mode, gesture, hit)
 }
 
@@ -59,13 +78,31 @@ fn at_point(
 /// to the hovered canvas TouchArea, leaving tool windows and click-through apps alone.
 pub(super) fn refresh(r: &Registry) {
     for (index, layer) in r.canvases.iter().enumerate() {
-        let cursor = at_point(
+        let desired = at_point(
             &r.session,
             r.mode,
             r.gesture,
             layer.last_pointer,
             layer.window.window().scale_factor().max(0.1),
         );
+        let was_custom = layer.window.get_cursor() == AnnotationCursor::CornerRadius;
+        let cursor = if desired == AnnotationCursor::CornerRadius {
+            if layer.corner_cursor_failed.get() {
+                AnnotationCursor::Moving
+            } else if was_custom
+                || (r.lifecycle.annotation_corner_cursor)(layer.window.window(), true)
+            {
+                AnnotationCursor::CornerRadius
+            } else {
+                layer.corner_cursor_failed.set(true);
+                AnnotationCursor::Moving
+            }
+        } else {
+            if was_custom {
+                (r.lifecycle.annotation_corner_cursor)(layer.window.window(), false);
+            }
+            desired
+        };
         if layer.window.get_cursor() != cursor {
             layer.window.set_cursor(cursor);
             // Slint samples TouchArea.mouse-cursor before calling pointer-event.
@@ -130,6 +167,73 @@ mod tests {
     use super::*;
     use lexift_core::domain::annotation::{Bounds, Kind, Object, Style};
     const TOOL: InteractionMode = InteractionMode::Tool(0);
+
+    #[test]
+    fn highlighter_handles_keep_their_edit_cursor_during_drag() {
+        for kind in [Kind::HighlightRectangle, Kind::HighlightLine] {
+            let mut session = Session::new();
+            let bounds = Bounds::from_corners((20., 20.), (220., 120.));
+            let points = if kind == Kind::HighlightLine {
+                vec![(20., 20.), (220., 120.)]
+            } else {
+                Vec::new()
+            };
+            session.add(Object {
+                kind,
+                bounds,
+                points,
+                style: Style::default(),
+            });
+            for (handle, point) in session.objects[0].edit_handles(1.).into_iter().enumerate() {
+                if kind == Kind::HighlightRectangle && handle < 8 {
+                    continue;
+                }
+                let expected = if kind == Kind::HighlightLine {
+                    AnnotationCursor::Vertical
+                } else {
+                    AnnotationCursor::CornerRadius
+                };
+                assert_eq!(at_point(&session, TOOL, None, Some(point), 1.), expected);
+                assert_eq!(
+                    at_point(
+                        &session,
+                        TOOL,
+                        Some(Gesture::Resize {
+                            initial: bounds,
+                            index: 0,
+                            handle
+                        }),
+                        Some((500., 500.)),
+                        1.
+                    ),
+                    expected
+                );
+            }
+            let body = if kind == Kind::HighlightLine {
+                (120., 70.)
+            } else {
+                (120., 60.)
+            };
+            assert_eq!(
+                at_point(&session, TOOL, None, Some(body), 1.),
+                AnnotationCursor::Moving
+            );
+            assert_eq!(
+                at_point(
+                    &session,
+                    TOOL,
+                    Some(Gesture::Move {
+                        start: body,
+                        initial: bounds,
+                        index: 0
+                    }),
+                    Some((500., 500.)),
+                    1.
+                ),
+                AnnotationCursor::Moving
+            );
+        }
+    }
 
     #[test]
     fn all_eight_handles_have_the_correct_resize_axis() {
@@ -218,6 +322,7 @@ mod tests {
                     screen_point(display, (300., 200.), scale),
                 );
                 session.add(Object {
+                    points: Vec::new(),
                     bounds,
                     kind,
                     style: Style::default(),

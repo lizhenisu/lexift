@@ -11,7 +11,7 @@ use lexift_core::domain::{
 };
 use slint::{ComponentHandle, ModelRc, VecModel};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     hash::{Hash, Hasher},
     rc::Rc,
     time::Duration,
@@ -34,13 +34,16 @@ struct Registry {
     canvases: Vec<CanvasLayer>,
     toolbar_owner: Option<usize>,
     session: Session,
+    hovered: Option<usize>,
     gesture: Option<Gesture>,
     draft: Option<Object>,
     mode: InteractionMode,
     render_queued: bool,
     style_edit_active: bool,
+    parameter_dragging: bool,
     style_edit_revision: u64,
     pending_edit_panel: bool,
+    gesture_object: Option<Object>,
     selected: [i32; 7],
     values: Vec<AnnotationValues>,
     group: Option<usize>,
@@ -55,6 +58,7 @@ struct Registry {
 
 struct CanvasLayer {
     last_pointer: Option<(f32, f32)>,
+    corner_cursor_failed: Cell<bool>,
     window: AnnotationCanvas,
     bounds: Rect,
     signature: Option<u64>,
@@ -149,12 +153,12 @@ fn defaults(tool: i32) -> AnnotationValues {
         } else {
             4
         },
-        rounding: 21,
+        rounding: if tool == 4 { 0 } else { 21 },
         text_size: if tool == 10 { 16 } else { 22 },
         start: 1,
         strength: if tool == 2 { 10. } else { 50. },
         shape: i32::from(matches!(tool, 1 | 2 | 7)),
-        mode: i32::from(tool == 4),
+        mode: 0,
         erase: tool != 2,
         antialias: true,
         color_index: if tool == 4 {
@@ -181,13 +185,16 @@ pub(crate) fn init(
             canvases: Vec::new(),
             toolbar_owner: None,
             session: Session::new(),
+            hovered: None,
             gesture: None,
             draft: None,
             mode: InteractionMode::Tool(0),
             render_queued: false,
             style_edit_active: false,
+            parameter_dragging: false,
             style_edit_revision: 0,
             pending_edit_panel: false,
+            gesture_object: None,
             selected: [0, 4, 7, 9, 10, 11, 13],
             values: (0..14).map(defaults).collect(),
             group: None,
@@ -265,6 +272,7 @@ impl Registry {
             }
         }
         self.mode = mode;
+        self.hovered = None;
         cursor::refresh(self);
         self.sync_mode_display();
         true
@@ -282,6 +290,7 @@ impl Registry {
     }
 
     fn close_panel(&mut self) {
+        self.parameter_dragging = false;
         choice::close(self);
         self.finish_style_edit();
         self.panel_revision = self.panel_revision.wrapping_add(1);
@@ -316,6 +325,7 @@ impl Registry {
         }
         self.values = (0..14).map(defaults).collect();
         self.selected = [0, 4, 7, 9, 10, 11, 13];
+        self.hovered = None;
     }
 }
 
@@ -345,10 +355,14 @@ pub(crate) fn escape() {
             r.session.cancel_drag();
             r.gesture = None;
             r.draft = None;
+            refresh_hovered(r);
+            cursor::refresh(r);
             return Some(r.generation);
         }
         if r.session.selected.is_some() {
             r.session.selected = None;
+            refresh_hovered(r);
+            cursor::refresh(r);
             return Some(r.generation);
         }
         None
@@ -435,6 +449,7 @@ pub(crate) fn toggle() {
                 });
                 r.canvases.push(CanvasLayer {
                     last_pointer: None,
+                    corner_cursor_failed: Cell::new(false),
                     window,
                     bounds,
                     signature: None,
@@ -519,18 +534,35 @@ fn pointer_canvas(weak: slint::Weak<AnnotationCanvas>) -> crate::bridge::PopupPo
     })
 }
 
+fn palette(tool: usize) -> [[u8; 3]; 8] {
+    if tool == 4 {
+        [
+            [255, 244, 0],
+            [255, 165, 0],
+            [70, 235, 235],
+            [165, 155, 255],
+            [255, 160, 245],
+            [255, 255, 255],
+            [50, 236, 102],
+            [33, 33, 33],
+        ]
+    } else {
+        [
+            [217, 71, 43],
+            [229, 191, 85],
+            [105, 173, 97],
+            [89, 143, 223],
+            [33, 33, 33],
+            [255, 255, 255],
+            [50, 236, 102],
+            [255, 244, 0],
+        ]
+    }
+}
+
 fn current_style(r: &Registry, tool: i32) -> Style {
     let v = &r.values[tool as usize];
-    let palette = [
-        [217, 71, 43],
-        [229, 191, 85],
-        [105, 173, 97],
-        [89, 143, 223],
-        [33, 33, 33],
-        [255, 255, 255],
-        [50, 236, 102],
-        [255, 244, 0],
-    ];
+    let palette = palette(tool as usize);
     let color = if v.color_index == 8 {
         parse_hex_color(&v.custom_color).unwrap_or(palette[0])
     } else {
@@ -556,23 +588,15 @@ fn toolbar_tools(r: &Registry) -> Vec<i32> {
 
 fn adopt_selected_style(r: &mut Registry, index: usize) -> bool {
     let object = r.session.objects[index].clone();
-    let tool = if object.kind.is_spotlight() { 2 } else { 0 };
-    let palette = [
-        [217, 71, 43],
-        [229, 191, 85],
-        [105, 173, 97],
-        [89, 143, 223],
-        [33, 33, 33],
-        [255, 255, 255],
-        [50, 236, 102],
-        [255, 244, 0],
-    ];
+    let tool = object.kind.tool();
+    let group = usize::from(tool >= 3);
+    let palette = palette(tool);
     let values = &mut r.values[tool];
     values.size = object.style.width.round() as i32;
     values.rounding = object.style.rounding.round() as i32;
     values.shape = i32::from(matches!(
         object.kind,
-        Kind::Ellipse | Kind::SpotlightEllipse
+        Kind::Ellipse | Kind::SpotlightEllipse | Kind::HighlightRectangle
     ));
     values.fill = object.style.fill;
     values.style = object.style.dash as i32;
@@ -591,8 +615,8 @@ fn adopt_selected_style(r: &mut Registry, index: usize) -> bool {
         )
         .into();
     }
-    r.selected[0] = tool as i32;
-    r.set_mode(InteractionMode::Tool(0));
+    r.selected[group] = tool as i32;
+    r.set_mode(InteractionMode::Tool(group));
     if let Some(main) = &r.main {
         main.set_tools(ModelRc::new(VecModel::from(toolbar_tools(r))));
     }
@@ -614,6 +638,15 @@ fn parse_hex_color(input: &str) -> Option<[u8; 3]> {
 }
 
 fn active_kind(r: &Registry) -> Option<Kind> {
+    if r.mode == InteractionMode::Tool(1) {
+        return Some(if r.selected[1] == 3 {
+            Kind::Pencil
+        } else if r.values[4].shape == 0 {
+            Kind::HighlightLine
+        } else {
+            Kind::HighlightRectangle
+        });
+    }
     match r.selected[0] {
         0 | 1 => Some(if r.values[r.selected[0] as usize].shape == 0 {
             Kind::Rectangle
@@ -666,7 +699,17 @@ fn update_geometry_values(generation: u64, tool: i32, values: AnnotationValues) 
         }
         if let Some(kind) = kind {
             r.session.update_selected(|object| {
-                if object.kind.is_spotlight() == kind.is_spotlight() {
+                if object.kind.tool() == kind.tool() {
+                    if object.kind != kind && kind.tool() == 4 {
+                        if kind == Kind::HighlightLine {
+                            object.points = vec![
+                                (object.bounds.left, object.bounds.top),
+                                (object.bounds.right, object.bounds.bottom),
+                            ];
+                        } else {
+                            object.points.clear();
+                        }
+                    }
                     object.kind = kind;
                     object.style = style;
                 }
@@ -685,10 +728,41 @@ fn update_geometry_values(generation: u64, tool: i32, values: AnnotationValues) 
                     r.generation == generation
                         && r.style_edit_revision == revision
                         && !choice::color_dragging(r)
+                        && !r.parameter_dragging
                 }) {
                     r.finish_style_edit();
                 }
             });
+        });
+    }
+}
+
+fn update_draft(
+    r: &mut Registry,
+    start: (f32, f32),
+    point: (f32, f32),
+    kind: Kind,
+    style: Style,
+    scale: f32,
+) {
+    if kind == Kind::Pencil {
+        let object = r.draft.get_or_insert_with(|| Object {
+            bounds: Bounds::from_corners(start, start),
+            kind,
+            style,
+            points: vec![start],
+        });
+        object.append_point(point, 0.5 * scale);
+    } else {
+        r.draft = Some(Object {
+            bounds: Bounds::from_corners(start, point),
+            kind,
+            style,
+            points: if kind == Kind::HighlightLine {
+                vec![start, point]
+            } else {
+                vec![]
+            },
         });
     }
 }
@@ -703,15 +777,25 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
         let layer = r.canvases.get(index)?;
         let scale = layer.window.window().scale_factor().max(0.1);
         let point = cursor::screen_point(layer.bounds, (x, y), scale);
+        if event == 4 {
+            r.canvases[index].last_pointer = None;
+            if r.hovered.take().is_some() {
+                return Some((r.generation, false));
+            }
+            return None;
+        }
         r.canvases[index].last_pointer = Some(point);
         let mut open_geometry_panel = false;
         match event {
             0 => {
+                r.hovered = None;
                 r.finish_style_edit();
+                r.gesture_object = None;
                 match r.session.hit(point, scale) {
                     Some(Hit::Handle(handle)) => {
                         let index = r.session.selected.unwrap();
                         let initial = r.session.objects[index].bounds;
+                        r.gesture_object = Some(r.session.objects[index].clone());
                         r.session.begin_drag();
                         r.gesture = Some(Gesture::Resize {
                             initial,
@@ -723,6 +807,7 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                         r.session.selected = Some(index);
                         r.pending_edit_panel = adopt_selected_style(r, index);
                         let initial = r.session.objects[index].bounds;
+                        r.gesture_object = Some(r.session.objects[index].clone());
                         r.session.begin_drag();
                         r.gesture = Some(Gesture::Move {
                             start: point,
@@ -733,13 +818,16 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                     None => {
                         r.pending_edit_panel = false;
                         r.session.selected = None;
-                        if r.mode == InteractionMode::Tool(0)
+                        if matches!(r.mode, InteractionMode::Tool(0 | 1))
                             && let Some(kind) = active_kind(r)
                         {
                             r.gesture = Some(Gesture::Draw {
                                 start: point,
                                 kind,
-                                style: current_style(r, r.selected[0]),
+                                style: current_style(
+                                    r,
+                                    r.selected[r.mode.selected_group() as usize],
+                                ),
                             });
                         }
                     }
@@ -747,47 +835,56 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
             }
             1 => match r.gesture {
                 Some(Gesture::Draw { start, kind, style }) => {
-                    r.draft = Some(Object {
-                        bounds: Bounds::from_corners(start, point),
-                        kind,
-                        style,
-                    });
+                    update_draft(r, start, point, kind, style, scale);
                 }
                 Some(Gesture::Move {
                     start,
                     initial,
                     index,
                 }) => {
-                    r.session.objects[index].bounds =
-                        initial.moved(point.0 - start.0, point.1 - start.1);
+                    let _ = initial;
+                    if let Some(mut object) = r.gesture_object.clone() {
+                        object.move_by(point.0 - start.0, point.1 - start.1);
+                        r.session.objects[index] = object;
+                    }
                 }
                 Some(Gesture::Resize {
                     initial,
                     index,
                     handle,
                 }) => {
-                    r.session.objects[index].bounds = initial.resized(handle, point);
+                    let _ = initial;
+                    if let Some(mut object) = r.gesture_object.clone() {
+                        object.edit_handle(handle, point, scale);
+                        r.session.objects[index] = object;
+                    }
                 }
                 None => {
+                    let hovered = hovered_rectangle_at(r, point, scale);
+                    let changed = r.hovered != hovered;
+                    r.hovered = hovered;
                     cursor::refresh(r);
-                    return None;
+                    return changed.then_some((r.generation, false));
                 }
             },
             2 => {
                 open_geometry_panel = std::mem::take(&mut r.pending_edit_panel);
                 if let Some(Gesture::Draw { start, kind, style }) = r.gesture.take() {
-                    r.draft = None;
-                    r.session.add(Object {
-                        bounds: Bounds::from_corners(start, point),
-                        kind,
-                        style,
-                    });
+                    update_draft(r, start, point, kind, style, scale);
+                    if let Some(object) = r.draft.take() {
+                        r.session.add(object);
+                    }
                 } else {
                     r.session.finish_drag();
                     r.gesture = None;
+                    if let Some(index) = r.session.selected {
+                        adopt_selected_style(r, index);
+                    }
                 }
+                r.gesture_object = None;
             }
             3 => {
+                r.hovered = None;
                 r.pending_edit_panel = false;
                 r.session.cancel_drag();
                 r.gesture = None;
@@ -804,9 +901,41 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
     if let Some((generation, open)) = result {
         schedule_render(generation);
         if open {
-            later(|| open_panel(0, false));
+            later(|| {
+                let group = REGISTRY.with(|s| {
+                    s.borrow()
+                        .as_ref()
+                        .map(|r| r.mode.selected_group().max(0) as usize)
+                });
+                if let Some(group) = group {
+                    open_panel(group, false);
+                }
+            });
         }
     }
+}
+
+fn hovered_rectangle_at(r: &Registry, point: (f32, f32), scale: f32) -> Option<usize> {
+    match r.session.hit(point, scale) {
+        Some(Hit::Object(index))
+            if r.session.selected != Some(index)
+                && r.session.objects[index].kind == Kind::HighlightRectangle =>
+        {
+            Some(index)
+        }
+        _ => None,
+    }
+}
+
+fn refresh_hovered(r: &mut Registry) {
+    r.hovered = if r.mode.is_mouse() {
+        None
+    } else {
+        r.canvases.iter().find_map(|layer| {
+            let point = layer.last_pointer?;
+            hovered_rectangle_at(r, point, layer.window.window().scale_factor().max(0.1))
+        })
+    };
 }
 
 fn schedule_render(generation: u64) {
@@ -838,7 +967,13 @@ fn render_canvases(generation: u64) {
         };
         r.render_queued = false;
         for layer in &mut r.canvases {
-            let signature = render_signature(&r.session, layer.bounds, r.draft.as_ref());
+            let signature = render_signature(
+                &r.session,
+                layer.bounds,
+                layer.window.window().scale_factor(),
+                r.draft.as_ref(),
+                r.hovered,
+            );
             if layer.signature == Some(signature) {
                 continue;
             }
@@ -848,6 +983,7 @@ fn render_canvases(generation: u64) {
                 layer.bounds,
                 layer.window.window().scale_factor(),
                 r.draft.as_ref(),
+                r.hovered,
             ) {
                 (r.lifecycle.annotation_frame_presenter)(
                     layer.window.window(),
@@ -860,8 +996,15 @@ fn render_canvases(generation: u64) {
     });
 }
 
-fn render_signature(session: &Session, monitor: Rect, draft: Option<&Object>) -> u64 {
+fn render_signature(
+    session: &Session,
+    monitor: Rect,
+    scale: f32,
+    draft: Option<&Object>,
+    hovered: Option<usize>,
+) -> u64 {
     let mut hash = std::collections::hash_map::DefaultHasher::new();
+    scale.to_bits().hash(&mut hash);
     session.spotlight_opacity.to_bits().hash(&mut hash);
     session
         .objects
@@ -871,10 +1014,11 @@ fn render_signature(session: &Session, monitor: Rect, draft: Option<&Object>) ->
         .hash(&mut hash);
     for (index, object) in session.objects.iter().chain(draft).enumerate() {
         let b = object.bounds;
-        if b.right < monitor.left as f32
-            || b.left > monitor.right as f32
-            || b.bottom < monitor.top as f32
-            || b.top > monitor.bottom as f32
+        let margin = (object.style.width / 2. + 8.) * scale;
+        if b.right + margin < monitor.left as f32
+            || b.left - margin > monitor.right as f32
+            || b.bottom + margin < monitor.top as f32
+            || b.top - margin > monitor.bottom as f32
         {
             continue;
         }
@@ -890,6 +1034,10 @@ fn render_signature(session: &Session, monitor: Rect, draft: Option<&Object>) ->
         ] {
             value.to_bits().hash(&mut hash);
         }
+        for (x, y) in &object.points {
+            x.to_bits().hash(&mut hash);
+            y.to_bits().hash(&mut hash);
+        }
         object.style.color.hash(&mut hash);
         object.style.fill.hash(&mut hash);
         object.style.dash.hash(&mut hash);
@@ -898,6 +1046,7 @@ fn render_signature(session: &Session, monitor: Rect, draft: Option<&Object>) ->
     if let Some(index) = session.selected {
         index.hash(&mut hash);
     }
+    hovered.hash(&mut hash);
     hash.finish()
 }
 
@@ -934,7 +1083,8 @@ fn undo() {
         if !r.session.undo() {
             return None;
         }
-        if r.mode == InteractionMode::Tool(0)
+        refresh_hovered(r);
+        if matches!(r.mode, InteractionMode::Tool(0 | 1))
             && let Some(index) = r.session.selected
         {
             adopt_selected_style(r, index);
@@ -942,6 +1092,7 @@ fn undo() {
         if let Some(main) = &r.main {
             main.set_can_undo(r.session.can_undo());
         }
+        cursor::refresh(r);
         Some(r.generation)
     });
     if let Some(generation) = generation {
@@ -953,9 +1104,11 @@ fn delete_selected() {
         let mut slot = s.borrow_mut();
         let r = slot.as_mut()?;
         r.session.delete_selected();
+        refresh_hovered(r);
         if let Some(main) = &r.main {
             main.set_can_undo(r.session.can_undo());
         }
+        cursor::refresh(r);
         Some(r.generation)
     });
     if let Some(generation) = generation {
@@ -1104,11 +1257,28 @@ fn open_panel(group: usize, menu: bool) {
         )));
         let generation = r.generation;
         let panel_revision = r.panel_revision;
-        if !menu && group == 0 {
+        if !menu && group <= 1 {
             panel.on_values_changed(move |values| {
                 later(move || update_geometry_values(generation, tool, values))
             });
         }
+        panel.on_parameter_dragging(move |active| {
+            later(move || {
+                REGISTRY.with(|slot| {
+                    if let Some(r) = slot.borrow_mut().as_mut().filter(|r| {
+                        r.generation == generation && r.panel_revision == panel_revision
+                    }) {
+                        if active {
+                            r.finish_style_edit();
+                        }
+                        r.parameter_dragging = active;
+                        if !active {
+                            r.finish_style_edit();
+                        }
+                    }
+                })
+            });
+        });
         panel.on_selected(move |tool| {
             later(move || {
                 let selected = REGISTRY.with(|s| {
@@ -1245,6 +1415,10 @@ fn position_panel(r: &Registry) {
     let available = ((area.right - area.left) as f32 / scale).max(1.);
     let width = if panel.get_menu() {
         240f32.min(available)
+    } else if panel.get_tool() == 3 {
+        650f32.min(available)
+    } else if panel.get_tool() == 4 {
+        810f32.min(available)
     } else if panel.get_tool() <= 2 {
         960f32.min(available)
     } else {
@@ -1254,8 +1428,12 @@ fn position_panel(r: &Registry) {
     panel.set_columns(columns);
     let height = if panel.get_menu() {
         46. + GROUPS[r.group.unwrap_or(0)].len() as f32 * 42.
-    } else if panel.get_tool() <= 2 {
-        if width < 780. { 158. } else { 68. }
+    } else if panel.get_tool() <= 4 {
+        if width < if panel.get_tool() == 3 { 644. } else { 780. } {
+            158.
+        } else {
+            68.
+        }
     } else {
         80. + ((fields(panel.get_tool()).len() as f32 / columns as f32).ceil()) * 62.
     };

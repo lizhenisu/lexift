@@ -1,5 +1,6 @@
 //! Windows-specific platform adapters belong in this module.
 
+pub(super) mod annotation_cursor;
 mod autostart;
 mod clipboard;
 mod clipboard_selection;

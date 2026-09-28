@@ -663,3 +663,9 @@ msgstr "사용자 지정 색상"
 
 msgid "Enter a six-digit HEX color."
 msgstr "6자리 HEX 색상을 입력하세요."
+
+msgid "Translucent"
+msgstr "반투명"
+
+msgid "Multiply — unavailable"
+msgstr "곱하기 — 사용 불가"

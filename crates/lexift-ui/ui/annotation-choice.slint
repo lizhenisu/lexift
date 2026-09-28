@@ -4,6 +4,7 @@ import { MenuMetrics } from "design/menu.slint";
 import { LineStylePreview } from "annotation-fields.slint";
 
 export component AnnotationChoiceWindow inherits Window {
+    in property <int> disabled-index: -1;
     title: "Lexift"; no-frame: true; always-on-top: true; background: transparent;
     in property <[string]> options;
     in property <bool> lines;
@@ -53,6 +54,7 @@ export component AnnotationChoiceWindow inherits Window {
             width: parent.width - 8px; height: MenuMetrics.row-height;
             border-radius: MenuMetrics.row-radius;
             background: root.selected == i ? Colors.primary : hit.has-hover ? Colors.menu-hover : transparent;
+            opacity: i == root.disabled-index ? 0.45 : 1;
             accessible-role: list-item; accessible-label: label;
             accessible-item-selected: root.selected == i;
             accessible-action-default => { root.chosen(i); }
@@ -65,7 +67,7 @@ export component AnnotationChoiceWindow inherits Window {
                 text: label; font-size: 13px; vertical-alignment: center; overflow: elide;
                 color: root.selected == i ? Colors.on-primary : Colors.foreground;
             }
-            hit := TouchArea { clicked => { root.chosen(i); } }
+            hit := TouchArea { enabled: i != root.disabled-index; clicked => { root.chosen(i); } }
         }
     }
 }

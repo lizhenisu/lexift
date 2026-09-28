@@ -382,11 +382,22 @@ mod tests {
         settings.invoke_select_category(1);
         assert_eq!(settings.get_fallback_target_index(), 4);
         assert!(settings.get_preprocess_join_lines());
+        panel.set_menu(false);
+        for tool in [3, 4] {
+            panel.set_tool(tool);
+            panel.set_values(crate::AnnotationValues {
+                size: 12,
+                color_index: if tool == 4 { 6 } else { 0 },
+                ..Default::default()
+            });
+            snapshot(&panel_adapter, &format!("brush-{tool}-narrow"), 400, 158);
+        }
         let canvas_events = Rc::new(RefCell::new(Vec::new()));
         let recorded = canvas_events.clone();
         canvas.on_pointer(move |kind, _, _| recorded.borrow_mut().push(kind));
         let mut document = lexift_core::domain::annotation::Session::new();
         document.add(lexift_core::domain::annotation::Object {
+            points: Vec::new(),
             bounds: lexift_core::domain::annotation::Bounds::from_corners((20., 20.), (140., 90.)),
             kind: lexift_core::domain::annotation::Kind::Rectangle,
             style: Default::default(),
@@ -401,6 +412,7 @@ mod tests {
                     bottom: 120,
                 },
                 1.,
+                None,
                 None,
             )
             .unwrap(),

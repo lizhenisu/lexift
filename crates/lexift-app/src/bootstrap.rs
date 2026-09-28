@@ -216,6 +216,15 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 }
             },
         )
+        .with_annotation_corner_cursor(|window, active| {
+            match lexift_platform::set_annotation_corner_cursor(&window.window_handle(), active) {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!(%error, "annotation corner cursor could not be changed");
+                    false
+                }
+            }
+        })
         .with_toolbar_cursor_position(move || {
             screen_for_toolbar.as_ref()?.cursor_position().ok()
         })

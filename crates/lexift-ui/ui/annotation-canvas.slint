@@ -1,4 +1,4 @@
-export enum AnnotationCursor { idle, drawing, moving, horizontal, vertical, diagonal-down, diagonal-up }
+export enum AnnotationCursor { idle, drawing, moving, horizontal, vertical, diagonal-down, diagonal-up, corner-radius }
 
 // A transparent, live-desktop overlay. Pixel content is produced from Core objects in Rust.
 export component AnnotationCanvas inherits Window {
@@ -30,6 +30,7 @@ export component AnnotationCanvas inherits Window {
             if event.button == PointerEventButton.left && event.kind == PointerEventKind.up { root.pointer(2, self.mouse-x / 1px, self.mouse-y / 1px); }
             if event.kind == PointerEventKind.cancel { root.pointer(3, self.mouse-x / 1px, self.mouse-y / 1px); }
         }
+        changed has-hover => { if !self.has-hover { root.pointer(4, self.mouse-x / 1px, self.mouse-y / 1px); } }
     }
     keys := FocusScope {
         key-pressed(event) => {

@@ -21,6 +21,9 @@ export component SpinBox inherits Rectangle {
     height: 30px; background: Colors.background; border-radius: 5px; opacity: root.enabled ? 1 : 0.45;
     border-width: 1px; border-color: input.has-focus ? Colors.primary : Colors.outline;
     forward-focus: input;
+    TouchArea { enabled: root.enabled;
+        scroll-event(event) => { root.value = clamp(root.value + (event.delta-y > 0px ? 1 : -1),root.minimum,root.maximum); return accept; }
+    }
     function commit() { root.value = input.text.is-float() ? clamp(round(input.text.to-float()), root.minimum, root.maximum) : root.value; input.text = root.value; }
     changed value => { input.text = root.value; }
     input := TextInput { x: 9px; width: parent.width - 44px; height: parent.height;
@@ -101,6 +104,7 @@ export component CheckBox inherits Rectangle {
 }
 
 export component Slider inherits Rectangle {
+    callback dragging(bool);
     in-out property <float> value;
     in property <float> minimum;
     in property <float> maximum: 100;
@@ -112,7 +116,7 @@ export component Slider inherits Rectangle {
         width: 16px; height: 16px; border-radius: 8px; background: Colors.primary;
         border-width: 2px; border-color: Colors.surface; }
     TouchArea {
-        pointer-event(event) => { if event.kind == PointerEventKind.down { root.value = root.minimum + clamp((self.mouse-x - 8px)/(self.width - 16px),0,1) * (root.maximum - root.minimum); } }
+        pointer-event(event) => { if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {root.dragging(false);} if event.kind == PointerEventKind.down { root.dragging(true); root.value = root.minimum + clamp((self.mouse-x - 8px)/(self.width - 16px),0,1) * (root.maximum - root.minimum); } }
         moved => { if self.pressed { root.value = root.minimum + clamp((self.mouse-x - 8px)/(self.width - 16px),0,1) * (root.maximum - root.minimum); } }
     }
 }

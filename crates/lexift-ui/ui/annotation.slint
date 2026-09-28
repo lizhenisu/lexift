@@ -28,6 +28,7 @@ component ToolIcon inherits Path {
         : kind == 13 ? "M3 14L13 4L21 12L11 22H9ZM7 10L15 18M11 22H22"
         : kind == 14 ? "M8 4L3 9L8 14M3 9H14C23 9 23 21 14 21H9"
         : kind == 15 ? "M12 2V16M7 11L12 16L17 11M3 16V21H21V16"
+        : kind == 18 ? "M4 20L20 4"
         : kind == 17 ? "M4 2L4 21L9 16L13 22L16 20L12 14L20 13Z"
         : "M3 12L9 18L21 5";
 }
@@ -117,6 +118,7 @@ export component AnnotationPanel inherits Window {
     in property <int> tool: 0;
     in property <string> heading: @tr("Rectangle");
     in-out property <AnnotationValues> values;
+    callback parameter-dragging(bool);
     callback values-changed(AnnotationValues);
     changed values => { root.values-changed(root.values); }
     in property <int> columns: 4;
@@ -126,7 +128,7 @@ export component AnnotationPanel inherits Window {
     callback selected(int);
     callback escape-requested();
     private property <[string]> labels: [@tr("Width"), @tr("Shape"), @tr("Line style"), @tr("Corner radius"), @tr("Fill"), @tr("Intensity"), @tr("Blend mode"), @tr("Magnification"), @tr("Erase annotations"), @tr("Anti-aliasing"), @tr("Shadow"), @tr("Text"), @tr("Font"), @tr("Text size"), @tr("Arrangement"), @tr("Start at"), @tr("Sequence"), @tr("Method"), @tr("Effect")];
-    private property <[color]> palette: [#d9472b, #e5bf55, #69ad61, #598fdf, #212121, #ffffff, #32ec66, #fff400];
+    private property <[color]> palette: root.tool == 4 ? [#fff400, #ffa500, #46ebeb, #a59bff, #ffa0f5, #ffffff, #32ec66, #212121] : [#d9472b, #e5bf55, #69ad61, #598fdf, #212121, #ffffff, #32ec66, #fff400];
     forward-focus: keys;
     keys := FocusScope {
         key-pressed(event) => { if event.text == Key.Escape { root.escape-requested(); return accept; } return reject; }
@@ -144,14 +146,14 @@ export component AnnotationPanel inherits Window {
             }
             Text { height: 28px; text: @tr("Adjust — unavailable"); color: Colors.secondary-foreground; font-size: 12px; horizontal-alignment: right; vertical-alignment: center; }
         }
-        if !root.menu && root.tool <= 2: Rectangle {
+        if !root.menu && root.tool <= 4: Rectangle {
             x: 12px; y: 10px; width: parent.width - 24px; height: parent.height - 20px;
-            private property <bool> compact: self.width < 750px;
-            ToolButton { x: 0px; y: 0px; kind: 0; selected: root.values.shape == 0;
+            private property <bool> compact: self.width < (root.tool == 3 ? 620px : 750px);
+            if root.tool <= 2: ToolButton { x: 0px; y: 0px; kind: 0; selected: root.values.shape == 0;
                 clicked => { root.values.shape = 0; } }
-            ToolButton { x: 38px; y: 0px; kind: 1; selected: root.values.shape == 1;
+            if root.tool <= 2: ToolButton { x: 38px; y: 0px; kind: 1; selected: root.values.shape == 1;
                 clicked => { root.values.shape = 1; } }
-            if root.tool != 2: CheckBox {
+            if root.tool < 2: CheckBox {
                 x: 82px; y: 7px; width: 100px;
                 text: @tr("Fill"); checked <=> root.values.fill;
             }
@@ -159,8 +161,8 @@ export component AnnotationPanel inherits Window {
                 x: 82px; y: 7px; width: 100px;
                 text: @tr("Outline"); checked <=> root.values.erase;
             }
-            if root.tool != 2: ComboBox { field: 2; lines: true; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); }
-                x: 184px; y: 4px; width: 105px; height: 30px;
+            if root.tool < 2 || root.tool == 3: ComboBox { field: 2; lines: true; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); }
+                x: root.tool == 3 ? 0px : 184px; y: 4px; width: 105px; height: 30px;
                 language-revision: root.language-revision;
                 model: ["────", "— —", "····", "— ·", "— · ·"];
                 current-index <=> root.values.style;
@@ -175,21 +177,34 @@ export component AnnotationPanel inherits Window {
                 vertical-alignment: center;
             }
             SpinBox {
-                x: compact ? 0px : root.tool == 2 ? 385px : 304px;
+                x: root.tool >= 3 ? (compact ? 0px : root.tool == 3 ? 120px : 290px) : compact ? 0px : root.tool == 2 ? 385px : 304px;
                 y: compact ? 47px : 4px;
                 width: 72px; height: 30px; minimum: 1; maximum: 100;
                 value <=> root.values.size;
-                enabled: root.tool == 2 ? root.values.erase : !root.values.fill;
+                enabled: root.tool == 4 ? root.values.shape == 0 : root.tool == 2 ? root.values.erase : !root.values.fill;
             }
-            SpinBox {
+            if root.tool <= 2: SpinBox {
                 x: compact ? 82px : root.tool == 2 ? 468px : 387px;
                 y: compact ? 47px : 4px;
                 width: 72px; height: 30px; minimum: 0; maximum: 100;
                 value <=> root.values.rounding;
                 enabled: root.values.shape == 0;
             }
+            if root.tool == 4: ToolButton { x: 0px; y: 0px; kind: 18; selected: root.values.shape == 0; clicked => {root.values.shape = 0;} }
+            if root.tool == 4: ToolButton { x: 38px; y: 0px; kind: 0; selected: root.values.shape == 1; clicked => {root.values.shape = 1;} }
+            if root.tool == 4: ComboBox {
+                x: 82px; y: 4px; width: 194px; height: 30px; field: 6;
+                active-field: root.active-choice; menu-requested(request) => {root.choice-requested(request);}
+                model: [@tr("Translucent"), @tr("Multiply — unavailable")]; current-index: 0;
+            }
+            if root.tool >= 3 && (root.tool == 3 || root.values.shape == 0): Slider {
+                x: compact ? 82px : root.tool == 3 ? 200px : 370px; y: compact ? 50px : 7px; width: 100px;
+                minimum: 1; maximum: 100; value: root.values.size;
+                changed value => {root.values.size = round(self.value);}
+                dragging(active) => {root.parameter-dragging(active);}
+            }
             for ink[i] in root.palette: Rectangle {
-                x: compact ? i * 34px : (root.tool == 2 ? 558px : 480px) + i * 34px;
+                x: compact ? i * 34px : (root.tool == 3 ? 310px : root.tool == 2 ? 558px : 480px) + i * 34px;
                 y: compact ? 90px : 5px;
                 width: 28px; height: 28px; border-radius: 8px;
                 border-width: root.values.color-index == i ? 2px : 1px;
@@ -198,7 +213,7 @@ export component AnnotationPanel inherits Window {
                 TouchArea { clicked => { root.values.color-index = i; } }
             }
             custom-color := Rectangle {
-                x: compact ? 272px : (root.tool == 2 ? 830px : 752px);
+                x: compact ? 272px : (root.tool == 3 ? 582px : root.tool == 2 ? 830px : 752px);
                 y: compact ? 90px : 5px; width: 28px; height: 28px;
                 border-radius: 8px; border-width: root.values.color-index == 8 ? 2px : 1px;
                 border-color: root.values.color-index == 8 || root.active-choice == -2 ? Colors.primary : Colors.outline;
@@ -212,7 +227,7 @@ export component AnnotationPanel inherits Window {
                 } }
             }
         }
-        if !root.menu && root.tool > 2: Rectangle {
+        if !root.menu && root.tool > 4: Rectangle {
             x: 12px; y: 8px; width: parent.width - 24px; height: parent.height - 16px;
             Text { x: 0px; y: 0px; text: root.heading; color: Colors.foreground; font-size: 13px; font-weight: 600; }
             for field[i] in root.fields: Rectangle {

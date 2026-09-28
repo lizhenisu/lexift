@@ -663,3 +663,9 @@ msgstr "自訂顏色"
 
 msgid "Enter a six-digit HEX color."
 msgstr "請輸入六位十六進位顏色。"
+
+msgid "Translucent"
+msgstr "半透明"
+
+msgid "Multiply — unavailable"
+msgstr "色彩增值 — 暫不可用"

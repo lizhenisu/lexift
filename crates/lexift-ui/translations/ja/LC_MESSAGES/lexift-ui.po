@@ -663,3 +663,9 @@ msgstr "カスタムカラー"
 
 msgid "Enter a six-digit HEX color."
 msgstr "6桁のHEXカラーを入力してください。"
+
+msgid "Translucent"
+msgstr "半透明"
+
+msgid "Multiply — unavailable"
+msgstr "乗算 — 利用不可"
