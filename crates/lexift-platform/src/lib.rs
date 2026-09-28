@@ -88,6 +88,21 @@ pub fn configure_window_geometry_repair(
     }
 }
 
+/// Gives ordinary application windows native small and large resource icons.
+pub fn configure_app_window_icon(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::app_icon::configure(window)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+        Ok(())
+    }
+}
+
 /// The outer-corner treatment available for the translation popup.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PopupCornerMode {

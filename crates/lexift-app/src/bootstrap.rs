@@ -179,6 +179,15 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 }
             },
         )
+        .with_app_window_icon(|window| {
+            match lexift_platform::configure_app_window_icon(&window.window_handle()) {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::debug!(%error, "native application icon is not available yet");
+                    false
+                }
+            }
+        })
         .with_menu_window_preparation(|window| {
             match window.with_winit_window(lexift_platform::configure_menu_window) {
                 Some(Ok(())) => true,

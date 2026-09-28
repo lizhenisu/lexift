@@ -135,6 +135,7 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) tray_menu_cancelled: Rc<dyn Fn()>,
     configure_resize_background: ConfigureResizeBackground,
     configure_window_paint_repair: ConfigureWindowPaintRepair,
+    configure_app_window_icon: fn(&slint::Window) -> bool,
 }
 
 impl WindowLifecycleCallbacks {
@@ -167,6 +168,7 @@ impl WindowLifecycleCallbacks {
             tray_menu_cancelled: Rc::new(|| {}),
             configure_resize_background: Rc::new(|_, _| true),
             configure_window_paint_repair: Rc::new(|_, _| true),
+            configure_app_window_icon: |_| true,
         }
     }
 
@@ -176,6 +178,12 @@ impl WindowLifecycleCallbacks {
         callback: impl Fn(&slint::Window) -> bool + 'static,
     ) -> Self {
         self.configure_menu_window = Rc::new(callback);
+        self
+    }
+
+    /// Sets the native icon used by taskbar and window-list consumers.
+    pub fn with_app_window_icon(mut self, callback: fn(&slint::Window) -> bool) -> Self {
+        self.configure_app_window_icon = callback;
         self
     }
 
@@ -1770,6 +1778,7 @@ struct AppWindowRegistry {
     settings: Option<SettingsWindow>,
     configure_resize_background: ConfigureResizeBackground,
     configure_window_paint_repair: ConfigureWindowPaintRepair,
+    configure_app_window_icon: fn(&slint::Window) -> bool,
     latest_state: AppState,
     show_selection_demo: bool,
     handler: Option<Rc<dyn Fn(AppEvent)>>,
@@ -2063,6 +2072,34 @@ fn install_settings_platform_hooks(
     let background = install_resize_background(configure, settings.window(), color);
     let repair = configure_repair(settings.window(), window_paint_repair(settings));
     background && repair
+}
+
+fn install_app_window_icon<C: ComponentHandle + 'static>(
+    component: &C,
+    configure: fn(&slint::Window) -> bool,
+) {
+    if !configure(component.window()) {
+        retry_app_window_icon(component.as_weak(), configure, 20);
+    }
+}
+
+fn retry_app_window_icon<C: ComponentHandle + 'static>(
+    component: slint::Weak<C>,
+    configure: fn(&slint::Window) -> bool,
+    attempts: u8,
+) {
+    if attempts == 0 {
+        tracing::warn!("native application window icon could not be configured");
+        return;
+    }
+    slint::Timer::single_shot(Duration::from_millis(16), move || {
+        let Some(component) = component.upgrade() else {
+            return;
+        };
+        if !configure(component.window()) {
+            retry_app_window_icon(component.as_weak(), configure, attempts - 1);
+        }
+    });
 }
 
 fn ensure_main_window(registry: &mut AppWindowRegistry) -> Result<AppWindow, slint::PlatformError> {
@@ -2383,6 +2420,7 @@ impl Ui {
                 configure_window_paint_repair: Rc::clone(
                     &window_lifecycle.configure_window_paint_repair,
                 ),
+                configure_app_window_icon: window_lifecycle.configure_app_window_icon,
                 latest_state: initial_state.clone(),
                 show_selection_demo,
                 handler: None,
@@ -2502,8 +2540,11 @@ impl Ui {
             cancel_idle_memory_trim();
             APP_WINDOW_REGISTRY.with(|registry| {
                 let mut registry = registry.borrow_mut();
-                let main = ensure_main_window(registry.as_mut().expect("UI registry initialized"))?;
-                main.show()
+                let registry = registry.as_mut().expect("UI registry initialized");
+                let main = ensure_main_window(registry)?;
+                main.show()?;
+                install_app_window_icon(&main, registry.configure_app_window_icon);
+                Ok::<(), slint::PlatformError>(())
             })?;
         }
         slint::run_event_loop_until_quit()?;
@@ -3141,6 +3182,7 @@ impl UiHandle {
                             main.window().set_minimized(false);
                         }
                         let _ = main.show();
+                        install_app_window_icon(&main, registry.configure_app_window_icon);
                         activate_user_requested_window(main.window());
                     }
                     Err(error) => tracing::error!(%error, "main window could not be created"),
@@ -3185,6 +3227,7 @@ impl UiHandle {
                     window.window().set_minimized(false);
                 }
                 let _ = window.show();
+                install_app_window_icon(&window, registry.configure_app_window_icon);
                 let color = window.get_resize_fallback_color();
                 if !install_settings_platform_hooks(
                     &registry.configure_resize_background,
