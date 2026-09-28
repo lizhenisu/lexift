@@ -651,10 +651,10 @@ component SettingsNavItem inherits Rectangle {
         height: parent.height;
         text: root.label;
         color: root.selected ? Colors.primary : Colors.foreground;
-        font-size: root.icon-kind == 3 || root.icon-kind == 4 ? 13px : Typography.body-size;
-        font-weight: root.selected ? 700 : 600;
+        font-size: Typography.body-size;
+        font-weight: 600;
         vertical-alignment: center;
-        wrap: word-wrap;
+        wrap: no-wrap;
         overflow: elide;
     }
 
@@ -774,13 +774,13 @@ export component SettingsWindow inherits Window {
     private property <int> preview-menu-kind: 0;
     private property <length> preview-menu-scroll-y: 0px;
 
-    // Measure localized navigation text instead of breaking long words mid-label.
+    // Match the navigation text's font and leave room for the icon and both margins.
     navigation-measure := Text {
         visible: false; font-size: Typography.body-size; font-weight: 600;
         text: @tr("General") + "\n" + @tr("Hotkeys") + "\n" + @tr("Selection Assistant") + "\n" + @tr("Screenshot settings") + "\n" + @tr("Translation settings") + "\n" + @tr("Service providers");
     }
     private property <bool> expanded-navigation: root.width >= Metrics.settings-wide-nav-breakpoint;
-    private property <length> sidebar-width: root.expanded-navigation ? max(Metrics.settings-sidebar-width, navigation-measure.preferred-width + 80px) : Metrics.settings-sidebar-compact-width;
+    private property <length> sidebar-width: root.expanded-navigation ? max(Metrics.settings-sidebar-width, navigation-measure.preferred-width + 100px) : Metrics.settings-sidebar-compact-width;
     private property <bool> hotkeys-compact: root.page-width < 580px;
     private property <length> page-width: root.width - root.sidebar-width;
     private property <[string]> language-labels: [
