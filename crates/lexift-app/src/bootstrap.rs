@@ -67,6 +67,8 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
     let screen_for_popup = services.screen.clone();
     let screen_for_toolbar = services.screen.clone();
     let screen_for_annotation = services.screen.clone();
+    let magnifier_for_annotation = lexift_platform::annotation_magnifier_port();
+    let magnifier_for_refresh = magnifier_for_annotation.clone();
     let tray_for_cancel = services.tray.clone();
     let ui = lexift_ui::Ui::new(
         &initial_state,
@@ -225,6 +227,25 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 }
             },
         )
+        .with_annotation_magnifier(move |views, windows| {
+            let Some(port) = &magnifier_for_annotation else { return views.is_empty() };
+            let overlays = windows.iter()
+                .filter_map(|window| lexift_platform::annotation_window_token(&window.window_handle()))
+                .collect::<Vec<_>>();
+            match port.sync(views, &overlays) {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!(%error, "annotation magnifier could not be synchronized");
+                    false
+                }
+            }
+        }, move || {
+            let Some(port) = &magnifier_for_refresh else { return false };
+            match port.refresh() {
+                Ok(()) => true,
+                Err(error) => { tracing::warn!(%error, "annotation magnifier refresh failed"); false }
+            }
+        })
         .with_annotation_corner_cursor(|window, active| {
             match lexift_platform::set_annotation_corner_cursor(&window.window_handle(), active) {
                 Ok(()) => true,

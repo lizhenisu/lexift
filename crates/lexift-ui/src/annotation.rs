@@ -6,7 +6,10 @@ use crate::{
     placement,
 };
 use lexift_core::domain::{
-    annotation::{Bounds, Hit, Kind, Object, Session, Style},
+    annotation::{
+        Bounds, Endpoint, Extra, Hit, Kind, MagnifierConnector, Object, Session, Style,
+        magnifier_output_for_source,
+    },
     geometry::{Point, Rect},
 };
 use slint::{ComponentHandle, ModelRc, VecModel};
@@ -14,7 +17,7 @@ use std::{
     cell::{Cell, RefCell},
     hash::{Hash, Hasher},
     rc::Rc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[path = "annotation_choice.rs"]
@@ -37,8 +40,15 @@ struct Registry {
     hovered: Option<usize>,
     gesture: Option<Gesture>,
     draft: Option<Object>,
+    arrow_pending: Option<ArrowPending>,
+    polyline: Option<Object>,
+    last_polyline_click: Option<(Instant, (f32, f32))>,
     mode: InteractionMode,
     render_queued: bool,
+    magnifier_sync: MagnifierSync,
+    magnifier_sync_revision: u64,
+    first_magnifier_timing: Option<FirstMagnifierTiming>,
+    first_magnifier_measured: bool,
     style_edit_active: bool,
     parameter_dragging: bool,
     style_edit_revision: u64,
@@ -51,6 +61,7 @@ struct Registry {
     lifecycle: WindowLifecycleCallbacks,
     timer: slint::Timer,
     layout_timer: slint::Timer,
+    magnifier_timer: slint::Timer,
     generation: u64,
     panel_revision: u64,
     status: String,
@@ -62,6 +73,63 @@ struct CanvasLayer {
     window: AnnotationCanvas,
     bounds: Rect,
     signature: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MagnifierSync {
+    Cold,
+    Pending(u64),
+    Live,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MagnifierFrameAction {
+    Clear,
+    Defer(u64),
+    Sync,
+    Wait,
+}
+
+fn magnifier_frame_action(
+    state: &mut MagnifierSync,
+    revision: &mut u64,
+    has_views: bool,
+) -> MagnifierFrameAction {
+    if !has_views {
+        *revision = revision.wrapping_add(1);
+        *state = MagnifierSync::Cold;
+        return MagnifierFrameAction::Clear;
+    }
+    match state {
+        MagnifierSync::Cold => {
+            *revision = revision.wrapping_add(1);
+            *state = MagnifierSync::Pending(*revision);
+            MagnifierFrameAction::Defer(*revision)
+        }
+        MagnifierSync::Live => MagnifierFrameAction::Sync,
+        MagnifierSync::Pending(_) | MagnifierSync::Failed => MagnifierFrameAction::Wait,
+    }
+}
+
+struct FirstMagnifierTiming {
+    first_move: Instant,
+    frame_start: Option<Instant>,
+    raster: Duration,
+    present: Duration,
+    border_submitted: Option<Instant>,
+}
+
+impl FirstMagnifierTiming {
+    fn new() -> Self {
+        Self {
+            first_move: Instant::now(),
+            frame_start: None,
+            raster: Duration::ZERO,
+            present: Duration::ZERO,
+            border_submitted: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,10 +153,14 @@ impl InteractionMode {
 
 #[derive(Clone, Copy)]
 enum Gesture {
+    PlacePoint,
+    FinishArrow,
     Draw {
         start: (f32, f32),
         kind: Kind,
         style: Style,
+        start_scale: f32,
+        max_distance: f32,
     },
     Move {
         start: (f32, f32),
@@ -100,6 +172,24 @@ enum Gesture {
         index: usize,
         handle: usize,
     },
+}
+
+#[derive(Clone)]
+struct ArrowPending {
+    start: (f32, f32),
+    style: Style,
+    start_scale: f32,
+    values: AnnotationValues,
+}
+
+impl ArrowPending {
+    fn preview(&self, end: (f32, f32)) -> Object {
+        arrow_draft(self.start, end, self.style, &self.values)
+    }
+
+    fn finish(&self, end: (f32, f32)) -> Option<Object> {
+        arrow_endpoint_valid(self.start, end, self.start_scale).then(|| self.preview(end))
+    }
 }
 
 const GROUPS: [&[i32]; 7] = [
@@ -157,7 +247,10 @@ fn defaults(tool: i32) -> AnnotationValues {
         text_size: if tool == 10 { 16 } else { 22 },
         start: 1,
         strength: if tool == 2 { 10. } else { 50. },
-        shape: i32::from(matches!(tool, 1 | 2 | 7)),
+        shape: i32::from(matches!(tool, 1 | 2)),
+        zoom: if tool == 7 { 150 } else { 0 },
+        head: tool == 5,
+        line_end: if tool == 5 { 3 } else { 0 },
         mode: 0,
         erase: tool != 2,
         antialias: true,
@@ -188,8 +281,15 @@ pub(crate) fn init(
             hovered: None,
             gesture: None,
             draft: None,
+            arrow_pending: None,
+            polyline: None,
+            last_polyline_click: None,
             mode: InteractionMode::Tool(0),
             render_queued: false,
+            magnifier_sync: MagnifierSync::Cold,
+            magnifier_sync_revision: 0,
+            first_magnifier_timing: None,
+            first_magnifier_measured: false,
             style_edit_active: false,
             parameter_dragging: false,
             style_edit_revision: 0,
@@ -202,6 +302,7 @@ pub(crate) fn init(
             lifecycle,
             timer: slint::Timer::default(),
             layout_timer: slint::Timer::default(),
+            magnifier_timer: slint::Timer::default(),
             generation: 0,
             panel_revision: 0,
             status: "Unavailable".into(),
@@ -272,6 +373,24 @@ impl Registry {
             }
         }
         self.mode = mode;
+        if mode != InteractionMode::Tool(2) {
+            self.arrow_pending = None;
+            if matches!(
+                self.gesture,
+                Some(
+                    Gesture::FinishArrow
+                        | Gesture::Draw {
+                            kind: Kind::Arrow,
+                            ..
+                        }
+                )
+            ) {
+                self.gesture = None;
+            }
+            self.polyline = None;
+            self.last_polyline_click = None;
+            self.draft = None;
+        }
         self.hovered = None;
         cursor::refresh(self);
         self.sync_mode_display();
@@ -306,12 +425,21 @@ impl Registry {
     }
     fn close(&mut self) {
         self.close_panel();
+        (self.lifecycle.annotation_magnifier_sync)(&[], &[]);
         self.generation = self.generation.wrapping_add(1);
         self.timer.stop();
         self.layout_timer.stop();
+        self.magnifier_timer.stop();
         self.gesture = None;
         self.draft = None;
+        self.arrow_pending = None;
+        self.polyline = None;
+        self.last_polyline_click = None;
         self.render_queued = false;
+        self.magnifier_sync = MagnifierSync::Cold;
+        self.magnifier_sync_revision = self.magnifier_sync_revision.wrapping_add(1);
+        self.first_magnifier_timing = None;
+        self.first_magnifier_measured = false;
         self.style_edit_active = false;
         self.pending_edit_panel = false;
         self.mode = InteractionMode::Tool(0);
@@ -355,7 +483,21 @@ pub(crate) fn escape() {
             r.session.cancel_drag();
             r.gesture = None;
             r.draft = None;
+            r.arrow_pending = None;
+            r.polyline = None;
+            r.last_polyline_click = None;
             refresh_hovered(r);
+            cursor::refresh(r);
+            return Some(r.generation);
+        }
+        if r.polyline.take().is_some() {
+            r.last_polyline_click = None;
+            r.draft = None;
+            cursor::refresh(r);
+            return Some(r.generation);
+        }
+        if r.arrow_pending.take().is_some() {
+            r.draft = None;
             cursor::refresh(r);
             return Some(r.generation);
         }
@@ -391,6 +533,48 @@ pub(crate) fn escape() {
     }
 }
 
+fn finish_polyline() {
+    let generation = REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let r = slot.as_mut()?;
+        let object = r.polyline.take()?;
+        r.last_polyline_click = None;
+        r.draft = None;
+        if object.points.len() >= if object.style.fill { 3 } else { 2 } {
+            r.session.add(object);
+        }
+        if let Some(main) = &r.main {
+            main.set_can_undo(r.session.can_undo());
+        }
+        cursor::refresh(r);
+        Some(r.generation)
+    });
+    if let Some(generation) = generation {
+        schedule_render(generation);
+    }
+}
+
+fn backspace_polyline() {
+    let generation = REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let r = slot.as_mut()?;
+        let polyline = r.polyline.as_mut()?;
+        polyline.points.pop();
+        if polyline.points.is_empty() {
+            r.polyline = None;
+            r.draft = None;
+        } else {
+            polyline.refresh_bounds();
+            r.draft = r.polyline.clone();
+        }
+        r.last_polyline_click = None;
+        Some(r.generation)
+    });
+    if let Some(generation) = generation {
+        schedule_render(generation);
+    }
+}
+
 pub(crate) fn toggle() {
     if is_open() {
         close();
@@ -408,6 +592,8 @@ pub(crate) fn toggle() {
         main.on_operate_requested(|| later(activate_mouse_mode));
         main.on_undo_requested(|| later(undo));
         main.on_delete_requested(|| later(delete_selected));
+        main.on_finish_path_requested(|| later(finish_polyline));
+        main.on_backspace_requested(|| later(backspace_polyline));
         main.on_finish_requested(|| later(close));
         main.on_escape_requested(|| later(escape));
         main.on_drag_requested(|| {
@@ -443,6 +629,8 @@ pub(crate) fn toggle() {
                 window.on_escape_requested(|| later(escape));
                 window.on_undo_requested(|| later(undo));
                 window.on_delete_requested(|| later(delete_selected));
+                window.on_finish_path_requested(|| later(finish_polyline));
+                window.on_backspace_requested(|| later(backspace_polyline));
                 window.window().on_close_requested(|| {
                     later(close);
                     slint::CloseRequestResponse::KeepWindowShown
@@ -589,7 +777,7 @@ fn toolbar_tools(r: &Registry) -> Vec<i32> {
 fn adopt_selected_style(r: &mut Registry, index: usize) -> bool {
     let object = r.session.objects[index].clone();
     let tool = object.kind.tool();
-    let group = usize::from(tool >= 3);
+    let group = if tool >= 5 { 2 } else { usize::from(tool >= 3) };
     let palette = palette(tool);
     let values = &mut r.values[tool];
     values.size = object.style.width.round() as i32;
@@ -598,9 +786,52 @@ fn adopt_selected_style(r: &mut Registry, index: usize) -> bool {
         object.kind,
         Kind::Ellipse | Kind::SpotlightEllipse | Kind::HighlightRectangle
     ));
+    match &object.extra {
+        Extra::Arrow {
+            curved,
+            head,
+            start,
+            end,
+        } => {
+            values.shape = i32::from(*curved);
+            values.head = *head;
+            values.line_start = endpoint_index(*start);
+            values.line_end = endpoint_index(*end);
+        }
+        Extra::Polyline {
+            curved,
+            head,
+            start,
+            end,
+        } => {
+            values.shape = i32::from(*curved);
+            values.head = *head;
+            values.line_start = endpoint_index(*start);
+            values.line_end = endpoint_index(*end);
+        }
+        Extra::Magnifier {
+            zoom,
+            ellipse,
+            connector,
+            erase_annotations,
+            antialias,
+            shadow,
+            ..
+        } => {
+            values.shape = i32::from(*ellipse);
+            values.zoom = (zoom * 100.).round() as i32;
+            values.connector_style = connector_index(*connector);
+            values.erase = *erase_annotations;
+            values.antialias = *antialias;
+            values.shadow = *shadow;
+        }
+        Extra::None => {}
+    }
     values.fill = object.style.fill;
     values.style = object.style.dash as i32;
-    values.erase = object.style.outline;
+    if tool != 7 {
+        values.erase = object.style.outline;
+    }
     values.strength = r.session.spotlight_opacity * 100.;
     if let Some(i) = palette
         .iter()
@@ -637,6 +868,52 @@ fn parse_hex_color(input: &str) -> Option<[u8; 3]> {
     color::parse_hex(input)
 }
 
+fn endpoint(index: i32) -> Endpoint {
+    match index {
+        1 => Endpoint::OpenArrow,
+        2 => Endpoint::Arrow,
+        3 => Endpoint::FilledArrow,
+        4 => Endpoint::Circle,
+        5 => Endpoint::OpenCircle,
+        6 => Endpoint::Diamond,
+        7 => Endpoint::OpenDiamond,
+        8 => Endpoint::Bar,
+        _ => Endpoint::None,
+    }
+}
+
+fn endpoint_index(value: Endpoint) -> i32 {
+    match value {
+        Endpoint::None => 0,
+        Endpoint::OpenArrow => 1,
+        Endpoint::Arrow => 2,
+        Endpoint::FilledArrow => 3,
+        Endpoint::Circle => 4,
+        Endpoint::OpenCircle => 5,
+        Endpoint::Diamond => 6,
+        Endpoint::OpenDiamond => 7,
+        Endpoint::Bar => 8,
+    }
+}
+
+fn magnifier_connector(index: i32) -> MagnifierConnector {
+    match index {
+        1 => MagnifierConnector::Dot,
+        2 => MagnifierConnector::Frame,
+        3 => MagnifierConnector::None,
+        _ => MagnifierConnector::Plain,
+    }
+}
+
+fn connector_index(value: MagnifierConnector) -> i32 {
+    match value {
+        MagnifierConnector::Plain => 0,
+        MagnifierConnector::Dot => 1,
+        MagnifierConnector::Frame => 2,
+        MagnifierConnector::None => 3,
+    }
+}
+
 fn active_kind(r: &Registry) -> Option<Kind> {
     if r.mode == InteractionMode::Tool(1) {
         return Some(if r.selected[1] == 3 {
@@ -645,6 +922,13 @@ fn active_kind(r: &Registry) -> Option<Kind> {
             Kind::HighlightLine
         } else {
             Kind::HighlightRectangle
+        });
+    }
+    if r.mode == InteractionMode::Tool(2) {
+        return Some(match r.selected[2] {
+            5 => Kind::Arrow,
+            6 => Kind::Polyline,
+            _ => Kind::Magnifier,
         });
     }
     match r.selected[0] {
@@ -694,6 +978,7 @@ fn update_geometry_values(generation: u64, tool: i32, values: AnnotationValues) 
             ));
         }
         let kind = active_kind(r);
+        let edited = r.values[tool as usize].clone();
         if tool == 2 {
             r.session.set_spotlight_opacity(r.values[2].strength / 100.);
         }
@@ -712,6 +997,45 @@ fn update_geometry_values(generation: u64, tool: i32, values: AnnotationValues) 
                     }
                     object.kind = kind;
                     object.style = style;
+                    match kind {
+                        Kind::Arrow => {
+                            if let Extra::Arrow {
+                                head, start, end, ..
+                            } = &mut object.extra
+                            {
+                                *head = edited.head;
+                                *start = endpoint(edited.line_start);
+                                *end = endpoint(edited.line_end);
+                            }
+                        }
+                        Kind::Polyline => {
+                            object.extra = Extra::Polyline {
+                                curved: edited.shape == 1,
+                                head: edited.head,
+                                start: endpoint(edited.line_start),
+                                end: endpoint(edited.line_end),
+                            };
+                        }
+                        Kind::Magnifier => {
+                            object.set_magnifier_zoom_centered(edited.zoom as f32 / 100.);
+                            if let Extra::Magnifier {
+                                ellipse,
+                                connector,
+                                erase_annotations,
+                                antialias,
+                                shadow,
+                                ..
+                            } = &mut object.extra
+                            {
+                                *ellipse = edited.shape == 1;
+                                *connector = magnifier_connector(edited.connector_style);
+                                *erase_annotations = edited.erase;
+                                *antialias = edited.antialias;
+                                *shadow = edited.shadow;
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             });
         }
@@ -751,20 +1075,119 @@ fn update_draft(
             kind,
             style,
             points: vec![start],
+            extra: Extra::None,
         });
         object.append_point(point, 0.5 * scale);
+    } else if kind == Kind::Arrow {
+        r.draft = Some(arrow_draft(start, point, style, &r.values[5]));
     } else {
-        r.draft = Some(Object {
-            bounds: Bounds::from_corners(start, point),
-            kind,
-            style,
-            points: if kind == Kind::HighlightLine {
-                vec![start, point]
+        let tool = kind.tool();
+        let values = &r.values[tool];
+        let bounds = Bounds::from_corners(start, point);
+        let extra = match kind {
+            // The drag previews only the source outline. Sampling starts on release.
+            Kind::Magnifier => Extra::None,
+            _ => Extra::None,
+        };
+        let points = match kind {
+            Kind::HighlightLine => vec![start, point],
+            _ => vec![],
+        };
+        let draft_kind = if kind == Kind::Magnifier {
+            if values.shape == 1 {
+                Kind::Ellipse
             } else {
-                vec![]
-            },
+                Kind::Rectangle
+            }
+        } else {
+            kind
+        };
+        let mut draft_style = style;
+        if kind == Kind::Magnifier {
+            draft_style.rounding = 0.;
+        }
+        r.draft = Some(Object {
+            bounds,
+            kind: draft_kind,
+            style: draft_style,
+            points,
+            extra,
         });
     }
+}
+
+fn arrow_draft(
+    start: (f32, f32),
+    end: (f32, f32),
+    style: Style,
+    values: &AnnotationValues,
+) -> Object {
+    Object {
+        bounds: Bounds::from_corners(start, end),
+        kind: Kind::Arrow,
+        style,
+        points: vec![start, end],
+        extra: Extra::Arrow {
+            curved: false,
+            head: values.head,
+            start: endpoint(values.line_start),
+            end: endpoint(values.line_end),
+        },
+    }
+}
+
+fn arrow_distance(a: (f32, f32), b: (f32, f32)) -> f32 {
+    (a.0 - b.0).hypot(a.1 - b.1)
+}
+
+fn arrow_endpoint_valid(start: (f32, f32), end: (f32, f32), scale: f32) -> bool {
+    arrow_distance(start, end) >= 3. * scale
+}
+
+fn arrow_drag_commits(start: (f32, f32), end: (f32, f32), max_distance: f32, scale: f32) -> bool {
+    max_distance.max(arrow_distance(start, end)) > 3. * scale
+        && arrow_endpoint_valid(start, end, scale)
+}
+
+/// Adds a tentative endpoint only after the pointer leaves the confirmed node.
+fn polyline_preview(polyline: &Object, point: (f32, f32), scale: f32) -> Object {
+    let mut draft = polyline.clone();
+    if polyline
+        .points
+        .last()
+        .is_some_and(|last| (point.0 - last.0).hypot(point.1 - last.1) > 2. * scale)
+    {
+        draft.points.push(point);
+        draft.refresh_bounds();
+    }
+    draft
+}
+
+fn magnifier_from_source(
+    source: Bounds,
+    style: Style,
+    values: &AnnotationValues,
+) -> Option<Object> {
+    let zoom = (values.zoom as f32 / 100.).clamp(1., 8.);
+    if source.width() < 2. || source.height() < 2. {
+        return None;
+    }
+    let output = magnifier_output_for_source(source, zoom);
+    Some(Object {
+        bounds: source,
+        kind: Kind::Magnifier,
+        style,
+        points: Vec::new(),
+        extra: Extra::Magnifier {
+            output,
+            zoom,
+            ellipse: values.shape == 1,
+            connector: magnifier_connector(values.connector_style),
+            erase_annotations: values.erase,
+            antialias: values.antialias,
+            shadow: values.shadow,
+        },
+    })
 }
 
 fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
@@ -779,6 +1202,9 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
         let point = cursor::screen_point(layer.bounds, (x, y), scale);
         if event == 4 {
             r.canvases[index].last_pointer = None;
+            if r.polyline.is_some() {
+                r.draft = r.polyline.clone();
+            }
             if r.hovered.take().is_some() {
                 return Some((r.generation, false));
             }
@@ -791,50 +1217,112 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 r.hovered = None;
                 r.finish_style_edit();
                 r.gesture_object = None;
-                match r.session.hit(point, scale) {
-                    Some(Hit::Handle(handle)) => {
-                        let index = r.session.selected.unwrap();
-                        let initial = r.session.objects[index].bounds;
-                        r.gesture_object = Some(r.session.objects[index].clone());
-                        r.session.begin_drag();
-                        r.gesture = Some(Gesture::Resize {
-                            initial,
-                            index,
-                            handle,
-                        });
-                    }
-                    Some(Hit::Object(index)) => {
-                        r.session.selected = Some(index);
-                        r.pending_edit_panel = adopt_selected_style(r, index);
-                        let initial = r.session.objects[index].bounds;
-                        r.gesture_object = Some(r.session.objects[index].clone());
-                        r.session.begin_drag();
-                        r.gesture = Some(Gesture::Move {
-                            start: point,
-                            initial,
-                            index,
-                        });
-                    }
-                    None => {
-                        r.pending_edit_panel = false;
-                        r.session.selected = None;
-                        if matches!(r.mode, InteractionMode::Tool(0 | 1))
-                            && let Some(kind) = active_kind(r)
-                        {
-                            r.gesture = Some(Gesture::Draw {
-                                start: point,
-                                kind,
-                                style: current_style(
-                                    r,
-                                    r.selected[r.mode.selected_group() as usize],
-                                ),
+                // A pending arrow may end over another object; finish it before hit testing.
+                if r.arrow_pending.is_some() {
+                    r.gesture = Some(Gesture::FinishArrow);
+                } else if r.polyline.is_some()
+                    || (r.mode == InteractionMode::Tool(2)
+                        && r.selected[2] == 6
+                        && r.session.hit(point, scale).is_none())
+                {
+                    r.session.selected = None;
+                    r.gesture = Some(Gesture::PlacePoint);
+                } else {
+                    match r.session.hit(point, scale) {
+                        Some(Hit::Handle(handle)) => {
+                            let index = r.session.selected.unwrap();
+                            let initial = r.session.objects[index].bounds;
+                            r.gesture_object = Some(r.session.objects[index].clone());
+                            r.session.begin_drag();
+                            r.gesture = Some(Gesture::Resize {
+                                initial,
+                                index,
+                                handle,
                             });
+                        }
+                        Some(Hit::Object(index)) => {
+                            r.session.selected = Some(index);
+                            r.pending_edit_panel = adopt_selected_style(r, index);
+                            let initial = r.session.objects[index].bounds;
+                            r.gesture_object = Some(r.session.objects[index].clone());
+                            r.session.begin_drag();
+                            r.gesture = Some(Gesture::Move {
+                                start: point,
+                                initial,
+                                index,
+                            });
+                        }
+                        None => {
+                            r.pending_edit_panel = false;
+                            r.session.selected = None;
+                            if matches!(r.mode, InteractionMode::Tool(0..=2))
+                                && let Some(kind) = active_kind(r)
+                            {
+                                if kind == Kind::Magnifier
+                                    && matches!(r.magnifier_sync, MagnifierSync::Pending(_))
+                                    && r.draft.is_none()
+                                    && !r
+                                        .session
+                                        .objects
+                                        .iter()
+                                        .any(|object| object.kind == Kind::Magnifier)
+                                {
+                                    // A cancelled preview may still have a queued native
+                                    // callback. A new gesture must receive its own border frame.
+                                    r.magnifier_sync_revision =
+                                        r.magnifier_sync_revision.wrapping_add(1);
+                                    r.magnifier_sync = MagnifierSync::Cold;
+                                    r.first_magnifier_timing = None;
+                                }
+                                r.gesture = Some(Gesture::Draw {
+                                    start: point,
+                                    kind,
+                                    style: current_style(
+                                        r,
+                                        r.selected[r.mode.selected_group() as usize],
+                                    ),
+                                    start_scale: scale,
+                                    max_distance: 0.,
+                                });
+                            }
                         }
                     }
                 }
             }
             1 => match r.gesture {
-                Some(Gesture::Draw { start, kind, style }) => {
+                Some(Gesture::PlacePoint) => {
+                    if let Some(polyline) = &r.polyline {
+                        r.draft = Some(polyline_preview(polyline, point, scale));
+                    }
+                }
+                Some(Gesture::FinishArrow) => {
+                    if let Some(pending) = &r.arrow_pending {
+                        r.draft = Some(pending.preview(point));
+                    }
+                }
+                Some(Gesture::Draw {
+                    start,
+                    kind,
+                    style,
+                    start_scale,
+                    max_distance,
+                }) => {
+                    if kind == Kind::Arrow {
+                        r.gesture = Some(Gesture::Draw {
+                            start,
+                            kind,
+                            style,
+                            start_scale,
+                            max_distance: max_distance.max(arrow_distance(start, point)),
+                        });
+                    }
+                    if kind == Kind::Magnifier
+                        && r.magnifier_sync == MagnifierSync::Cold
+                        && !r.first_magnifier_measured
+                        && r.first_magnifier_timing.is_none()
+                    {
+                        r.first_magnifier_timing = Some(FirstMagnifierTiming::new());
+                    }
                     update_draft(r, start, point, kind, style, scale);
                 }
                 Some(Gesture::Move {
@@ -844,7 +1332,7 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 }) => {
                     let _ = initial;
                     if let Some(mut object) = r.gesture_object.clone() {
-                        object.move_by(point.0 - start.0, point.1 - start.1);
+                        object.move_from(start, point.0 - start.0, point.1 - start.1);
                         r.session.objects[index] = object;
                     }
                 }
@@ -860,7 +1348,15 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                     }
                 }
                 None => {
-                    let hovered = hovered_rectangle_at(r, point, scale);
+                    if let Some(pending) = &r.arrow_pending {
+                        r.draft = Some(pending.preview(point));
+                        return Some((r.generation, false));
+                    }
+                    if let Some(polyline) = &r.polyline {
+                        r.draft = Some(polyline_preview(polyline, point, scale));
+                        return Some((r.generation, false));
+                    }
+                    let hovered = hovered_geometry_at(&r.session, point, scale);
                     let changed = r.hovered != hovered;
                     r.hovered = hovered;
                     cursor::refresh(r);
@@ -869,10 +1365,97 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
             },
             2 => {
                 open_geometry_panel = std::mem::take(&mut r.pending_edit_panel);
-                if let Some(Gesture::Draw { start, kind, style }) = r.gesture.take() {
-                    update_draft(r, start, point, kind, style, scale);
-                    if let Some(object) = r.draft.take() {
+                if matches!(r.gesture, Some(Gesture::FinishArrow)) {
+                    r.gesture = None;
+                    if let Some(object) = r
+                        .arrow_pending
+                        .as_ref()
+                        .and_then(|pending| pending.finish(point))
+                    {
                         r.session.add(object);
+                        r.arrow_pending = None;
+                    }
+                    r.draft = None;
+                } else if matches!(r.gesture, Some(Gesture::PlacePoint)) {
+                    r.gesture = None;
+                    let double_click = r.last_polyline_click.is_some_and(|(time, last)| {
+                        time.elapsed() <= Duration::from_millis(350)
+                            && (point.0 - last.0).hypot(point.1 - last.1) <= 6. * scale
+                    });
+                    if double_click {
+                        if let Some(object) = r.polyline.take()
+                            && object.points.len() >= if object.style.fill { 3 } else { 2 }
+                        {
+                            r.session.add(object);
+                        }
+                        r.draft = None;
+                        r.last_polyline_click = None;
+                    } else {
+                        if r.polyline.is_none() {
+                            let values = &r.values[6];
+                            r.polyline = Some(Object {
+                                bounds: Bounds::from_corners(point, point),
+                                kind: Kind::Polyline,
+                                style: current_style(r, 6),
+                                points: Vec::new(),
+                                extra: Extra::Polyline {
+                                    curved: values.shape == 1,
+                                    head: values.head,
+                                    start: endpoint(values.line_start),
+                                    end: endpoint(values.line_end),
+                                },
+                            });
+                        }
+                        if let Some(polyline) = r.polyline.as_mut() {
+                            polyline.points.push(point);
+                            polyline.refresh_bounds();
+                            r.draft = Some(polyline.clone());
+                        }
+                        r.last_polyline_click = Some((Instant::now(), point));
+                    }
+                } else if let Some(Gesture::Draw {
+                    start,
+                    kind,
+                    style,
+                    start_scale,
+                    max_distance,
+                }) = r.gesture.take()
+                {
+                    if kind == Kind::Arrow {
+                        if arrow_drag_commits(start, point, max_distance, start_scale) {
+                            r.session
+                                .add(arrow_draft(start, point, style, &r.values[5]));
+                            r.draft = None;
+                        } else {
+                            r.arrow_pending = Some(ArrowPending {
+                                start,
+                                style,
+                                start_scale,
+                                values: r.values[5].clone(),
+                            });
+                            r.draft = None;
+                        }
+                    } else if kind == Kind::Magnifier {
+                        update_draft(r, start, point, kind, style, scale);
+                        let _ = r.draft.take();
+                        if r.magnifier_sync == MagnifierSync::Cold
+                            && !r.first_magnifier_measured
+                            && r.first_magnifier_timing.is_none()
+                        {
+                            r.first_magnifier_timing = Some(FirstMagnifierTiming::new());
+                        }
+                        if let Some(object) = magnifier_from_source(
+                            Bounds::from_corners(start, point),
+                            style,
+                            &r.values[7],
+                        ) {
+                            r.session.add(object);
+                        }
+                    } else {
+                        update_draft(r, start, point, kind, style, scale);
+                        if let Some(object) = r.draft.take() {
+                            r.session.add(object);
+                        }
                     }
                 } else {
                     r.session.finish_drag();
@@ -889,6 +1472,8 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 r.session.cancel_drag();
                 r.gesture = None;
                 r.draft = None;
+                r.arrow_pending = None;
+                r.polyline = None;
             }
             _ => return None,
         }
@@ -915,11 +1500,14 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
     }
 }
 
-fn hovered_rectangle_at(r: &Registry, point: (f32, f32), scale: f32) -> Option<usize> {
-    match r.session.hit(point, scale) {
+fn hovered_geometry_at(session: &Session, point: (f32, f32), scale: f32) -> Option<usize> {
+    match session.hit(point, scale) {
         Some(Hit::Object(index))
-            if r.session.selected != Some(index)
-                && r.session.objects[index].kind == Kind::HighlightRectangle =>
+            if session.selected != Some(index)
+                && matches!(
+                    session.objects[index].kind,
+                    Kind::Rectangle | Kind::Ellipse | Kind::HighlightRectangle
+                ) =>
         {
             Some(index)
         }
@@ -933,7 +1521,11 @@ fn refresh_hovered(r: &mut Registry) {
     } else {
         r.canvases.iter().find_map(|layer| {
             let point = layer.last_pointer?;
-            hovered_rectangle_at(r, point, layer.window.window().scale_factor().max(0.1))
+            hovered_geometry_at(
+                &r.session,
+                point,
+                layer.window.window().scale_factor().max(0.1),
+            )
         })
     };
 }
@@ -960,13 +1552,67 @@ fn schedule_render(generation: u64) {
 }
 
 fn render_canvases(generation: u64) {
-    REGISTRY.with(|s| {
+    let deferred_revision = REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
-        let Some(r) = slot.as_mut().filter(|r| r.generation == generation) else {
-            return;
-        };
+        let r = slot.as_mut().filter(|r| r.generation == generation)?;
         r.render_queued = false;
-        for layer in &mut r.canvases {
+        if r.canvases.is_empty() {
+            return None;
+        }
+        let views = magnifier_views(&r.session, r.draft.as_ref());
+        let drawing_magnifier = matches!(
+            r.gesture,
+            Some(Gesture::Draw {
+                kind: Kind::Magnifier,
+                ..
+            })
+        );
+        let had_native_state = r.magnifier_sync != MagnifierSync::Cold;
+        let deferred_revision = match magnifier_frame_action(
+            &mut r.magnifier_sync,
+            &mut r.magnifier_sync_revision,
+            !views.is_empty(),
+        ) {
+            MagnifierFrameAction::Clear => {
+                if !drawing_magnifier {
+                    r.first_magnifier_timing = None;
+                }
+                if had_native_state {
+                    sync_magnifier_views(r, &views);
+                }
+                None
+            }
+            MagnifierFrameAction::Defer(revision) => {
+                if !r.first_magnifier_measured {
+                    let timing = r
+                        .first_magnifier_timing
+                        .get_or_insert_with(FirstMagnifierTiming::new);
+                    timing.frame_start.get_or_insert_with(Instant::now);
+                }
+                Some(revision)
+            }
+            MagnifierFrameAction::Sync => {
+                sync_magnifier_views(r, &views);
+                None
+            }
+            MagnifierFrameAction::Wait => None,
+        };
+        let measure_first_frame = r
+            .first_magnifier_timing
+            .as_ref()
+            .is_some_and(|timing| timing.border_submitted.is_none());
+        if measure_first_frame && let Some(timing) = r.first_magnifier_timing.as_mut() {
+            timing.frame_start.get_or_insert_with(Instant::now);
+        }
+        let active_canvas = r
+            .canvases
+            .iter()
+            .position(|layer| layer.last_pointer.is_some())
+            .unwrap_or(0);
+        let canvas_order = std::iter::once(active_canvas)
+            .chain((0..r.canvases.len()).filter(|&index| index != active_canvas));
+        for index in canvas_order {
+            let layer = &mut r.canvases[index];
             let signature = render_signature(
                 &r.session,
                 layer.bounds,
@@ -978,6 +1624,7 @@ fn render_canvases(generation: u64) {
                 continue;
             }
             layer.signature = Some(signature);
+            let raster_start = Instant::now();
             if let Some(frame) = crate::annotation_render::render(
                 &r.session,
                 layer.bounds,
@@ -985,15 +1632,144 @@ fn render_canvases(generation: u64) {
                 r.draft.as_ref(),
                 r.hovered,
             ) {
+                if measure_first_frame && let Some(timing) = r.first_magnifier_timing.as_mut() {
+                    timing.raster += raster_start.elapsed();
+                }
+                let present_start = Instant::now();
                 (r.lifecycle.annotation_frame_presenter)(
                     layer.window.window(),
                     frame.data(),
                     frame.width(),
                     frame.height(),
                 );
+                if measure_first_frame && let Some(timing) = r.first_magnifier_timing.as_mut() {
+                    timing.present += present_start.elapsed();
+                }
             }
         }
+        if measure_first_frame && let Some(timing) = r.first_magnifier_timing.as_mut() {
+            timing.border_submitted = Some(Instant::now());
+        }
+        deferred_revision
     });
+    if let Some(revision) = deferred_revision {
+        // Returning to the event loop lets the compositor show the border
+        // before the cold native Magnification API initialization begins.
+        slint::Timer::single_shot(Duration::from_millis(16), move || {
+            sync_first_magnifier(generation, revision)
+        });
+    }
+}
+
+fn sync_magnifier_views(
+    r: &mut Registry,
+    views: &[lexift_core::ports::magnifier::MagnifierSpec],
+) -> bool {
+    let mut overlay_windows = r
+        .canvases
+        .iter()
+        .map(|layer| layer.window.window())
+        .collect::<Vec<_>>();
+    if let Some(main) = &r.main {
+        overlay_windows.push(main.window());
+    }
+    if let Some(panel) = &r.panel {
+        overlay_windows.push(panel.window());
+    }
+    if let Some(choice) = &r.choice {
+        overlay_windows.push(choice.window.window());
+    }
+    let success = (r.lifecycle.annotation_magnifier_sync)(views, &overlay_windows);
+    r.magnifier_sync = if views.is_empty() {
+        MagnifierSync::Cold
+    } else if success {
+        MagnifierSync::Live
+    } else {
+        // A failed native setup may have left a partially created view.
+        (r.lifecycle.annotation_magnifier_sync)(&[], &[]);
+        MagnifierSync::Failed
+    };
+    success
+}
+
+fn sync_first_magnifier(generation: u64, revision: u64) {
+    REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot.as_mut().filter(|r| {
+            deferred_sync_is_current(r.generation, r.magnifier_sync, generation, revision)
+        }) else {
+            return;
+        };
+        let views = magnifier_views(&r.session, r.draft.as_ref());
+        if views.is_empty() {
+            r.first_magnifier_timing = None;
+            sync_magnifier_views(r, &[]);
+            return;
+        }
+        let native_start = Instant::now();
+        let success = sync_magnifier_views(r, &views);
+        let native = native_start.elapsed();
+        if let Some(timing) = r.first_magnifier_timing.take() {
+            let border = timing
+                .border_submitted
+                .map(|submitted| submitted.duration_since(timing.first_move));
+            tracing::debug!(
+                native_ok = success,
+                queue_ms = timing
+                    .frame_start
+                    .map(|started| started.duration_since(timing.first_move).as_millis() as u64),
+                raster_ms = timing.raster.as_millis() as u64,
+                present_ms = timing.present.as_millis() as u64,
+                border_ms = border.map(|elapsed| elapsed.as_millis() as u64),
+                native_ms = native.as_millis() as u64,
+                "first annotation magnifier frame"
+            );
+            r.first_magnifier_measured = true;
+        }
+    });
+}
+
+fn deferred_sync_is_current(
+    current_generation: u64,
+    state: MagnifierSync,
+    callback_generation: u64,
+    callback_revision: u64,
+) -> bool {
+    current_generation == callback_generation && state == MagnifierSync::Pending(callback_revision)
+}
+
+/// Maps committed magnifiers to stable native window IDs.
+fn magnifier_views(
+    session: &Session,
+    draft: Option<&Object>,
+) -> Vec<lexift_core::ports::magnifier::MagnifierSpec> {
+    session
+        .objects
+        .iter()
+        .chain(draft)
+        .enumerate()
+        .filter_map(|(index, object)| {
+            let Extra::Magnifier {
+                output,
+                zoom,
+                ellipse,
+                antialias,
+                ..
+            } = object.extra
+            else {
+                return None;
+            };
+            Some(lexift_core::ports::magnifier::MagnifierSpec {
+                id: index as u64,
+                preview: index == session.objects.len(),
+                source: object.bounds,
+                output,
+                zoom,
+                ellipse,
+                antialias,
+            })
+        })
+        .collect()
 }
 
 fn render_signature(
@@ -1015,10 +1791,19 @@ fn render_signature(
     for (index, object) in session.objects.iter().chain(draft).enumerate() {
         let b = object.bounds;
         let margin = (object.style.width / 2. + 8.) * scale;
-        if b.right + margin < monitor.left as f32
-            || b.left - margin > monitor.right as f32
-            || b.bottom + margin < monitor.top as f32
-            || b.top - margin > monitor.bottom as f32
+        let output_visible = if let Extra::Magnifier { output, .. } = object.extra {
+            output.right + margin >= monitor.left as f32
+                && output.left - margin <= monitor.right as f32
+                && output.bottom + margin >= monitor.top as f32
+                && output.top - margin <= monitor.bottom as f32
+        } else {
+            false
+        };
+        if !output_visible
+            && (b.right + margin < monitor.left as f32
+                || b.left - margin > monitor.right as f32
+                || b.bottom + margin < monitor.top as f32
+                || b.top - margin > monitor.bottom as f32)
         {
             continue;
         }
@@ -1042,6 +1827,7 @@ fn render_signature(
         object.style.fill.hash(&mut hash);
         object.style.dash.hash(&mut hash);
         object.style.outline.hash(&mut hash);
+        format!("{:?}", object.extra).hash(&mut hash);
     }
     if let Some(index) = session.selected {
         index.hash(&mut hash);
@@ -1167,6 +1953,11 @@ fn show_main(generation: u64, attempt: u8) {
                     Duration::from_secs(1),
                     check_display_layout,
                 );
+                r.magnifier_timer.start(
+                    slint::TimerMode::Repeated,
+                    Duration::from_millis(66),
+                    refresh_magnifiers,
+                );
             }
             PassiveWindowPreparation::Pending if attempt < 20 => {
                 let _ = main.show();
@@ -1176,6 +1967,21 @@ fn show_main(generation: u64, attempt: u8) {
                 });
             }
             _ => r.close(),
+        }
+    });
+}
+
+fn refresh_magnifiers() {
+    REGISTRY.with(|slot| {
+        let slot = slot.borrow();
+        let Some(r) = slot.as_ref() else { return };
+        if r.session
+            .objects
+            .iter()
+            .chain(r.draft.iter())
+            .any(|object| object.kind == Kind::Magnifier)
+        {
+            (r.lifecycle.annotation_magnifier_refresh)();
         }
     });
 }
@@ -1257,7 +2063,7 @@ fn open_panel(group: usize, menu: bool) {
         )));
         let generation = r.generation;
         let panel_revision = r.panel_revision;
-        if !menu && group <= 1 {
+        if !menu && group <= 2 {
             panel.on_values_changed(move |values| {
                 later(move || update_geometry_values(generation, tool, values))
             });
@@ -1294,6 +2100,24 @@ fn open_panel(group: usize, menu: bool) {
                         return false;
                     }
                     r.close_panel();
+                    if r.selected[group] != tool {
+                        r.arrow_pending = None;
+                        if matches!(
+                            r.gesture,
+                            Some(
+                                Gesture::FinishArrow
+                                    | Gesture::Draw {
+                                        kind: Kind::Arrow,
+                                        ..
+                                    }
+                            )
+                        ) {
+                            r.gesture = None;
+                        }
+                        r.polyline = None;
+                        r.last_polyline_click = None;
+                        r.draft = None;
+                    }
                     r.selected[group] = tool;
                     if let Some(main) = &r.main {
                         main.set_tools(ModelRc::new(VecModel::from(toolbar_tools(r))));
@@ -1419,7 +2243,13 @@ fn position_panel(r: &Registry) {
         650f32.min(available)
     } else if panel.get_tool() == 4 {
         810f32.min(available)
-    } else if panel.get_tool() <= 2 {
+    } else if panel.get_tool() == 7 {
+        1120f32.min(available)
+    } else if panel.get_tool() == 6 {
+        1030f32.min(available)
+    } else if panel.get_tool() == 5 {
+        856f32.min(available)
+    } else if panel.get_tool() <= 2 || panel.get_tool() <= 6 {
         960f32.min(available)
     } else {
         720f32.min(available)
@@ -1433,6 +2263,16 @@ fn position_panel(r: &Registry) {
             158.
         } else {
             68.
+        }
+    } else if panel.get_tool() <= 7 {
+        if width < 354. {
+            if panel.get_tool() == 7 { 252. } else { 180. }
+        } else if width < 644. {
+            if panel.get_tool() == 7 { 138. } else { 148. }
+        } else if width < if panel.get_tool() == 5 { 856. } else { 890. } {
+            if panel.get_tool() == 7 { 138. } else { 98. }
+        } else {
+            58.
         }
     } else {
         80. + ((fields(panel.get_tool()).len() as f32 / columns as f32).ceil()) * 62.
@@ -1566,6 +2406,268 @@ pub(crate) fn apply_theme() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arrow_click_preview_commits_once_and_rejects_a_nearby_endpoint() {
+        let pending = ArrowPending {
+            start: (-120., 40.),
+            style: Style::default(),
+            start_scale: 1.25,
+            values: defaults(5),
+        };
+        let mut session = Session::new();
+        let preview = pending.preview((80., -20.));
+        assert_eq!(preview.points, vec![(-120., 40.), (80., -20.)]);
+        assert!(matches!(preview.extra, Extra::Arrow { curved: false, .. }));
+        let frame = crate::annotation_render::render(
+            &session,
+            Rect {
+                left: -250,
+                top: -100,
+                right: 150,
+                bottom: 100,
+            },
+            1.,
+            Some(&preview),
+            None,
+        )
+        .unwrap();
+        assert!(frame.pixel(230, 110).unwrap().alpha() > 0);
+        assert!(session.objects.is_empty());
+        assert!(!session.can_undo());
+        assert!(pending.finish((-116.35, 40.)).is_none());
+        assert!(pending.finish((-116.25, 40.)).is_some());
+        assert!(session.add(pending.finish((80., -20.)).unwrap()));
+        assert_eq!(session.selected, Some(0));
+        assert_eq!(session.objects[0].points, preview.points);
+        assert!(session.undo());
+        assert!(session.objects.is_empty());
+        assert!(!session.can_undo());
+    }
+
+    #[test]
+    fn arrow_drag_uses_maximum_excursion_and_release_endpoint() {
+        let start = (-200., -100.);
+        for scale in [1., 1.25] {
+            assert!(!arrow_drag_commits(start, start, 2.9 * scale, scale));
+            assert!(arrow_drag_commits(
+                start,
+                (start.0 + 4. * scale, start.1),
+                0.,
+                scale,
+            ));
+            assert!(arrow_drag_commits(
+                start,
+                (start.0 - 4. * scale, start.1 - 4. * scale),
+                0.,
+                scale,
+            ));
+            assert!(!arrow_drag_commits(start, start, 20. * scale, scale));
+        }
+    }
+
+    #[test]
+    fn polyline_preview_stays_at_confirmed_node_until_pointer_leaves_it() {
+        let monitor = Rect {
+            left: -120,
+            top: -100,
+            right: 120,
+            bottom: 100,
+        };
+        let endpoint = (50., 0.);
+        for curved in [false, true] {
+            let mut polyline = Object {
+                bounds: Bounds::from_corners((-80., -80.), endpoint),
+                kind: Kind::Polyline,
+                style: Style::default(),
+                points: vec![(-80., -80.), (-60., 50.), endpoint],
+                extra: Extra::Polyline {
+                    curved,
+                    head: false,
+                    start: Endpoint::None,
+                    end: Endpoint::None,
+                },
+            };
+            polyline.refresh_bounds();
+            for scale in [1., 1.25] {
+                let close = (endpoint.0 + 2. * scale, endpoint.1);
+                let draft = polyline_preview(&polyline, close, scale);
+                assert_eq!(draft, polyline);
+                assert_eq!(draft.stroke_points().last().copied(), Some(endpoint));
+                let committed = crate::annotation_render::render(
+                    &Session::new(),
+                    monitor,
+                    scale,
+                    Some(&polyline),
+                    None,
+                )
+                .unwrap();
+                let preview = crate::annotation_render::render(
+                    &Session::new(),
+                    monitor,
+                    scale,
+                    Some(&draft),
+                    None,
+                )
+                .unwrap();
+                assert_eq!(preview.data(), committed.data());
+
+                let far = (endpoint.0 + 10. * scale, endpoint.1);
+                let extended = polyline_preview(&polyline, far, scale);
+                assert_eq!(extended.points.last().copied(), Some(far));
+                assert_eq!(extended.points.len(), polyline.points.len() + 1);
+                assert_eq!(polyline.points.last().copied(), Some(endpoint));
+                let moving = crate::annotation_render::render(
+                    &Session::new(),
+                    monitor,
+                    scale,
+                    Some(&extended),
+                    None,
+                )
+                .unwrap();
+                assert_ne!(moving.data(), committed.data());
+            }
+        }
+    }
+
+    #[test]
+    fn geometry_hover_uses_existing_hit_regions_without_selecting_handles() {
+        for kind in [Kind::Rectangle, Kind::Ellipse, Kind::HighlightRectangle] {
+            let mut session = Session::new();
+            let bounds = Bounds::from_corners((20., 20.), (80., 70.));
+            assert!(session.add(Object {
+                kind,
+                bounds,
+                points: Vec::new(),
+                style: Style::default(),
+                extra: Extra::None,
+            }));
+            session.selected = None;
+            assert_eq!(hovered_geometry_at(&session, (50., 20.), 1.), Some(0));
+            assert_eq!(hovered_geometry_at(&session, (5., 5.), 1.), None);
+            if kind != Kind::HighlightRectangle {
+                assert_eq!(hovered_geometry_at(&session, (50., 45.), 1.), None);
+                session.objects[0].style.fill = true;
+                assert_eq!(hovered_geometry_at(&session, (50., 45.), 1.), Some(0));
+            }
+            session.selected = Some(0);
+            assert_eq!(hovered_geometry_at(&session, (50., 20.), 1.), None);
+        }
+    }
+
+    #[test]
+    fn magnifier_frame_draft_never_creates_a_native_view() {
+        let object = Object {
+            bounds: Bounds::from_corners((120., 80.), (220., 160.)),
+            kind: Kind::Magnifier,
+            style: Style::default(),
+            points: vec![],
+            extra: Extra::Magnifier {
+                output: Bounds::from_corners((260., 80.), (410., 200.)),
+                zoom: 1.5,
+                ellipse: false,
+                connector: MagnifierConnector::Plain,
+                erase_annotations: true,
+                antialias: true,
+                shadow: false,
+            },
+        };
+        let mut session = Session::new();
+        assert!(session.add(object.clone()));
+        let output = Bounds::from_corners((260., 80.), (410., 200.));
+        let draft = Object {
+            bounds: output,
+            kind: Kind::Rectangle,
+            style: Style::default(),
+            points: vec![],
+            extra: Extra::None,
+        };
+        let preview = magnifier_views(&session, Some(&draft));
+        assert_eq!(
+            preview
+                .iter()
+                .map(|view| (view.id, view.preview))
+                .collect::<Vec<_>>(),
+            vec![(0, false)]
+        );
+        assert!(session.add(object));
+        let committed = magnifier_views(&session, None);
+        assert_eq!(committed[1].id, 1);
+        assert!(!committed[1].preview);
+        assert!(session.undo());
+        assert_eq!(magnifier_views(&session, None).len(), 1);
+    }
+
+    #[test]
+    fn magnifier_commit_centers_output_and_rejects_tiny_sample() {
+        let values = AnnotationValues {
+            zoom: 150,
+            ..defaults(7)
+        };
+        let source = Bounds::from_corners((-180., -120.), (-30., -30.));
+        let object = magnifier_from_source(source, Style::default(), &values).unwrap();
+        assert_eq!(object.bounds, source);
+        assert_eq!(object.bounds.handles()[7], (-30., -30.));
+        assert!(
+            matches!(object.extra, Extra::Magnifier { output, .. } if output == Bounds::from_corners((-217.5, -142.5), (7.5, -7.5)))
+        );
+        assert!(
+            magnifier_from_source(
+                Bounds::from_corners((0., 0.), (1., 1.)),
+                Style::default(),
+                &values,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn deferred_magnifier_sync_ignores_cancelled_and_replaced_gestures() {
+        let mut state = MagnifierSync::Cold;
+        let mut revision = 0;
+        assert_eq!(
+            magnifier_frame_action(&mut state, &mut revision, true),
+            MagnifierFrameAction::Defer(1)
+        );
+        assert_eq!(
+            magnifier_frame_action(&mut state, &mut revision, true),
+            MagnifierFrameAction::Wait
+        );
+        assert_eq!(
+            magnifier_frame_action(&mut state, &mut revision, false),
+            MagnifierFrameAction::Clear
+        );
+        assert_eq!(
+            magnifier_frame_action(&mut state, &mut revision, true),
+            MagnifierFrameAction::Defer(3)
+        );
+        assert!(!deferred_sync_is_current(7, state, 7, 1));
+        state = MagnifierSync::Live;
+        assert_eq!(
+            magnifier_frame_action(&mut state, &mut revision, true),
+            MagnifierFrameAction::Sync
+        );
+        state = MagnifierSync::Failed;
+        assert_eq!(
+            magnifier_frame_action(&mut state, &mut revision, true),
+            MagnifierFrameAction::Wait
+        );
+        assert!(deferred_sync_is_current(7, MagnifierSync::Pending(3), 7, 3));
+        assert!(!deferred_sync_is_current(7, MagnifierSync::Cold, 7, 3));
+        assert!(!deferred_sync_is_current(
+            7,
+            MagnifierSync::Pending(4),
+            7,
+            3
+        ));
+        assert!(!deferred_sync_is_current(
+            8,
+            MagnifierSync::Pending(3),
+            7,
+            3
+        ));
+    }
+
     #[test]
     fn toolbar_owner_tracks_physical_monitor_boundaries() {
         let monitors = [

@@ -392,6 +392,36 @@ mod tests {
             });
             snapshot(&panel_adapter, &format!("brush-{tool}-narrow"), 400, 158);
         }
+        for tool in [5, 6, 7] {
+            panel.set_tool(tool);
+            panel.set_values(crate::AnnotationValues {
+                size: if tool == 7 { 2 } else { 5 },
+                zoom: 150,
+                head: tool == 5,
+                line_end: if tool == 5 { 3 } else { 0 },
+                erase: tool == 7,
+                antialias: true,
+                ..Default::default()
+            });
+            snapshot(
+                &panel_adapter,
+                &format!("line-{tool}-wide"),
+                if tool == 7 {
+                    1120
+                } else if tool == 6 {
+                    1030
+                } else {
+                    960
+                },
+                58,
+            );
+            snapshot(
+                &panel_adapter,
+                &format!("line-{tool}-narrow"),
+                500,
+                if tool == 7 { 138 } else { 148 },
+            );
+        }
         let canvas_events = Rc::new(RefCell::new(Vec::new()));
         let recorded = canvas_events.clone();
         canvas.on_pointer(move |kind, _, _| recorded.borrow_mut().push(kind));
@@ -401,6 +431,7 @@ mod tests {
             bounds: lexift_core::domain::annotation::Bounds::from_corners((20., 20.), (140., 90.)),
             kind: lexift_core::domain::annotation::Kind::Rectangle,
             style: Default::default(),
+            extra: Default::default(),
         });
         canvas.set_frame(crate::annotation_render::preview_image(
             &crate::annotation_render::render(

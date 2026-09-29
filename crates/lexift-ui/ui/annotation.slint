@@ -6,6 +6,7 @@ export struct AnnotationValues {
     shape: int, style: int, mode: int, font: int, format: int, zoom: int,
     fill: bool, erase: bool, antialias: bool, shadow: bool,
     text: string, color-index: int, custom-color: string,
+    line-start: int, line-end: int, connector-style: int, head: bool,
 }
 
 component ToolIcon inherits Path {
@@ -41,8 +42,13 @@ component ToolButton inherits Rectangle {
     width: 38px; height: 38px; border-radius: 6px;
     background: area.pressed ? Colors.icon-button-pressed : root.selected ? Colors.primary-container
         : area.has-hover && root.enabled ? Colors.icon-button-hover : transparent;
-    ToolIcon { x: 7px; y: 7px; kind: root.kind;
+    if root.kind != 19: ToolIcon { x: 7px; y: 7px; kind: root.kind;
         ink: !root.enabled ? Colors.outline : root.selected ? Colors.primary : Colors.foreground; }
+    if root.kind == 19: Image {
+        x: 7px; y: 7px; width: 24px; height: 24px;
+        source: @image-url("icons/curve.svg"); image-fit: contain;
+        colorize: !root.enabled ? Colors.outline : root.selected ? Colors.primary : Colors.foreground;
+    }
     area := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }
 
@@ -58,6 +64,8 @@ export component AnnotationToolbar inherits Window {
     callback operate-requested();
     callback undo-requested();
     callback delete-requested();
+    callback finish-path-requested();
+    callback backspace-requested();
     callback drag-requested();
     callback finish-requested();
     callback escape-requested();
@@ -66,6 +74,8 @@ export component AnnotationToolbar inherits Window {
         key-pressed(event) => {
             if event.text == Key.Escape { root.escape-requested(); return accept; }
             if event.text == Key.Delete { root.delete-requested(); return accept; }
+            if event.text == Key.Return { root.finish-path-requested(); return accept; }
+            if event.text == Key.Backspace { root.backspace-requested(); return accept; }
             if event.text == "z" && event.modifiers.control { root.undo-requested(); return accept; }
             return reject;
         }
@@ -129,6 +139,8 @@ export component AnnotationPanel inherits Window {
     callback escape-requested();
     private property <[string]> labels: [@tr("Width"), @tr("Shape"), @tr("Line style"), @tr("Corner radius"), @tr("Fill"), @tr("Intensity"), @tr("Blend mode"), @tr("Magnification"), @tr("Erase annotations"), @tr("Anti-aliasing"), @tr("Shadow"), @tr("Text"), @tr("Font"), @tr("Text size"), @tr("Arrangement"), @tr("Start at"), @tr("Sequence"), @tr("Method"), @tr("Effect")];
     private property <[color]> palette: root.tool == 4 ? [#fff400, #ffa500, #46ebeb, #a59bff, #ffa0f5, #ffffff, #32ec66, #212121] : [#d9472b, #e5bf55, #69ad61, #598fdf, #212121, #ffffff, #32ec66, #fff400];
+    private property <[string]> endpoint-options: [@tr("None"), @tr("Open arrow"), @tr("Arrow"), @tr("Filled arrow"), @tr("Circle"), @tr("Open circle"), @tr("Diamond"), @tr("Open diamond"), @tr("Bar")];
+    private property <[string]> connector-options: [@tr("Plain line"), @tr("Source dot"), @tr("Source frame"), @tr("No connection")];
     forward-focus: keys;
     keys := FocusScope {
         key-pressed(event) => { if event.text == Key.Escape { root.escape-requested(); return accept; } return reject; }
@@ -221,13 +233,95 @@ export component AnnotationPanel inherits Window {
                 accessible-role: button; accessible-label: @tr("Custom color");
                 Image { x: 4px; y: 4px; width: 20px; height: 20px; source: @image-url("icons/custom-color.svg"); }
                 custom-hit := TouchArea { clicked => {
-                    root.choice-requested({field: -2, options: [], selected: 0, lines: false,
+                    root.choice-requested({field: -2, options: [], selected: 0, lines: false, connectors: false,
                         x: custom-color.absolute-position.x / 1px, y: custom-color.absolute-position.y / 1px,
                         width: custom-color.width / 1px, height: custom-color.height / 1px});
                 } }
             }
         }
-        if !root.menu && root.tool > 4: Rectangle {
+        if !root.menu && root.tool >= 5 && root.tool <= 7: Rectangle {
+            x: 12px; y: 10px; width: parent.width - 24px; height: parent.height - 20px;
+            private property <bool> compact: self.width < (root.tool == 5 ? 832px : 890px);
+            private property <bool> narrow: self.width < 620px;
+            private property <bool> tiny: self.width < 330px;
+            if root.tool != 5: ToolButton { x: 0px; y: 0px; kind: root.tool == 7 ? 0 : 6;
+                selected: root.values.shape == 0; clicked => { root.values.shape = 0; } }
+            if root.tool != 5: ToolButton { x: 38px; y: 0px; kind: root.tool == 7 ? 1 : 19;
+                selected: root.values.shape == 1; clicked => { root.values.shape = 1; } }
+            if root.tool != 7: ComboBox {
+                x: root.tool == 5 ? 0px : 88px; y: 4px; width: 104px; height: 30px; field: 2;
+                active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); }
+                language-revision: root.language-revision;
+                model: [@tr("Solid"), @tr("Dashed"), @tr("Dotted"), @tr("Dash dot"), @tr("Dash dot dot")];
+                current-index <=> root.values.style;
+            }
+            SpinBox { x: root.tool == 7 ? 88px : root.tool == 5 ? 114px : 202px; y: 4px; width: 72px; height: 30px;
+                minimum: 1; maximum: 100; value <=> root.values.size; }
+            if root.tool == 6: CheckBox { x: 286px; y: 7px; width: 64px;
+                text: @tr("Fill"); checked <=> root.values.fill; }
+            if root.tool != 7: CheckBox { x: root.tool == 6 ? 354px : 198px; y: 7px; width: 80px;
+                text: @tr("Arrowhead"); checked <=> root.values.head; }
+            if root.tool != 7: ComboBox {
+                x: narrow ? 0px : root.tool == 6 ? 444px : 292px; y: narrow ? 46px : 4px; width: 108px; height: 30px; field: 19;
+                enabled: root.values.head;
+                active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); }
+                language-revision: root.language-revision; model: root.endpoint-options;
+                current-index <=> root.values.line-start;
+            }
+            if root.tool != 7: ComboBox {
+                x: narrow ? 116px : root.tool == 6 ? 558px : 408px;
+                y: narrow ? 46px : 4px; width: 108px; height: 30px; field: 20;
+                enabled: root.values.head;
+                active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); }
+                language-revision: root.language-revision; model: root.endpoint-options;
+                current-index <=> root.values.line-end;
+            }
+            if root.tool == 7: ComboBox {
+                x: 176px; y: 4px; width: 108px; height: 30px; field: 21;
+                connectors: true;
+                active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); }
+                language-revision: root.language-revision; model: root.connector-options;
+                current-index <=> root.values.connector-style;
+            }
+            if root.tool == 7: Slider {
+                x: tiny ? 0px : 292px; y: tiny ? 48px : 7px; width: 108px; minimum: 100; maximum: 800;
+                value: root.values.zoom; changed value => { root.values.zoom = round(self.value); }
+                dragging(active) => { root.parameter-dragging(active); }
+            }
+            if root.tool == 7: Text { x: tiny ? 116px : 404px; y: tiny ? 42px : 0px; height: 38px;
+                text: (root.values.zoom / 100) + "×"; font-size: 13px;
+                color: Colors.foreground; vertical-alignment: center; }
+            if root.tool == 7: CheckBox { x: narrow ? 0px : 456px; y: tiny ? 90px : narrow ? 48px : 7px; width: 110px;
+                text: @tr("Erase annotations"); checked <=> root.values.erase; }
+            if root.tool == 7: CheckBox { x: compact ? (tiny ? 0px : narrow ? 142px : 0px) : 584px;
+                y: tiny ? 126px : compact ? 48px : 7px; width: 105px;
+                text: @tr("Anti-aliasing"); checked <=> root.values.antialias; }
+            if root.tool == 7: CheckBox { x: compact ? (tiny ? 136px : narrow ? 286px : 140px) : 700px;
+                y: tiny ? 126px : compact ? 48px : 7px; width: 90px;
+                text: @tr("Shadow"); checked <=> root.values.shadow; }
+            for ink[i] in root.palette: Rectangle {
+                x: (root.tool == 7 ? (compact ? 0px : 790px) : (compact ? 0px : root.tool == 6 ? 690px : 532px)) + (tiny && i >= 4 ? i - 4 : i) * 34px;
+                y: compact ? (root.tool == 7 ? (tiny ? (i >= 4 ? 204px : 170px) : 90px) : (narrow ? (tiny && i >= 4 ? 130px : 96px) : 48px)) : 5px;
+                width: 28px; height: 28px; border-radius: 8px;
+                border-width: root.values.color-index == i ? 2px : 1px;
+                border-color: root.values.color-index == i ? Colors.primary : Colors.outline;
+                Rectangle { x: 4px; y: 4px; width: 20px; height: 20px; border-radius: 5px; background: ink; }
+                TouchArea { clicked => { root.values.color-index = i; } }
+            }
+            custom-third := Rectangle {
+                x: (root.tool == 7 ? (compact ? (tiny ? 136px : 272px) : 1062px) : (compact ? (tiny ? 136px : 272px) : root.tool == 6 ? 962px : 804px));
+                y: compact ? (root.tool == 7 ? (tiny ? 204px : 90px) : (narrow ? (tiny ? 130px : 96px) : 48px)) : 5px;
+                width: 28px; height: 28px; border-radius: 8px;
+                border-width: root.values.color-index == 8 ? 2px : 1px;
+                border-color: root.values.color-index == 8 || root.active-choice == -2 ? Colors.primary : Colors.outline;
+                background: Colors.surface; accessible-role: button; accessible-label: @tr("Custom color");
+                Image { x: 4px; y: 4px; width: 20px; height: 20px; source: @image-url("icons/custom-color.svg"); }
+                TouchArea { clicked => { root.choice-requested({field: -2, options: [], selected: 0, lines: false, connectors: false,
+                    x: custom-third.absolute-position.x / 1px, y: custom-third.absolute-position.y / 1px,
+                    width: custom-third.width / 1px, height: custom-third.height / 1px}); } }
+            }
+        }
+        if !root.menu && root.tool > 7: Rectangle {
             x: 12px; y: 8px; width: parent.width - 24px; height: parent.height - 16px;
             Text { x: 0px; y: 0px; text: root.heading; color: Colors.foreground; font-size: 13px; font-weight: 600; }
             for field[i] in root.fields: Rectangle {

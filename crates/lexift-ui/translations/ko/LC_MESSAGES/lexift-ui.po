@@ -669,3 +669,51 @@ msgstr "반투명"
 
 msgid "Multiply — unavailable"
 msgstr "곱하기 — 사용 불가"
+
+msgid "None"
+msgstr "없음"
+
+msgid "Open arrow"
+msgstr "윤곽 화살표"
+
+msgid "Filled arrow"
+msgstr "채운 화살표"
+
+msgid "Circle"
+msgstr "원"
+
+msgid "Open circle"
+msgstr "윤곽 원"
+
+msgid "Diamond"
+msgstr "마름모"
+
+msgid "Open diamond"
+msgstr "윤곽 마름모"
+
+msgid "Bar"
+msgstr "막대"
+
+msgid "Arrowhead"
+msgstr "화살촉"
+
+msgid "Dotted"
+msgstr "점선"
+
+msgid "Dash dot"
+msgstr "일점쇄선"
+
+msgid "Dash dot dot"
+msgstr "이점쇄선"
+
+msgid "Plain line"
+msgstr "일반 연결선"
+
+msgid "Source dot"
+msgstr "원본 점"
+
+msgid "Source frame"
+msgstr "원본 테두리"
+
+msgid "No connection"
+msgstr "연결선 없음"

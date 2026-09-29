@@ -13,6 +13,8 @@ export component AnnotationCanvas inherits Window {
     callback escape-requested();
     callback undo-requested();
     callback delete-requested();
+    callback finish-path-requested();
+    callback backspace-requested();
     forward-focus: keys;
     Image { source: root.frame; width: 100%; height: 100%; image-fit: fill; }
     TouchArea {
@@ -36,6 +38,8 @@ export component AnnotationCanvas inherits Window {
         key-pressed(event) => {
             if event.text == Key.Escape { root.escape-requested(); return accept; }
             if event.text == Key.Delete { root.delete-requested(); return accept; }
+            if event.text == Key.Return { root.finish-path-requested(); return accept; }
+            if event.text == Key.Backspace { root.backspace-requested(); return accept; }
             if event.text == "z" && event.modifiers.control { root.undo-requested(); return accept; }
             return reject;
         }

@@ -669,3 +669,51 @@ msgstr "半透明"
 
 msgid "Multiply — unavailable"
 msgstr "色彩增值 — 暫不可用"
+
+msgid "None"
+msgstr "無"
+
+msgid "Open arrow"
+msgstr "空心箭頭"
+
+msgid "Filled arrow"
+msgstr "實心箭頭"
+
+msgid "Circle"
+msgstr "圓形"
+
+msgid "Open circle"
+msgstr "空心圓"
+
+msgid "Diamond"
+msgstr "菱形"
+
+msgid "Open diamond"
+msgstr "空心菱形"
+
+msgid "Bar"
+msgstr "端線"
+
+msgid "Arrowhead"
+msgstr "箭頭"
+
+msgid "Dotted"
+msgstr "點線"
+
+msgid "Dash dot"
+msgstr "點劃線"
+
+msgid "Dash dot dot"
+msgstr "雙點劃線"
+
+msgid "Plain line"
+msgstr "一般連線"
+
+msgid "Source dot"
+msgstr "取樣端圓點"
+
+msgid "Source frame"
+msgstr "取樣框"
+
+msgid "No connection"
+msgstr "無連線"

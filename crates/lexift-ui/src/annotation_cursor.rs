@@ -15,7 +15,7 @@ pub(super) fn screen_point(bounds: Rect, point: (f32, f32), scale: f32) -> (f32,
 }
 
 fn handle_cursor(handle: usize) -> AnnotationCursor {
-    match handle {
+    match handle % 8 {
         0 | 7 => AnnotationCursor::DiagonalDown,
         2 | 5 => AnnotationCursor::DiagonalUp,
         1 | 6 => AnnotationCursor::Vertical,
@@ -29,6 +29,7 @@ fn resolve(mode: InteractionMode, gesture: Option<Gesture>, hit: Option<Hit>) ->
         return AnnotationCursor::Idle;
     }
     match gesture {
+        Some(Gesture::PlacePoint | Gesture::FinishArrow) => AnnotationCursor::Drawing,
         Some(Gesture::Draw { .. }) => AnnotationCursor::Drawing,
         Some(Gesture::Move { .. }) => AnnotationCursor::Moving,
         Some(Gesture::Resize { handle, .. }) => handle_cursor(handle),
@@ -69,6 +70,12 @@ fn at_point(
             if object.kind == Kind::HighlightLine {
                 return AnnotationCursor::Vertical;
             }
+            if object.kind == Kind::Arrow {
+                return AnnotationCursor::Vertical;
+            }
+            if object.kind == Kind::Polyline {
+                return AnnotationCursor::Moving;
+            }
         }
     }
     resolve(mode, gesture, hit)
@@ -78,13 +85,17 @@ fn at_point(
 /// to the hovered canvas TouchArea, leaving tool windows and click-through apps alone.
 pub(super) fn refresh(r: &Registry) {
     for (index, layer) in r.canvases.iter().enumerate() {
-        let desired = at_point(
-            &r.session,
-            r.mode,
-            r.gesture,
-            layer.last_pointer,
-            layer.window.window().scale_factor().max(0.1),
-        );
+        let desired = if r.arrow_pending.is_some() {
+            AnnotationCursor::Drawing
+        } else {
+            at_point(
+                &r.session,
+                r.mode,
+                r.gesture,
+                layer.last_pointer,
+                layer.window.window().scale_factor().max(0.1),
+            )
+        };
         let was_custom = layer.window.get_cursor() == AnnotationCursor::CornerRadius;
         let cursor = if desired == AnnotationCursor::CornerRadius {
             if layer.corner_cursor_failed.get() {
@@ -165,7 +176,7 @@ fn refresh_stationary_pointer(generation: u64, index: usize, point: (f32, f32)) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lexift_core::domain::annotation::{Bounds, Kind, Object, Style};
+    use lexift_core::domain::annotation::{Bounds, Endpoint, Extra, Kind, Object, Style};
     const TOOL: InteractionMode = InteractionMode::Tool(0);
 
     #[test]
@@ -183,6 +194,7 @@ mod tests {
                 bounds,
                 points,
                 style: Style::default(),
+                extra: Default::default(),
             });
             for (handle, point) in session.objects[0].edit_handles(1.).into_iter().enumerate() {
                 if kind == Kind::HighlightRectangle && handle < 8 {
@@ -260,12 +272,22 @@ mod tests {
     #[test]
     fn active_drag_keeps_its_cursor_when_crossing_other_hit_regions() {
         let initial = Bounds::from_corners((0., 0.), (200., 100.));
+        assert_eq!(
+            resolve(
+                InteractionMode::Tool(2),
+                Some(Gesture::FinishArrow),
+                Some(Hit::Object(0))
+            ),
+            AnnotationCursor::Drawing
+        );
         let gestures = [
             (
                 Gesture::Draw {
                     start: (0., 0.),
                     kind: Kind::Rectangle,
                     style: Style::default(),
+                    start_scale: 1.,
+                    max_distance: 0.,
                 },
                 AnnotationCursor::Drawing,
             ),
@@ -302,6 +324,63 @@ mod tests {
     }
 
     #[test]
+    fn arrow_midpoint_uses_vertical_cursor_on_hover_and_during_drag() {
+        for points in [
+            vec![(0., 0.), (100., 0.)],
+            vec![(0., 0.), (100., 100.)],
+            vec![(0., 0.), (100., 0.), (50., -100.)],
+            vec![(0., 0.), (100., 0.), (50., 100.)],
+        ] {
+            let mut session = Session::new();
+            let curved = points.len() == 3;
+            let mut arrow = Object {
+                bounds: Bounds::from_corners(points[0], points[1]),
+                points,
+                kind: Kind::Arrow,
+                style: Style::default(),
+                extra: Extra::Arrow {
+                    curved,
+                    head: true,
+                    start: Endpoint::None,
+                    end: Endpoint::FilledArrow,
+                },
+            };
+            arrow.refresh_bounds();
+            session.add(arrow);
+            let handles = session.objects[0].edit_handles(1.);
+            for point in handles {
+                assert_eq!(
+                    at_point(&session, TOOL, None, Some(point), 1.),
+                    AnnotationCursor::Vertical
+                );
+            }
+            assert_eq!(
+                at_point(
+                    &session,
+                    TOOL,
+                    Some(Gesture::Resize {
+                        initial: session.objects[0].bounds,
+                        index: 0,
+                        handle: 2,
+                    }),
+                    Some((500., 500.)),
+                    1.,
+                ),
+                AnnotationCursor::Vertical
+            );
+            assert_eq!(
+                at_point(&session, TOOL, None, Some((500., 500.)), 1.),
+                AnnotationCursor::Drawing
+            );
+            session.selected = None;
+            assert_eq!(
+                at_point(&session, TOOL, None, Some((500., 500.)), 1.),
+                AnnotationCursor::Drawing
+            );
+        }
+    }
+
+    #[test]
     fn cursor_uses_the_existing_hit_regions_at_each_dpi_and_negative_origin() {
         let display = Rect {
             left: -1920,
@@ -326,6 +405,7 @@ mod tests {
                     bounds,
                     kind,
                     style: Style::default(),
+                    extra: Default::default(),
                 });
                 for (handle, point) in bounds.handles().into_iter().enumerate() {
                     assert_eq!(

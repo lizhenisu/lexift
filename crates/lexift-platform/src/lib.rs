@@ -265,6 +265,43 @@ pub fn present_annotation_frame(
     }
 }
 
+/// Opaque native identity used to filter Lexift overlay windows from a live magnifier.
+pub fn annotation_window_token(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> Option<lexift_core::ports::magnifier::WindowToken> {
+    #[cfg(target_os = "windows")]
+    {
+        use raw_window_handle::RawWindowHandle;
+        let handle = window.window_handle().ok()?;
+        let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+            return None;
+        };
+        Some(lexift_core::ports::magnifier::WindowToken(
+            handle.hwnd.get(),
+        ))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+        None
+    }
+}
+
+/// Windows magnification is kept behind the Core capability interface.
+pub fn annotation_magnifier_port()
+-> Option<std::sync::Arc<dyn lexift_core::ports::magnifier::MagnifierPort>> {
+    #[cfg(target_os = "windows")]
+    {
+        Some(std::sync::Arc::new(
+            windows::annotation_magnifier::WindowsMagnifierPort,
+        ))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
 /// Configures the Translation Popup's one outer-corner treatment.
 ///
 /// Windows uses DWM clipping when available and reports an opaque square fallback when it is not.

@@ -63,6 +63,7 @@ pub(super) fn open(generation: u64, panel_revision: u64, request: AnnotationChoi
         crate::theme::apply(&window);
         window.set_options(request.options.clone());
         window.set_lines(request.lines);
+        window.set_connectors(request.connectors);
         window.set_disabled_index(if panel.get_tool() == 4 && request.field == 6 {
             1
         } else {
@@ -239,6 +240,9 @@ fn set_value(values: &mut AnnotationValues, field: i32, index: i32) {
         7 => values.zoom = index,
         12 => values.font = index,
         16 => values.format = index,
+        19 => values.line_start = index,
+        20 => values.line_end = index,
+        21 => values.connector_style = index,
         _ => {}
     }
 }
@@ -339,6 +343,8 @@ fn place(r: &Registry) {
         320.
     } else if q.lines {
         112.
+    } else if q.connectors {
+        88.
     } else {
         180.
     };
@@ -500,6 +506,7 @@ mod tests {
             (16, 2),
             (17, 1),
             (18, 1),
+            (21, 3),
         ] {
             let mut values = original.clone();
             set_value(&mut values, field, index);
@@ -510,6 +517,7 @@ mod tests {
                 7 => values.zoom,
                 12 => values.font,
                 16 => values.format,
+                21 => values.connector_style,
                 _ => unreachable!(),
             };
             assert_eq!(selected, index);

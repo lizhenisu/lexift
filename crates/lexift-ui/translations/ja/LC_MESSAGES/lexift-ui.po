@@ -669,3 +669,51 @@ msgstr "半透明"
 
 msgid "Multiply — unavailable"
 msgstr "乗算 — 利用不可"
+
+msgid "None"
+msgstr "なし"
+
+msgid "Open arrow"
+msgstr "白抜き矢印"
+
+msgid "Filled arrow"
+msgstr "塗りつぶし矢印"
+
+msgid "Circle"
+msgstr "円"
+
+msgid "Open circle"
+msgstr "白抜き円"
+
+msgid "Diamond"
+msgstr "ひし形"
+
+msgid "Open diamond"
+msgstr "白抜きひし形"
+
+msgid "Bar"
+msgstr "横棒"
+
+msgid "Arrowhead"
+msgstr "矢印の先端"
+
+msgid "Dotted"
+msgstr "点線"
+
+msgid "Dash dot"
+msgstr "一点鎖線"
+
+msgid "Dash dot dot"
+msgstr "二点鎖線"
+
+msgid "Plain line"
+msgstr "通常の線"
+
+msgid "Source dot"
+msgstr "採取側の点"
+
+msgid "Source frame"
+msgstr "採取枠"
+
+msgid "No connection"
+msgstr "接続なし"

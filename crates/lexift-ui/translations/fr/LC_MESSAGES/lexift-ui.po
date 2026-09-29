@@ -669,3 +669,51 @@ msgstr "Translucide"
 
 msgid "Multiply — unavailable"
 msgstr "Produit — indisponible"
+
+msgid "None"
+msgstr "Aucun"
+
+msgid "Open arrow"
+msgstr "Flèche ouverte"
+
+msgid "Filled arrow"
+msgstr "Flèche pleine"
+
+msgid "Circle"
+msgstr "Cercle"
+
+msgid "Open circle"
+msgstr "Cercle vide"
+
+msgid "Diamond"
+msgstr "Losange"
+
+msgid "Open diamond"
+msgstr "Losange vide"
+
+msgid "Bar"
+msgstr "Barre"
+
+msgid "Arrowhead"
+msgstr "Pointe de flèche"
+
+msgid "Dotted"
+msgstr "Pointillé"
+
+msgid "Dash dot"
+msgstr "Tiret-point"
+
+msgid "Dash dot dot"
+msgstr "Tiret-deux points"
+
+msgid "Plain line"
+msgstr "Ligne simple"
+
+msgid "Source dot"
+msgstr "Point sur la source"
+
+msgid "Source frame"
+msgstr "Cadre de la source"
+
+msgid "No connection"
+msgstr "Aucune liaison"

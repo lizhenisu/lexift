@@ -669,3 +669,51 @@ msgstr "Semitransparente"
 
 msgid "Multiply — unavailable"
 msgstr "Multiplicar — indisponível"
+
+msgid "None"
+msgstr "Nenhum"
+
+msgid "Open arrow"
+msgstr "Seta vazada"
+
+msgid "Filled arrow"
+msgstr "Seta preenchida"
+
+msgid "Circle"
+msgstr "Círculo"
+
+msgid "Open circle"
+msgstr "Círculo vazado"
+
+msgid "Diamond"
+msgstr "Losango"
+
+msgid "Open diamond"
+msgstr "Losango vazado"
+
+msgid "Bar"
+msgstr "Barra"
+
+msgid "Arrowhead"
+msgstr "Ponta de seta"
+
+msgid "Dotted"
+msgstr "Pontilhado"
+
+msgid "Dash dot"
+msgstr "Traço e ponto"
+
+msgid "Dash dot dot"
+msgstr "Traço e dois pontos"
+
+msgid "Plain line"
+msgstr "Linha simples"
+
+msgid "Source dot"
+msgstr "Ponto na origem"
+
+msgid "Source frame"
+msgstr "Moldura da origem"
+
+msgid "No connection"
+msgstr "Sem conexão"

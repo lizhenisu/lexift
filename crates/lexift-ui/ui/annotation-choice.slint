@@ -1,13 +1,14 @@
 import { AnnotationColorPicker } from "annotation-color.slint";
 import { Colors } from "design/colors.slint";
 import { MenuMetrics } from "design/menu.slint";
-import { LineStylePreview } from "annotation-fields.slint";
+import { ConnectorStylePreview, LineStylePreview } from "annotation-fields.slint";
 
 export component AnnotationChoiceWindow inherits Window {
     in property <int> disabled-index: -1;
     title: "Lexift"; no-frame: true; always-on-top: true; background: transparent;
     in property <[string]> options;
     in property <bool> lines;
+    in property <bool> connectors;
     in property <bool> color-mode;
     in-out property <float> hue;
     in-out property <float> saturation;
@@ -62,7 +63,11 @@ export component AnnotationChoiceWindow inherits Window {
                 x: 8px; y: (parent.height - 4px) / 2; width: parent.width - 16px; height: 4px;
                 style: i; ink: root.selected == i ? Colors.on-primary : Colors.foreground;
             }
-            if !root.lines: Text {
+            if root.connectors: ConnectorStylePreview {
+                x: 8px; y: (parent.height - 20px) / 2; width: parent.width - 16px; height: 20px;
+                style: i; ink: root.selected == i ? Colors.on-primary : Colors.foreground;
+            }
+            if !root.lines && !root.connectors: Text {
                 x: 8px; width: parent.width - 16px; height: parent.height;
                 text: label; font-size: 13px; vertical-alignment: center; overflow: elide;
                 color: root.selected == i ? Colors.on-primary : Colors.foreground;

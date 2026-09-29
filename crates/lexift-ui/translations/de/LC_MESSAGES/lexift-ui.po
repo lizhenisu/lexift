@@ -669,3 +669,51 @@ msgstr "Halbtransparent"
 
 msgid "Multiply — unavailable"
 msgstr "Multiplizieren — nicht verfügbar"
+
+msgid "None"
+msgstr "Keine"
+
+msgid "Open arrow"
+msgstr "Offener Pfeil"
+
+msgid "Filled arrow"
+msgstr "Gefüllter Pfeil"
+
+msgid "Circle"
+msgstr "Kreis"
+
+msgid "Open circle"
+msgstr "Offener Kreis"
+
+msgid "Diamond"
+msgstr "Raute"
+
+msgid "Open diamond"
+msgstr "Offene Raute"
+
+msgid "Bar"
+msgstr "Querstrich"
+
+msgid "Arrowhead"
+msgstr "Pfeilspitze"
+
+msgid "Dotted"
+msgstr "Gepunktet"
+
+msgid "Dash dot"
+msgstr "Strichpunkt"
+
+msgid "Dash dot dot"
+msgstr "Strichpunktpunkt"
+
+msgid "Plain line"
+msgstr "Einfache Linie"
+
+msgid "Source dot"
+msgstr "Punkt am Quellbereich"
+
+msgid "Source frame"
+msgstr "Quellrahmen"
+
+msgid "No connection"
+msgstr "Keine Verbindung"

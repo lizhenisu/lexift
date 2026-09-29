@@ -669,3 +669,51 @@ msgstr "Translucent"
 
 msgid "Multiply — unavailable"
 msgstr "Multiply — unavailable"
+
+msgid "None"
+msgstr "None"
+
+msgid "Open arrow"
+msgstr "Open arrow"
+
+msgid "Filled arrow"
+msgstr "Filled arrow"
+
+msgid "Circle"
+msgstr "Circle"
+
+msgid "Open circle"
+msgstr "Open circle"
+
+msgid "Diamond"
+msgstr "Diamond"
+
+msgid "Open diamond"
+msgstr "Open diamond"
+
+msgid "Bar"
+msgstr "Bar"
+
+msgid "Arrowhead"
+msgstr "Arrowhead"
+
+msgid "Dotted"
+msgstr "Dotted"
+
+msgid "Dash dot"
+msgstr "Dash dot"
+
+msgid "Dash dot dot"
+msgstr "Dash dot dot"
+
+msgid "Plain line"
+msgstr "Plain line"
+
+msgid "Source dot"
+msgstr "Source dot"
+
+msgid "Source frame"
+msgstr "Source frame"
+
+msgid "No connection"
+msgstr "No connection"

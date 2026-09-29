@@ -1,6 +1,7 @@
 //! Windows-specific platform adapters belong in this module.
 
 pub(super) mod annotation_cursor;
+pub(super) mod annotation_magnifier;
 pub(super) mod app_icon;
 mod autostart;
 mod clipboard;

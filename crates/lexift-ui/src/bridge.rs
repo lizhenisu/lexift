@@ -103,6 +103,9 @@ type AnnotationDisplays = Rc<dyn Fn() -> Vec<Rect>>;
 type AnnotationClickThrough = Rc<dyn Fn(&slint::Window, bool) -> bool>;
 type AnnotationCornerCursor = Rc<dyn Fn(&slint::Window, bool) -> bool>;
 type AnnotationFramePresenter = Rc<dyn Fn(&slint::Window, &[u8], u32, u32) -> bool>;
+type AnnotationMagnifierSync =
+    Rc<dyn Fn(&[lexift_core::ports::magnifier::MagnifierSpec], &[&slint::Window]) -> bool>;
+type AnnotationMagnifierRefresh = Rc<dyn Fn() -> bool>;
 type ConfigureResizeBackground = Rc<dyn Fn(&slint::Window, [u8; 3]) -> bool>;
 type WindowPaintRepair = Rc<dyn Fn()>;
 type ConfigureWindowPaintRepair = Rc<dyn Fn(&slint::Window, WindowPaintRepair) -> bool>;
@@ -130,6 +133,8 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) annotation_click_through: AnnotationClickThrough,
     pub(crate) annotation_corner_cursor: AnnotationCornerCursor,
     pub(crate) annotation_frame_presenter: AnnotationFramePresenter,
+    pub(crate) annotation_magnifier_sync: AnnotationMagnifierSync,
+    pub(crate) annotation_magnifier_refresh: AnnotationMagnifierRefresh,
     trim_process_working_set: fn() -> bool,
     pub(crate) configure_menu_window: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) tray_menu_cancelled: Rc<dyn Fn()>,
@@ -163,6 +168,8 @@ impl WindowLifecycleCallbacks {
             annotation_click_through: Rc::new(|_, _| false),
             annotation_corner_cursor: Rc::new(|_, _| false),
             annotation_frame_presenter: Rc::new(|_, _, _, _| false),
+            annotation_magnifier_sync: Rc::new(|_, _| false),
+            annotation_magnifier_refresh: Rc::new(|| false),
             trim_process_working_set,
             configure_menu_window: Rc::new(|_| true),
             tray_menu_cancelled: Rc::new(|| {}),
@@ -218,6 +225,17 @@ impl WindowLifecycleCallbacks {
         cursor: impl Fn(&slint::Window, bool) -> bool + 'static,
     ) -> Self {
         self.annotation_corner_cursor = Rc::new(cursor);
+        self
+    }
+
+    pub fn with_annotation_magnifier(
+        mut self,
+        sync: impl Fn(&[lexift_core::ports::magnifier::MagnifierSpec], &[&slint::Window]) -> bool
+        + 'static,
+        refresh: impl Fn() -> bool + 'static,
+    ) -> Self {
+        self.annotation_magnifier_sync = Rc::new(sync);
+        self.annotation_magnifier_refresh = Rc::new(refresh);
         self
     }
 
