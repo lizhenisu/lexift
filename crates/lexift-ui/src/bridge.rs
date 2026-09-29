@@ -3089,7 +3089,8 @@ impl UiHandle {
     }
 
     pub fn toggle_annotation_toolbar(&self) {
-        let _ = slint::invoke_from_event_loop(crate::annotation::toggle);
+        let requested_at = Instant::now();
+        let _ = slint::invoke_from_event_loop(move || crate::annotation::toggle(requested_at));
     }
 
     pub fn set_annotation_hotkey_status(&self, status: String) {

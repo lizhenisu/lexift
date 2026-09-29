@@ -35,6 +35,12 @@ struct Registry {
     choice: Option<choice::Menu>,
     choice_revision: u64,
     canvases: Vec<CanvasLayer>,
+    pending_displays: Vec<Rect>,
+    canvas_bootstrap: Vec<CanvasBootstrap>,
+    bootstrap_cursor: usize,
+    annotation_ready: bool,
+    cold_open_measured: bool,
+    cold_open_timing: Option<ColdOpenTiming>,
     toolbar_owner: Option<usize>,
     session: Session,
     hovered: Option<usize>,
@@ -65,6 +71,101 @@ struct Registry {
     generation: u64,
     panel_revision: u64,
     status: String,
+}
+
+#[derive(Default)]
+struct ColdOpenTiming {
+    requested_at: Option<Instant>,
+    ui_queue: Duration,
+    toolbar_create: Duration,
+    display_query: Duration,
+    canvas_create: Duration,
+    canvas_prepare: Duration,
+    canvas_show: Duration,
+    canvas_native_complete: Duration,
+    canvas_retry: Duration,
+    raster: Duration,
+    native_present: Duration,
+    toolbar_prepare: Duration,
+    toolbar_place: Duration,
+    toolbar_show: Duration,
+    toolbar_native_complete: Duration,
+    toolbar_finish: Duration,
+    toolbar_retry: Duration,
+    toolbar_retries: u8,
+    per_screen: Vec<CanvasColdTiming>,
+    largest_stage: Duration,
+    largest_callback: Duration,
+}
+
+#[derive(Default)]
+struct CanvasColdTiming {
+    create: Duration,
+    prepare: Duration,
+    show: Duration,
+    native_complete: Duration,
+    retry: Duration,
+    retries: u8,
+    raster: Duration,
+    present: Duration,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CanvasBootstrap {
+    Prepare(u8),
+    Present,
+    Ready,
+}
+
+impl ColdOpenTiming {
+    fn report(self, outcome: &'static str, screens: usize) {
+        let total = self.requested_at.map_or(Duration::ZERO, |at| at.elapsed());
+        let per_screen = self
+            .per_screen
+            .iter()
+            .enumerate()
+            .map(|(index, screen)| {
+                format!(
+                    "{index}:create={} prepare={} show={} native={} retry={}({}) raster={} present={}",
+                    screen.create.as_millis(),
+                    screen.prepare.as_millis(),
+                    screen.show.as_millis(),
+                    screen.native_complete.as_millis(),
+                    screen.retry.as_millis(),
+                    screen.retries,
+                    screen.raster.as_millis(),
+                    screen.present.as_millis(),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        tracing::info!(
+            outcome,
+            screens,
+            total_ms = total.as_millis(),
+            ui_queue_ms = self.ui_queue.as_millis(),
+            toolbar_create_ms = self.toolbar_create.as_millis(),
+            display_query_ms = self.display_query.as_millis(),
+            canvas_create_ms = self.canvas_create.as_millis(),
+            canvas_prepare_ms = self.canvas_prepare.as_millis(),
+            canvas_show_ms = self.canvas_show.as_millis(),
+            canvas_native_complete_ms = self.canvas_native_complete.as_millis(),
+            canvas_retry_ms = self.canvas_retry.as_millis(),
+            raster_ms = self.raster.as_millis(),
+            native_present_ms = self.native_present.as_millis(),
+            toolbar_prepare_ms = self.toolbar_prepare.as_millis(),
+            toolbar_place_ms = self.toolbar_place.as_millis(),
+            toolbar_show_ms = self.toolbar_show.as_millis(),
+            toolbar_native_complete_ms = self.toolbar_native_complete.as_millis(),
+            toolbar_finish_ms = self.toolbar_finish.as_millis(),
+            toolbar_retry_ms = self.toolbar_retry.as_millis(),
+            toolbar_retries = self.toolbar_retries,
+            per_screen,
+            largest_stage_ms = self.largest_stage.as_millis(),
+            largest_callback_ms = self.largest_callback.as_millis(),
+            "First annotation open timing"
+        );
+    }
 }
 
 struct CanvasLayer {
@@ -276,6 +377,12 @@ pub(crate) fn init(
             choice: None,
             choice_revision: 0,
             canvases: Vec::new(),
+            pending_displays: Vec::new(),
+            canvas_bootstrap: Vec::new(),
+            bootstrap_cursor: 0,
+            annotation_ready: false,
+            cold_open_measured: false,
+            cold_open_timing: None,
             toolbar_owner: None,
             session: Session::new(),
             hovered: None,
@@ -337,6 +444,10 @@ pub(crate) fn is_open() -> bool {
 
 fn later(f: impl FnOnce() + 'static) {
     slint::Timer::single_shot(Duration::ZERO, f);
+}
+
+fn next_frame(f: impl FnOnce() + 'static) {
+    slint::Timer::single_shot(Duration::from_millis(16), f);
 }
 
 impl Registry {
@@ -424,6 +535,10 @@ impl Registry {
         self.sync_mode_display();
     }
     fn close(&mut self) {
+        if let Some(timing) = self.cold_open_timing.take() {
+            timing.report("cancelled", self.pending_displays.len());
+            self.cold_open_measured = true;
+        }
         self.close_panel();
         (self.lifecycle.annotation_magnifier_sync)(&[], &[]);
         self.generation = self.generation.wrapping_add(1);
@@ -436,6 +551,10 @@ impl Registry {
         self.polyline = None;
         self.last_polyline_click = None;
         self.render_queued = false;
+        self.annotation_ready = false;
+        self.pending_displays.clear();
+        self.canvas_bootstrap.clear();
+        self.bootstrap_cursor = 0;
         self.magnifier_sync = MagnifierSync::Cold;
         self.magnifier_sync_revision = self.magnifier_sync_revision.wrapping_add(1);
         self.first_magnifier_timing = None;
@@ -575,16 +694,26 @@ fn backspace_polyline() {
     }
 }
 
-pub(crate) fn toggle() {
+pub(crate) fn toggle(requested_at: Instant) {
     if is_open() {
         close();
         return;
     }
     crate::bridge::cancel_idle_memory_trim();
+    let callback_start = Instant::now();
     REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
         let Some(r) = slot.as_mut() else { return };
+        if !r.cold_open_measured {
+            r.cold_open_timing = Some(ColdOpenTiming {
+                requested_at: Some(requested_at),
+                ui_queue: requested_at.elapsed(),
+                ..Default::default()
+            });
+        }
+        let toolbar_start = Instant::now();
         let Ok(main) = AnnotationToolbar::new() else {
+            r.close();
             return;
         };
         crate::theme::apply(&main);
@@ -618,84 +747,244 @@ pub(crate) fn toggle() {
             slint::CloseRequestResponse::KeepWindowShown
         });
         main.window().set_size(slint::LogicalSize::new(650., 54.));
+        if let Some(timing) = r.cold_open_timing.as_mut() {
+            let elapsed = toolbar_start.elapsed();
+            timing.toolbar_create += elapsed;
+            timing.largest_stage = timing.largest_stage.max(elapsed);
+        }
         r.main = Some(main);
         r.sync_mode_display();
         r.generation = r.generation.wrapping_add(1);
         let generation = r.generation;
-        for (index, bounds) in (r.lifecycle.annotation_displays)().into_iter().enumerate() {
-            if let Ok(window) = AnnotationCanvas::new() {
-                window.set_frame(slint::Image::default());
-                window.on_pointer(move |kind, x, y| canvas_pointer(index, kind, x, y));
-                window.on_escape_requested(|| later(escape));
-                window.on_undo_requested(|| later(undo));
-                window.on_delete_requested(|| later(delete_selected));
-                window.on_finish_path_requested(|| later(finish_polyline));
-                window.on_backspace_requested(|| later(backspace_polyline));
-                window.window().on_close_requested(|| {
-                    later(close);
-                    slint::CloseRequestResponse::KeepWindowShown
-                });
-                r.canvases.push(CanvasLayer {
-                    last_pointer: None,
-                    corner_cursor_failed: Cell::new(false),
-                    window,
-                    bounds,
-                    signature: None,
-                });
-            }
+        let query_start = Instant::now();
+        r.pending_displays = (r.lifecycle.annotation_displays)();
+        if let Some(timing) = r.cold_open_timing.as_mut() {
+            let elapsed = query_start.elapsed();
+            timing.display_query += elapsed;
+            timing.largest_stage = timing.largest_stage.max(elapsed);
+            timing.largest_callback = timing.largest_callback.max(callback_start.elapsed());
         }
-        later(move || show_canvas(generation, 0, 0));
+        next_frame(move || bootstrap_tick(generation));
     });
 }
 
-fn show_canvas(generation: u64, index: usize, attempt: u8) {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BootstrapAction {
+    Create(usize),
+    Advance(usize),
+    ShowToolbar,
+}
+
+fn bootstrap_action(
+    created: usize,
+    total: usize,
+    states: &[CanvasBootstrap],
+    cursor: usize,
+) -> BootstrapAction {
+    if created < total {
+        return BootstrapAction::Create(created);
+    }
+    for offset in 0..states.len() {
+        let index = (cursor + offset) % states.len();
+        if states[index] != CanvasBootstrap::Ready {
+            return BootstrapAction::Advance(index);
+        }
+    }
+    BootstrapAction::ShowToolbar
+}
+
+/// Advance one screen stage per event-loop turn; a pending native window does
+/// not hold up preparation of the other monitors.
+fn bootstrap_tick(generation: u64) {
+    let callback_start = Instant::now();
     REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
         let Some(r) = slot.as_mut().filter(|r| r.generation == generation) else {
             return;
         };
-        let Some(layer) = r.canvases.get(index) else {
-            later(move || schedule_render(generation));
-            later(move || show_main(generation, 0));
-            return;
-        };
-        let rect = layer.bounds;
-        let width = (rect.right - rect.left).max(1) as u32;
-        let height = (rect.bottom - rect.top).max(1) as u32;
-        layer
-            .window
-            .window()
-            .set_size(slint::PhysicalSize::new(width, height));
-        layer
-            .window
-            .window()
-            .set_position(slint::PhysicalPosition::new(rect.left, rect.top));
-        match (r.prepare)(layer.window.window()) {
-            PassiveWindowPreparation::Ready => {
-                if layer.window.show().is_err()
-                    || !(r.lifecycle.complete_passive_window_show)(
-                        layer.window.window(),
-                        pointer_canvas(layer.window.as_weak()),
-                    )
-                {
-                    r.close();
-                    return;
+        let action = bootstrap_action(
+            r.canvases.len(),
+            r.pending_displays.len(),
+            &r.canvas_bootstrap,
+            r.bootstrap_cursor,
+        );
+        match action {
+            BootstrapAction::Create(index) => create_canvas(r, index),
+            BootstrapAction::Advance(index) => {
+                r.bootstrap_cursor = (index + 1) % r.canvas_bootstrap.len();
+                match r.canvas_bootstrap[index] {
+                    CanvasBootstrap::Prepare(attempt) => show_canvas(r, index, attempt),
+                    CanvasBootstrap::Present => render_initial_canvas(r, index),
+                    CanvasBootstrap::Ready => unreachable!(),
                 }
-                (r.lifecycle.annotation_click_through)(layer.window.window(), r.mode.is_mouse());
-                settle_canvas(layer.window.as_weak(), rect, 2);
-                let next = index + 1;
-                later(move || show_canvas(generation, next, 0));
             }
-            PassiveWindowPreparation::Pending if attempt < 20 => {
-                let _ = layer.window.show();
-                let _ = layer.window.hide();
-                slint::Timer::single_shot(Duration::from_millis(16), move || {
-                    show_canvas(generation, index, attempt + 1)
-                });
+            BootstrapAction::ShowToolbar => {
+                next_frame(move || show_main(generation, 0));
+                return;
             }
-            _ => r.close(),
+        }
+        if r.generation == generation {
+            if let Some(timing) = r.cold_open_timing.as_mut() {
+                timing.largest_callback = timing.largest_callback.max(callback_start.elapsed());
+            }
+            next_frame(move || bootstrap_tick(generation));
         }
     });
+}
+
+fn create_canvas(r: &mut Registry, index: usize) {
+    let bounds = r.pending_displays[index];
+    let start = Instant::now();
+    let Ok(window) = AnnotationCanvas::new() else {
+        r.close();
+        return;
+    };
+    window.set_frame(slint::Image::default());
+    window.on_pointer(move |kind, x, y| canvas_pointer(index, kind, x, y));
+    window.on_escape_requested(|| later(escape));
+    window.on_undo_requested(|| later(undo));
+    window.on_delete_requested(|| later(delete_selected));
+    window.on_finish_path_requested(|| later(finish_polyline));
+    window.on_backspace_requested(|| later(backspace_polyline));
+    window.window().on_close_requested(|| {
+        later(close);
+        slint::CloseRequestResponse::KeepWindowShown
+    });
+    r.canvases.push(CanvasLayer {
+        last_pointer: None,
+        corner_cursor_failed: Cell::new(false),
+        window,
+        bounds,
+        signature: None,
+    });
+    r.canvas_bootstrap.push(CanvasBootstrap::Prepare(0));
+    if let Some(timing) = r.cold_open_timing.as_mut() {
+        let elapsed = start.elapsed();
+        timing.canvas_create += elapsed;
+        timing.largest_stage = timing.largest_stage.max(elapsed);
+        timing.per_screen.push(CanvasColdTiming {
+            create: elapsed,
+            ..Default::default()
+        });
+    }
+}
+
+fn show_canvas(r: &mut Registry, index: usize, attempt: u8) {
+    let layer = &r.canvases[index];
+    let stage_start = Instant::now();
+    let rect = layer.bounds;
+    let width = (rect.right - rect.left).max(1) as u32;
+    let height = (rect.bottom - rect.top).max(1) as u32;
+    layer
+        .window
+        .window()
+        .set_size(slint::PhysicalSize::new(width, height));
+    layer
+        .window
+        .window()
+        .set_position(slint::PhysicalPosition::new(rect.left, rect.top));
+    let preparation = (r.prepare)(layer.window.window());
+    if let Some(timing) = r.cold_open_timing.as_mut() {
+        let elapsed = stage_start.elapsed();
+        timing.canvas_prepare += elapsed;
+        timing.largest_stage = timing.largest_stage.max(elapsed);
+        timing.per_screen[index].prepare += elapsed;
+    }
+    match preparation {
+        PassiveWindowPreparation::Ready => {
+            let show_start = Instant::now();
+            if layer.window.show().is_err() {
+                r.close();
+                return;
+            }
+            if let Some(timing) = r.cold_open_timing.as_mut() {
+                let elapsed = show_start.elapsed();
+                timing.canvas_show += elapsed;
+                timing.largest_stage = timing.largest_stage.max(elapsed);
+                timing.per_screen[index].show += elapsed;
+            }
+            let native_start = Instant::now();
+            if !(r.lifecycle.complete_passive_window_show)(
+                layer.window.window(),
+                pointer_canvas(layer.window.as_weak()),
+            ) {
+                r.close();
+                return;
+            }
+            if let Some(timing) = r.cold_open_timing.as_mut() {
+                let elapsed = native_start.elapsed();
+                timing.canvas_native_complete += elapsed;
+                timing.largest_stage = timing.largest_stage.max(elapsed);
+                timing.per_screen[index].native_complete += elapsed;
+            }
+            (r.lifecycle.annotation_click_through)(layer.window.window(), r.mode.is_mouse());
+            settle_canvas(layer.window.as_weak(), rect, 2);
+            r.canvas_bootstrap[index] = CanvasBootstrap::Present;
+        }
+        PassiveWindowPreparation::Pending if attempt < 20 => {
+            let retry_start = Instant::now();
+            let _ = layer.window.show();
+            let _ = layer.window.hide();
+            if let Some(timing) = r.cold_open_timing.as_mut() {
+                let elapsed = retry_start.elapsed();
+                timing.canvas_retry += elapsed;
+                timing.largest_stage = timing.largest_stage.max(elapsed);
+                timing.per_screen[index].retry += elapsed;
+                timing.per_screen[index].retries += 1;
+            }
+            r.canvas_bootstrap[index] = CanvasBootstrap::Prepare(attempt + 1);
+        }
+        _ => r.close(),
+    }
+}
+
+/// Present one complete blank monitor frame before its canvas accepts drawing.
+/// The native layered bitmap is retained here until Windows hit testing of an
+/// unpresented Slint canvas has been verified on supported DPI layouts.
+fn render_initial_canvas(r: &mut Registry, index: usize) {
+    let layer = &r.canvases[index];
+    let raster_start = Instant::now();
+    let Some(frame) = crate::annotation_render::render(
+        &r.session,
+        layer.bounds,
+        layer.window.window().scale_factor(),
+        None,
+        None,
+    ) else {
+        r.close();
+        return;
+    };
+    if let Some(timing) = r.cold_open_timing.as_mut() {
+        let elapsed = raster_start.elapsed();
+        timing.raster += elapsed;
+        timing.largest_stage = timing.largest_stage.max(elapsed);
+        timing.per_screen[index].raster += elapsed;
+    }
+    let present_start = Instant::now();
+    let presented = (r.lifecycle.annotation_frame_presenter)(
+        layer.window.window(),
+        frame.data(),
+        frame.width(),
+        frame.height(),
+    );
+    if let Some(timing) = r.cold_open_timing.as_mut() {
+        let elapsed = present_start.elapsed();
+        timing.native_present += elapsed;
+        timing.largest_stage = timing.largest_stage.max(elapsed);
+        timing.per_screen[index].present += elapsed;
+    }
+    if !presented {
+        r.close();
+        return;
+    }
+    r.canvases[index].signature = Some(render_signature(
+        &r.session,
+        r.canvases[index].bounds,
+        r.canvases[index].window.window().scale_factor(),
+        None,
+        None,
+    ));
+    r.canvas_bootstrap[index] = CanvasBootstrap::Ready;
 }
 
 fn settle_canvas(weak: slint::Weak<AnnotationCanvas>, bounds: Rect, remaining: u8) {
@@ -1194,7 +1483,7 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
     let result = REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
         let r = slot.as_mut()?;
-        if r.mode.is_mouse() {
+        if !r.annotation_ready || r.mode.is_mouse() {
             return None;
         }
         let layer = r.canvases.get(index)?;
@@ -1903,14 +2192,23 @@ fn delete_selected() {
 }
 
 fn show_main(generation: u64, attempt: u8) {
+    let callback_start = Instant::now();
     REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
         let Some(r) = slot.as_mut().filter(|r| r.generation == generation) else {
             return;
         };
         let Some(main) = r.main.as_ref() else { return };
-        match (r.prepare)(main.window()) {
+        let prepare_start = Instant::now();
+        let preparation = (r.prepare)(main.window());
+        if let Some(timing) = r.cold_open_timing.as_mut() {
+            let elapsed = prepare_start.elapsed();
+            timing.toolbar_prepare += elapsed;
+            timing.largest_stage = timing.largest_stage.max(elapsed);
+        }
+        match preparation {
             PassiveWindowPreparation::Ready => {
+                let place_start = Instant::now();
                 let anchor = (r.lifecycle.toolbar_cursor_position)().unwrap_or_default();
                 if let Some(area) = (r.lifecycle.popup_work_area)(anchor) {
                     let scale = main.window().scale_factor();
@@ -1930,15 +2228,35 @@ fn show_main(generation: u64, attempt: u8) {
                     main.window()
                         .set_position(slint::PhysicalPosition::new(p.x, p.y));
                 }
-                if main.show().is_err()
-                    || !(r.lifecycle.complete_passive_window_show)(
-                        main.window(),
-                        pointer_main(main.as_weak()),
-                    )
-                {
+                if let Some(timing) = r.cold_open_timing.as_mut() {
+                    let elapsed = place_start.elapsed();
+                    timing.toolbar_place += elapsed;
+                    timing.largest_stage = timing.largest_stage.max(elapsed);
+                }
+                let show_start = Instant::now();
+                if main.show().is_err() {
                     r.close();
                     return;
                 }
+                if let Some(timing) = r.cold_open_timing.as_mut() {
+                    let elapsed = show_start.elapsed();
+                    timing.toolbar_show += elapsed;
+                    timing.largest_stage = timing.largest_stage.max(elapsed);
+                }
+                let native_start = Instant::now();
+                if !(r.lifecycle.complete_passive_window_show)(
+                    main.window(),
+                    pointer_main(main.as_weak()),
+                ) {
+                    r.close();
+                    return;
+                }
+                if let Some(timing) = r.cold_open_timing.as_mut() {
+                    let elapsed = native_start.elapsed();
+                    timing.toolbar_native_complete += elapsed;
+                    timing.largest_stage = timing.largest_stage.max(elapsed);
+                }
+                let finish_start = Instant::now();
                 let weak_main = main.as_weak();
                 let work_area = Rc::clone(&r.lifecycle.popup_work_area);
                 sync_toolbar_owner(r);
@@ -1958,10 +2276,28 @@ fn show_main(generation: u64, attempt: u8) {
                     Duration::from_millis(66),
                     refresh_magnifiers,
                 );
+                r.annotation_ready = true;
+                r.pending_displays.clear();
+                if let Some(mut timing) = r.cold_open_timing.take() {
+                    let elapsed = finish_start.elapsed();
+                    timing.toolbar_finish += elapsed;
+                    timing.largest_stage = timing.largest_stage.max(elapsed);
+                    timing.largest_callback = timing.largest_callback.max(callback_start.elapsed());
+                    timing.report("ready", r.canvases.len());
+                    r.cold_open_measured = true;
+                }
             }
             PassiveWindowPreparation::Pending if attempt < 20 => {
+                let retry_start = Instant::now();
                 let _ = main.show();
                 let _ = main.hide();
+                if let Some(timing) = r.cold_open_timing.as_mut() {
+                    let elapsed = retry_start.elapsed();
+                    timing.toolbar_retry += elapsed;
+                    timing.toolbar_retries += 1;
+                    timing.largest_stage = timing.largest_stage.max(elapsed);
+                    timing.largest_callback = timing.largest_callback.max(callback_start.elapsed());
+                }
                 slint::Timer::single_shot(Duration::from_millis(16), move || {
                     show_main(generation, attempt + 1)
                 });
@@ -2406,6 +2742,38 @@ pub(crate) fn apply_theme() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bootstrap_creates_each_canvas_before_advancing_windows() {
+        let states = [CanvasBootstrap::Prepare(0), CanvasBootstrap::Prepare(0)];
+        assert_eq!(bootstrap_action(0, 2, &[], 0), BootstrapAction::Create(0));
+        assert_eq!(
+            bootstrap_action(1, 2, &states[..1], 0),
+            BootstrapAction::Create(1)
+        );
+        assert_eq!(
+            bootstrap_action(2, 2, &states, 0),
+            BootstrapAction::Advance(0)
+        );
+    }
+
+    #[test]
+    fn bootstrap_skips_ready_screen_and_retries_another() {
+        let states = [CanvasBootstrap::Ready, CanvasBootstrap::Prepare(2)];
+        assert_eq!(
+            bootstrap_action(2, 2, &states, 0),
+            BootstrapAction::Advance(1)
+        );
+        let states = [CanvasBootstrap::Present, CanvasBootstrap::Ready];
+        assert_eq!(
+            bootstrap_action(2, 2, &states, 1),
+            BootstrapAction::Advance(0)
+        );
+        assert_eq!(
+            bootstrap_action(2, 2, &[CanvasBootstrap::Ready; 2], 0),
+            BootstrapAction::ShowToolbar
+        );
+    }
 
     #[test]
     fn arrow_click_preview_commits_once_and_rejects_a_nearby_endpoint() {

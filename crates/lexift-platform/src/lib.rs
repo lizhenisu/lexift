@@ -18,7 +18,7 @@ pub enum SelectionGesture {
     Completed(lexift_core::domain::geometry::Point),
 }
 
-/// Installs a lightweight Windows mouse gesture monitor on the calling UI thread.
+/// Starts the Windows mouse gesture monitor on a dedicated message thread.
 pub fn start_selection_monitor(
     handler: std::sync::Arc<dyn Fn(SelectionGesture) + Send + Sync>,
 ) -> lexift_core::Result<()> {

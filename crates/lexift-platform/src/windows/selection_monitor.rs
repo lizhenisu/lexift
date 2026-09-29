@@ -1,4 +1,13 @@
-use std::{cell::RefCell, sync::Arc};
+use std::{
+    cell::RefCell,
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicU64, Ordering},
+        mpsc,
+    },
+    thread::{self, JoinHandle},
+    time::Instant,
+};
 
 use lexift_core::domain::geometry::Point;
 use windows::Win32::{
@@ -7,12 +16,14 @@ use windows::Win32::{
     UI::{
         Input::KeyboardAndMouse::GetDoubleClickTime,
         WindowsAndMessaging::{
-            CallNextHookEx, GetSystemMetrics, GetWindowThreadProcessId, HC_ACTION, HHOOK,
-            MSLLHOOKSTRUCT, SM_CXDOUBLECLK, SM_CYDOUBLECLK, SetWindowsHookExW, UnhookWindowsHookEx,
-            WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WindowFromPoint,
+            CallNextHookEx, GetSystemMetrics, GetWindowThreadProcessId, HC_ACTION, MSLLHOOKSTRUCT,
+            SM_CXDOUBLECLK, SM_CYDOUBLECLK, SetWindowsHookExW, UnhookWindowsHookEx, WH_MOUSE_LL,
+            WM_LBUTTONDOWN, WM_LBUTTONUP, WindowFromPoint,
         },
     },
 };
+
+use super::hook_thread::HookMessageThread;
 
 const DRAG_DISTANCE_SQUARED: i64 = 36;
 
@@ -120,42 +131,105 @@ impl GestureTracker {
 }
 
 struct Monitor {
-    hook: HHOOK,
     tracker: GestureTracker,
-    handler: Arc<dyn Fn(Gesture) + Send + Sync>,
+    sender: mpsc::Sender<(Gesture, Instant)>,
+    max_callback_us: Arc<AtomicU64>,
 }
 
 thread_local! {
     static MONITOR: RefCell<Option<Monitor>> = const { RefCell::new(None) };
 }
 
+struct MonitorHandle {
+    hook_thread: HookMessageThread,
+    dispatcher: JoinHandle<()>,
+    sender: mpsc::Sender<(Gesture, Instant)>,
+    max_callback_us: Arc<AtomicU64>,
+    max_dispatch_delay_us: Arc<AtomicU64>,
+}
+
+static ACTIVE_MONITOR: OnceLock<Mutex<Option<MonitorHandle>>> = OnceLock::new();
+
+fn active_monitor() -> &'static Mutex<Option<MonitorHandle>> {
+    ACTIVE_MONITOR.get_or_init(|| Mutex::new(None))
+}
+
 pub fn start(handler: Arc<dyn Fn(Gesture) + Send + Sync>) -> lexift_core::Result<()> {
-    MONITOR.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if slot.is_some() {
-            return Ok(());
-        }
+    let mut active = active_monitor()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if active.is_some() {
+        return Ok(());
+    }
+    let (sender, receiver) = mpsc::channel::<(Gesture, Instant)>();
+    let max_dispatch_delay_us = Arc::new(AtomicU64::new(0));
+    let dispatch_delay = Arc::clone(&max_dispatch_delay_us);
+    let dispatcher = thread::Builder::new()
+        .name("lexift-selection-dispatch".into())
+        .spawn(move || {
+            while let Ok((gesture, sent_at)) = receiver.recv() {
+                dispatch_delay.fetch_max(sent_at.elapsed().as_micros() as u64, Ordering::Relaxed);
+                handler(gesture);
+            }
+        })
+        .map_err(|error| {
+            lexift_core::Error::new(format!("Could not dispatch selection gestures: {error}"))
+        })?;
+    let max_callback_us = Arc::new(AtomicU64::new(0));
+    let hook_sender = sender.clone();
+    let hook_max = Arc::clone(&max_callback_us);
+    let hook_thread = match HookMessageThread::start("lexift-selection-hook", move || {
         let hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), None, 0) }.map_err(
             |error| lexift_core::Error::new(format!("Could not monitor text selection: {error}")),
         )?;
-        *slot = Some(Monitor {
-            hook,
-            tracker: GestureTracker::default(),
-            handler,
+        MONITOR.with(|slot| {
+            *slot.borrow_mut() = Some(Monitor {
+                tracker: GestureTracker::default(),
+                sender: hook_sender,
+                max_callback_us: hook_max,
+            });
         });
-        Ok(())
-    })
+        Ok(Box::new(move || {
+            MONITOR.with(|slot| *slot.borrow_mut() = None);
+            let _ = unsafe { UnhookWindowsHookEx(hook) };
+        }))
+    }) {
+        Ok(thread) => thread,
+        Err(error) => {
+            drop(sender);
+            let _ = dispatcher.join();
+            return Err(error);
+        }
+    };
+    *active = Some(MonitorHandle {
+        hook_thread,
+        dispatcher,
+        sender,
+        max_callback_us,
+        max_dispatch_delay_us,
+    });
+    Ok(())
 }
 
 pub fn stop() {
-    MONITOR.with(|slot| {
-        if let Some(monitor) = slot.borrow_mut().take() {
-            let _ = unsafe { UnhookWindowsHookEx(monitor.hook) };
-        }
-    });
+    let monitor = active_monitor()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take();
+    if let Some(monitor) = monitor {
+        monitor.hook_thread.stop();
+        drop(monitor.sender);
+        let _ = monitor.dispatcher.join();
+        tracing::info!(
+            max_callback_us = monitor.max_callback_us.load(Ordering::Relaxed),
+            max_dispatch_delay_us = monitor.max_dispatch_delay_us.load(Ordering::Relaxed),
+            "selection mouse hook stopped"
+        );
+    }
 }
 
 unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    let started = Instant::now();
     if code == HC_ACTION as i32 && lparam.0 != 0 {
         let event = wparam.0 as u32;
         if event == WM_LBUTTONDOWN || event == WM_LBUTTONUP {
@@ -177,9 +251,9 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
             } else {
                 (0, false)
             };
-            let action = MONITOR.with(|slot| {
+            MONITOR.with(|slot| {
                 let mut slot = slot.borrow_mut();
-                let monitor = slot.as_mut()?;
+                let Some(monitor) = slot.as_mut() else { return };
                 let gesture = if event == WM_LBUTTONDOWN {
                     monitor.tracker.down(
                         point,
@@ -190,21 +264,37 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
                     )
                 } else {
                     monitor.tracker.up(point)
-                }?;
-                Some((Arc::clone(&monitor.handler), gesture))
+                };
+                if let Some(gesture) = gesture {
+                    let _ = monitor.sender.send((gesture, Instant::now()));
+                }
             });
-            if let Some((handler, gesture)) = action {
-                handler(gesture);
-            }
         }
     }
+    MONITOR.with(|slot| {
+        if let Some(monitor) = slot.borrow().as_ref() {
+            monitor
+                .max_callback_us
+                .fetch_max(started.elapsed().as_micros() as u64, Ordering::Relaxed);
+        }
+    });
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{DoubleClickSettings, Gesture, GestureTracker, is_drag};
+    use super::{DoubleClickSettings, Gesture, GestureTracker, is_drag, start, stop};
     use lexift_core::domain::geometry::Point;
+    use std::sync::Arc;
+
+    #[test]
+    #[ignore = "installs a global mouse hook on an interactive Windows desktop"]
+    fn dedicated_hook_can_stop_and_restart() {
+        for _ in 0..2 {
+            start(Arc::new(|_| {})).unwrap();
+            stop();
+        }
+    }
 
     const SETTINGS: DoubleClickSettings = DoubleClickSettings {
         interval_ms: 500,

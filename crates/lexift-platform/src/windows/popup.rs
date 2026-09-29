@@ -1,4 +1,16 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicU64, Ordering},
+        mpsc,
+    },
+    thread::{self, JoinHandle},
+    time::Instant,
+};
+
+use super::hook_thread::HookMessageThread;
 
 use crate::{
     PassiveToolWindowPreparation, PopupPointerEvent, PopupPointerHandler, PopupResizeEdge,
@@ -138,7 +150,19 @@ const WHEEL_DELTA: f32 = 120.0;
 const LOGICAL_SCROLL_PIXELS_PER_NOTCH: f32 = 60.0;
 
 thread_local! {
-    static POPUP_DISMISS_MONITOR: RefCell<Option<PopupDismissMonitor>> = const { RefCell::new(None) };
+    static POPUP_HOOK_STATE: RefCell<Option<PopupHookState>> = const { RefCell::new(None) };
+}
+
+struct PopupHookState {
+    sender: mpsc::Sender<DismissalEvent>,
+    max_callback_us: Arc<AtomicU64>,
+}
+
+enum DismissalEvent {
+    Watch(usize, usize),
+    Unwatch(usize),
+    MouseDown(i32, i32, Instant),
+    Foreground(usize, Instant),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -150,19 +174,81 @@ struct PopupDismissWatch {
 
 struct PopupDismissMonitor {
     watches: HashMap<usize, PopupDismissWatch>,
-    mouse_hook: windows::Win32::UI::WindowsAndMessaging::HHOOK,
-    foreground_hook: windows::Win32::UI::Accessibility::HWINEVENTHOOK,
 }
 
 impl PopupDismissMonitor {
-    fn install() -> lexift_core::Result<Self> {
-        use windows::Win32::UI::{
-            Accessibility::SetWinEventHook,
-            WindowsAndMessaging::{
-                EVENT_SYSTEM_FOREGROUND, SetWindowsHookExW, WH_MOUSE_LL, WINEVENT_OUTOFCONTEXT,
+    fn watch(&mut self, hwnd: usize, initial_foreground: usize) {
+        self.watches.insert(
+            hwnd,
+            PopupDismissWatch {
+                initial_foreground,
+                foreground_changed: false,
+                dismissal_posted: false,
             },
-        };
+        );
+    }
 
+    fn unwatch(&mut self, hwnd: usize) {
+        self.watches.remove(&hwnd);
+    }
+}
+
+struct PopupDismissHandle {
+    sender: mpsc::Sender<DismissalEvent>,
+    hook_thread: HookMessageThread,
+    dispatcher: JoinHandle<()>,
+    watched: HashSet<usize>,
+    max_callback_us: Arc<AtomicU64>,
+    max_dispatch_delay_us: Arc<AtomicU64>,
+}
+
+static ACTIVE_DISMISSAL: OnceLock<Mutex<Option<PopupDismissHandle>>> = OnceLock::new();
+
+fn active_dismissal() -> &'static Mutex<Option<PopupDismissHandle>> {
+    ACTIVE_DISMISSAL.get_or_init(|| Mutex::new(None))
+}
+
+fn start_dismissal() -> lexift_core::Result<PopupDismissHandle> {
+    use windows::Win32::UI::{
+        Accessibility::SetWinEventHook,
+        WindowsAndMessaging::{
+            EVENT_SYSTEM_FOREGROUND, SetWindowsHookExW, UnhookWindowsHookEx, WH_MOUSE_LL,
+            WINEVENT_OUTOFCONTEXT,
+        },
+    };
+    let (sender, receiver) = mpsc::channel::<DismissalEvent>();
+    let max_dispatch_delay_us = Arc::new(AtomicU64::new(0));
+    let dispatch_delay = Arc::clone(&max_dispatch_delay_us);
+    let dispatcher = thread::Builder::new()
+        .name("lexift-popup-dismiss-dispatch".into())
+        .spawn(move || {
+            let mut monitor = PopupDismissMonitor {
+                watches: HashMap::new(),
+            };
+            while let Ok(event) = receiver.recv() {
+                match event {
+                    DismissalEvent::Watch(hwnd, foreground) => monitor.watch(hwnd, foreground),
+                    DismissalEvent::Unwatch(hwnd) => monitor.unwatch(hwnd),
+                    DismissalEvent::MouseDown(x, y, sent_at) => {
+                        dispatch_delay
+                            .fetch_max(sent_at.elapsed().as_micros() as u64, Ordering::Relaxed);
+                        post_dismissals_for_outside_point(&mut monitor, x, y);
+                    }
+                    DismissalEvent::Foreground(hwnd, sent_at) => {
+                        dispatch_delay
+                            .fetch_max(sent_at.elapsed().as_micros() as u64, Ordering::Relaxed);
+                        post_dismissals_for_foreground(&mut monitor, hwnd);
+                    }
+                }
+            }
+        })
+        .map_err(|error| {
+            lexift_core::Error::new(format!("Could not dispatch popup dismissal: {error}"))
+        })?;
+    let max_callback_us = Arc::new(AtomicU64::new(0));
+    let hook_sender = sender.clone();
+    let hook_max = Arc::clone(&max_callback_us);
+    let hook_thread = match HookMessageThread::start("lexift-popup-dismiss-hook", move || {
         let mouse_hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(popup_mouse_hook), None, 0) }
             .map_err(|_| {
                 lexift_core::Error::new("Could not monitor pointer input outside popup")
@@ -179,48 +265,100 @@ impl PopupDismissMonitor {
             )
         };
         if foreground_hook.0.is_null() {
-            let _ =
-                unsafe { windows::Win32::UI::WindowsAndMessaging::UnhookWindowsHookEx(mouse_hook) };
+            let _ = unsafe { UnhookWindowsHookEx(mouse_hook) };
             return Err(lexift_core::Error::new(
                 "Could not monitor foreground changes for popup",
             ));
         }
-        Ok(Self {
-            watches: HashMap::new(),
-            mouse_hook,
-            foreground_hook,
-        })
-    }
-
-    fn watch(&mut self, hwnd: windows::Win32::Foundation::HWND) {
-        let initial_foreground =
-            hwnd_key(unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() });
-        self.watches.insert(
-            hwnd_key(hwnd),
-            PopupDismissWatch {
-                initial_foreground,
-                foreground_changed: false,
-                dismissal_posted: false,
-            },
-        );
-    }
-
-    fn unwatch(&mut self, hwnd: windows::Win32::Foundation::HWND) {
-        self.watches.remove(&hwnd_key(hwnd));
-    }
+        POPUP_HOOK_STATE.with(|slot| {
+            *slot.borrow_mut() = Some(PopupHookState {
+                sender: hook_sender,
+                max_callback_us: hook_max,
+            })
+        });
+        Ok(Box::new(move || {
+            use windows::Win32::UI::Accessibility::UnhookWinEvent;
+            POPUP_HOOK_STATE.with(|slot| *slot.borrow_mut() = None);
+            let _ = unsafe { UnhookWindowsHookEx(mouse_hook) };
+            let _ = unsafe { UnhookWinEvent(foreground_hook) };
+        }))
+    }) {
+        Ok(thread) => thread,
+        Err(error) => {
+            drop(sender);
+            let _ = dispatcher.join();
+            return Err(error);
+        }
+    };
+    Ok(PopupDismissHandle {
+        sender,
+        hook_thread,
+        dispatcher,
+        watched: HashSet::new(),
+        max_callback_us,
+        max_dispatch_delay_us,
+    })
 }
 
-impl Drop for PopupDismissMonitor {
-    fn drop(&mut self) {
-        use windows::Win32::UI::{
-            Accessibility::UnhookWinEvent, WindowsAndMessaging::UnhookWindowsHookEx,
-        };
-        if let Err(error) = unsafe { UnhookWindowsHookEx(self.mouse_hook) } {
-            tracing::debug!(%error, "translation popup mouse monitor could not be removed");
+fn stop_dismissal(monitor: PopupDismissHandle) {
+    monitor.hook_thread.stop();
+    drop(monitor.sender);
+    let _ = monitor.dispatcher.join();
+    tracing::info!(
+        max_callback_us = monitor.max_callback_us.load(Ordering::Relaxed),
+        max_dispatch_delay_us = monitor.max_dispatch_delay_us.load(Ordering::Relaxed),
+        "popup mouse hook stopped"
+    );
+}
+
+fn lock_dismissal() -> std::sync::MutexGuard<'static, Option<PopupDismissHandle>> {
+    active_dismissal()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn current_foreground_key() -> usize {
+    hwnd_key(unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() })
+}
+
+fn watch_dismissal(hwnd: windows::Win32::Foundation::HWND) -> lexift_core::Result<()> {
+    let mut slot = lock_dismissal();
+    if slot.is_none() {
+        *slot = Some(start_dismissal()?);
+    }
+    let monitor = slot.as_mut().expect("dismissal monitor was installed");
+    let key = hwnd_key(hwnd);
+    if monitor
+        .sender
+        .send(DismissalEvent::Watch(key, current_foreground_key()))
+        .is_err()
+    {
+        let stopped = slot.take();
+        drop(slot);
+        if let Some(stopped) = stopped {
+            stop_dismissal(stopped);
         }
-        if !unsafe { UnhookWinEvent(self.foreground_hook) }.as_bool() {
-            tracing::debug!("translation popup foreground monitor could not be removed");
+        return Err(lexift_core::Error::new("Popup dismissal monitor stopped"));
+    }
+    monitor.watched.insert(key);
+    Ok(())
+}
+
+fn unwatch_dismissal(hwnd: windows::Win32::Foundation::HWND) {
+    let monitor = {
+        let mut slot = lock_dismissal();
+        let Some(active) = slot.as_mut() else { return };
+        let key = hwnd_key(hwnd);
+        active.watched.remove(&key);
+        let _ = active.sender.send(DismissalEvent::Unwatch(key));
+        if active.watched.is_empty() {
+            slot.take()
+        } else {
+            None
         }
+    };
+    if let Some(monitor) = monitor {
+        stop_dismissal(monitor);
     }
 }
 
@@ -230,16 +368,7 @@ pub(crate) fn set_dismissal(
 ) -> lexift_core::Result<()> {
     let hwnd = required_hwnd(window)?;
     if enabled {
-        POPUP_DISMISS_MONITOR.with(|slot| {
-            let mut slot = slot.borrow_mut();
-            if slot.is_none() {
-                *slot = Some(PopupDismissMonitor::install()?);
-            }
-            slot.as_mut()
-                .expect("dismiss monitor was installed")
-                .watch(hwnd);
-            Ok(())
-        })
+        watch_dismissal(hwnd)
     } else {
         unregister_dismissal_hwnd(hwnd);
         Ok(())
@@ -247,15 +376,7 @@ pub(crate) fn set_dismissal(
 }
 
 fn unregister_dismissal_hwnd(hwnd: windows::Win32::Foundation::HWND) {
-    POPUP_DISMISS_MONITOR.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if let Some(monitor) = slot.as_mut() {
-            monitor.unwatch(hwnd);
-            if monitor.watches.is_empty() {
-                *slot = None;
-            }
-        }
-    });
+    unwatch_dismissal(hwnd);
 }
 
 unsafe extern "system" fn popup_mouse_hook(
@@ -267,6 +388,7 @@ unsafe extern "system" fn popup_mouse_hook(
         CallNextHookEx, HC_ACTION, MSLLHOOKSTRUCT, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN,
         WM_XBUTTONDOWN,
     };
+    let started = Instant::now();
     if code == HC_ACTION as i32
         && matches!(
             wparam.0 as u32,
@@ -275,8 +397,23 @@ unsafe extern "system" fn popup_mouse_hook(
         && lparam.0 != 0
     {
         let data = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
-        post_dismissals_for_outside_point(data.pt.x, data.pt.y);
+        POPUP_HOOK_STATE.with(|slot| {
+            if let Some(state) = slot.borrow().as_ref() {
+                let _ = state.sender.send(DismissalEvent::MouseDown(
+                    data.pt.x,
+                    data.pt.y,
+                    Instant::now(),
+                ));
+            }
+        });
     }
+    POPUP_HOOK_STATE.with(|slot| {
+        if let Some(state) = slot.borrow().as_ref() {
+            state
+                .max_callback_us
+                .fetch_max(started.elapsed().as_micros() as u64, Ordering::Relaxed);
+        }
+    });
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
@@ -289,54 +426,43 @@ unsafe extern "system" fn popup_foreground_hook(
     _event_thread: u32,
     _event_time: u32,
 ) {
-    post_dismissals_for_foreground(hwnd);
+    POPUP_HOOK_STATE.with(|slot| {
+        if let Some(state) = slot.borrow().as_ref() {
+            let _ = state
+                .sender
+                .send(DismissalEvent::Foreground(hwnd_key(hwnd), Instant::now()));
+        }
+    });
 }
 
-fn post_dismissals_for_outside_point(x: i32, y: i32) {
+fn post_dismissals_for_outside_point(monitor: &mut PopupDismissMonitor, x: i32, y: i32) {
     use windows::Win32::{Foundation::RECT, UI::WindowsAndMessaging::GetWindowRect};
-    POPUP_DISMISS_MONITOR.with(|slot| {
-        let Ok(mut slot) = slot.try_borrow_mut() else {
-            return;
-        };
-        let Some(monitor) = slot.as_mut() else {
-            return;
-        };
-        for (key, watch) in &mut monitor.watches {
-            if watch.dismissal_posted {
-                continue;
-            }
-            let hwnd = hwnd_from_key(*key);
-            let mut rect = RECT::default();
-            if unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok()
-                && !point_inside_rect(x, y, rect.left, rect.top, rect.right, rect.bottom)
-            {
-                post_dismissal(hwnd, watch);
-            }
+    for (key, watch) in &mut monitor.watches {
+        if watch.dismissal_posted {
+            continue;
         }
-    });
+        let hwnd = hwnd_from_key(*key);
+        let mut rect = RECT::default();
+        if unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok()
+            && !point_inside_rect(x, y, rect.left, rect.top, rect.right, rect.bottom)
+        {
+            post_dismissal(hwnd, watch);
+        }
+    }
 }
 
-fn post_dismissals_for_foreground(foreground: windows::Win32::Foundation::HWND) {
-    let foreground = hwnd_key(foreground);
-    POPUP_DISMISS_MONITOR.with(|slot| {
-        let Ok(mut slot) = slot.try_borrow_mut() else {
-            return;
-        };
-        let Some(monitor) = slot.as_mut() else {
-            return;
-        };
-        for (key, watch) in &mut monitor.watches {
-            if watch.dismissal_posted || *key == foreground {
-                if *key == foreground {
-                    watch.foreground_changed = true;
-                }
-                continue;
+fn post_dismissals_for_foreground(monitor: &mut PopupDismissMonitor, foreground: usize) {
+    for (key, watch) in &mut monitor.watches {
+        if watch.dismissal_posted || *key == foreground {
+            if *key == foreground {
+                watch.foreground_changed = true;
             }
-            if should_dismiss_for_foreground(watch, foreground) {
-                post_dismissal(hwnd_from_key(*key), watch);
-            }
+            continue;
         }
-    });
+        if should_dismiss_for_foreground(watch, foreground) {
+            post_dismissal(hwnd_from_key(*key), watch);
+        }
+    }
 }
 
 fn should_dismiss_for_foreground(watch: &mut PopupDismissWatch, foreground: usize) -> bool {
@@ -1213,12 +1339,20 @@ mod tests {
         async_key_is_pressed, client_position, configure_passive, interactive_extended_style,
         native_top_resize_hit_test, pack_screen_position, passive_extended_style,
         passive_refresh_flags, point_inside_rect, popup_native_snap_style, scale_dip_to_physical,
-        should_dismiss_for_foreground, wheel_delta_physical,
+        should_dismiss_for_foreground, start_dismissal, stop_dismissal, wheel_delta_physical,
     };
     use crate::PassiveToolWindowPreparation;
     use windows::Win32::UI::WindowsAndMessaging::{
         SWP_FRAMECHANGED, SWP_NOACTIVATE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     };
+
+    #[test]
+    #[ignore = "installs a global mouse hook on an interactive Windows desktop"]
+    fn popup_dismissal_hook_can_stop_and_restart() {
+        for _ in 0..2 {
+            stop_dismissal(start_dismissal().unwrap());
+        }
+    }
 
     #[test]
     fn tray_menu_style_excludes_taskbar_without_changing_activation_or_other_flags() {

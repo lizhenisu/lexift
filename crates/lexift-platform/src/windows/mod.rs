@@ -6,6 +6,7 @@ pub(super) mod app_icon;
 mod autostart;
 mod clipboard;
 mod clipboard_selection;
+mod hook_thread;
 mod hotkey;
 mod instance;
 pub(crate) mod memory;

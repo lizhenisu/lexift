@@ -1,5 +1,7 @@
 param(
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\target\renderer-diagnostics')
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\target\renderer-diagnostics'),
+    [ValidateSet('skia-opengl', 'femtovg', 'software')]
+    [string[]]$SelectedVariants = @('skia-opengl', 'femtovg', 'software')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,7 +37,7 @@ $variants = [ordered]@{
     'software' = 'renderer-software'
 }
 
-foreach ($variant in $variants.Keys) {
+foreach ($variant in $SelectedVariants) {
     $feature = $variants[$variant]
     [System.IO.File]::WriteAllText(
         $manifestPath,
