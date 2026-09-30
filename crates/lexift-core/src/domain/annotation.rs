@@ -263,6 +263,10 @@ impl Kind {
 }
 
 impl Object {
+    /// Completed pencil strokes are permanent marks until undo or session clearing.
+    pub fn is_editable(&self) -> bool {
+        self.kind != Kind::Pencil
+    }
     pub fn toggle_text_arrow(&mut self, scale: f32) {
         let b = self.bounds;
         if let Extra::Text(text) = &mut self.extra {
@@ -438,6 +442,9 @@ impl Object {
                 .any(|p| segment_distance(point, p[0], p[1]) <= tolerance)
     }
     pub fn edit_handles(&self, scale: f32) -> Vec<(f32, f32)> {
+        if !self.is_editable() {
+            return Vec::new();
+        }
         if let Extra::Text(text) = &self.extra {
             let b = self.bounds;
             // Keep the operation squares outside the editable body. On short text,
@@ -505,6 +512,9 @@ impl Object {
         handles
     }
     pub fn move_by(&mut self, dx: f32, dy: f32) {
+        if !self.is_editable() {
+            return;
+        }
         self.bounds = self.bounds.moved(dx, dy);
         for p in &mut self.points {
             p.0 += dx;
@@ -530,6 +540,9 @@ impl Object {
         }
     }
     pub fn resize_to(&mut self, target: Bounds) {
+        if !self.is_editable() {
+            return;
+        }
         let b = self.bounds;
         for p in &mut self.points {
             p.0 = target.left + (p.0 - b.left) / b.width().max(1.) * target.width();
@@ -538,6 +551,9 @@ impl Object {
         self.bounds = target;
     }
     pub fn edit_handle(&mut self, handle: usize, point: (f32, f32), scale: f32) {
+        if !self.is_editable() {
+            return;
+        }
         if !point.0.is_finite() || !point.1.is_finite() {
             return;
         }
@@ -768,10 +784,14 @@ impl Session {
     fn snapshot(&self) -> Snapshot {
         Snapshot {
             objects: self.objects.clone(),
-            selected: self.selected,
+            selected: self.editable_selected(),
             opacity: self.spotlight_opacity,
             watermark: self.watermark.clone(),
         }
+    }
+    fn editable_selected(&self) -> Option<usize> {
+        self.selected
+            .filter(|&index| self.objects.get(index).is_some_and(Object::is_editable))
     }
     pub fn set_spotlight_opacity(&mut self, opacity: f32) {
         let opacity = opacity.clamp(0., 1.);
@@ -803,7 +823,12 @@ impl Session {
         }
         self.undo.push(self.snapshot());
         self.objects.push(object);
-        self.selected = Some(self.objects.len() - 1);
+        self.selected = self
+            .objects
+            .last()
+            .unwrap()
+            .is_editable()
+            .then_some(self.objects.len() - 1);
         true
     }
     pub fn begin_drag(&mut self) {
@@ -820,12 +845,15 @@ impl Session {
         if let Some(before) = self.drag_before.take() {
             self.objects = before.objects;
             self.selected = before.selected;
+            self.selected = self.editable_selected();
             self.spotlight_opacity = before.opacity;
             self.watermark = before.watermark;
         }
     }
     pub fn update_selected(&mut self, change: impl FnOnce(&mut Object)) {
-        let Some(index) = self.selected else { return };
+        let Some(index) = self.editable_selected() else {
+            return;
+        };
         let before = self.snapshot();
         change(&mut self.objects[index]);
         if before != self.snapshot() && self.drag_before.is_none() {
@@ -833,7 +861,7 @@ impl Session {
         }
     }
     pub fn delete_selected(&mut self) {
-        if let Some(index) = self.selected {
+        if let Some(index) = self.editable_selected() {
             self.undo.push(self.snapshot());
             self.selected = None;
             self.objects.remove(index);
@@ -846,6 +874,7 @@ impl Session {
         self.drag_before = None;
         self.objects = before.objects;
         self.selected = before.selected;
+        self.selected = self.editable_selected();
         self.spotlight_opacity = before.opacity;
         self.watermark = before.watermark;
         true
@@ -854,7 +883,7 @@ impl Session {
         *self = Self::new();
     }
     pub fn hit(&self, point: (f32, f32), scale: f32) -> Option<Hit> {
-        if let Some(index) = self.selected {
+        if let Some(index) = self.editable_selected() {
             for (handle, (x, y)) in self.objects[index].edit_handles(scale).iter().enumerate() {
                 let tolerance = if (self.objects[index].kind == Kind::Arrow && handle == 2)
                     || (self.objects[index].kind == Kind::Text && (handle < 4 || handle == 5))
@@ -873,6 +902,9 @@ impl Session {
             .enumerate()
             .rev()
             .find_map(|(index, object)| {
+                if !object.is_editable() {
+                    return None;
+                }
                 if let Extra::Text(text) = &object.extra {
                     if object
                         .text_link_arrow()
@@ -1119,7 +1151,7 @@ mod tests {
         o
     }
     #[test]
-    fn pencil_sampling_hit_transform_and_undo() {
+    fn pencil_sampling_is_preserved_but_completed_strokes_cannot_be_edited() {
         let mut o = brush(Kind::Pencil, vec![(-100., -100.)]);
         o.append_point((-100., -100.), 0.5);
         o.append_point((-50., -100.), 0.5);
@@ -1130,15 +1162,48 @@ mod tests {
         assert!(!o.hit_path((-50., -50.), 1.));
         let mut s = Session::new();
         assert!(s.add(o.clone()));
+        assert_eq!(s.selected, None);
+        assert!(o.edit_handles(1.).is_empty());
+        assert_eq!(s.hit((-50., -100.), 1.), None);
+        // Stale selection must not unlock style, deletion, or geometry changes.
+        s.selected = Some(0);
         s.begin_drag();
         s.objects[0].move_by(10., 20.);
+        s.objects[0].resize_to(Bounds::from_corners((0., 0.), (200., 200.)));
+        s.objects[0].edit_handle(7, (300., 300.), 1.);
+        s.update_selected(|object| object.style.width = 40.);
+        s.delete_selected();
         s.finish_drag();
-        assert!(s.undo());
         assert_eq!(s.objects[0], o);
-        o.resize_to(Bounds::from_corners((0., 0.), (200., 200.)));
-        assert_eq!(o.points, vec![(0., 0.), (200., 0.), (200., 200.)]);
-        assert_eq!(o.style.width, 12.);
         assert!(s.add(brush(Kind::Pencil, vec![(20., 20.)])));
+        assert_eq!(s.selected, None);
+        assert!(s.undo());
+        assert_eq!(s.objects, vec![o]);
+        assert_eq!(s.selected, None);
+        assert!(s.undo());
+        assert!(s.objects.is_empty());
+        assert!(!s.can_undo());
+    }
+    #[test]
+    fn pencil_does_not_block_editable_objects_beneath_it_at_either_dpi() {
+        for dpi in [1., 1.25] {
+            let mut s = Session::new();
+            s.add(brush(
+                Kind::HighlightLine,
+                vec![(-100., -100.), (100., -100.)],
+            ));
+            s.add(brush(Kind::Pencil, vec![(-100., -100.), (100., -100.)]));
+            assert_eq!(s.hit((0., -100.), dpi), Some(Hit::Object(0)));
+            s.selected = Some(0);
+            s.update_selected(|object| object.style.width = 24.);
+            assert_eq!(s.objects[0].style.width, 24.);
+            assert_eq!(s.objects[1].style.width, 12.);
+            s.objects[0].move_by(0., 100.);
+            assert_eq!(s.hit((0., -100.), dpi), None);
+            s.clear();
+            assert!(s.objects.is_empty());
+            assert!(!s.can_undo());
+        }
     }
     #[test]
     fn highlight_endpoints_rounding_and_cancel() {

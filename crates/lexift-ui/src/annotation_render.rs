@@ -982,10 +982,13 @@ pub(crate) fn render_editing(
             );
         }
     }
-    if let Some(index) = session
-        .selected
-        .and_then(|i| session.objects.get(i).map(|_| i))
-    {
+    if let Some(index) = session.selected.and_then(|i| {
+        session
+            .objects
+            .get(i)
+            .filter(|o| o.is_editable())
+            .map(|_| i)
+    }) {
         let selected = &session.objects[index];
         if let Extra::Text(text) = &selected.extra {
             let b = selected.bounds;
