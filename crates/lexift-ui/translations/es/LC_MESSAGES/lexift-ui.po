@@ -715,5 +715,47 @@ msgstr "Punto de origen"
 msgid "Source frame"
 msgstr "Marco de origen"
 
+msgid "Apply"
+msgstr "Aplicar"
+
+msgid "Bottom center"
+msgstr "Abajo al centro"
+
+msgid "Bottom left"
+msgstr "Abajo a la izquierda"
+
+msgid "Bottom right"
+msgstr "Abajo a la derecha"
+
+msgid "Center"
+msgstr "Centro"
+
+msgid "Edit annotation text"
+msgstr "Editar texto de anotación"
+
+msgid "Enter watermark"
+msgstr "Introducir marca de agua"
+
+msgid "Opacity"
+msgstr "Opacidad"
+
+msgid "Outline width"
+msgstr "Grosor del contorno"
+
+msgid "Padding"
+msgstr "Relleno interior"
+
+msgid "Time"
+msgstr "Hora"
+
+msgid "Top center"
+msgstr "Arriba al centro"
+
+msgid "Top left"
+msgstr "Arriba a la izquierda"
+
+msgid "Top right"
+msgstr "Arriba a la derecha"
+
 msgid "No connection"
 msgstr "Sin conexión"

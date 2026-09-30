@@ -1,4 +1,4 @@
-export enum AnnotationCursor { idle, drawing, moving, horizontal, vertical, diagonal-down, diagonal-up, corner-radius }
+export enum AnnotationCursor { idle, drawing, text, moving, horizontal, vertical, diagonal-down, diagonal-up, corner-radius }
 
 // A transparent, live-desktop overlay. Pixel content is produced from Core objects in Rust.
 export component AnnotationCanvas inherits Window {
@@ -21,6 +21,7 @@ export component AnnotationCanvas inherits Window {
         width: 100%;
         height: 100%;
         mouse-cursor: root.cursor == AnnotationCursor.moving ? move
+            : root.cursor == AnnotationCursor.text ? text
             : root.cursor == AnnotationCursor.horizontal ? ew-resize
             : root.cursor == AnnotationCursor.vertical ? ns-resize
             : root.cursor == AnnotationCursor.diagonal-down ? nwse-resize

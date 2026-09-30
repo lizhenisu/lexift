@@ -11,6 +11,10 @@ lexift-core.workspace = true
 slint = { workspace = true, features = ["raw-window-handle-06", "unstable-winit-030"] }
 tracing.workspace = true
 tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd"] }
+ab_glyph = "0.2.32"
+fontdb = { version = "0.24.0", default-features = false, features = ["fs"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+resvg = { version = "0.48.1", default-features = false }
 
 [build-dependencies]
 slint-build.workspace = true

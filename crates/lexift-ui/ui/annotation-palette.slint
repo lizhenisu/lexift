@@ -1,0 +1,30 @@
+import { Colors } from "design/colors.slint";
+
+// Shared preset/custom row. The caller owns the color target and popup lifetime.
+export component AnnotationPalette inherits Rectangle {
+    in-out property <int> selected;
+    in property <[color]> palette: [#d9472b, #e5bf55, #69ad61, #598fdf, #212121, #ffffff, #32ec66, #fff400];
+    in property <length> button-size: 28px;
+    in property <length> inset: 4px;
+    in property <length> radius: 8px;
+    in property <bool> custom-active;
+    callback custom-requested(float,float,float,float);
+    width: 8 * 32px + root.button-size; height: root.button-size;
+    for ink[i] in root.palette: Rectangle {
+        x: i * 32px; width: root.button-size; height: root.button-size; border-radius: root.radius;
+        border-width: root.selected == i ? 2px : 1px;
+        border-color: root.selected == i ? Colors.primary : Colors.outline;
+        Rectangle { x: root.inset; y: root.inset; width: parent.width - 2 * root.inset; height: parent.height - 2 * root.inset;
+            border-radius: root.radius - 3px; background: ink; }
+        TouchArea { clicked => { root.selected = i; } }
+    }
+    custom := Rectangle {
+        x: 8 * 32px; width: root.button-size; height: root.button-size; border-radius: root.radius;
+        border-width: root.selected == 8 ? 2px : 1px;
+        border-color: root.selected == 8 || root.custom-active ? Colors.primary : Colors.outline;
+        Image { x: root.inset; y: root.inset; width: parent.width - 2 * root.inset; height: parent.height - 2 * root.inset;
+            source: @image-url("icons/custom-color.svg"); }
+        TouchArea { clicked => { root.custom-requested(custom.absolute-position.x / 1px, custom.absolute-position.y / 1px,
+            custom.width / 1px, custom.height / 1px); } }
+    }
+}

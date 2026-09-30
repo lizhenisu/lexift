@@ -715,5 +715,47 @@ msgstr "採取側の点"
 msgid "Source frame"
 msgstr "採取枠"
 
+msgid "Apply"
+msgstr "適用"
+
+msgid "Bottom center"
+msgstr "下中央"
+
+msgid "Bottom left"
+msgstr "左下"
+
+msgid "Bottom right"
+msgstr "右下"
+
+msgid "Center"
+msgstr "中央"
+
+msgid "Edit annotation text"
+msgstr "注釈テキストを編集"
+
+msgid "Enter watermark"
+msgstr "透かしを入力"
+
+msgid "Opacity"
+msgstr "不透明度"
+
+msgid "Outline width"
+msgstr "輪郭の太さ"
+
+msgid "Padding"
+msgstr "内側余白"
+
+msgid "Time"
+msgstr "時刻"
+
+msgid "Top center"
+msgstr "上中央"
+
+msgid "Top left"
+msgstr "左上"
+
+msgid "Top right"
+msgstr "右上"
+
 msgid "No connection"
 msgstr "接続なし"

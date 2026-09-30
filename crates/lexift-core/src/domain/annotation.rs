@@ -1,4 +1,5 @@
 //! Transient screen annotation state in physical virtual-desktop coordinates.
+use crate::domain::geometry::Rect;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Bounds {
@@ -23,6 +24,9 @@ impl Bounds {
     }
     pub fn height(self) -> f32 {
         self.bottom - self.top
+    }
+    pub fn center(self) -> (f32, f32) {
+        ((self.left + self.right) / 2., (self.top + self.bottom) / 2.)
     }
     pub fn moved(self, dx: f32, dy: f32) -> Self {
         Self {
@@ -96,6 +100,7 @@ pub enum Kind {
     Arrow,
     Polyline,
     Magnifier,
+    Text,
 }
 impl Kind {
     pub fn is_spotlight(self) -> bool {
@@ -158,6 +163,62 @@ pub enum MagnifierConnector {
     None,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextBackground {
+    pub color: [u8; 3],
+    pub opacity: u8,
+    pub rounding: f32,
+    pub padding: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextOutline {
+    pub color: [u8; 3],
+    pub width: f32,
+}
+
+/// Text geometry uses an unrotated `Object::bounds`; visual handles rotate about its center.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextAnnotation {
+    pub content: String,
+    pub font_family: String,
+    pub font_size: f32,
+    pub bold: bool,
+    pub italic: bool,
+    pub outline: Option<TextOutline>,
+    pub background: Option<TextBackground>,
+    pub rotation: f32,
+    pub linked_arrow: Option<(f32, f32)>,
+    /// Scales intrinsic inset and caret allowance along with the font and frame.
+    pub layout_scale: f32,
+    pub linked_arrow_control: Option<(f32, f32)>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum WatermarkPosition {
+    #[default]
+    Tile,
+    BottomRight,
+    BottomLeft,
+    TopRight,
+    TopLeft,
+    TopCenter,
+    BottomCenter,
+    Center,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Watermark {
+    pub template: String,
+    /// Time placeholders are resolved only when the user applies the watermark.
+    pub content: String,
+    pub font_family: String,
+    pub font_size: f32,
+    pub opacity: u8,
+    pub color: [u8; 3],
+    pub position: WatermarkPosition,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum Extra {
     #[default]
@@ -183,6 +244,7 @@ pub enum Extra {
         antialias: bool,
         shadow: bool,
     },
+    Text(TextAnnotation),
 }
 
 impl Kind {
@@ -193,6 +255,7 @@ impl Kind {
             Self::Arrow => 5,
             Self::Polyline => 6,
             Self::Magnifier => 7,
+            Self::Text => 8,
             Self::SpotlightRectangle | Self::SpotlightEllipse => 2,
             _ => 0,
         }
@@ -200,6 +263,65 @@ impl Kind {
 }
 
 impl Object {
+    pub fn toggle_text_arrow(&mut self, scale: f32) {
+        let b = self.bounds;
+        if let Extra::Text(text) = &mut self.extra {
+            text.linked_arrow = if text.linked_arrow.is_some() {
+                None
+            } else {
+                Some((b.right + 100. * scale, b.center().1))
+            };
+            text.linked_arrow_control = None;
+        }
+    }
+    pub fn text_arrow_anchor(&self) -> Option<(f32, f32)> {
+        let Extra::Text(text) = &self.extra else {
+            return None;
+        };
+        let tip = text.linked_arrow?;
+        let local_tip = unrotate_text_point(tip, self.bounds, text.rotation);
+        let (cx, cy) = self.bounds.center();
+        let (dx, dy) = (local_tip.0 - cx, local_tip.1 - cy);
+        if dx.abs() <= f32::EPSILON && dy.abs() <= f32::EPSILON {
+            return Some(rotate_text_point(
+                (self.bounds.right, cy),
+                self.bounds,
+                text.rotation,
+            ));
+        }
+        let half_w = self.bounds.width() / 2.;
+        let half_h = self.bounds.height() / 2.;
+        let factor = (half_w / dx.abs().max(f32::EPSILON)).min(half_h / dy.abs().max(f32::EPSILON));
+        Some(rotate_text_point(
+            (cx + dx * factor, cy + dy * factor),
+            self.bounds,
+            text.rotation,
+        ))
+    }
+    /// Projects the text connector into the same geometry used by standalone arrows.
+    pub fn text_link_arrow(&self) -> Option<Object> {
+        let Extra::Text(text) = &self.extra else {
+            return None;
+        };
+        let tip = text.linked_arrow?;
+        let anchor = self.text_arrow_anchor()?;
+        let mut points = vec![anchor, tip];
+        if let Some(control) = text.linked_arrow_control {
+            points.push(control);
+        }
+        Some(Object {
+            kind: Kind::Arrow,
+            bounds: Bounds::from_corners(anchor, tip),
+            style: self.style,
+            points,
+            extra: Extra::Arrow {
+                curved: text.linked_arrow_control.is_some(),
+                head: true,
+                start: Endpoint::None,
+                end: Endpoint::FilledArrow,
+            },
+        })
+    }
     /// Changes magnification while keeping the output frame at its current center.
     pub fn set_magnifier_zoom_centered(&mut self, requested_zoom: f32) {
         let Extra::Magnifier { output, zoom, .. } = &mut self.extra else {
@@ -316,6 +438,29 @@ impl Object {
                 .any(|p| segment_distance(point, p[0], p[1]) <= tolerance)
     }
     pub fn edit_handles(&self, scale: f32) -> Vec<(f32, f32)> {
+        if let Extra::Text(text) = &self.extra {
+            let b = self.bounds;
+            // Keep the operation squares outside the editable body. On short text,
+            // controls centred on the corners otherwise cover every body hit.
+            let gap = 9. * scale;
+            let corners = [
+                (b.left - gap, b.top - gap),
+                (b.right + gap, b.top - gap),
+                (b.left - gap, b.bottom + gap),
+                (b.right + gap, b.bottom + gap),
+            ];
+            let mut handles = corners
+                .into_iter()
+                .map(|point| rotate_text_point(point, b, text.rotation))
+                .collect::<Vec<_>>();
+            if let Some(tip) = text.linked_arrow {
+                handles.push(tip);
+                if let Some(arrow) = self.text_link_arrow() {
+                    handles.push(arrow.edit_handles(scale)[2]);
+                }
+            }
+            return handles;
+        }
         if self.kind == Kind::Arrow && self.points.len() >= 2 {
             let a = self.points[0];
             let b = self.points[1];
@@ -393,7 +538,80 @@ impl Object {
         self.bounds = target;
     }
     pub fn edit_handle(&mut self, handle: usize, point: (f32, f32), scale: f32) {
-        if self.kind == Kind::Arrow && handle == 2 && self.points.len() >= 2 {
+        if !point.0.is_finite() || !point.1.is_finite() {
+            return;
+        }
+        let link_anchor = self.text_arrow_anchor();
+        if let Extra::Text(text) = &mut self.extra {
+            let center = self.bounds.center();
+            match handle {
+                0 => {
+                    let initial = (self.bounds.top - center.1).atan2(self.bounds.left - center.0);
+                    text.rotation = (point.1 - center.1).atan2(point.0 - center.0) - initial;
+                }
+                4 => text.linked_arrow = Some(point),
+                5 => {
+                    if let (Some(anchor), Some(tip)) = (link_anchor, text.linked_arrow) {
+                        let midpoint = ((anchor.0 + tip.0) / 2., (anchor.1 + tip.1) / 2.);
+                        text.linked_arrow_control = if distance(point, midpoint) <= 2. * scale {
+                            None
+                        } else {
+                            Some((2. * point.0 - midpoint.0, 2. * point.1 - midpoint.1))
+                        };
+                    }
+                }
+                3 => {
+                    let anchored = rotate_text_point(
+                        (self.bounds.left, self.bounds.top),
+                        self.bounds,
+                        text.rotation,
+                    );
+                    let local = unrotate_text_point(point, self.bounds, text.rotation);
+                    let local = (local.0 - 9. * scale, local.1 - 9. * scale);
+                    let old_width = self.bounds.width().max(1.);
+                    let old_height = self.bounds.height().max(1.);
+                    let anchor = (self.bounds.left, self.bounds.top);
+                    let factor = ((local.0 - anchor.0) / old_width)
+                        .max((local.1 - anchor.1) / old_height)
+                        .max(5. / text.font_size);
+                    if !factor.is_finite()
+                        || !(text.font_size * factor).is_finite()
+                        || !(old_width * factor).is_finite()
+                        || !(old_height * factor).is_finite()
+                        || !(text.layout_scale * factor).is_finite()
+                    {
+                        return;
+                    }
+                    let (width, height) = (old_width * factor, old_height * factor);
+                    let (sin, cos) = text.rotation.sin_cos();
+                    let left = anchored.0 - width / 2. + cos * width / 2. - sin * height / 2.;
+                    let top = anchored.1 - height / 2. + sin * width / 2. + cos * height / 2.;
+                    let next = Bounds {
+                        left,
+                        top,
+                        right: left + width,
+                        bottom: top + height,
+                    };
+                    if ![next.left, next.top, next.right, next.bottom]
+                        .into_iter()
+                        .all(f32::is_finite)
+                    {
+                        return;
+                    }
+                    self.bounds = next;
+                    text.font_size *= factor;
+                    text.layout_scale *= factor;
+                    if let Some(background) = &mut text.background {
+                        background.padding *= factor;
+                        background.rounding *= factor;
+                    }
+                    if let Some(outline) = &mut text.outline {
+                        outline.width *= factor;
+                    }
+                }
+                _ => {}
+            }
+        } else if self.kind == Kind::Arrow && handle == 2 && self.points.len() >= 2 {
             let a = self.points[0];
             let b = self.points[1];
             let midpoint = ((a.0 + b.0) / 2., (a.1 + b.1) / 2.);
@@ -491,6 +709,17 @@ fn inside(bounds: Bounds, point: (f32, f32), margin: f32) -> bool {
         && point.1 <= bounds.bottom + margin
 }
 
+pub fn rotate_text_point(point: (f32, f32), bounds: Bounds, angle: f32) -> (f32, f32) {
+    let (cx, cy) = bounds.center();
+    let (sin, cos) = angle.sin_cos();
+    let (x, y) = (point.0 - cx, point.1 - cy);
+    (cx + x * cos - y * sin, cy + x * sin + y * cos)
+}
+
+pub fn unrotate_text_point(point: (f32, f32), bounds: Bounds, angle: f32) -> (f32, f32) {
+    rotate_text_point(point, bounds, -angle)
+}
+
 fn distance(a: (f32, f32), b: (f32, f32)) -> f32 {
     (a.0 - b.0).hypot(a.1 - b.1)
 }
@@ -507,6 +736,7 @@ struct Snapshot {
     objects: Vec<Object>,
     selected: Option<usize>,
     opacity: f32,
+    watermark: Option<Watermark>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -521,6 +751,9 @@ pub struct Session {
     pub objects: Vec<Object>,
     pub selected: Option<usize>,
     pub spotlight_opacity: f32,
+    pub watermark: Option<Watermark>,
+    /// Current monitor layout for drawing one watermark consistently across magnified samples.
+    pub displays: Vec<Rect>,
     undo: Vec<Snapshot>,
     drag_before: Option<Snapshot>,
 }
@@ -537,6 +770,7 @@ impl Session {
             objects: self.objects.clone(),
             selected: self.selected,
             opacity: self.spotlight_opacity,
+            watermark: self.watermark.clone(),
         }
     }
     pub fn set_spotlight_opacity(&mut self, opacity: f32) {
@@ -546,6 +780,14 @@ impl Session {
                 self.undo.push(self.snapshot());
             }
             self.spotlight_opacity = opacity;
+        }
+    }
+    pub fn set_watermark(&mut self, watermark: Option<Watermark>) {
+        if self.watermark != watermark {
+            if self.drag_before.is_none() {
+                self.undo.push(self.snapshot());
+            }
+            self.watermark = watermark;
         }
     }
     pub fn can_undo(&self) -> bool {
@@ -579,6 +821,7 @@ impl Session {
             self.objects = before.objects;
             self.selected = before.selected;
             self.spotlight_opacity = before.opacity;
+            self.watermark = before.watermark;
         }
     }
     pub fn update_selected(&mut self, change: impl FnOnce(&mut Object)) {
@@ -604,6 +847,7 @@ impl Session {
         self.objects = before.objects;
         self.selected = before.selected;
         self.spotlight_opacity = before.opacity;
+        self.watermark = before.watermark;
         true
     }
     pub fn clear(&mut self) {
@@ -612,7 +856,9 @@ impl Session {
     pub fn hit(&self, point: (f32, f32), scale: f32) -> Option<Hit> {
         if let Some(index) = self.selected {
             for (handle, (x, y)) in self.objects[index].edit_handles(scale).iter().enumerate() {
-                let tolerance = if self.objects[index].kind == Kind::Arrow && handle == 2 {
+                let tolerance = if (self.objects[index].kind == Kind::Arrow && handle == 2)
+                    || (self.objects[index].kind == Kind::Text && (handle < 4 || handle == 5))
+                {
                     9. * scale
                 } else {
                     6. * scale
@@ -627,6 +873,16 @@ impl Session {
             .enumerate()
             .rev()
             .find_map(|(index, object)| {
+                if let Extra::Text(text) = &object.extra {
+                    if object
+                        .text_link_arrow()
+                        .is_some_and(|arrow| arrow.hit_path(point, scale))
+                    {
+                        return Some(Hit::Object(index));
+                    }
+                    let local = unrotate_text_point(point, object.bounds, text.rotation);
+                    return inside(object.bounds, local, 6. * scale).then_some(Hit::Object(index));
+                }
                 if matches!(
                     object.kind,
                     Kind::Pencil | Kind::HighlightLine | Kind::Arrow | Kind::Polyline
@@ -669,6 +925,185 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn text_object() -> Object {
+        Object {
+            bounds: Bounds::from_corners((-100., 20.), (20., 70.)),
+            kind: Kind::Text,
+            style: Style::default(),
+            points: Vec::new(),
+            extra: Extra::Text(TextAnnotation {
+                content: "文字".into(),
+                font_family: "Segoe UI".into(),
+                font_size: 20.,
+                bold: false,
+                italic: false,
+                outline: None,
+                background: None,
+                rotation: 0.,
+                layout_scale: 1.,
+                linked_arrow_control: None,
+                linked_arrow: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn short_text_body_is_not_covered_by_corner_controls() {
+        let mut session = Session::new();
+        let mut object = text_object();
+        object.bounds = Bounds::from_corners((100., 100.), (129., 130.));
+        session.add(object);
+        for scale in [1., 1.25] {
+            assert_eq!(session.hit((114., 115.), scale), Some(Hit::Object(0)));
+            let handles = session.objects[0].edit_handles(scale);
+            for (index, handle) in handles.into_iter().enumerate() {
+                assert_eq!(session.hit(handle, scale), Some(Hit::Handle(index)));
+            }
+        }
+    }
+
+    #[test]
+    fn text_scaling_has_no_fixed_upper_limit_and_keeps_its_anchor() {
+        for scale in [1., 1.25] {
+            for rotation in [0., 0.6] {
+                let mut object = text_object();
+                if let Extra::Text(text) = &mut object.extra {
+                    text.rotation = rotation;
+                }
+                let original = object.clone();
+                let b = object.bounds;
+                let anchor = rotate_text_point((b.left, b.top), b, rotation);
+                let target = rotate_text_point(
+                    (
+                        b.left + b.width() * 100. + 9. * scale,
+                        b.top + b.height() * 100. + 9. * scale,
+                    ),
+                    b,
+                    rotation,
+                );
+                object.edit_handle(3, target, scale);
+                let Extra::Text(text) = &object.extra else {
+                    unreachable!()
+                };
+                assert!(text.font_size > 1000.);
+                assert!((text.layout_scale - 100.).abs() < 0.001);
+                let now = rotate_text_point(
+                    (object.bounds.left, object.bounds.top),
+                    object.bounds,
+                    rotation,
+                );
+                assert!(distance(anchor, now) < 0.01);
+                let snapshot = object.clone();
+                object.edit_handle(3, (f32::INFINITY, 0.), scale);
+                assert_eq!(object, snapshot);
+                let b = object.bounds;
+                let target = rotate_text_point(
+                    (
+                        b.left + original.bounds.width() + 9. * scale,
+                        b.top + original.bounds.height() + 9. * scale,
+                    ),
+                    b,
+                    rotation,
+                );
+                object.edit_handle(3, target, scale);
+                assert!((object.bounds.width() - original.bounds.width()).abs() < 0.01);
+            }
+        }
+    }
+
+    #[test]
+    fn text_arrow_toggle_bend_endpoint_and_undo_share_arrow_geometry() {
+        let mut session = Session::new();
+        session.add(text_object());
+        let before = session.objects[0].clone();
+        session.update_selected(|object| object.toggle_text_arrow(1.25));
+        let handles = session.objects[0].edit_handles(1.25);
+        assert_eq!(handles.len(), 6);
+        let target = (handles[5].0, handles[5].1 - 60.);
+        session.begin_drag();
+        session.objects[0].edit_handle(5, target, 1.25);
+        session.finish_drag();
+        assert!(distance(session.objects[0].edit_handles(1.25)[5], target) < 0.001);
+        assert_eq!(session.hit(target, 1.25), Some(Hit::Handle(5)));
+        let arrow = session.objects[0].text_link_arrow().unwrap();
+        assert!(arrow.hit_path(target, 1.25));
+        let mut centered_tip = session.objects[0].clone();
+        centered_tip.edit_handle(4, centered_tip.bounds.center(), 1.25);
+        assert_ne!(
+            centered_tip.text_arrow_anchor().unwrap(),
+            centered_tip.bounds.center()
+        );
+        let straight = (
+            (arrow.points[0].0 + arrow.points[1].0) / 2.,
+            (arrow.points[0].1 + arrow.points[1].1) / 2.,
+        );
+        session.objects[0].edit_handle(5, straight, 1.25);
+        assert_eq!(
+            session.objects[0].text_link_arrow().unwrap().points.len(),
+            2
+        );
+        session.update_selected(|object| object.toggle_text_arrow(1.25));
+        assert_eq!(session.objects[0].edit_handles(1.25).len(), 4);
+        assert!(session.undo());
+        assert!(session.objects[0].text_link_arrow().is_some());
+        assert!(session.undo());
+        assert!(session.undo());
+        assert_eq!(session.objects[0], before);
+    }
+
+    #[test]
+    fn rotated_text_handles_hit_resize_and_undo() {
+        let mut session = Session::new();
+        assert!(session.add(text_object()));
+        let before = session.objects[0].clone();
+        session.begin_drag();
+        session.objects[0].edit_handle(0, (-100., 70.), 1.);
+        let handles = session.objects[0].edit_handles(1.);
+        let body = rotate_text_point(
+            (-40., 45.),
+            session.objects[0].bounds,
+            match &session.objects[0].extra {
+                Extra::Text(text) => text.rotation,
+                _ => unreachable!(),
+            },
+        );
+        assert_eq!(session.hit(body, 1.), Some(Hit::Object(0)));
+        assert_eq!(session.hit(handles[0], 1.), Some(Hit::Handle(0)));
+        let anchor = handles[0];
+        session.objects[0].edit_handle(3, (handles[3].0 + 50., handles[3].1 + 50.), 1.);
+        let resized = session.objects[0].edit_handles(1.);
+        assert!((resized[0].0 - anchor.0).abs() < 0.01);
+        assert!((resized[0].1 - anchor.1).abs() < 0.01);
+        session.objects[0].toggle_text_arrow(1.);
+        assert!(session.objects[0].text_arrow_anchor().is_some());
+        session.finish_drag();
+        assert!(session.undo());
+        assert_eq!(session.objects[0], before);
+    }
+
+    #[test]
+    fn watermark_is_single_undoable_session_state() {
+        let mut session = Session::new();
+        let watermark = Watermark {
+            template: "test".into(),
+            content: "test".into(),
+            font_family: "Segoe UI".into(),
+            font_size: 24.,
+            opacity: 50,
+            color: [255, 0, 0],
+            position: WatermarkPosition::Tile,
+        };
+        session.set_watermark(Some(watermark.clone()));
+        session.begin_drag();
+        let mut next = watermark.clone();
+        next.opacity = 60;
+        session.set_watermark(Some(next));
+        session.finish_drag();
+        assert!(session.undo());
+        assert_eq!(session.watermark, Some(watermark));
+        assert!(session.undo());
+        assert_eq!(session.watermark, None);
+    }
     fn brush(kind: Kind, points: Vec<(f32, f32)>) -> Object {
         let mut o = Object {
             kind,

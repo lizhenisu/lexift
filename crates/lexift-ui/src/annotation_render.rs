@@ -5,10 +5,58 @@ use lexift_core::domain::{
 };
 #[cfg(test)]
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
+use std::{cell::RefCell, collections::HashMap};
 use tiny_skia::{
     BlendMode, FillRule, FilterQuality, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint,
     Rect as SkRect, Stroke, StrokeDash, Transform,
 };
+
+thread_local! {
+    static TEXT_CONTROL_ICONS: RefCell<HashMap<(usize, u32), Pixmap>> = RefCell::new(HashMap::new());
+}
+
+fn draw_text_control_icon(pixmap: &mut Pixmap, handle: usize, center: (f32, f32), scale: f32) {
+    let svg = match handle {
+        0 => include_str!("../ui/icons/text-rotate.svg"),
+        2 => include_str!("../ui/icons/text-link-arrow.svg"),
+        3 => include_str!("../ui/icons/text-resize.svg"),
+        _ => return,
+    };
+    let size = (18. * scale).round().max(1.) as u32;
+    TEXT_CONTROL_ICONS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let std::collections::hash_map::Entry::Vacant(entry) = cache.entry((handle, size)) {
+            let Ok(tree) = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
+            else {
+                return;
+            };
+            let Some(mut svg_pixels) = resvg::tiny_skia::Pixmap::new(size, size) else {
+                return;
+            };
+            resvg::render(
+                &tree,
+                resvg::tiny_skia::Transform::from_scale(size as f32 / 18., size as f32 / 18.),
+                &mut svg_pixels.as_mut(),
+            );
+            let Some(mut icon) = Pixmap::new(size, size) else {
+                return;
+            };
+            icon.data_mut().copy_from_slice(svg_pixels.data());
+            entry.insert(icon);
+        }
+        let Some(icon) = cache.get(&(handle, size)) else {
+            return;
+        };
+        pixmap.draw_pixmap(
+            (center.0 - size as f32 / 2.).round() as i32,
+            (center.1 - size as f32 / 2.).round() as i32,
+            icon.as_ref(),
+            &PixmapPaint::default(),
+            Transform::identity(),
+            None,
+        );
+    });
+}
 
 fn path(bounds: Bounds, kind: Kind, rounding: f32, monitor: Rect) -> Option<Path> {
     let (l, t, r, b) = (
@@ -115,6 +163,13 @@ fn draw_brush(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) {
 }
 
 fn draw_object(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) {
+    if object.kind == Kind::Text {
+        crate::annotation_text::draw_text(pixmap, object, monitor, scale);
+        if let Some(arrow) = object.text_link_arrow() {
+            draw_line_annotation(pixmap, &arrow, monitor, scale);
+        }
+        return;
+    }
     if matches!(object.kind, Kind::Arrow | Kind::Polyline) {
         draw_line_annotation(pixmap, object, monitor, scale);
         return;
@@ -485,6 +540,8 @@ fn draw_magnified_marks(
     }
     let mut marks = Session::new();
     marks.spotlight_opacity = session.spotlight_opacity;
+    marks.watermark = session.watermark.clone();
+    marks.displays = session.displays.clone();
     marks.objects = session
         .objects
         .iter()
@@ -492,7 +549,7 @@ fn draw_magnified_marks(
         .cloned()
         .collect();
     let draft = draft.filter(|o| o.kind != Kind::Magnifier);
-    if marks.objects.is_empty() && draft.is_none() {
+    if marks.objects.is_empty() && draft.is_none() && marks.watermark.is_none() {
         return;
     }
     let Some(sampled) = render(&marks, sample, 1., draft, None) else {
@@ -790,12 +847,44 @@ pub(crate) fn render(
     in_progress: Option<&Object>,
     hovered: Option<usize>,
 ) -> Option<Pixmap> {
+    render_editing(session, monitor, scale, in_progress, hovered, None)
+}
+
+pub(crate) fn render_editing(
+    session: &Session,
+    monitor: Rect,
+    scale: f32,
+    in_progress: Option<&Object>,
+    hovered: Option<usize>,
+    reference: Option<&str>,
+) -> Option<Pixmap> {
     let width = u32::try_from(monitor.right - monitor.left).ok()?;
     let height = u32::try_from(monitor.bottom - monitor.top).ok()?;
     if width == 0 || height == 0 || width as u64 * height as u64 > 40_000_000 {
         return None;
     }
     let mut pixmap = Pixmap::new(width, height)?;
+    if let Some(watermark) = &session.watermark {
+        if session.displays.is_empty() {
+            crate::annotation_text::draw_watermark(&mut pixmap, watermark, monitor, monitor, scale);
+        } else {
+            for display in &session.displays {
+                if display.left < monitor.right
+                    && display.right > monitor.left
+                    && display.top < monitor.bottom
+                    && display.bottom > monitor.top
+                {
+                    crate::annotation_text::draw_watermark(
+                        &mut pixmap,
+                        watermark,
+                        monitor,
+                        *display,
+                        scale,
+                    );
+                }
+            }
+        }
+    }
     let spotlight = session
         .objects
         .iter()
@@ -840,10 +929,24 @@ pub(crate) fn render(
         }
         pixmap.data_mut().copy_from_slice(mask.data());
     }
-    for object in session.objects.iter().chain(in_progress) {
+    for (index, object) in session.objects.iter().chain(in_progress).enumerate() {
         if object.kind == Kind::Magnifier {
             draw_magnified_marks(&mut pixmap, session, in_progress, object, monitor);
             draw_magnifier_overlay(&mut pixmap, object, monitor, scale);
+        } else if object.kind == Kind::Text
+            && session.selected == Some(index)
+            && reference.is_some()
+        {
+            crate::annotation_text::draw_text_with_reference(
+                &mut pixmap,
+                object,
+                monitor,
+                scale,
+                reference,
+            );
+            if let Some(arrow) = object.text_link_arrow() {
+                draw_line_annotation(&mut pixmap, &arrow, monitor, scale);
+            }
         } else {
             draw_object(&mut pixmap, object, monitor, scale);
         }
@@ -884,8 +987,42 @@ pub(crate) fn render(
         .and_then(|i| session.objects.get(i).map(|_| i))
     {
         let selected = &session.objects[index];
+        if let Extra::Text(text) = &selected.extra {
+            let b = selected.bounds;
+            let corners = [
+                (b.left, b.top),
+                (b.right, b.top),
+                (b.right, b.bottom),
+                (b.left, b.bottom),
+            ];
+            let corners = corners
+                .map(|p| lexift_core::domain::annotation::rotate_text_point(p, b, text.rotation));
+            let mut builder = PathBuilder::new();
+            builder.move_to(
+                corners[0].0 - monitor.left as f32,
+                corners[0].1 - monitor.top as f32,
+            );
+            for p in corners.iter().skip(1) {
+                builder.line_to(p.0 - monitor.left as f32, p.1 - monitor.top as f32);
+            }
+            builder.close();
+            if let Some(path) = builder.finish() {
+                pixmap.stroke_path(
+                    &path,
+                    &color_paint([28, 28, 28]),
+                    &Stroke {
+                        width: scale.max(1.),
+                        ..Stroke::default()
+                    },
+                    Transform::identity(),
+                    None,
+                );
+            }
+        }
         for (handle, (x, y)) in selected.edit_handles(scale).into_iter().enumerate() {
-            if selected.kind == Kind::Arrow && handle == 2 {
+            if (selected.kind == Kind::Arrow && handle == 2)
+                || (selected.kind == Kind::Text && handle == 5)
+            {
                 let center = (x - monitor.left as f32, y - monitor.top as f32);
                 // Stroke-only rings keep the arrow itself visible through the handle.
                 for (radius, color, width) in [
@@ -911,7 +1048,11 @@ pub(crate) fn render(
                 }
                 continue;
             }
-            let half = 4. * scale;
+            let half = if selected.kind == Kind::Text && handle < 4 {
+                9. * scale
+            } else {
+                4. * scale
+            };
             let Some(r) = SkRect::from_xywh(
                 x - monitor.left as f32 - half,
                 y - monitor.top as f32 - half,
@@ -946,7 +1087,52 @@ pub(crate) fn render(
             }
             let mut white = Paint::default();
             white.set_color_rgba8(255, 255, 255, 255);
-            pixmap.fill_rect(r, &white, Transform::identity(), None);
+            if selected.kind == Kind::Text && handle < 4 {
+                let mut bg = Paint::default();
+                let ink = if handle == 1 {
+                    [224, 64, 47]
+                } else {
+                    [40, 129, 255]
+                };
+                bg.set_color_rgba8(ink[0], ink[1], ink[2], 255);
+                pixmap.fill_rect(r, &bg, Transform::identity(), None);
+                if handle < 4 {
+                    let cx = x - monitor.left as f32;
+                    let cy = y - monitor.top as f32;
+                    let s = scale;
+                    if handle == 0 || handle == 2 || handle == 3 {
+                        draw_text_control_icon(&mut pixmap, handle, (cx, cy), scale);
+                        continue;
+                    }
+                    let mut symbol = PathBuilder::new();
+                    match handle {
+                        1 => {
+                            // delete
+                            symbol.move_to(cx - 3. * s, cy - 3. * s);
+                            symbol.line_to(cx + 3. * s, cy + 3. * s);
+                            symbol.move_to(cx + 3. * s, cy - 3. * s);
+                            symbol.line_to(cx - 3. * s, cy + 3. * s);
+                        }
+                        _ => unreachable!(),
+                    }
+                    if let Some(symbol) = symbol.finish() {
+                        pixmap.stroke_path(
+                            &symbol,
+                            &color_paint([255, 255, 255]),
+                            &Stroke {
+                                width: 1.7 * scale,
+                                line_cap: tiny_skia::LineCap::Round,
+                                ..Stroke::default()
+                            },
+                            Transform::identity(),
+                            None,
+                        );
+                    }
+                    continue;
+                }
+            } else {
+                pixmap.fill_rect(r, &white, Transform::identity(), None);
+            }
             let mut blue = color_paint(if selected.kind == Kind::HighlightLine {
                 [218, 22, 192]
             } else {
@@ -978,6 +1164,123 @@ pub(crate) fn preview_image(pixmap: &Pixmap) -> Image {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn enlarged_text_and_curved_connector_render_together() {
+        use lexift_core::domain::annotation::{Style, TextAnnotation};
+        let dpi = 1.25;
+        let text = TextAnnotation {
+            content: "示例文本".into(),
+            font_family: "Microsoft YaHei".into(),
+            font_size: 22.,
+            bold: false,
+            italic: false,
+            outline: None,
+            background: None,
+            rotation: 0.,
+            layout_scale: 1.,
+            linked_arrow: None,
+            linked_arrow_control: None,
+        };
+        let b = crate::annotation_text::text_bounds((60., 100.), &text, dpi);
+        let mut object = Object {
+            kind: Kind::Text,
+            bounds: b,
+            style: Style::default(),
+            points: Vec::new(),
+            extra: Extra::Text(text),
+        };
+        object.edit_handle(
+            3,
+            (
+                b.left + b.width() * 10. + 9. * dpi,
+                b.top + b.height() * 10. + 9. * dpi,
+            ),
+            dpi,
+        );
+        let Extra::Text(text) = &object.extra else {
+            unreachable!()
+        };
+        let measured =
+            crate::annotation_text::text_bounds((object.bounds.left, object.bounds.top), text, dpi);
+        assert!((object.bounds.width() - measured.width()).abs() < 0.01);
+        assert!((object.bounds.height() - measured.height()).abs() < 0.01);
+        object.toggle_text_arrow(dpi);
+        let midpoint = object.edit_handles(dpi)[5];
+        object.edit_handle(5, (midpoint.0, midpoint.1 - 90.), dpi);
+        let mut session = Session::new();
+        session.add(object);
+        let frame = render(
+            &session,
+            Rect {
+                left: 0,
+                top: 0,
+                right: 1200,
+                bottom: 700,
+            },
+            dpi,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(frame.pixels().iter().any(|p| p.alpha() > 0));
+        if let Ok(path) = std::env::var("LEXIFT_TEXT_SCALE_RGBA") {
+            std::fs::write(path, frame.data()).unwrap();
+        }
+    }
+
+    #[test]
+    fn text_controls_render_with_svg_icons_at_both_dpi_scales() {
+        use lexift_core::domain::annotation::{Style, TextAnnotation};
+        for scale in [1., 1.25] {
+            let text = TextAnnotation {
+                content: "示例文本".into(),
+                font_family: "Microsoft YaHei".into(),
+                font_size: 22.,
+                bold: false,
+                italic: false,
+                outline: None,
+                background: None,
+                rotation: 0.,
+                layout_scale: 1.,
+                linked_arrow_control: None,
+                linked_arrow: None,
+            };
+            let mut session = Session::new();
+            session.add(Object {
+                bounds: crate::annotation_text::text_bounds((70., 50.), &text, scale),
+                kind: Kind::Text,
+                points: Vec::new(),
+                style: Style::default(),
+                extra: Extra::Text(text),
+            });
+            let monitor = Rect {
+                left: 0,
+                top: 0,
+                right: 320,
+                bottom: 150,
+            };
+            let frame = render(&session, monitor, scale, None, None).unwrap();
+            for (x, y) in session.objects[0].edit_handles(scale).into_iter().take(4) {
+                let mut white_pixels = 0;
+                for row in (y as i32 - 8)..=(y as i32 + 8) {
+                    for col in (x as i32 - 8)..=(x as i32 + 8) {
+                        let i = (row as usize * 320 + col as usize) * 4;
+                        let pixel = &frame.data()[i..i + 4];
+                        if pixel[0] > 230 && pixel[1] > 230 && pixel[2] > 230 {
+                            white_pixels += 1;
+                        }
+                    }
+                }
+                assert!(white_pixels > 5, "each operation icon must be visible");
+            }
+            if scale == 1.25
+                && let Ok(path) = std::env::var("LEXIFT_TEXT_CONTROLS_RGBA")
+            {
+                std::fs::write(path, frame.data()).unwrap();
+            }
+        }
+    }
+
     #[test]
     fn geometry_hover_follows_rectangle_and_ellipse_without_edit_handles() {
         let monitor = Rect {

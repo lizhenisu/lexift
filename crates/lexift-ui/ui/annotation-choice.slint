@@ -1,7 +1,10 @@
+import { AnnotationPalette } from "annotation-palette.slint";
 import { AnnotationColorPicker } from "annotation-color.slint";
 import { Colors } from "design/colors.slint";
 import { MenuMetrics } from "design/menu.slint";
-import { ConnectorStylePreview, LineStylePreview } from "annotation-fields.slint";
+import { AnnotationValues } from "annotation.slint";
+import { Slider, SpinBox, ConnectorStylePreview, LineStylePreview } from "annotation-fields.slint";
+import { ScrollView } from "std-widgets.slint";
 
 export component AnnotationChoiceWindow inherits Window {
     in property <int> disabled-index: -1;
@@ -10,6 +13,13 @@ export component AnnotationChoiceWindow inherits Window {
     in property <bool> lines;
     in property <bool> connectors;
     in property <bool> color-mode;
+    in property <bool> font-mode;
+    in property <int> text-style-mode: 0;
+    in-out property <AnnotationValues> style-values;
+    callback custom-requested(float,float,float,float);
+    callback text-style-edited(AnnotationValues);
+    changed style-values => { root.text-style-edited(root.style-values); }
+    private property <[color]> palette: [#d9472b, #e5bf55, #69ad61, #598fdf, #212121, #ffffff, #32ec66, #fff400];
     in-out property <float> hue;
     in-out property <float> saturation;
     in-out property <float> value;
@@ -21,7 +31,7 @@ export component AnnotationChoiceWindow inherits Window {
     callback hex-edited(string,bool);
     callback color-dragging(bool);
     in-out property <int> selected;
-    out property <length> menu-height: root.color-mode ? 300px : root.options.length * MenuMetrics.row-height + 8px;
+    out property <length> menu-height: root.text-style-mode == 1 ? 80px : root.text-style-mode == 2 ? 160px : root.color-mode ? 300px : root.font-mode ? 320px : root.options.length * MenuMetrics.row-height + 8px;
     callback chosen(int);
     callback cancel();
     forward-focus: keys;
@@ -29,7 +39,7 @@ export component AnnotationChoiceWindow inherits Window {
         capture-key-pressed(event) => { if event.text == Key.Escape { root.cancel(); return accept; } if root.color-mode && event.text == Key.Return { root.hex-edited(root.hex-text,true); return accept; } return reject; }
         key-pressed(event) => {
             if event.text == Key.Escape { root.cancel(); }
-            else if root.color-mode { return reject; }
+            else if root.color-mode || root.text-style-mode != 0 { return reject; }
             else if event.text == Key.DownArrow { root.selected = mod(root.selected + 1, root.options.length); }
             else if event.text == Key.UpArrow { root.selected = mod(root.selected + root.options.length - 1, root.options.length); }
             else if event.text == Key.Home { root.selected = 0; }
@@ -50,7 +60,38 @@ export component AnnotationChoiceWindow inherits Window {
             hex-edited(text,commit) => { root.hex-edited(text,commit); }
             dragging(active) => { root.color-dragging(active); }
         }
-        for label[i] in root.options: Rectangle {
+            if root.text-style-mode == 1: Rectangle {
+                width: 100%; height: 100%;
+                Text { x: 10px; y: 9px; text: @tr("Outline width"); color: Colors.foreground; }
+                SpinBox { x: 150px; y: 6px; width: 80px; height: 30px; minimum: 1; maximum: 20; value <=> root.style-values.text-outline-width; }
+                AnnotationPalette {
+                    x: (parent.width - self.width) / 2; y: 44px; button-size: 27px; inset: 3px; radius: 6px;
+                    selected <=> root.style-values.text-outline-color-index;
+                    custom-requested(x,y,w,h) => { root.custom-requested(x,y,w,h); }
+                }
+            }
+            if root.text-style-mode == 2: Rectangle {
+                width: 100%; height: 100%;
+                Text { x: 10px; y: 9px; text: @tr("Opacity"); color: Colors.foreground; }
+                Slider { x: 110px; y: 14px; width: 185px; minimum: 0; maximum: 100;
+                    value: root.style-values.text-bg-opacity; changed value => { root.style-values.text-bg-opacity = round(self.value); }
+                    dragging(active) => { root.color-dragging(active); } }
+                Text { x: 10px; y: 45px; text: @tr("Corner radius"); color: Colors.foreground; }
+                SpinBox { x: 120px; y: 40px; width: 80px; height: 30px; minimum: 0; maximum: 100; value <=> root.style-values.text-bg-rounding; }
+                Text { x: 10px; y: 82px; text: @tr("Padding"); color: Colors.foreground; }
+                SpinBox { x: 120px; y: 78px; width: 80px; height: 30px; minimum: 0; maximum: 100; value <=> root.style-values.text-bg-padding; }
+                AnnotationPalette {
+                    x: (parent.width - self.width) / 2; y: 122px; button-size: 27px; inset: 3px; radius: 6px;
+                    selected <=> root.style-values.text-bg-color-index;
+                    custom-requested(x,y,w,h) => { root.custom-requested(x,y,w,h); }
+                }
+            }
+        if !root.color-mode && root.text-style-mode == 0: ScrollView {
+            width: 100%; height: 100%;
+            content-width: self.visible-width;
+            content-height: root.options.length * MenuMetrics.row-height + 8px;
+            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+            for label[i] in root.options: Rectangle {
             x: 4px; y: 4px + i * MenuMetrics.row-height;
             width: parent.width - 8px; height: MenuMetrics.row-height;
             border-radius: MenuMetrics.row-radius;
@@ -70,9 +111,11 @@ export component AnnotationChoiceWindow inherits Window {
             if !root.lines && !root.connectors: Text {
                 x: 8px; width: parent.width - 16px; height: parent.height;
                 text: label; font-size: 13px; vertical-alignment: center; overflow: elide;
+                font-family: root.font-mode ? label : "";
                 color: root.selected == i ? Colors.on-primary : Colors.foreground;
             }
             hit := TouchArea { enabled: i != root.disabled-index; clicked => { root.chosen(i); } }
+        }
         }
     }
 }

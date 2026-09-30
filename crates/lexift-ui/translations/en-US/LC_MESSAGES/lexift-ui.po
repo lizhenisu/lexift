@@ -715,5 +715,47 @@ msgstr "Source dot"
 msgid "Source frame"
 msgstr "Source frame"
 
+msgid "Apply"
+msgstr "Apply"
+
+msgid "Bottom center"
+msgstr "Bottom center"
+
+msgid "Bottom left"
+msgstr "Bottom left"
+
+msgid "Bottom right"
+msgstr "Bottom right"
+
+msgid "Center"
+msgstr "Center"
+
+msgid "Edit annotation text"
+msgstr "Edit annotation text"
+
+msgid "Enter watermark"
+msgstr "Enter watermark"
+
+msgid "Opacity"
+msgstr "Opacity"
+
+msgid "Outline width"
+msgstr "Outline width"
+
+msgid "Padding"
+msgstr "Padding"
+
+msgid "Time"
+msgstr "Time"
+
+msgid "Top center"
+msgstr "Top center"
+
+msgid "Top left"
+msgstr "Top left"
+
+msgid "Top right"
+msgstr "Top right"
+
 msgid "No connection"
 msgstr "No connection"

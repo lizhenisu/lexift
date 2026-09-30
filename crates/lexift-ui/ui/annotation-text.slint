@@ -1,0 +1,118 @@
+import { Colors } from "design/colors.slint";
+
+// This window exists only while editing, at the text object's physical location.
+export component AnnotationTextInput inherits Window {
+    title: @tr("Edit annotation text"); no-frame: true; always-on-top: true;
+    // The one-step alpha keeps the native editor hittable without painting a box.
+    background: #00000001; preferred-width: 40px; preferred-height: 32px;
+    in-out property <string> value;
+    in property <float> text-size: 22;
+    in property <string> font-name;
+    in property <bool> bold;
+    in property <bool> italic;
+    in property <float> text-padding: 2;
+    in property <float> content-x;
+    in property <float> content-y;
+    in property <float> layout-width: 40;
+    in property <float> layout-height: 32;
+    in property <bool> control-hover: false;
+    in property <color> ink: Colors.foreground;
+    out property <int> cursor-offset: editor.cursor-position-byte-offset;
+    out property <int> anchor-offset: editor.anchor-position-byte-offset;
+    out property <string> preedit: editor.preedit-text;
+    out property <bool> native-visual: false;
+    callback pointer(int, float, float);
+    callback place-selection(int, int);
+    place-selection(anchor, focus) => { editor.set-selection-offsets(anchor, focus); }
+    callback content-changed(string);
+    callback caret-changed();
+    callback done(string);
+    callback cancel();
+    forward-focus: editor;
+    editor := TextInput {
+            x: (root.content-x + root.text-padding) * 1px;
+            y: (root.content-y + root.text-padding) * 1px;
+            width: (root.layout-width - 2 * root.text-padding) * 1px;
+            height: (root.layout-height - 2 * root.text-padding) * 1px;
+            text <=> root.value; single-line: false; wrap: no-wrap;
+            font-size: root.text-size * 1px; font-family: root.font-name;
+            font-weight: root.bold ? 700 : 400; font-italic: root.italic;
+            // The native input owns IME and keyboard state; the canvas paints all feedback.
+            color: root.native-visual ? root.ink : #00000000;
+            selection-background-color: transparent;
+            selection-foreground-color: transparent;
+            vertical-alignment: TextVerticalAlignment.top;
+            key-pressed(event) => {
+                if event.text == Key.Escape { root.cancel(); return accept; }
+                if event.text == Key.Return && event.modifiers.control { root.done(root.value); return accept; }
+                return reject;
+            }
+    }
+    TouchArea {
+        width: 100%; height: 100%; mouse-cursor: root.control-hover ? default : text;
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.pointer(0, self.mouse-x / 1px, self.mouse-y / 1px); }
+            if event.kind == PointerEventKind.move { root.pointer(1, self.mouse-x / 1px, self.mouse-y / 1px); }
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.up { root.pointer(2, self.mouse-x / 1px, self.mouse-y / 1px); }
+            if event.kind == PointerEventKind.cancel { root.pointer(3, self.mouse-x / 1px, self.mouse-y / 1px); }
+        }
+    }
+    changed value => { root.content-changed(root.value); }
+    changed cursor-offset => { root.caret-changed(); }
+    changed anchor-offset => { root.caret-changed(); }
+    changed native-visual => { root.caret-changed(); }
+    changed preedit => { root.caret-changed(); }
+}
+
+export component AnnotationWatermarkInput inherits Window {
+    title: @tr("Enter watermark"); no-frame: true; always-on-top: true;
+    background: transparent; preferred-width: 440px; preferred-height: 270px;
+    in-out property <string> value;
+    in-out property <bool> presets-open: false;
+    in-out property <int> selected-preset: 1;
+    out property <[string]> preset-labels: ["ISO 24h", "Slash 24h", "EU 24h", "US 24h", "Date", "Time", "Time 12h", "Weekday", "Millis", "Compact", "US 12h"];
+    callback presets-requested(float, float, float, float);
+    callback dismiss-presets();
+    callback choose-preset(int);
+    choose-preset(index) => { root.selected-preset = index; root.value += root.preset-values[index]; }
+    callback focus-input();
+    focus-input => { input.focus(); }
+    callback apply(string);
+    callback cancel();
+    private property <[string]> preset-values: ["$yyyy-MM-dd HH:mm:ss$", "$yyyy/MM/dd HH:mm:ss$", "$dd/MM/yyyy HH:mm:ss$", "$MM/dd/yyyy HH:mm:ss$", "$yyyy/MM/dd$", "$HH:mm:ss$", "$hh:mm:ss a$", "$EEEE$", "$SSS$", "$yyyyMMddHHmmss$", "$MM/dd/yyyy hh:mm:ss a$"];
+    forward-focus: input;
+    Rectangle {
+        width: 100%; height: 100%; background: Colors.surface;
+        border-color: Colors.outline; border-width: 1px; border-radius: 10px;
+        Text { x: 16px; y: 12px; text: @tr("Enter watermark"); font-size: 15px; color: Colors.foreground; }
+        Rectangle { x: 14px; y: 38px; width: parent.width - 28px; height: 172px;
+            border-color: Colors.outline; border-width: 1px; border-radius: 5px; background: Colors.background;
+            input := TextInput { x: 8px; y: 7px; width: parent.width - 16px; height: parent.height - 14px;
+                text <=> root.value; single-line: false; wrap: word-wrap; color: Colors.foreground;
+                vertical-alignment: TextVerticalAlignment.top;
+                key-pressed(event) => {
+                    if event.text == Key.Escape { if root.presets-open { root.dismiss-presets(); } else { root.cancel(); } return accept; }
+                    if event.text == Key.Return && event.modifiers.control { root.apply(root.value); return accept; }
+                    return reject;
+                }
+            }
+        }
+        Text { x: 16px; y: 226px; text: @tr("Time"); color: Colors.foreground; }
+        Rectangle { x: 60px; y: 217px; width: 140px; height: 34px; border-radius: 6px;
+            background: Colors.icon-button-hover;
+            Text { x: 9px; width: parent.width - 38px; height: parent.height; text: root.preset-labels[root.selected-preset]; vertical-alignment: center; color: Colors.foreground; }
+            Image { x: parent.width - 27px; y: (parent.height - self.height) / 2;
+                width: 18px; height: 18px; source: @image-url("icons/chevron-down.svg");
+                image-fit: contain; colorize: Colors.foreground; }
+            TouchArea { width: 100%; height: 100%; clicked => { root.presets-requested(parent.x / 1px, parent.y / 1px, parent.width / 1px, parent.height / 1px); } }
+        }
+        Rectangle { x: 260px; y: 217px; width: 80px; height: 34px; border-radius: 6px; background: Colors.primary;
+            Text { text: @tr("Apply"); color: Colors.on-primary; horizontal-alignment: center; vertical-alignment: center; }
+            TouchArea { width: 100%; height: 100%; clicked => { root.apply(root.value); } }
+        }
+        Rectangle { x: 346px; y: 217px; width: 80px; height: 34px; border-radius: 6px; background: Colors.icon-button-hover;
+            Text { text: @tr("Cancel"); color: Colors.foreground; horizontal-alignment: center; vertical-alignment: center; }
+            TouchArea { width: 100%; height: 100%; clicked => { root.cancel(); } }
+        }
+    }
+}

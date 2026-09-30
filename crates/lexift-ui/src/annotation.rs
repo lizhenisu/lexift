@@ -1,13 +1,15 @@
 //! Owns the ephemeral annotation preview windows and per-tool UI values.
 use crate::bridge::dispatch_pointer_input as dispatch;
 use crate::{
-    AnnotationCanvas, AnnotationPanel, AnnotationToolbar, AnnotationValues,
+    AnnotationCanvas, AnnotationPanel, AnnotationTextInput, AnnotationToolbar, AnnotationValues,
+    AnnotationWatermarkInput,
     bridge::{PassiveWindowPreparation, PopupPointerInput, WindowLifecycleCallbacks},
     placement,
 };
 use lexift_core::domain::{
     annotation::{
         Bounds, Endpoint, Extra, Hit, Kind, MagnifierConnector, Object, Session, Style,
+        TextAnnotation, TextBackground, TextOutline, Watermark, WatermarkPosition,
         magnifier_output_for_source,
     },
     geometry::{Point, Rect},
@@ -32,6 +34,11 @@ thread_local! { static REGISTRY: RefCell<Option<Registry>> = const { RefCell::ne
 struct Registry {
     main: Option<AnnotationToolbar>,
     panel: Option<AnnotationPanel>,
+    text_editor: Option<AnnotationTextInput>,
+    text_edit: Option<TextEdit>,
+    watermark_input: Option<AnnotationWatermarkInput>,
+    watermark_input_revision: u64,
+    fonts: Vec<String>,
     choice: Option<choice::Menu>,
     choice_revision: u64,
     canvases: Vec<CanvasLayer>,
@@ -256,6 +263,14 @@ impl InteractionMode {
 enum Gesture {
     PlacePoint,
     FinishArrow,
+    DeleteText,
+    ToggleTextArrow {
+        index: usize,
+    },
+    CreateText {
+        at: (f32, f32),
+        scale: f32,
+    },
     Draw {
         start: (f32, f32),
         kind: Kind,
@@ -273,6 +288,36 @@ enum Gesture {
         index: usize,
         handle: usize,
     },
+    TextHandle {
+        start: (f32, f32),
+        grab: (f32, f32),
+        handle: usize,
+        index: Option<usize>,
+        editing: bool,
+        active: bool,
+        scale: f32,
+    },
+    TextSelection {
+        anchor: usize,
+    },
+}
+
+#[derive(Clone)]
+struct TextEdit {
+    id: u64,
+    selection_anchor: Option<usize>,
+    index: Option<usize>,
+    at: (f32, f32),
+    scale: f32,
+    original: TextAnnotation,
+    bounds: Bounds,
+    laid_out_content: String,
+}
+
+thread_local! { static NEXT_TEXT_EDIT: Cell<u64> = const { Cell::new(0) }; }
+
+fn text_edit_matches(r: &Registry, id: u64) -> bool {
+    r.text_edit.as_ref().is_some_and(|edit| edit.id == id)
 }
 
 #[derive(Clone)]
@@ -346,8 +391,18 @@ fn defaults(tool: i32) -> AnnotationValues {
         },
         rounding: if tool == 4 { 0 } else { 21 },
         text_size: if tool == 10 { 16 } else { 22 },
+        text_outline_width: 1,
+        text_bg_opacity: 100,
+        text_bg_rounding: 0,
+        text_bg_padding: 4,
+        strength: if tool == 9 {
+            100.
+        } else if tool == 2 {
+            10.
+        } else {
+            50.
+        },
         start: 1,
-        strength: if tool == 2 { 10. } else { 50. },
         shape: i32::from(matches!(tool, 1 | 2)),
         zoom: if tool == 7 { 150 } else { 0 },
         head: tool == 5,
@@ -374,6 +429,11 @@ pub(crate) fn init(
         *slot.borrow_mut() = Some(Registry {
             main: None,
             panel: None,
+            text_editor: None,
+            text_edit: None,
+            watermark_input: None,
+            watermark_input_revision: 0,
+            fonts: Vec::new(),
             choice: None,
             choice_revision: 0,
             canvases: Vec::new(),
@@ -464,6 +524,10 @@ impl Registry {
             self.sync_mode_display();
             return true;
         }
+        self.close_watermark_input();
+        if self.text_editor.is_some() {
+            finish_text_edit_registry(self, true);
+        }
         if self.mode.is_mouse() != mode.is_mouse() {
             let mut changed = Vec::new();
             for (index, layer) in self.canvases.iter().enumerate() {
@@ -519,6 +583,15 @@ impl Registry {
         }
     }
 
+    /// Invalidate callbacks before releasing the native editor and its input bridge.
+    fn close_watermark_input(&mut self) {
+        choice::close_watermark(self);
+        self.watermark_input_revision = self.watermark_input_revision.wrapping_add(1);
+        if let Some(editor) = self.watermark_input.take() {
+            let _ = editor.hide();
+        }
+    }
+
     fn close_panel(&mut self) {
         self.parameter_dragging = false;
         choice::close(self);
@@ -540,6 +613,11 @@ impl Registry {
             self.cold_open_measured = true;
         }
         self.close_panel();
+        if let Some(editor) = self.text_editor.take() {
+            let _ = editor.hide();
+        }
+        self.text_edit = None;
+        self.close_watermark_input();
         (self.lifecycle.annotation_magnifier_sync)(&[], &[]);
         self.generation = self.generation.wrapping_add(1);
         self.timer.stop();
@@ -576,6 +654,354 @@ impl Registry {
     }
 }
 
+fn finish_text_edit_registry(r: &mut Registry, commit: bool) {
+    let value = r
+        .text_editor
+        .as_ref()
+        .map(|editor| editor.get_value().to_string())
+        .unwrap_or_default();
+    if let Some(editor) = r.text_editor.take() {
+        let _ = editor.hide();
+    }
+    let Some(edit) = r.text_edit.take() else {
+        return;
+    };
+    if !commit || value.trim().is_empty() {
+        return;
+    }
+    let mut text = edit.original;
+    text.content = value;
+    let bounds = if edit.laid_out_content == text.content {
+        edit.bounds
+    } else {
+        crate::annotation_text::text_bounds(edit.at, &text, edit.scale)
+    };
+    if let Some(index) = edit.index {
+        r.session.selected = Some(index);
+        r.session.update_selected(|object| {
+            object.bounds = bounds;
+            object.extra = Extra::Text(text);
+        });
+    } else {
+        r.session.add(Object {
+            bounds,
+            kind: Kind::Text,
+            style: current_style(r, 8),
+            points: Vec::new(),
+            extra: Extra::Text(text),
+        });
+    }
+    if let Some(main) = &r.main {
+        main.set_can_undo(r.session.can_undo());
+    }
+}
+
+fn finish_text_edit(generation: u64, commit: bool) {
+    let changed = REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let r = slot.as_mut().filter(|r| r.generation == generation)?;
+        finish_text_edit_registry(r, commit);
+        Some(r.generation)
+    });
+    if let Some(generation) = changed {
+        schedule_render(generation);
+    }
+}
+
+fn finish_matching_text_edit(generation: u64, id: u64, commit: bool) {
+    if REGISTRY.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|r| r.generation == generation && text_edit_matches(r, id))
+    }) {
+        finish_text_edit(generation, commit);
+    }
+}
+
+fn pointer_text(weak: slint::Weak<AnnotationTextInput>) -> crate::bridge::PopupPointerSink {
+    Rc::new(move |input| {
+        if let Some(editor) = weak.upgrade() {
+            dispatch(editor.window(), input);
+        }
+    })
+}
+
+/// Native and forwarded mouse events enter through the same Slint TouchArea.
+fn editor_pointer(generation: u64, id: u64, event: i32, x: f32, y: f32) {
+    REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot
+            .as_mut()
+            .filter(|r| r.generation == generation && text_edit_matches(r, id))
+        else {
+            return;
+        };
+        let Some(object) = editing_text_object(r) else {
+            return;
+        };
+        let editor = r.text_editor.as_ref().unwrap();
+        let origin = editor.window().position();
+        let dpi = editor.window().scale_factor();
+        let point = (origin.x as f32 + x * dpi, origin.y as f32 + y * dpi);
+        let handle = text_handle_at(&object, point, dpi);
+        editor.set_control_hover(
+            handle.is_some() || matches!(r.gesture, Some(Gesture::TextHandle { .. })),
+        );
+        if matches!(r.gesture, Some(Gesture::TextHandle { editing: true, .. })) {
+            if event == 1 || event == 2 {
+                update_text_handle(r, point);
+            }
+            if event == 2 {
+                finish_text_handle(r, point);
+            }
+            if event == 3 {
+                if let Some(object) = r.gesture_object.take() {
+                    apply_editing_object(r, object);
+                }
+                r.gesture = None;
+            }
+            let generation = r.generation;
+            later(move || schedule_render(generation));
+            return;
+        }
+        if event == 0
+            && let Some(handle) = handle
+        {
+            begin_text_handle(r, object, handle, point, dpi, true);
+            return;
+        }
+        let offset = crate::annotation_text::caret_at(&object, point);
+        if event == 0 {
+            restore_text_focus(r);
+        }
+        let edit = r.text_edit.as_mut().unwrap();
+        match event {
+            0 => {
+                edit.selection_anchor = Some(offset);
+                editor.invoke_place_selection(offset as i32, offset as i32);
+            }
+            1 | 2 => {
+                if let Some(anchor) = edit.selection_anchor {
+                    editor.invoke_place_selection(anchor as i32, offset as i32);
+                }
+                if event == 2 {
+                    edit.selection_anchor = None;
+                }
+            }
+            _ => edit.selection_anchor = None,
+        }
+    });
+}
+
+/// Reads the latest input state: IME commit can change value and preedit together.
+fn resize_text_editor(generation: u64, id: u64) {
+    let changed = REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let r = slot.as_mut().filter(|r| r.generation == generation)?;
+        if !text_edit_matches(r, id) {
+            return None;
+        }
+        let (Some(editor), Some(edit)) = (&r.text_editor, &mut r.text_edit) else {
+            return None;
+        };
+        let mut text = edit.original.clone();
+        text.content = editor_preview(editor).0;
+        let b = crate::annotation_text::text_bounds(edit.at, &text, edit.scale);
+        edit.bounds = b;
+        edit.laid_out_content = text.content.clone();
+        place_text_editor(editor, b, edit.scale, &text, &r.canvases);
+        Some(r.generation)
+    });
+    if let Some(generation) = changed {
+        schedule_render(generation);
+    }
+}
+
+/// Bounds the native surface to the desktop, while TextInput keeps full logical layout.
+fn place_text_editor(
+    editor: &AnnotationTextInput,
+    bounds: Bounds,
+    scale: f32,
+    text: &TextAnnotation,
+    canvases: &[CanvasLayer],
+) {
+    let displays = canvases
+        .iter()
+        .map(|layer| layer.bounds)
+        .collect::<Vec<_>>();
+    let viewport = text_editor_viewport(bounds, &displays);
+    editor.window().set_position(slint::PhysicalPosition::new(
+        viewport.left.floor() as i32,
+        viewport.top.floor() as i32,
+    ));
+    let native_scale = editor.window().scale_factor().max(0.1);
+    editor.set_text_size(text.font_size * scale / native_scale);
+    editor.set_text_padding(crate::annotation_text::text_padding(text, scale) / native_scale);
+    editor.set_content_x((bounds.left - viewport.left.floor()) / native_scale);
+    editor.set_content_y((bounds.top - viewport.top.floor()) / native_scale);
+    editor.set_layout_width(bounds.width() / native_scale);
+    editor.set_layout_height(bounds.height() / native_scale);
+    editor.window().set_size(slint::PhysicalSize::new(
+        (viewport.right.ceil() - viewport.left.floor()).max(1.) as u32,
+        (viewport.bottom.ceil() - viewport.top.floor()).max(1.) as u32,
+    ));
+}
+
+fn text_editor_viewport(bounds: Bounds, displays: &[Rect]) -> Bounds {
+    let Some(first) = displays.first() else {
+        return bounds;
+    };
+    let desktop = displays.iter().fold(*first, |mut area, screen| {
+        area.left = area.left.min(screen.left);
+        area.top = area.top.min(screen.top);
+        area.right = area.right.max(screen.right);
+        area.bottom = area.bottom.max(screen.bottom);
+        area
+    });
+    let left = bounds
+        .left
+        .max(desktop.left as f32)
+        .min(desktop.right as f32 - 1.);
+    let top = bounds
+        .top
+        .max(desktop.top as f32)
+        .min(desktop.bottom as f32 - 1.);
+    Bounds {
+        left,
+        top,
+        right: bounds.right.min(desktop.right as f32).max(left + 1.),
+        bottom: bounds.bottom.min(desktop.bottom as f32).max(top + 1.),
+    }
+}
+
+fn open_text_editor(at: (f32, f32), index: Option<usize>, scale: f32) {
+    let clicked = at;
+    REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot.as_mut() else { return };
+        finish_text_edit_registry(r, true);
+        let scale = index
+            .and_then(|i| r.session.objects.get(i))
+            .map_or(scale, crate::annotation_text::object_scale);
+        let original = index
+            .and_then(|i| r.session.objects.get(i))
+            .and_then(|o| {
+                if let Extra::Text(text) = &o.extra {
+                    Some(text.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| text_from_values(r, String::new()));
+        let at = index
+            .and_then(|i| r.session.objects.get(i))
+            .map_or(at, |object| (object.bounds.left, object.bounds.top));
+        let Ok(editor) = AnnotationTextInput::new() else {
+            return;
+        };
+        crate::theme::apply(&editor);
+        let generation = r.generation;
+        let id = NEXT_TEXT_EDIT.with(|next| {
+            let id = next.get().wrapping_add(1);
+            next.set(id);
+            id
+        });
+        editor.set_value(original.content.clone().into());
+        editor.set_text_size(original.font_size);
+        editor.set_font_name(original.font_family.clone().into());
+        editor.set_bold(original.bold);
+        editor.set_italic(original.italic);
+        editor.set_text_padding(crate::annotation_text::text_padding(&original, 1.));
+        let color = index
+            .and_then(|i| r.session.objects.get(i))
+            .map_or(current_style(r, 8).color, |object| object.style.color);
+        editor.set_ink(slint::Color::from_rgb_u8(color[0], color[1], color[2]));
+        editor.on_done(move |_| later(move || finish_matching_text_edit(generation, id, true)));
+        editor.on_cancel(move || later(move || finish_matching_text_edit(generation, id, false)));
+        editor.on_pointer(move |event, x, y| editor_pointer(generation, id, event, x, y));
+        editor.on_content_changed(move |_| {
+            later(move || resize_text_editor(generation, id));
+        });
+        editor.on_caret_changed(move || later(move || resize_text_editor(generation, id)));
+        editor.window().on_close_requested(move || {
+            later(move || finish_matching_text_edit(generation, id, true));
+            slint::CloseRequestResponse::KeepWindowShown
+        });
+        let b = crate::annotation_text::text_bounds(at, &original, scale);
+        place_text_editor(&editor, b, scale, &original, &r.canvases);
+        if let Some(object) = index.and_then(|i| r.session.objects.get(i)) {
+            let offset = crate::annotation_text::caret_at(object, clicked) as i32;
+            editor.invoke_place_selection(offset, offset);
+        }
+        if let Some(owner) = r.canvases.iter().find(|layer| {
+            at.0 >= layer.bounds.left as f32
+                && at.0 < layer.bounds.right as f32
+                && at.1 >= layer.bounds.top as f32
+                && at.1 < layer.bounds.bottom as f32
+        }) {
+            (r.lifecycle.attach_tool_window)(editor.window(), owner.window.window());
+        }
+        r.text_edit = Some(TextEdit {
+            id,
+            selection_anchor: None,
+            index,
+            at,
+            scale,
+            original,
+            bounds: b,
+            laid_out_content: editor.get_value().to_string(),
+        });
+        r.text_editor = Some(editor);
+        later(move || show_text_editor(generation, id, 0));
+    });
+    let generation = REGISTRY.with(|slot| slot.borrow().as_ref().map(|r| r.generation));
+    if let Some(generation) = generation {
+        schedule_render(generation);
+    }
+}
+
+fn show_text_editor(generation: u64, id: u64, attempt: u8) {
+    REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot.as_mut().filter(|r| r.generation == generation) else {
+            return;
+        };
+        if !text_edit_matches(r, id) {
+            return;
+        }
+        let Some(editor) = &r.text_editor else { return };
+        match (r.prepare)(editor.window()) {
+            PassiveWindowPreparation::Ready => {
+                if editor.show().is_err()
+                    || !(r.lifecycle.complete_passive_window_show)(
+                        editor.window(),
+                        pointer_text(editor.as_weak()),
+                    )
+                {
+                    r.text_editor = None;
+                    r.text_edit = None;
+                    return;
+                }
+                if let Some(edit) = &r.text_edit {
+                    place_text_editor(editor, edit.bounds, edit.scale, &edit.original, &r.canvases);
+                }
+                (r.lifecycle.activate_user_requested_window)(editor.window());
+            }
+            PassiveWindowPreparation::Pending if attempt < 20 => {
+                let _ = editor.show();
+                let _ = editor.hide();
+                slint::Timer::single_shot(Duration::from_millis(16), move || {
+                    show_text_editor(generation, id, attempt + 1)
+                });
+            }
+            _ => {
+                r.text_editor = None;
+                r.text_edit = None;
+            }
+        }
+    });
+}
+
 pub(crate) fn shutdown() {
     REGISTRY.with(|s| {
         if let Some(mut r) = s.borrow_mut().take() {
@@ -593,6 +1019,26 @@ pub(crate) fn close() {
 }
 pub(crate) fn escape() {
     if choice::dismiss() {
+        return;
+    }
+    let editing = REGISTRY.with(|slot| {
+        let slot = slot.borrow();
+        slot.as_ref().and_then(|r| {
+            if r.text_editor.is_some() {
+                Some((r.generation, true, 0))
+            } else if r.watermark_input.is_some() {
+                Some((r.generation, false, r.watermark_input_revision))
+            } else {
+                None
+            }
+        })
+    });
+    if let Some((generation, text, revision)) = editing {
+        if text {
+            finish_text_edit(generation, false);
+        } else {
+            close_watermark_input(generation, revision);
+        }
         return;
     }
     let first = REGISTRY.with(|s| {
@@ -758,6 +1204,7 @@ pub(crate) fn toggle(requested_at: Instant) {
         let generation = r.generation;
         let query_start = Instant::now();
         r.pending_displays = (r.lifecycle.annotation_displays)();
+        r.session.displays = r.pending_displays.clone();
         if let Some(timing) = r.cold_open_timing.as_mut() {
             let elapsed = query_start.elapsed();
             timing.display_query += elapsed;
@@ -1037,6 +1484,24 @@ fn palette(tool: usize) -> [[u8; 3]; 8] {
     }
 }
 
+fn palette_color(palette: [[u8; 3]; 8], index: i32, custom: &str) -> [u8; 3] {
+    if index == 8 {
+        parse_hex_color(custom).unwrap_or(palette[0])
+    } else {
+        palette[index.clamp(0, 7) as usize]
+    }
+}
+
+fn color_to_values(palette: [[u8; 3]; 8], rgb: [u8; 3]) -> (i32, slint::SharedString) {
+    (
+        palette
+            .iter()
+            .position(|c| *c == rgb)
+            .map_or(8, |i| i as i32),
+        color::hex(rgb).into(),
+    )
+}
+
 fn current_style(r: &Registry, tool: i32) -> Style {
     let v = &r.values[tool as usize];
     let palette = palette(tool as usize);
@@ -1055,6 +1520,115 @@ fn current_style(r: &Registry, tool: i32) -> Style {
     }
 }
 
+fn chosen_font(r: &Registry, tool: usize) -> String {
+    r.fonts
+        .get(r.values[tool].font.max(0) as usize)
+        .cloned()
+        .unwrap_or_else(|| "Segoe UI".into())
+}
+
+fn text_from_values(r: &Registry, content: String) -> TextAnnotation {
+    let v = &r.values[8];
+    let colors = palette(8);
+    TextAnnotation {
+        content,
+        font_family: chosen_font(r, 8),
+        font_size: v.text_size.max(5) as f32,
+        bold: v.text_bold,
+        italic: v.text_italic,
+        outline: v.text_outline.then(|| TextOutline {
+            color: palette_color(
+                colors,
+                v.text_outline_color_index,
+                &v.text_outline_custom_color,
+            ),
+            width: v.text_outline_width.clamp(1, 20) as f32,
+        }),
+        background: v.text_background.then(|| TextBackground {
+            color: palette_color(colors, v.text_bg_color_index, &v.text_bg_custom_color),
+            opacity: (v.text_bg_opacity.clamp(0, 100) as f32 * 2.55).round() as u8,
+            rounding: v.text_bg_rounding.max(0) as f32,
+            padding: v.text_bg_padding.max(0) as f32,
+        }),
+        rotation: 0.,
+        layout_scale: 1.,
+        linked_arrow_control: None,
+        linked_arrow: None,
+    }
+}
+
+fn watermark_from_values(r: &Registry, template: String, content: String) -> Watermark {
+    Watermark {
+        template,
+        content,
+        font_family: chosen_font(r, 9),
+        font_size: r.values[9].text_size.clamp(5, 144) as f32,
+        opacity: r.values[9].strength.round().clamp(0., 100.) as u8,
+        color: current_style(r, 9).color,
+        position: match r.values[9].mode {
+            1 => WatermarkPosition::BottomRight,
+            2 => WatermarkPosition::BottomLeft,
+            3 => WatermarkPosition::TopRight,
+            4 => WatermarkPosition::TopLeft,
+            5 => WatermarkPosition::TopCenter,
+            6 => WatermarkPosition::BottomCenter,
+            7 => WatermarkPosition::Center,
+            _ => WatermarkPosition::Tile,
+        },
+    }
+}
+
+fn adopt_watermark_style(r: &mut Registry) {
+    let Some(watermark) = &r.session.watermark else {
+        r.values[9].text = "".into();
+        if let Some(panel) = &r.panel
+            && panel.get_tool() == 9
+            && !panel.get_menu()
+        {
+            panel.set_values(r.values[9].clone());
+        }
+        return;
+    };
+    let values = &mut r.values[9];
+    values.text = watermark.template.clone().into();
+    values.text_size = watermark.font_size.round() as i32;
+    values.strength = watermark.opacity as f32;
+    values.mode = match watermark.position {
+        WatermarkPosition::Tile => 0,
+        WatermarkPosition::BottomRight => 1,
+        WatermarkPosition::BottomLeft => 2,
+        WatermarkPosition::TopRight => 3,
+        WatermarkPosition::TopLeft => 4,
+        WatermarkPosition::TopCenter => 5,
+        WatermarkPosition::BottomCenter => 6,
+        WatermarkPosition::Center => 7,
+    };
+    values.font = r
+        .fonts
+        .iter()
+        .position(|name| name == &watermark.font_family)
+        .unwrap_or(0) as i32;
+    if let Some(index) = palette(9)
+        .iter()
+        .position(|color| color == &watermark.color)
+    {
+        values.color_index = index as i32;
+    } else {
+        values.color_index = 8;
+        values.custom_color = format!(
+            "#{:02X}{:02X}{:02X}",
+            watermark.color[0], watermark.color[1], watermark.color[2]
+        )
+        .into();
+    }
+    if let Some(panel) = &r.panel
+        && panel.get_tool() == 9
+        && !panel.get_menu()
+    {
+        panel.set_values(values.clone());
+    }
+}
+
 fn toolbar_tools(r: &Registry) -> Vec<i32> {
     let mut selected = r.selected;
     if selected[0] != 2 && r.values[selected[0] as usize].shape == 1 {
@@ -1066,7 +1640,13 @@ fn toolbar_tools(r: &Registry) -> Vec<i32> {
 fn adopt_selected_style(r: &mut Registry, index: usize) -> bool {
     let object = r.session.objects[index].clone();
     let tool = object.kind.tool();
-    let group = if tool >= 5 { 2 } else { usize::from(tool >= 3) };
+    let group = if tool == 8 {
+        3
+    } else if tool >= 5 {
+        2
+    } else {
+        usize::from(tool >= 3)
+    };
     let palette = palette(tool);
     let values = &mut r.values[tool];
     values.size = object.style.width.round() as i32;
@@ -1113,6 +1693,30 @@ fn adopt_selected_style(r: &mut Registry, index: usize) -> bool {
             values.erase = *erase_annotations;
             values.antialias = *antialias;
             values.shadow = *shadow;
+        }
+        Extra::Text(text) => {
+            values.text = text.content.clone().into();
+            text_dimensions_to_values(values, text);
+            values.font = r
+                .fonts
+                .iter()
+                .position(|family| family == &text.font_family)
+                .unwrap_or(0) as i32;
+            values.text_bold = text.bold;
+            values.text_italic = text.italic;
+            values.text_outline = text.outline.is_some();
+            values.text_background = text.background.is_some();
+            if let Some(outline) = &text.outline {
+                (
+                    values.text_outline_color_index,
+                    values.text_outline_custom_color,
+                ) = color_to_values(palette, outline.color);
+            }
+            if let Some(background) = &text.background {
+                values.text_bg_opacity = (background.opacity as f32 / 2.55).round() as i32;
+                (values.text_bg_color_index, values.text_bg_custom_color) =
+                    color_to_values(palette, background.color);
+            }
         }
         Extra::None => {}
     }
@@ -1204,6 +1808,9 @@ fn connector_index(value: MagnifierConnector) -> i32 {
 }
 
 fn active_kind(r: &Registry) -> Option<Kind> {
+    if r.mode == InteractionMode::Tool(3) {
+        return (r.selected[3] == 8).then_some(Kind::Text);
+    }
     if r.mode == InteractionMode::Tool(1) {
         return Some(if r.selected[1] == 3 {
             Kind::Pencil
@@ -1235,6 +1842,31 @@ fn active_kind(r: &Registry) -> Option<Kind> {
     }
 }
 
+/// Integer toolbar values must not quantize scaled geometry on unrelated edits.
+fn preserve_text_dimensions(
+    updated: &mut TextAnnotation,
+    original: &TextAnnotation,
+    before: &AnnotationValues,
+    after: &AnnotationValues,
+) {
+    if before.text_size == after.text_size {
+        updated.font_size = original.font_size;
+    }
+    if let (Some(next), Some(old)) = (&mut updated.background, &original.background) {
+        if before.text_bg_padding == after.text_bg_padding {
+            next.padding = old.padding;
+        }
+        if before.text_bg_rounding == after.text_bg_rounding {
+            next.rounding = old.rounding;
+        }
+    }
+    if let (Some(next), Some(old)) = (&mut updated.outline, &original.outline)
+        && before.text_outline_width == after.text_outline_width
+    {
+        next.width = old.width;
+    }
+}
+
 fn update_geometry_values(generation: u64, tool: i32, values: AnnotationValues) {
     let edit = REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
@@ -1254,6 +1886,7 @@ fn update_geometry_values(generation: u64, tool: i32, values: AnnotationValues) 
             r.style_edit_active = true;
         }
         r.style_edit_revision = r.style_edit_revision.wrapping_add(1);
+        let previous_values = r.values[tool as usize].clone();
         r.values[tool as usize] = values;
         if let Some(main) = &r.main {
             main.set_tools(ModelRc::new(VecModel::from(toolbar_tools(r))));
@@ -1268,6 +1901,64 @@ fn update_geometry_values(generation: u64, tool: i32, values: AnnotationValues) 
         }
         let kind = active_kind(r);
         let edited = r.values[tool as usize].clone();
+        let text_scale = r
+            .session
+            .selected
+            .and_then(|index| r.session.objects.get(index))
+            .and_then(|object| {
+                r.canvases.iter().find(|layer| {
+                    let center = object.bounds.center();
+                    center.0 >= layer.bounds.left as f32
+                        && center.0 < layer.bounds.right as f32
+                        && center.1 >= layer.bounds.top as f32
+                        && center.1 < layer.bounds.bottom as f32
+                })
+            })
+            .map_or(1., |layer| layer.window.window().scale_factor().max(0.1));
+        let text_style = (tool == 8).then(|| text_from_values(r, String::new()));
+        let text_scale = r
+            .session
+            .selected
+            .and_then(|index| r.session.objects.get(index))
+            .filter(|object| object.kind == Kind::Text)
+            .map_or(text_scale, crate::annotation_text::object_scale);
+        if let Some(next) = &text_style
+            && let Some(edit) = r.text_edit.as_mut()
+        {
+            let mut updated = next.clone();
+            updated.content = edit.original.content.clone();
+            updated.rotation = edit.original.rotation;
+            updated.linked_arrow = edit.original.linked_arrow;
+            updated.linked_arrow_control = edit.original.linked_arrow_control;
+            updated.layout_scale = edit.original.layout_scale;
+            preserve_text_dimensions(&mut updated, &edit.original, &previous_values, &edited);
+            edit.original = updated;
+            if let Some(editor) = &r.text_editor {
+                editor.set_text_size(edit.original.font_size);
+                editor.set_font_name(edit.original.font_family.clone().into());
+                editor.set_bold(edit.original.bold);
+                editor.set_italic(edit.original.italic);
+                editor.set_text_padding(crate::annotation_text::text_padding(&edit.original, 1.));
+                editor.set_ink(slint::Color::from_rgb_u8(
+                    style.color[0],
+                    style.color[1],
+                    style.color[2],
+                ));
+                let mut preview = edit.original.clone();
+                preview.content = editor_preview(editor).0;
+                let bounds = crate::annotation_text::text_bounds(edit.at, &preview, edit.scale);
+                edit.bounds = bounds;
+                edit.laid_out_content = preview.content.clone();
+                place_text_editor(editor, bounds, edit.scale, &preview, &r.canvases);
+            }
+        }
+        let watermark = if tool == 9 {
+            r.session.watermark.as_ref().map(|current| {
+                watermark_from_values(r, current.template.clone(), current.content.clone())
+            })
+        } else {
+            None
+        };
         if tool == 2 {
             r.session.set_spotlight_opacity(r.values[2].strength / 100.);
         }
@@ -1323,10 +2014,44 @@ fn update_geometry_values(generation: u64, tool: i32, values: AnnotationValues) 
                                 *shadow = edited.shadow;
                             }
                         }
+                        Kind::Text => {
+                            if let (Extra::Text(existing), Some(updated)) =
+                                (&mut object.extra, &text_style)
+                            {
+                                let content = existing.content.clone();
+                                let rotation = existing.rotation;
+                                let arrow = existing.linked_arrow;
+                                let arrow_control = existing.linked_arrow_control;
+                                let layout_scale = existing.layout_scale;
+                                let old_text = existing.clone();
+                                *existing = updated.clone();
+                                existing.content = content;
+                                existing.rotation = rotation;
+                                existing.linked_arrow = arrow;
+                                existing.linked_arrow_control = arrow_control;
+                                existing.layout_scale = layout_scale;
+                                preserve_text_dimensions(
+                                    existing,
+                                    &old_text,
+                                    &previous_values,
+                                    &edited,
+                                );
+                                object.bounds = crate::annotation_text::text_bounds(
+                                    (object.bounds.left, object.bounds.top),
+                                    existing,
+                                    text_scale,
+                                );
+                            }
+                        }
                         _ => {}
                     }
                 }
             });
+        }
+        if tool == 9
+            && let Some(watermark) = watermark
+        {
+            r.session.set_watermark(Some(watermark));
         }
         if let Some(main) = &r.main {
             main.set_can_undo(r.session.can_undo());
@@ -1479,7 +2204,214 @@ fn magnifier_from_source(
     })
 }
 
+fn text_handle_at(object: &Object, point: (f32, f32), scale: f32) -> Option<usize> {
+    object
+        .edit_handles(scale)
+        .iter()
+        .position(|p| (p.0 - point.0).abs() <= 9. * scale && (p.1 - point.1).abs() <= 9. * scale)
+}
+
+fn editing_body_contains(object: &Object, point: (f32, f32)) -> bool {
+    let Extra::Text(text) = &object.extra else {
+        return false;
+    };
+    let local =
+        lexift_core::domain::annotation::rotate_text_point(point, object.bounds, -text.rotation);
+    local.0 >= object.bounds.left
+        && local.0 <= object.bounds.right
+        && local.1 >= object.bounds.top
+        && local.1 <= object.bounds.bottom
+}
+
+fn select_editing_text(r: &Registry, point: (f32, f32), anchor: Option<usize>) -> usize {
+    let Some(object) = editing_text_object(r) else {
+        return 0;
+    };
+    let offset = crate::annotation_text::caret_at(&object, point);
+    if let Some(editor) = &r.text_editor {
+        editor.invoke_place_selection(anchor.unwrap_or(offset) as i32, offset as i32);
+    }
+    offset
+}
+
+fn restore_text_focus(r: &Registry) {
+    let (Some(edit), Some(_)) = (&r.text_edit, &r.text_editor) else {
+        return;
+    };
+    let (generation, id) = (r.generation, edit.id);
+    later(move || {
+        REGISTRY.with(|slot| {
+            let slot = slot.borrow();
+            if let Some(r) = slot.as_ref().filter(|r| {
+                r.generation == generation && text_edit_matches(r, id) && r.choice.is_none()
+            }) && let Some(editor) = &r.text_editor
+            {
+                (r.lifecycle.activate_user_requested_window)(editor.window());
+            }
+        })
+    });
+}
+
+fn begin_text_handle(
+    r: &mut Registry,
+    object: Object,
+    handle: usize,
+    point: (f32, f32),
+    scale: f32,
+    editing: bool,
+) {
+    let center = object.edit_handles(scale)[handle];
+    r.gesture = Some(Gesture::TextHandle {
+        start: point,
+        grab: (point.0 - center.0, point.1 - center.1),
+        handle,
+        index: if editing {
+            r.text_edit.as_ref().and_then(|edit| edit.index)
+        } else {
+            r.session.selected
+        },
+        editing,
+        active: false,
+        scale,
+    });
+    r.gesture_object = Some(object);
+}
+
+/// Preserve the grab offset; a control click must not change geometry.
+fn update_text_handle(r: &mut Registry, point: (f32, f32)) {
+    let Some(Gesture::TextHandle {
+        start,
+        grab,
+        handle,
+        index,
+        editing,
+        active,
+        scale,
+    }) = r.gesture
+    else {
+        return;
+    };
+    if matches!(handle, 1 | 2) {
+        return;
+    }
+    let Some(target) = text_drag_target(start, grab, point, scale, active) else {
+        return;
+    };
+    if !active && !editing {
+        r.session.begin_drag();
+    }
+    r.gesture = Some(Gesture::TextHandle {
+        start,
+        grab,
+        handle,
+        index,
+        editing,
+        active: true,
+        scale,
+    });
+    let Some(mut object) = r.gesture_object.clone() else {
+        return;
+    };
+    object.edit_handle(handle, target, scale);
+    if editing {
+        apply_editing_object(r, object);
+    } else if let Some(index) = index {
+        r.session.objects[index] = object;
+    }
+}
+
+fn text_drag_target(
+    start: (f32, f32),
+    grab: (f32, f32),
+    point: (f32, f32),
+    scale: f32,
+    active: bool,
+) -> Option<(f32, f32)> {
+    (active || (point.0 - start.0).hypot(point.1 - start.1) > 3. * scale)
+        .then_some((point.0 - grab.0, point.1 - grab.1))
+}
+
+fn apply_editing_object(r: &mut Registry, object: Object) {
+    let Extra::Text(mut text) = object.extra else {
+        return;
+    };
+    let (Some(edit), Some(editor)) = (&mut r.text_edit, &r.text_editor) else {
+        return;
+    };
+    edit.bounds = object.bounds;
+    edit.at = (object.bounds.left, object.bounds.top);
+    edit.laid_out_content = text.content.clone();
+    place_text_editor(editor, object.bounds, edit.scale, &text, &r.canvases);
+    text.content = editor.get_value().to_string();
+    edit.original = text;
+}
+
+fn text_dimensions_to_values(values: &mut AnnotationValues, text: &TextAnnotation) {
+    values.text_size = text.font_size.round() as i32;
+    if let Some(background) = &text.background {
+        values.text_bg_padding = background.padding.round() as i32;
+        values.text_bg_rounding = background.rounding.round() as i32;
+    }
+    if let Some(outline) = &text.outline {
+        values.text_outline_width = outline.width.round() as i32;
+    }
+}
+
+fn finish_text_handle(r: &mut Registry, point: (f32, f32)) {
+    let Some(Gesture::TextHandle {
+        handle,
+        editing,
+        index,
+        active,
+        scale,
+        ..
+    }) = r.gesture
+    else {
+        return;
+    };
+    if editing
+        && matches!(handle, 1 | 2)
+        && let Some(mut object) = editing_text_object(r)
+        && text_handle_at(&object, point, scale) == Some(handle)
+    {
+        if handle == 1 {
+            finish_text_edit_registry(r, false);
+            if let Some(index) = index {
+                r.session.selected = Some(index);
+                r.session.delete_selected();
+            }
+        } else {
+            object.toggle_text_arrow(scale);
+            apply_editing_object(r, object);
+        }
+    }
+    if !editing && active {
+        r.session.finish_drag();
+        if let Some(index) = index {
+            adopt_selected_style(r, index);
+        }
+    }
+    if editing
+        && active
+        && let Some(edit) = &r.text_edit
+    {
+        text_dimensions_to_values(&mut r.values[8], &edit.original);
+        if let Some(panel) = &r.panel
+            && panel.get_tool() == 8
+        {
+            panel.set_values(r.values[8].clone());
+        }
+    }
+    r.gesture = None;
+    r.gesture_object = None;
+    if editing {
+        restore_text_focus(r);
+    }
+    cursor::refresh(r);
+}
+
 fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
+    let mut text_to_open = None;
     let result = REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
         let r = slot.as_mut()?;
@@ -1503,6 +2435,31 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
         let mut open_geometry_panel = false;
         match event {
             0 => {
+                if r.text_editor.is_some() {
+                    if let Some(object) = editing_text_object(r) {
+                        if let Some(handle) = text_handle_at(&object, point, scale) {
+                            begin_text_handle(r, object, handle, point, scale, true);
+                            return Some((r.generation, false));
+                        }
+                        if editing_body_contains(&object, point) {
+                            let anchor = select_editing_text(r, point, None);
+                            r.gesture = Some(Gesture::TextSelection { anchor });
+                            restore_text_focus(r);
+                            return Some((r.generation, false));
+                        }
+                    }
+                    let empty = r
+                        .text_editor
+                        .as_ref()
+                        .is_some_and(|editor| editor.get_value().trim().is_empty());
+                    finish_text_edit_registry(r, true);
+                    if empty {
+                        // Losing focus on an empty draft ends this gesture; the
+                        // same click must not start another blank editor.
+                        r.gesture = None;
+                        return Some((r.generation, false));
+                    }
+                }
                 r.hovered = None;
                 r.finish_style_edit();
                 r.gesture_object = None;
@@ -1520,6 +2477,26 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                     match r.session.hit(point, scale) {
                         Some(Hit::Handle(handle)) => {
                             let index = r.session.selected.unwrap();
+                            if r.session.objects[index].kind == Kind::Text && handle == 3 {
+                                begin_text_handle(
+                                    r,
+                                    r.session.objects[index].clone(),
+                                    handle,
+                                    point,
+                                    scale,
+                                    false,
+                                );
+                                return Some((r.generation, false));
+                            }
+                            if r.session.objects[index].kind == Kind::Text && handle == 2 {
+                                r.gesture = Some(Gesture::ToggleTextArrow { index });
+                                return Some((r.generation, false));
+                            }
+                            if r.session.objects[index].kind == Kind::Text && handle == 1 {
+                                r.session.delete_selected();
+                                r.gesture = Some(Gesture::DeleteText);
+                                return Some((r.generation, false));
+                            }
                             let initial = r.session.objects[index].bounds;
                             r.gesture_object = Some(r.session.objects[index].clone());
                             r.session.begin_drag();
@@ -1544,7 +2521,9 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                         None => {
                             r.pending_edit_panel = false;
                             r.session.selected = None;
-                            if matches!(r.mode, InteractionMode::Tool(0..=2))
+                            if r.mode == InteractionMode::Tool(3) && r.selected[3] == 8 {
+                                r.gesture = Some(Gesture::CreateText { at: point, scale });
+                            } else if matches!(r.mode, InteractionMode::Tool(0..=2))
                                 && let Some(kind) = active_kind(r)
                             {
                                 if kind == Kind::Magnifier
@@ -1579,6 +2558,8 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 }
             }
             1 => match r.gesture {
+                Some(Gesture::DeleteText | Gesture::ToggleTextArrow { .. }) => {}
+                Some(Gesture::CreateText { .. }) => {}
                 Some(Gesture::PlacePoint) => {
                     if let Some(polyline) = &r.polyline {
                         r.draft = Some(polyline_preview(polyline, point, scale));
@@ -1636,6 +2617,12 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                         r.session.objects[index] = object;
                     }
                 }
+                Some(Gesture::TextHandle { .. }) => {
+                    update_text_handle(r, point);
+                }
+                Some(Gesture::TextSelection { anchor }) => {
+                    select_editing_text(r, point, Some(anchor));
+                }
                 None => {
                     if let Some(pending) = &r.arrow_pending {
                         r.draft = Some(pending.preview(point));
@@ -1653,6 +2640,37 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 }
             },
             2 => {
+                if let Some(Gesture::TextSelection { anchor }) = r.gesture {
+                    select_editing_text(r, point, Some(anchor));
+                    r.gesture = None;
+                    restore_text_focus(r);
+                    return Some((r.generation, false));
+                }
+                if matches!(r.gesture, Some(Gesture::TextHandle { .. })) {
+                    update_text_handle(r, point);
+                    finish_text_handle(r, point);
+                    return Some((r.generation, false));
+                }
+                if let Some(Gesture::ToggleTextArrow { index }) = r.gesture {
+                    if r.session.selected == Some(index)
+                        && r.session.objects.get(index).is_some()
+                        && r.session.hit(point, scale) == Some(Hit::Handle(2))
+                    {
+                        r.session
+                            .update_selected(|object| object.toggle_text_arrow(scale));
+                    }
+                    r.gesture = None;
+                    return Some((r.generation, false));
+                }
+                if matches!(r.gesture, Some(Gesture::DeleteText)) {
+                    r.gesture = None;
+                    return Some((r.generation, false));
+                }
+                if let Some(Gesture::CreateText { at, scale }) = r.gesture.as_ref() {
+                    text_to_open = Some((*at, None, *scale));
+                    r.gesture = None;
+                    return Some((r.generation, false));
+                }
                 open_geometry_panel = std::mem::take(&mut r.pending_edit_panel);
                 if matches!(r.gesture, Some(Gesture::FinishArrow)) {
                     r.gesture = None;
@@ -1702,14 +2720,17 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                         }
                         r.last_polyline_click = Some((Instant::now(), point));
                     }
-                } else if let Some(Gesture::Draw {
-                    start,
-                    kind,
-                    style,
-                    start_scale,
-                    max_distance,
-                }) = r.gesture.take()
-                {
+                } else if matches!(r.gesture, Some(Gesture::Draw { .. })) {
+                    let Some(Gesture::Draw {
+                        start,
+                        kind,
+                        style,
+                        start_scale,
+                        max_distance,
+                    }) = r.gesture.take()
+                    else {
+                        unreachable!()
+                    };
                     if kind == Kind::Arrow {
                         if arrow_drag_commits(start, point, max_distance, start_scale) {
                             r.session
@@ -1747,6 +2768,13 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                         }
                     }
                 } else {
+                    if let Some(Gesture::Move { start, index, .. }) = r.gesture
+                        && r.session.objects[index].kind == Kind::Text
+                        && (point.0 - start.0).hypot(point.1 - start.1) <= 3. * scale
+                    {
+                        text_to_open = Some((point, Some(index), scale));
+                        open_geometry_panel = false;
+                    }
                     r.session.finish_drag();
                     r.gesture = None;
                     if let Some(index) = r.session.selected {
@@ -1756,6 +2784,11 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 r.gesture_object = None;
             }
             3 => {
+                if matches!(r.gesture, Some(Gesture::TextHandle { editing: true, .. }))
+                    && let Some(object) = r.gesture_object.take()
+                {
+                    apply_editing_object(r, object);
+                }
                 r.hovered = None;
                 r.pending_edit_panel = false;
                 r.session.cancel_drag();
@@ -1774,6 +2807,9 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
     });
     if let Some((generation, open)) = result {
         schedule_render(generation);
+        if let Some((point, index, scale)) = text_to_open {
+            open_text_editor(point, index, scale);
+        }
         if open {
             later(|| {
                 let group = REGISTRY.with(|s| {
@@ -1840,6 +2876,66 @@ fn schedule_render(generation: u64) {
     }
 }
 
+/// Matches TextInput's insertion semantics without adding composition to the model.
+fn editor_preview(editor: &AnnotationTextInput) -> (String, std::ops::Range<usize>) {
+    crate::annotation_text::composition_preview(
+        &editor.get_value(),
+        &editor.get_preedit(),
+        editor.get_cursor_offset().max(0) as usize,
+    )
+}
+
+/// Shares the editor's current geometry between painting and cursor hit testing.
+fn editing_text_object(r: &Registry) -> Option<Object> {
+    let (Some(edit), Some(editor)) = (&r.text_edit, &r.text_editor) else {
+        return None;
+    };
+    let mut visible = edit.original.clone();
+    visible.content = editor_preview(editor).0;
+    if editor.get_native_visual() {
+        visible.content.clear();
+        visible.outline = None;
+    }
+    let mut object = edit
+        .index
+        .and_then(|index| r.session.objects.get(index))
+        .cloned()
+        .unwrap_or_else(|| Object {
+            bounds: edit.bounds,
+            kind: Kind::Text,
+            style: current_style(r, 8),
+            points: Vec::new(),
+            extra: Extra::None,
+        });
+    object.bounds = edit.bounds;
+    object.extra = Extra::Text(visible);
+    Some(object)
+}
+
+/// Composition and committed text share glyphs; native input only paints selection.
+fn visible_session(r: &Registry) -> Session {
+    // Rendering needs the visible objects, never the undo snapshots.
+    let mut session = Session::new();
+    session.objects = r.session.objects.clone();
+    session.selected = r.session.selected;
+    session.watermark = r.session.watermark.clone();
+    session.displays = r.session.displays.clone();
+    session.spotlight_opacity = r.session.spotlight_opacity;
+    let (Some(edit), Some(visible)) = (&r.text_edit, editing_text_object(r)) else {
+        return session;
+    };
+    if let Some(index) = edit.index {
+        if let Some(object) = session.objects.get_mut(index) {
+            *object = visible;
+            session.selected = Some(index);
+        }
+    } else {
+        session.objects.push(visible);
+        session.selected = Some(session.objects.len() - 1);
+    }
+    session
+}
+
 fn render_canvases(generation: u64) {
     let deferred_revision = REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
@@ -1893,6 +2989,32 @@ fn render_canvases(generation: u64) {
         if measure_first_frame && let Some(timing) = r.first_magnifier_timing.as_mut() {
             timing.frame_start.get_or_insert_with(Instant::now);
         }
+        let display_session = visible_session(r);
+        let confirmed = r
+            .text_editor
+            .as_ref()
+            .filter(|editor| !editor.get_preedit().is_empty())
+            .map(|editor| editor.get_value().to_string());
+        let caret = r
+            .text_editor
+            .as_ref()
+            .filter(|editor| !editor.get_native_visual())
+            .and_then(|editor| {
+                display_session.selected.map(|index| {
+                    let (_, preedit) = editor_preview(editor);
+                    let offset = if preedit.is_empty() {
+                        editor.get_cursor_offset().max(0) as usize
+                    } else {
+                        preedit.end
+                    };
+                    (
+                        index,
+                        offset,
+                        preedit,
+                        editor.get_anchor_offset().max(0) as usize,
+                    )
+                })
+            });
         let active_canvas = r
             .canvases
             .iter()
@@ -1902,25 +3024,59 @@ fn render_canvases(generation: u64) {
             .chain((0..r.canvases.len()).filter(|&index| index != active_canvas));
         for index in canvas_order {
             let layer = &mut r.canvases[index];
-            let signature = render_signature(
-                &r.session,
+            let mut signature = render_signature(
+                &display_session,
                 layer.bounds,
                 layer.window.window().scale_factor(),
                 r.draft.as_ref(),
                 r.hovered,
             );
+            if let Some((_, offset, ref preedit, anchor)) = caret {
+                signature ^= (offset as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+                signature ^= (preedit.start as u64).wrapping_mul(0x517c_c1b7_2722_0a95);
+                signature ^= (preedit.len() as u64).wrapping_mul(0x94d0_49bb_1331_11eb);
+                signature ^= (anchor as u64).wrapping_mul(0xd6e8_feb8_6659_fd93);
+            }
             if layer.signature == Some(signature) {
                 continue;
             }
             layer.signature = Some(signature);
             let raster_start = Instant::now();
-            if let Some(frame) = crate::annotation_render::render(
-                &r.session,
+            if let Some(mut frame) = crate::annotation_render::render_editing(
+                &display_session,
                 layer.bounds,
                 layer.window.window().scale_factor(),
                 r.draft.as_ref(),
                 r.hovered,
+                confirmed.as_deref(),
             ) {
+                if let Some((index, offset, ref preedit, anchor)) = caret
+                    && let Some(object) = display_session.objects.get(index)
+                {
+                    if preedit.is_empty() {
+                        crate::annotation_text::draw_selection(
+                            &mut frame,
+                            object,
+                            anchor.min(offset)..anchor.max(offset),
+                            layer.bounds,
+                        );
+                    }
+                    crate::annotation_text::draw_composition_underline(
+                        &mut frame,
+                        object,
+                        preedit.clone(),
+                        layer.bounds,
+                        layer.window.window().scale_factor(),
+                    );
+                    crate::annotation_text::draw_caret(
+                        &mut frame,
+                        object,
+                        offset,
+                        layer.bounds,
+                        layer.window.window().scale_factor(),
+                        confirmed.as_deref(),
+                    );
+                }
                 if measure_first_frame && let Some(timing) = r.first_magnifier_timing.as_mut() {
                     timing.raster += raster_start.elapsed();
                 }
@@ -2071,6 +3227,7 @@ fn render_signature(
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     scale.to_bits().hash(&mut hash);
     session.spotlight_opacity.to_bits().hash(&mut hash);
+    format!("{:?}", session.watermark).hash(&mut hash);
     session
         .objects
         .iter()
@@ -2080,7 +3237,10 @@ fn render_signature(
     for (index, object) in session.objects.iter().chain(draft).enumerate() {
         let b = object.bounds;
         let margin = (object.style.width / 2. + 8.) * scale;
-        let output_visible = if let Extra::Magnifier { output, .. } = object.extra {
+        let output_visible = if matches!(object.extra, Extra::Text(_)) {
+            // Rotation and a connector can be visible while the unrotated body is not.
+            true
+        } else if let Extra::Magnifier { output, .. } = object.extra {
             output.right + margin >= monitor.left as f32
                 && output.left - margin <= monitor.right as f32
                 && output.bottom + margin >= monitor.top as f32
@@ -2154,10 +3314,14 @@ fn undo() {
     let generation = REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
         let r = slot.as_mut()?;
+        if r.text_editor.is_some() {
+            finish_text_edit_registry(r, true);
+        }
         r.finish_style_edit();
         if !r.session.undo() {
             return None;
         }
+        adopt_watermark_style(r);
         refresh_hovered(r);
         if matches!(r.mode, InteractionMode::Tool(0 | 1))
             && let Some(index) = r.session.selected
@@ -2178,6 +3342,9 @@ fn delete_selected() {
     let generation = REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
         let r = slot.as_mut()?;
+        if r.text_editor.is_some() {
+            finish_text_edit_registry(r, false);
+        }
         r.session.delete_selected();
         refresh_hovered(r);
         if let Some(main) = &r.main {
@@ -2383,6 +3550,21 @@ fn open_panel(group: usize, menu: bool) {
         };
         crate::theme::apply(&panel);
         let tool = r.selected[group];
+        if matches!(tool, 8 | 9) && r.fonts.is_empty() {
+            r.fonts = crate::annotation_text::font_families();
+            if let Some(index) = r
+                .fonts
+                .iter()
+                .position(|name| name == "Microsoft YaHei")
+                .or_else(|| r.fonts.iter().position(|name| name == "Segoe UI"))
+            {
+                r.values[8].font = index as i32;
+                r.values[9].font = index as i32;
+            }
+        }
+        panel.set_font_families(ModelRc::new(VecModel::from(
+            r.fonts.iter().cloned().map(Into::into).collect::<Vec<_>>(),
+        )));
         panel.set_tool(tool);
         panel.set_menu(menu);
         panel.set_heading(crate::i18n::tr(NAMES[tool as usize]).into());
@@ -2399,11 +3581,12 @@ fn open_panel(group: usize, menu: bool) {
         )));
         let generation = r.generation;
         let panel_revision = r.panel_revision;
-        if !menu && group <= 2 {
+        if !menu && group <= 3 {
             panel.on_values_changed(move |values| {
                 later(move || update_geometry_values(generation, tool, values))
             });
         }
+        panel.on_watermark_edit_requested(move || later(move || open_watermark_input(generation)));
         panel.on_parameter_dragging(move |active| {
             later(move || {
                 REGISTRY.with(|slot| {
@@ -2437,6 +3620,10 @@ fn open_panel(group: usize, menu: bool) {
                     }
                     r.close_panel();
                     if r.selected[group] != tool {
+                        r.close_watermark_input();
+                        if r.text_editor.is_some() {
+                            finish_text_edit_registry(r, true);
+                        }
                         r.arrow_pending = None;
                         if matches!(
                             r.gesture,
@@ -2477,6 +3664,157 @@ fn open_panel(group: usize, menu: bool) {
         r.panel = Some(panel);
         later(move || show_panel(generation, panel_revision, 0));
     });
+}
+
+fn open_watermark_input(generation: u64) {
+    REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot.as_mut().filter(|r| r.generation == generation) else {
+            return;
+        };
+        r.close_watermark_input();
+        let revision = r.watermark_input_revision;
+        let Ok(editor) = AnnotationWatermarkInput::new() else {
+            return;
+        };
+        crate::theme::apply(&editor);
+        editor.set_value(r.values[9].text.clone());
+        editor.on_presets_requested(move |x, y, width, height| {
+            later(move || choice::open_watermark(generation, revision, x, y, width, height));
+        });
+        editor.on_dismiss_presets(move || {
+            later(move || choice::dismiss_watermark(generation, revision));
+        });
+        editor.on_apply(move |value| {
+            later(move || apply_watermark(generation, revision, value.to_string()))
+        });
+        editor.on_cancel(move || later(move || close_watermark_input(generation, revision)));
+        editor.window().on_close_requested(move || {
+            later(move || close_watermark_input(generation, revision));
+            slint::CloseRequestResponse::KeepWindowShown
+        });
+        let Some(main) = &r.main else { return };
+        let origin = main.window().position();
+        let anchor = Point {
+            x: origin.x,
+            y: origin.y,
+        };
+        let position = if let Some(area) = (r.lifecycle.popup_work_area)(anchor) {
+            let x = origin.x.clamp(area.left, area.right - 440);
+            let above = origin.y - 285;
+            let y = if above >= area.top {
+                above
+            } else {
+                (origin.y + 65).min(area.bottom - 270)
+            };
+            (x, y)
+        } else {
+            (origin.x, origin.y - 285)
+        };
+        editor
+            .window()
+            .set_position(slint::PhysicalPosition::new(position.0, position.1));
+        r.watermark_input = Some(editor);
+        later(move || show_watermark_input(generation, revision, 0));
+    });
+}
+
+fn show_watermark_input(generation: u64, revision: u64, attempt: u8) {
+    REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot
+            .as_mut()
+            .filter(|r| r.generation == generation && r.watermark_input_revision == revision)
+        else {
+            return;
+        };
+        let Some(editor) = &r.watermark_input else {
+            return;
+        };
+        match (r.prepare)(editor.window()) {
+            PassiveWindowPreparation::Ready => {
+                let owner_ready = r.main.as_ref().is_some_and(|main| {
+                    (r.lifecycle.attach_tool_window)(editor.window(), main.window())
+                });
+                if !owner_ready
+                    || editor.show().is_err()
+                    || !(r.lifecycle.complete_passive_window_show)(
+                        editor.window(),
+                        pointer_watermark(editor.as_weak()),
+                    )
+                {
+                    r.close_watermark_input();
+                    return;
+                }
+                (r.lifecycle.activate_user_requested_window)(editor.window());
+            }
+            PassiveWindowPreparation::Pending if attempt < 20 => {
+                let _ = editor.show();
+                let _ = editor.hide();
+                slint::Timer::single_shot(Duration::from_millis(16), move || {
+                    show_watermark_input(generation, revision, attempt + 1)
+                });
+            }
+            _ => {
+                r.close_watermark_input();
+            }
+        }
+    });
+}
+
+fn pointer_watermark(
+    weak: slint::Weak<AnnotationWatermarkInput>,
+) -> crate::bridge::PopupPointerSink {
+    Rc::new(move |input| {
+        if let Some(editor) = weak.upgrade() {
+            choice::watermark_pointer(input);
+            dispatch(editor.window(), input);
+        }
+    })
+}
+
+fn close_watermark_input(generation: u64, revision: u64) {
+    REGISTRY.with(|slot| {
+        if let Some(r) = slot
+            .borrow_mut()
+            .as_mut()
+            .filter(|r| r.generation == generation && r.watermark_input_revision == revision)
+        {
+            r.close_watermark_input();
+        }
+    });
+}
+
+fn apply_watermark(generation: u64, revision: u64, template: String) {
+    let changed = REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let r = slot.as_mut().filter(|r| {
+            r.generation == generation
+                && r.watermark_input_revision == revision
+                && r.watermark_input.is_some()
+        })?;
+        r.close_watermark_input();
+        r.finish_style_edit();
+        r.values[9].text = template.clone().into();
+        let content =
+            crate::annotation_text::resolve_watermark_template(&template, chrono::Local::now());
+        let watermark =
+            (!content.trim().is_empty()).then(|| watermark_from_values(r, template, content));
+        r.session.set_watermark(watermark);
+        if let Some(panel) = &r.panel
+            && panel.get_tool() == 9
+            && !panel.get_menu()
+        {
+            panel.set_values(r.values[9].clone());
+        }
+        if let Some(main) = &r.main {
+            main.set_can_undo(r.session.can_undo());
+        }
+        Some(r.generation)
+    });
+    if let Some(generation) = changed {
+        schedule_render(generation);
+    }
 }
 
 fn show_panel(generation: u64, panel_revision: u64, attempt: u8) {
@@ -2581,6 +3919,10 @@ fn position_panel(r: &Registry) {
         810f32.min(available)
     } else if panel.get_tool() == 7 {
         1120f32.min(available)
+    } else if panel.get_tool() == 8 {
+        780f32.min(available)
+    } else if panel.get_tool() == 9 {
+        1000f32.min(available)
     } else if panel.get_tool() == 6 {
         1030f32.min(available)
     } else if panel.get_tool() == 5 {
@@ -2610,6 +3952,10 @@ fn position_panel(r: &Registry) {
         } else {
             58.
         }
+    } else if panel.get_tool() == 8 {
+        if width < 774. { 106. } else { 58. }
+    } else if panel.get_tool() == 9 {
+        if width < 988. { 154. } else { 58. }
     } else {
         80. + ((fields(panel.get_tool()).len() as f32 / columns as f32).ceil()) * 62.
     };
@@ -2741,6 +4087,217 @@ pub(crate) fn apply_theme() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn watermark_pointer_bridge_reaches_controls_and_stale_instances_are_ignored() {
+        use slint::platform::{
+            Platform, WindowAdapter, WindowEvent,
+            software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+        };
+        struct TestPlatform;
+        impl Platform for TestPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer))
+            }
+        }
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        for dpi in [1., 1.25] {
+            let editor = AnnotationWatermarkInput::new().unwrap();
+            editor
+                .window()
+                .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
+            editor
+                .window()
+                .set_size(slint::LogicalSize::new(440., 270.));
+            editor.show().unwrap();
+            let applied = Rc::new(RefCell::new(None));
+            let applied_sink = applied.clone();
+            editor.on_apply(move |value| *applied_sink.borrow_mut() = Some(value.to_string()));
+            let cancelled = Rc::new(Cell::new(false));
+            let cancel_sink = cancelled.clone();
+            editor.on_cancel(move || cancel_sink.set(true));
+            let sink = pointer_watermark(editor.as_weak());
+            let click = |x: f32, y: f32| {
+                sink(PopupPointerInput::Moved {
+                    x: x * dpi,
+                    y: y * dpi,
+                });
+                sink(PopupPointerInput::LeftPressed {
+                    x: x * dpi,
+                    y: y * dpi,
+                });
+                sink(PopupPointerInput::LeftReleased {
+                    x: x * dpi,
+                    y: y * dpi,
+                });
+            };
+            click(30., 55.);
+            editor.window().dispatch_event(WindowEvent::KeyPressed {
+                text: "中文".into(),
+            });
+            editor.window().dispatch_event(WindowEvent::KeyReleased {
+                text: "中文".into(),
+            });
+            assert_eq!(editor.get_value(), "中文");
+            let requested = Rc::new(Cell::new(false));
+            let requested_sink = requested.clone();
+            editor.on_presets_requested(move |x, y, width, height| {
+                assert_eq!((x, y, width, height), (60., 217., 140., 34.));
+                requested_sink.set(true);
+            });
+            click(130., 234.);
+            assert!(requested.get());
+            assert_eq!(editor.get_selected_preset(), 1);
+            editor.invoke_choose_preset(1);
+            assert!(editor.get_value().contains("$yyyy/MM/dd HH:mm:ss$"));
+            click(300., 234.);
+            assert_eq!(
+                applied.borrow().as_deref(),
+                Some(editor.get_value().as_str())
+            );
+            click(385., 234.);
+            assert!(cancelled.get());
+            drop(editor);
+            sink(PopupPointerInput::LeftPressed { x: 0., y: 0. });
+        }
+        init(
+            |_| PassiveWindowPreparation::Ready,
+            WindowLifecycleCallbacks::new(
+                |_, _| true,
+                |_| true,
+                |_| false,
+                |_, _, _| false,
+                |_, _| true,
+                |_, _| true,
+                || false,
+            ),
+        );
+        let generation = REGISTRY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            r.main = Some(AnnotationToolbar::new().unwrap());
+            r.generation
+        });
+        open_watermark_input(generation);
+        let old_revision =
+            REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().watermark_input_revision);
+        choice::open_watermark(generation, old_revision, 60., 217., 140., 34.);
+        REGISTRY.with(|slot| {
+            let slot = slot.borrow();
+            let r = slot.as_ref().unwrap();
+            assert!(r.watermark_input.as_ref().unwrap().get_presets_open());
+            let menu = &r.choice.as_ref().unwrap().window;
+            assert_eq!(menu.get_selected(), 1);
+            assert_eq!(menu.get_menu_height(), 404.);
+        });
+        // Clicking the trigger toggles the independent menu, not the input window.
+        choice::open_watermark(generation, old_revision, 60., 217., 140., 34.);
+        REGISTRY.with(|slot| {
+            let slot = slot.borrow();
+            assert!(slot.as_ref().unwrap().choice.is_none());
+            assert!(slot.as_ref().unwrap().watermark_input.is_some());
+        });
+        choice::open_watermark(generation, old_revision, 60., 217., 140., 34.);
+        open_watermark_input(generation);
+        choice::open_watermark(generation, old_revision, 60., 217., 140., 34.);
+        choice::dismiss_watermark(generation, old_revision);
+        show_watermark_input(generation, old_revision, 0);
+        apply_watermark(generation, old_revision, "stale".into());
+        close_watermark_input(generation, old_revision);
+        REGISTRY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            assert!(r.watermark_input.is_some());
+            assert!(r.choice.is_none());
+            assert!(r.session.watermark.is_none());
+            assert!(!r.session.can_undo());
+            r.close();
+            assert!(r.watermark_input.is_none());
+            slot.take();
+        });
+    }
+
+    #[test]
+    fn text_resize_ignores_clicks_and_keeps_the_grab_offset() {
+        for dpi in [1., 1.25] {
+            let start = (-120., 60.);
+            let grab = (6. * dpi, -4. * dpi);
+            assert!(super::text_drag_target(start, grab, start, dpi, false).is_none());
+            assert!(
+                super::text_drag_target(start, grab, (start.0 + 3. * dpi, start.1), dpi, false)
+                    .is_none()
+            );
+            let target =
+                super::text_drag_target(start, grab, (start.0 + 20., start.1 + 30.), dpi, false)
+                    .unwrap();
+            assert_eq!(target, (start.0 + 20. - grab.0, start.1 + 30. - grab.1));
+            // Returning to the press position after crossing the threshold restores geometry.
+            assert_eq!(
+                super::text_drag_target(start, grab, start, dpi, true),
+                Some((start.0 - grab.0, start.1 - grab.1))
+            );
+        }
+    }
+    #[test]
+    fn color_edits_preserve_fractional_and_scaled_text_dimensions() {
+        let original = TextAnnotation {
+            content: "文字".into(),
+            font_family: "Microsoft YaHei".into(),
+            font_size: 777.75,
+            bold: false,
+            italic: false,
+            outline: Some(TextOutline {
+                color: [0, 0, 0],
+                width: 180.5,
+            }),
+            background: Some(TextBackground {
+                color: [255, 255, 255],
+                opacity: 200,
+                rounding: 400.5,
+                padding: 240.5,
+            }),
+            rotation: 0.,
+            layout_scale: 50.,
+            linked_arrow: None,
+            linked_arrow_control: None,
+        };
+        let before = defaults(8);
+        let mut after = before.clone();
+        after.color_index = 1;
+        let mut updated = original.clone();
+        updated.font_size = 778.;
+        updated.outline.as_mut().unwrap().width = 20.;
+        updated.background.as_mut().unwrap().padding = 0.;
+        updated.background.as_mut().unwrap().rounding = 0.;
+        preserve_text_dimensions(&mut updated, &original, &before, &after);
+        assert_eq!(updated, original);
+    }
+
+    #[test]
+    fn editor_viewport_clips_large_logical_bounds_to_negative_desktop() {
+        let screens = [
+            Rect {
+                left: -1920,
+                top: -100,
+                right: 0,
+                bottom: 980,
+            },
+            Rect {
+                left: 0,
+                top: 0,
+                right: 2560,
+                bottom: 1440,
+            },
+        ];
+        let huge = Bounds::from_corners((-3000., -500.), (50_000., 20_000.));
+        let viewport = text_editor_viewport(huge, &screens);
+        assert_eq!(
+            viewport,
+            Bounds::from_corners((-1920., -100.), (2560., 1440.))
+        );
+        let small = Bounds::from_corners((-100., 20.), (50., 60.));
+        assert_eq!(text_editor_viewport(small, &screens), small);
+    }
+
     use super::*;
 
     #[test]

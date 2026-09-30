@@ -715,5 +715,47 @@ msgstr "Punkt am Quellbereich"
 msgid "Source frame"
 msgstr "Quellrahmen"
 
+msgid "Apply"
+msgstr "Anwenden"
+
+msgid "Bottom center"
+msgstr "Unten zentriert"
+
+msgid "Bottom left"
+msgstr "Unten links"
+
+msgid "Bottom right"
+msgstr "Unten rechts"
+
+msgid "Center"
+msgstr "Zentriert"
+
+msgid "Edit annotation text"
+msgstr "Anmerkungstext bearbeiten"
+
+msgid "Enter watermark"
+msgstr "Wasserzeichen eingeben"
+
+msgid "Opacity"
+msgstr "Deckkraft"
+
+msgid "Outline width"
+msgstr "Konturbreite"
+
+msgid "Padding"
+msgstr "Innenabstand"
+
+msgid "Time"
+msgstr "Zeit"
+
+msgid "Top center"
+msgstr "Oben zentriert"
+
+msgid "Top left"
+msgstr "Oben links"
+
+msgid "Top right"
+msgstr "Oben rechts"
+
 msgid "No connection"
 msgstr "Keine Verbindung"

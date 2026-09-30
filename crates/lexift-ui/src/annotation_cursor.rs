@@ -2,7 +2,7 @@
 use super::{Gesture, InteractionMode, Registry};
 use crate::AnnotationCursor;
 use lexift_core::domain::{
-    annotation::{Hit, Kind, Session},
+    annotation::{Hit, Kind, Object, Session},
     geometry::Rect,
 };
 use slint::ComponentHandle;
@@ -30,9 +30,19 @@ fn resolve(mode: InteractionMode, gesture: Option<Gesture>, hit: Option<Hit>) ->
     }
     match gesture {
         Some(Gesture::PlacePoint | Gesture::FinishArrow) => AnnotationCursor::Drawing,
+        Some(Gesture::DeleteText | Gesture::ToggleTextArrow { .. }) => AnnotationCursor::Idle,
+        Some(Gesture::CreateText { .. }) => AnnotationCursor::Drawing,
         Some(Gesture::Draw { .. }) => AnnotationCursor::Drawing,
         Some(Gesture::Move { .. }) => AnnotationCursor::Moving,
+        Some(Gesture::TextSelection { .. }) => AnnotationCursor::Text,
         Some(Gesture::Resize { handle, .. }) => handle_cursor(handle),
+        Some(Gesture::TextHandle { handle, .. }) => {
+            if handle == 5 {
+                AnnotationCursor::Vertical
+            } else {
+                AnnotationCursor::Idle
+            }
+        }
         None => match hit {
             Some(Hit::Handle(handle)) => handle_cursor(handle),
             Some(Hit::Object(_)) => AnnotationCursor::Moving,
@@ -64,6 +74,12 @@ fn at_point(
             _ => None,
         };
         if let Some(handle) = handle {
+            if object.kind == Kind::Text && handle < 4 {
+                return AnnotationCursor::Idle;
+            }
+            if object.kind == Kind::Text && handle == 5 {
+                return AnnotationCursor::Vertical;
+            }
             if object.kind == Kind::HighlightRectangle && handle >= 8 {
                 return AnnotationCursor::CornerRadius;
             }
@@ -81,11 +97,40 @@ fn at_point(
     resolve(mode, gesture, hit)
 }
 
+/// Drafts are outside the Core session, but their visible controls still take priority.
+fn editing_control_cursor(
+    object: &Object,
+    point: (f32, f32),
+    scale: f32,
+) -> Option<AnnotationCursor> {
+    let tolerance = 9. * scale;
+    object
+        .edit_handles(scale)
+        .into_iter()
+        .take(4)
+        .find_map(|(x, y)| {
+            ((point.0 - x).abs() <= tolerance && (point.1 - y).abs() <= tolerance)
+                .then_some(AnnotationCursor::Idle)
+        })
+}
+
 /// Updating feedback does not enqueue annotation rasterization. Slint applies it only
 /// to the hovered canvas TouchArea, leaving tool windows and click-through apps alone.
 pub(super) fn refresh(r: &Registry) {
+    let editing = if r.gesture.is_none() && !r.mode.is_mouse() {
+        super::editing_text_object(r)
+    } else {
+        None
+    };
     for (index, layer) in r.canvases.iter().enumerate() {
-        let desired = if r.arrow_pending.is_some() {
+        let editing_control = editing.as_ref().and_then(|object| {
+            layer.last_pointer.and_then(|point| {
+                editing_control_cursor(object, point, layer.window.window().scale_factor().max(0.1))
+            })
+        });
+        let desired = if let Some(cursor) = editing_control {
+            cursor
+        } else if r.arrow_pending.is_some() {
             AnnotationCursor::Drawing
         } else {
             at_point(
@@ -95,6 +140,22 @@ pub(super) fn refresh(r: &Registry) {
                 layer.last_pointer,
                 layer.window.window().scale_factor().max(0.1),
             )
+        };
+        let hovered_text = r.text_editor.is_some()
+            && r.gesture.is_none()
+            && layer.last_pointer.is_some_and(|point| {
+                matches!(r.session.hit(point, layer.window.window().scale_factor().max(0.1)),
+                Some(Hit::Object(index)) if r.session.objects[index].kind == Kind::Text)
+            });
+        let desired = if editing_control.is_none()
+            && (hovered_text
+                || (r.mode == InteractionMode::Tool(3)
+                    && r.selected[3] == 8
+                    && desired == AnnotationCursor::Drawing))
+        {
+            AnnotationCursor::Text
+        } else {
+            desired
         };
         let was_custom = layer.window.get_cursor() == AnnotationCursor::CornerRadius;
         let cursor = if desired == AnnotationCursor::CornerRadius {
@@ -175,6 +236,89 @@ fn refresh_stationary_pointer(generation: u64, index: usize, point: (f32, f32)) 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn text_controls_use_arrow_for_drafts_hover_and_drag_at_both_dpi_scales() {
+        use lexift_core::domain::annotation::TextAnnotation;
+        for scale in [1., 1.25] {
+            for rotation in [0., 0.6] {
+                let bounds = Bounds::from_corners((-240., -100.), (-208., -72.));
+                let object = Object {
+                    kind: Kind::Text,
+                    bounds,
+                    points: Vec::new(),
+                    style: Style::default(),
+                    extra: Extra::Text(TextAnnotation {
+                        content: "短".into(),
+                        font_family: "Microsoft YaHei".into(),
+                        font_size: 22.,
+                        bold: false,
+                        italic: false,
+                        outline: None,
+                        background: None,
+                        rotation,
+                        layout_scale: 1.,
+                        linked_arrow_control: None,
+                        linked_arrow: None,
+                    }),
+                };
+                let mut session = Session::new();
+                session.add(object.clone());
+                for (handle, point) in object.edit_handles(scale).into_iter().take(4).enumerate() {
+                    assert_eq!(
+                        editing_control_cursor(&object, point, scale),
+                        Some(AnnotationCursor::Idle)
+                    );
+                    assert_eq!(
+                        at_point(&session, TOOL, None, Some(point), scale),
+                        AnnotationCursor::Idle
+                    );
+                    assert_eq!(
+                        at_point(
+                            &session,
+                            TOOL,
+                            Some(Gesture::Resize {
+                                initial: bounds,
+                                index: 0,
+                                handle,
+                            }),
+                            Some((400., 400.)),
+                            scale
+                        ),
+                        AnnotationCursor::Idle
+                    );
+                }
+                assert_eq!(
+                    editing_control_cursor(&object, bounds.center(), scale),
+                    None
+                );
+                assert_eq!(
+                    at_point(&session, TOOL, None, Some(bounds.center()), scale),
+                    AnnotationCursor::Moving
+                );
+                session.objects[0].toggle_text_arrow(scale);
+                let midpoint = session.objects[0].edit_handles(scale)[5];
+                assert_eq!(
+                    at_point(&session, TOOL, None, Some(midpoint), scale),
+                    AnnotationCursor::Vertical
+                );
+                assert_eq!(
+                    at_point(
+                        &session,
+                        TOOL,
+                        Some(Gesture::Move {
+                            start: bounds.center(),
+                            initial: bounds,
+                            index: 0,
+                        }),
+                        Some(bounds.center()),
+                        scale
+                    ),
+                    AnnotationCursor::Moving
+                );
+            }
+        }
+    }
+
     use super::*;
     use lexift_core::domain::annotation::{Bounds, Endpoint, Extra, Kind, Object, Style};
     const TOOL: InteractionMode = InteractionMode::Tool(0);

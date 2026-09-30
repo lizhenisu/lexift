@@ -715,5 +715,47 @@ msgstr "Point sur la source"
 msgid "Source frame"
 msgstr "Cadre de la source"
 
+msgid "Apply"
+msgstr "Appliquer"
+
+msgid "Bottom center"
+msgstr "En bas au centre"
+
+msgid "Bottom left"
+msgstr "En bas à gauche"
+
+msgid "Bottom right"
+msgstr "En bas à droite"
+
+msgid "Center"
+msgstr "Centre"
+
+msgid "Edit annotation text"
+msgstr "Modifier le texte annoté"
+
+msgid "Enter watermark"
+msgstr "Saisir un filigrane"
+
+msgid "Opacity"
+msgstr "Opacité"
+
+msgid "Outline width"
+msgstr "Épaisseur du contour"
+
+msgid "Padding"
+msgstr "Marge intérieure"
+
+msgid "Time"
+msgstr "Heure"
+
+msgid "Top center"
+msgstr "En haut au centre"
+
+msgid "Top left"
+msgstr "En haut à gauche"
+
+msgid "Top right"
+msgstr "En haut à droite"
+
 msgid "No connection"
 msgstr "Aucune liaison"

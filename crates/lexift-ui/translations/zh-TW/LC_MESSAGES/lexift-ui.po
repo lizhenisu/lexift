@@ -715,5 +715,47 @@ msgstr "取樣端圓點"
 msgid "Source frame"
 msgstr "取樣框"
 
+msgid "Apply"
+msgstr "套用"
+
+msgid "Bottom center"
+msgstr "底部置中"
+
+msgid "Bottom left"
+msgstr "左下角"
+
+msgid "Bottom right"
+msgstr "右下角"
+
+msgid "Center"
+msgstr "置中"
+
+msgid "Edit annotation text"
+msgstr "編輯標註文字"
+
+msgid "Enter watermark"
+msgstr "輸入浮水印"
+
+msgid "Opacity"
+msgstr "不透明度"
+
+msgid "Outline width"
+msgstr "描邊寬度"
+
+msgid "Padding"
+msgstr "內距"
+
+msgid "Time"
+msgstr "時間"
+
+msgid "Top center"
+msgstr "頂部置中"
+
+msgid "Top left"
+msgstr "左上角"
+
+msgid "Top right"
+msgstr "右上角"
+
 msgid "No connection"
 msgstr "無連線"

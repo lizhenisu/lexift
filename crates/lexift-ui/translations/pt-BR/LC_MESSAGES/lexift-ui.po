@@ -715,5 +715,47 @@ msgstr "Ponto na origem"
 msgid "Source frame"
 msgstr "Moldura da origem"
 
+msgid "Apply"
+msgstr "Aplicar"
+
+msgid "Bottom center"
+msgstr "Inferior central"
+
+msgid "Bottom left"
+msgstr "Inferior esquerdo"
+
+msgid "Bottom right"
+msgstr "Inferior direito"
+
+msgid "Center"
+msgstr "Centro"
+
+msgid "Edit annotation text"
+msgstr "Editar texto da anotação"
+
+msgid "Enter watermark"
+msgstr "Digite a marca d’água"
+
+msgid "Opacity"
+msgstr "Opacidade"
+
+msgid "Outline width"
+msgstr "Espessura do contorno"
+
+msgid "Padding"
+msgstr "Espaçamento interno"
+
+msgid "Time"
+msgstr "Hora"
+
+msgid "Top center"
+msgstr "Superior central"
+
+msgid "Top left"
+msgstr "Superior esquerdo"
+
+msgid "Top right"
+msgstr "Superior direito"
+
 msgid "No connection"
 msgstr "Sem conexão"
