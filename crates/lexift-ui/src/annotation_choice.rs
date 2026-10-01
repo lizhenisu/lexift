@@ -565,9 +565,14 @@ fn finish(generation: u64, panel_revision: u64, revision: u64, index: Option<i32
             if panel.get_tool() == 4 && menu.request.field == 6 && index == 1 {
                 return;
             }
+            let tool = panel.get_tool() as usize;
+            let field = menu.request.field;
             let mut values = panel.get_values();
-            set_value(&mut values, menu.request.field, index);
-            panel.set_values(values);
+            if field == 12 {
+                fonts::choose(r, tool, index);
+            }
+            set_value(&mut values, field, index);
+            r.panel.as_ref().unwrap().set_values(values);
         }
         let parent = r
             .choice
@@ -751,6 +756,9 @@ fn place(r: &Registry) {
     menu.window
         .window()
         .set_position(slint::PhysicalPosition::new(position.x, position.y));
+    if q.field == 12 {
+        menu.window.invoke_center_selection();
+    }
 }
 
 /// Use physical coordinates throughout, including negative monitor origins.
@@ -880,6 +888,63 @@ pub(super) fn panel_pointer(input: PopupPointerInput) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn font_menu_centers_selection_and_keeps_keyboard_navigation_visible() {
+        use slint::platform::{
+            Platform, WindowAdapter, WindowEvent,
+            software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+        };
+        struct TestPlatform;
+        impl Platform for TestPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer))
+            }
+        }
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        for dpi in [1., 1.25] {
+            let window = AnnotationChoiceWindow::new().unwrap();
+            window.set_options(ModelRc::new(VecModel::from(
+                (0..200)
+                    .map(|i| format!("Font {i:03}").into())
+                    .collect::<Vec<_>>(),
+            )));
+            window.set_font_mode(true);
+            window.set_selected(155);
+            window
+                .window()
+                .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
+            window.window().set_size(slint::PhysicalSize::new(
+                (300. * dpi) as u32,
+                (320. * dpi) as u32,
+            ));
+            window.show().unwrap();
+            slint::platform::update_timers_and_animations();
+            window.invoke_center_selection();
+            let assert_visible = || {
+                let top = 4. + window.get_selected() as f32 * 36.;
+                let scroll = -window.get_font_scroll_y();
+                assert!(
+                    top >= scroll - 1. && top + 36. <= scroll + 318. + 1.,
+                    "{top}, {scroll}"
+                );
+            };
+            assert_visible();
+            for key in [
+                slint::platform::Key::End,
+                slint::platform::Key::Home,
+                slint::platform::Key::DownArrow,
+                slint::platform::Key::UpArrow,
+            ] {
+                window
+                    .window()
+                    .dispatch_event(WindowEvent::KeyPressed { text: key.into() });
+                slint::platform::update_timers_and_animations();
+                assert_visible();
+            }
+            window.hide().unwrap();
+        }
+    }
+
     #[test]
     fn custom_colors_round_trip_and_update_only_their_target() {
         let original = defaults(8);

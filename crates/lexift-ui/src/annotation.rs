@@ -28,6 +28,8 @@ mod choice;
 mod color;
 #[path = "annotation_cursor.rs"]
 mod cursor;
+#[path = "annotation_fonts.rs"]
+mod fonts;
 
 thread_local! { static REGISTRY: RefCell<Option<Registry>> = const { RefCell::new(None) }; }
 
@@ -39,6 +41,7 @@ struct Registry {
     watermark_input: Option<AnnotationWatermarkInput>,
     watermark_input_revision: u64,
     fonts: Vec<String>,
+    font_preferences: fonts::Preferences,
     choice: Option<choice::Menu>,
     choice_revision: u64,
     canvases: Vec<CanvasLayer>,
@@ -506,6 +509,7 @@ pub(crate) fn init(
             watermark_input: None,
             watermark_input_revision: 0,
             fonts: Vec::new(),
+            font_preferences: fonts::Preferences::default(),
             choice: None,
             choice_revision: 0,
             canvases: Vec::new(),
@@ -725,6 +729,9 @@ impl Registry {
             let _ = main.hide();
         }
         self.values = (0..14).map(defaults).collect();
+        if !self.fonts.is_empty() {
+            fonts::reset_defaults(self);
+        }
         self.selected = [0, 4, 7, 9, 10, 11, 13];
         self.hovered = None;
     }
@@ -1005,6 +1012,7 @@ fn open_text_editor(at: (f32, f32), index: Option<usize>, scale: f32) {
         let mut slot = slot.borrow_mut();
         let Some(r) = slot.as_mut() else { return };
         finish_text_edit_registry(r, true);
+        fonts::ensure(r);
         let scale = index
             .and_then(|i| r.session.objects.get(i))
             .map_or(scale, |o| {
@@ -1025,7 +1033,11 @@ fn open_text_editor(at: (f32, f32), index: Option<usize>, scale: f32) {
                     None
                 }
             })
-            .unwrap_or_else(|| text_from_values(r, String::new()));
+            .unwrap_or_else(|| {
+                let mut text = text_from_values(r, String::new());
+                text.font_family = fonts::preferred(r, 8);
+                text
+            });
         let at = index
             .and_then(|i| r.session.objects.get(i))
             .map_or(at, |object| {
@@ -1680,7 +1692,7 @@ fn chosen_font(r: &Registry, tool: usize) -> String {
     r.fonts
         .get(r.values[tool].font.max(0) as usize)
         .cloned()
-        .unwrap_or_else(|| "Segoe UI".into())
+        .unwrap_or_else(|| fonts::preferred(r, tool))
 }
 
 fn text_from_values(r: &Registry, content: String) -> TextAnnotation {
@@ -2121,12 +2133,18 @@ fn sequence_from_values(r: &Registry, at: (f32, f32), scale: f32) -> Object {
             endpoint: Endpoint::FilledArrow,
         }),
     };
-    update_sequence_style(&mut object, v, &r.fonts, current_style(r, 10));
+    let mut creation = v.clone();
+    let family = fonts::preferred(r, 10);
+    if let Some(index) = r.fonts.iter().position(|name| name == &family) {
+        creation.font = index as i32;
+    }
+    update_sequence_style(&mut object, &creation, &r.fonts, current_style(r, 10));
     object
 }
 
 /// The press snapshot includes selection and numbering; no undo entry exists until release.
 fn begin_sequence_placement(r: &mut Registry, point: (f32, f32), scale: f32) {
+    fonts::ensure(r);
     let object = sequence_from_values(r, point, scale);
     r.session.begin_drag();
     if !r.session.add(object.clone()) {
@@ -4029,18 +4047,8 @@ fn open_panel(group: usize, menu: bool) {
         };
         crate::theme::apply(&panel);
         let tool = r.selected[group];
-        if matches!(tool, 8..=10) && r.fonts.is_empty() {
-            r.fonts = crate::annotation_text::font_families();
-            if let Some(index) = r
-                .fonts
-                .iter()
-                .position(|name| name == "Microsoft YaHei")
-                .or_else(|| r.fonts.iter().position(|name| name == "Segoe UI"))
-            {
-                r.values[8].font = index as i32;
-                r.values[9].font = index as i32;
-                r.values[10].font = index as i32;
-            }
+        if matches!(tool, 8..=10) {
+            fonts::ensure(r);
         }
         panel.set_font_families(ModelRc::new(VecModel::from(
             r.fonts.iter().cloned().map(Into::into).collect::<Vec<_>>(),
@@ -4164,6 +4172,7 @@ fn open_watermark_input(generation: u64) {
         let Some(r) = slot.as_mut().filter(|r| r.generation == generation) else {
             return;
         };
+        fonts::ensure(r);
         r.close_watermark_input();
         let revision = r.watermark_input_revision;
         let Ok(editor) = AnnotationWatermarkInput::new() else {
@@ -4605,6 +4614,14 @@ pub(crate) fn refresh_language() {
     REGISTRY.with(|slot| {
         if let Some(r) = slot.borrow_mut().as_mut() {
             choice::close(r);
+            if !r.fonts.is_empty() {
+                fonts::reset_defaults(r);
+            }
+            if let Some(panel) = &r.panel
+                && !panel.get_menu()
+            {
+                panel.set_values(r.values[panel.get_tool() as usize].clone());
+            }
             if r.panel.as_ref().is_some_and(|p| p.get_menu()) {
                 r.close_panel();
             } else if let Some(panel) = &r.panel {

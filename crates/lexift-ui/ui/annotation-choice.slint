@@ -33,6 +33,17 @@ export component AnnotationChoiceWindow inherits Window {
     callback color-dragging(bool);
     in-out property <int> selected;
     out property <length> menu-height: root.text-style-mode == 1 ? 80px : root.text-style-mode == 2 ? 160px : root.color-mode ? 300px : root.font-mode ? 320px : root.options.length * MenuMetrics.row-height + 8px;
+    in-out property <length> font-scroll-y: 0px;
+    callback center-selection();
+    center-selection => { root.reveal-selection(true); }
+    function reveal-selection(center: bool) {
+        if root.font-mode {
+            if center { root.font-scroll-y = -clamp(4px + root.selected * MenuMetrics.row-height - ((root.height - 2px) - MenuMetrics.row-height) / 2, 0px, max(0px, (root.options.length * MenuMetrics.row-height + 8px) - (root.height - 2px))); }
+            else if 4px + root.selected * MenuMetrics.row-height < -root.font-scroll-y { root.font-scroll-y = -(4px + root.selected * MenuMetrics.row-height); }
+            else if 4px + (root.selected + 1) * MenuMetrics.row-height > -root.font-scroll-y + (root.height - 2px) { root.font-scroll-y = -clamp(4px + (root.selected + 1) * MenuMetrics.row-height - (root.height - 2px), 0px, max(0px, (root.options.length * MenuMetrics.row-height + 8px) - (root.height - 2px))); }
+        }
+    }
+    changed selected => { root.reveal-selection(false); }
     callback chosen(int);
     callback cancel();
     forward-focus: keys;
@@ -88,6 +99,7 @@ export component AnnotationChoiceWindow inherits Window {
                 }
             }
         if !root.color-mode && root.text-style-mode == 0: ScrollView {
+            content-y <=> root.font-scroll-y;
             width: 100%; height: 100%;
             content-width: self.visible-width;
             content-height: root.options.length * MenuMetrics.row-height + 8px;

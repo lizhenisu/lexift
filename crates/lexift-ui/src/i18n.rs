@@ -14,6 +14,10 @@ pub(crate) fn select(language: UiLanguage) -> bool {
 pub(crate) fn apply() {
     let _ = slint::select_bundled_translation(CURRENT.get().code());
 }
+pub(crate) fn language() -> UiLanguage {
+    CURRENT.get()
+}
+
 pub(crate) fn tr(key: &str) -> String {
     lookup(CURRENT.get().code(), key).unwrap_or(key).into()
 }

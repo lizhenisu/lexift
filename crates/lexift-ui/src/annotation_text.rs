@@ -165,9 +165,49 @@ pub(crate) fn font_families() -> Vec<String> {
             .faces()
             .flat_map(|face| face.families.iter().map(|f| f.0.clone()))
             .collect::<Vec<_>>();
-        names.sort_by_key(|name| name.to_lowercase());
-        names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        normalize_family_names(&mut names);
         names
+    })
+}
+
+fn normalize_family_names(names: &mut Vec<String>) {
+    names.sort_by_cached_key(|name| (name.to_lowercase(), name.clone()));
+    names.dedup_by(|a, b| a.to_lowercase() == b.to_lowercase());
+}
+
+/// Return an installed family that fontdb can resolve for its generic sans-serif face.
+pub(crate) fn system_sans_family() -> Option<String> {
+    FONTS.with(|slot| {
+        let fonts = slot.borrow();
+        let id = fonts
+            .db
+            .query(&Query {
+                families: &[Family::SansSerif],
+                ..Query::default()
+            })
+            .or_else(|| {
+                [
+                    "Noto Sans",
+                    "DejaVu Sans",
+                    "Liberation Sans",
+                    "Helvetica Neue",
+                    "Helvetica",
+                    "Arial",
+                ]
+                .into_iter()
+                .find_map(|family| {
+                    fonts.db.query(&Query {
+                        families: &[Family::Name(family)],
+                        ..Query::default()
+                    })
+                })
+            })?;
+        fonts
+            .db
+            .face(id)?
+            .families
+            .first()
+            .map(|family| family.0.clone())
     })
 }
 
@@ -1113,6 +1153,23 @@ pub(crate) fn resolve_watermark_template(template: &str, at: DateTime<Local>) ->
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn family_names_sort_stably_and_deduplicate_case_variants() {
+        let mut names = [
+            "微软雅黑",
+            "zeta",
+            "arial",
+            "Arial",
+            "École",
+            "école",
+            "Beta",
+            "Arial",
+        ]
+        .map(String::from)
+        .to_vec();
+        normalize_family_names(&mut names);
+        assert_eq!(names, ["Arial", "Beta", "zeta", "École", "微软雅黑"]);
+    }
     use super::*;
     use chrono::TimeZone;
     use lexift_core::domain::annotation::{Kind, Style, TextOutline};
