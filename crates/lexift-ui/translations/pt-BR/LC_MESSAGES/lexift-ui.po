@@ -759,3 +759,36 @@ msgstr "Superior direito"
 
 msgid "No connection"
 msgstr "Sem conexão"
+
+msgid "Filled circle"
+msgstr "Círculo preenchido"
+
+msgid "Circle with white border"
+msgstr "Círculo com borda branca"
+
+msgid "Outline circle"
+msgstr "Contorno circular"
+
+msgid "Number only"
+msgstr "Somente número"
+
+msgid "Filled square"
+msgstr "Quadrado preenchido"
+
+msgid "Size"
+msgstr "Tamanho"
+
+msgid "Guide"
+msgstr "Linha-guia"
+
+msgid "Smallest"
+msgstr "Mínimo"
+
+msgid "Small"
+msgstr "Pequeno"
+
+msgid "Medium"
+msgstr "Médio"
+
+msgid "Largest"
+msgstr "Máximo"

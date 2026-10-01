@@ -759,3 +759,36 @@ msgstr "右上"
 
 msgid "No connection"
 msgstr "接続なし"
+
+msgid "Filled circle"
+msgstr "塗りつぶし円"
+
+msgid "Circle with white border"
+msgstr "白枠付き円"
+
+msgid "Outline circle"
+msgstr "円の輪郭"
+
+msgid "Number only"
+msgstr "番号のみ"
+
+msgid "Filled square"
+msgstr "塗りつぶし四角"
+
+msgid "Size"
+msgstr "サイズ"
+
+msgid "Guide"
+msgstr "ガイド線"
+
+msgid "Smallest"
+msgstr "最小"
+
+msgid "Small"
+msgstr "小"
+
+msgid "Medium"
+msgstr "中"
+
+msgid "Largest"
+msgstr "最大"

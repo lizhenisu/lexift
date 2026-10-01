@@ -14,6 +14,9 @@ export component LineEdit inherits Rectangle {
 }
 
 export component SpinBox inherits Rectangle {
+    callback input-editing(bool);
+    callback input-finished();
+    callback input-confirmed();
     in-out property <int> value;
     in property <bool> enabled: true;
     in property <int> minimum: 1;
@@ -25,14 +28,14 @@ export component SpinBox inherits Rectangle {
         scroll-event(event) => { root.value = clamp(root.value + (event.delta-y > 0px ? 1 : -1),root.minimum,root.maximum); return accept; }
     }
     function commit() { root.value = input.text.is-float() ? clamp(round(input.text.to-float()), root.minimum, root.maximum) : root.value; input.text = root.value; }
-    changed value => { input.text = root.value; }
+    changed value => { if !input.has-focus { input.text = root.value; } }
     input := TextInput { x: 9px; width: parent.width - 44px; height: parent.height;
-        enabled: root.enabled;
+        enabled: root.enabled; single-line: true;
         text: root.value; font-size: 13px; color: Colors.foreground; vertical-alignment: center;
         selection-background-color: Colors.primary-container; selection-foreground-color: Colors.foreground;
         edited => { if self.text.is-float() { root.value = clamp(round(self.text.to-float()),root.minimum,root.maximum); } }
-        accepted => { root.commit(); }
-        changed has-focus => { if !self.has-focus { root.commit(); } }
+        accepted => { root.commit(); root.input-editing(false); root.input-confirmed(); }
+        changed has-focus => { root.input-editing(self.has-focus); if !self.has-focus { root.commit(); root.input-finished(); } }
     }
     Rectangle { x: parent.width - 28px; y: 0px; width: 1px; height: parent.height; background: Colors.outline; }
     for direction[i] in [1,-1]: Rectangle {
@@ -41,7 +44,7 @@ export component SpinBox inherits Rectangle {
         Path { x: 8px; y: 5px; width: 10px; height: 5px; viewbox-width: 10; viewbox-height: 5;
             commands: i == 0 ? "M1 4L5 1L9 4" : "M1 1L5 4L9 1";
             fill: transparent; stroke: Colors.secondary-foreground; stroke-width: 1.5px; }
-        hit := TouchArea { enabled: root.enabled; clicked => { root.commit(); root.value = clamp(root.value + direction,root.minimum,root.maximum); } }
+        hit := TouchArea { enabled: root.enabled; clicked => { root.commit(); root.value = clamp(root.value + direction,root.minimum,root.maximum); input.text = root.value; root.input-editing(false); root.input-confirmed(); } }
     }
     Rectangle { x: parent.width - 27px; y: 15px; width: 27px; height: 1px; background: Colors.outline; }
 }

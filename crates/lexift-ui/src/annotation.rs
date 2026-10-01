@@ -8,9 +8,9 @@ use crate::{
 };
 use lexift_core::domain::{
     annotation::{
-        Bounds, Endpoint, Extra, Hit, Kind, MagnifierConnector, Object, Session, Style,
-        TextAnnotation, TextBackground, TextOutline, Watermark, WatermarkPosition,
-        magnifier_output_for_source,
+        Bounds, Endpoint, Extra, Hit, Kind, MagnifierConnector, Object, SequenceAnnotation,
+        SequenceFormat, SequenceShape, Session, Style, TextAnnotation, TextBackground, TextOutline,
+        Watermark, WatermarkPosition, magnifier_output_for_source,
     },
     geometry::{Point, Rect},
 };
@@ -261,6 +261,14 @@ impl InteractionMode {
 
 #[derive(Clone, Copy)]
 enum Gesture {
+    PlaceSequence {
+        start: (f32, f32),
+        index: usize,
+    },
+    SequenceControl {
+        index: usize,
+        handle: usize,
+    },
     PlacePoint,
     FinishArrow,
     DeleteText,
@@ -302,7 +310,6 @@ enum Gesture {
     },
 }
 
-#[derive(Clone)]
 struct TextEdit {
     id: u64,
     selection_anchor: Option<usize>,
@@ -312,12 +319,69 @@ struct TextEdit {
     original: TextAnnotation,
     bounds: Bounds,
     laid_out_content: String,
+    caret: CaretBlink,
+    caret_timer: slint::Timer,
+}
+
+/// Canvas feedback has its own clock because the native TextInput is transparent.
+struct CaretBlink {
+    visible: bool,
+}
+impl CaretBlink {
+    fn reset(&mut self) {
+        self.visible = true;
+    }
+    fn tick(&mut self, held: bool) -> bool {
+        let previous = self.visible;
+        self.visible = held || !self.visible;
+        self.visible != previous
+    }
+}
+
+fn reset_text_caret(r: &mut Registry) {
+    let Some(edit) = &mut r.text_edit else { return };
+    edit.caret.reset();
+    let (generation, id) = (r.generation, edit.id);
+    edit.caret_timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(500),
+        move || tick_text_caret(generation, id),
+    );
+}
+
+fn tick_text_caret(generation: u64, id: u64) {
+    let changed = REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot
+            .as_mut()
+            .filter(|r| r.generation == generation && text_edit_matches(r, id))
+        else {
+            return false;
+        };
+        let composing = r
+            .text_editor
+            .as_ref()
+            .is_some_and(|e| !e.get_preedit().is_empty());
+        let edit = r.text_edit.as_mut().unwrap();
+        edit.caret
+            .tick(composing || edit.selection_anchor.is_some())
+    });
+    if changed {
+        schedule_render(generation);
+    }
 }
 
 thread_local! { static NEXT_TEXT_EDIT: Cell<u64> = const { Cell::new(0) }; }
 
 fn text_edit_matches(r: &Registry, id: u64) -> bool {
     r.text_edit.as_ref().is_some_and(|edit| edit.id == id)
+}
+fn editing_sequence(r: &Registry) -> bool {
+    r.text_edit
+        .as_ref()
+        .and_then(|e| e.index)
+        .and_then(|i| r.session.objects.get(i))
+        .is_some_and(|o| o.kind == Kind::Sequence)
 }
 
 #[derive(Clone)]
@@ -403,10 +467,18 @@ fn defaults(tool: i32) -> AnnotationValues {
             50.
         },
         start: 1,
-        shape: i32::from(matches!(tool, 1 | 2)),
+        sequence_ratio: 2,
+        sequence_guide: true,
+        sequence_text_color: "".into(),
+        sequence_label: "1".into(),
+        shape: if tool == 10 {
+            4
+        } else {
+            i32::from(matches!(tool, 1 | 2))
+        },
         zoom: if tool == 7 { 150 } else { 0 },
         head: tool == 5,
-        line_end: if tool == 5 { 3 } else { 0 },
+        line_end: if matches!(tool, 5 | 10) { 3 } else { 0 },
         mode: 0,
         erase: tool != 2,
         antialias: true,
@@ -547,6 +619,10 @@ impl Registry {
                 changed.push(index);
             }
         }
+        if mode != InteractionMode::Tool(4) && cancel_sequence_placement(self) {
+            let generation = self.generation;
+            later(move || schedule_render(generation));
+        }
         self.mode = mode;
         if mode != InteractionMode::Tool(2) {
             self.arrow_pending = None;
@@ -666,7 +742,31 @@ fn finish_text_edit_registry(r: &mut Registry, commit: bool) {
     let Some(edit) = r.text_edit.take() else {
         return;
     };
-    if !commit || value.trim().is_empty() {
+    edit.caret_timer.stop();
+    if !commit {
+        return;
+    }
+    if let Some(index) = edit.index
+        && r.session
+            .objects
+            .get(index)
+            .is_some_and(|o| o.kind == Kind::Sequence)
+    {
+        let mut caption = edit.original;
+        caption.content = value;
+        r.session.selected = Some(index);
+        r.session.update_selected(|object| {
+            if let Extra::Sequence(s) = &mut object.extra {
+                s.caption = caption;
+            }
+            crate::annotation_sequence::layout(object);
+        });
+        if let Some(main) = &r.main {
+            main.set_can_undo(r.session.can_undo());
+        }
+        return;
+    }
+    if value.trim().is_empty() {
         return;
     }
     let mut text = edit.original;
@@ -743,7 +843,11 @@ fn editor_pointer(generation: u64, id: u64, event: i32, x: f32, y: f32) {
         let origin = editor.window().position();
         let dpi = editor.window().scale_factor();
         let point = (origin.x as f32 + x * dpi, origin.y as f32 + y * dpi);
-        let handle = text_handle_at(&object, point, dpi);
+        let handle = if editing_sequence(r) {
+            None
+        } else {
+            text_handle_at(&object, point, dpi)
+        };
         editor.set_control_hover(
             handle.is_some() || matches!(r.gesture, Some(Gesture::TextHandle { .. })),
         );
@@ -775,6 +879,7 @@ fn editor_pointer(generation: u64, id: u64, event: i32, x: f32, y: f32) {
             restore_text_focus(r);
         }
         let edit = r.text_edit.as_mut().unwrap();
+        let selecting = event == 0 || edit.selection_anchor.is_some();
         match event {
             0 => {
                 edit.selection_anchor = Some(offset);
@@ -789,6 +894,10 @@ fn editor_pointer(generation: u64, id: u64, event: i32, x: f32, y: f32) {
                 }
             }
             _ => edit.selection_anchor = None,
+        }
+        if selecting {
+            reset_text_caret(r);
+            later(move || schedule_render(generation));
         }
     });
 }
@@ -806,10 +915,26 @@ fn resize_text_editor(generation: u64, id: u64) {
         };
         let mut text = edit.original.clone();
         text.content = editor_preview(editor).0;
-        let b = crate::annotation_text::text_bounds(edit.at, &text, edit.scale);
+        let b = if let Some(mut object) = edit
+            .index
+            .and_then(|i| r.session.objects.get(i))
+            .filter(|o| o.kind == Kind::Sequence)
+            .cloned()
+        {
+            if let Extra::Sequence(s) = &mut object.extra {
+                s.caption = text.clone();
+            }
+            crate::annotation_sequence::layout(&mut object);
+            let b = object.sequence_caption().unwrap().bounds;
+            edit.at = (b.left, b.top);
+            b
+        } else {
+            crate::annotation_text::text_bounds(edit.at, &text, edit.scale)
+        };
         edit.bounds = b;
         edit.laid_out_content = text.content.clone();
         place_text_editor(editor, b, edit.scale, &text, &r.canvases);
+        reset_text_caret(r);
         Some(r.generation)
     });
     if let Some(generation) = changed {
@@ -882,12 +1007,20 @@ fn open_text_editor(at: (f32, f32), index: Option<usize>, scale: f32) {
         finish_text_edit_registry(r, true);
         let scale = index
             .and_then(|i| r.session.objects.get(i))
-            .map_or(scale, crate::annotation_text::object_scale);
+            .map_or(scale, |o| {
+                if let Extra::Sequence(s) = &o.extra {
+                    s.scale
+                } else {
+                    crate::annotation_text::object_scale(o)
+                }
+            });
         let original = index
             .and_then(|i| r.session.objects.get(i))
             .and_then(|o| {
                 if let Extra::Text(text) = &o.extra {
                     Some(text.clone())
+                } else if let Extra::Sequence(s) = &o.extra {
+                    Some(s.caption.clone())
                 } else {
                     None
                 }
@@ -895,7 +1028,12 @@ fn open_text_editor(at: (f32, f32), index: Option<usize>, scale: f32) {
             .unwrap_or_else(|| text_from_values(r, String::new()));
         let at = index
             .and_then(|i| r.session.objects.get(i))
-            .map_or(at, |object| (object.bounds.left, object.bounds.top));
+            .map_or(at, |object| {
+                let b = object
+                    .sequence_caption()
+                    .map_or(object.bounds, |o| o.bounds);
+                (b.left, b.top)
+            });
         let Ok(editor) = AnnotationTextInput::new() else {
             return;
         };
@@ -912,9 +1050,16 @@ fn open_text_editor(at: (f32, f32), index: Option<usize>, scale: f32) {
         editor.set_bold(original.bold);
         editor.set_italic(original.italic);
         editor.set_text_padding(crate::annotation_text::text_padding(&original, 1.));
-        let color = index
-            .and_then(|i| r.session.objects.get(i))
-            .map_or(current_style(r, 8).color, |object| object.style.color);
+        let color = index.and_then(|i| r.session.objects.get(i)).map_or(
+            current_style(r, 8).color,
+            |object| {
+                if let Extra::Sequence(s) = &object.extra {
+                    s.caption_color
+                } else {
+                    object.style.color
+                }
+            },
+        );
         editor.set_ink(slint::Color::from_rgb_u8(color[0], color[1], color[2]));
         editor.on_done(move |_| later(move || finish_matching_text_edit(generation, id, true)));
         editor.on_cancel(move || later(move || finish_matching_text_edit(generation, id, false)));
@@ -930,7 +1075,10 @@ fn open_text_editor(at: (f32, f32), index: Option<usize>, scale: f32) {
         let b = crate::annotation_text::text_bounds(at, &original, scale);
         place_text_editor(&editor, b, scale, &original, &r.canvases);
         if let Some(object) = index.and_then(|i| r.session.objects.get(i)) {
-            let offset = crate::annotation_text::caret_at(object, clicked) as i32;
+            let caption = object.sequence_caption();
+            let offset =
+                crate::annotation_text::caret_at(caption.as_ref().unwrap_or(object), clicked)
+                    as i32;
             editor.invoke_place_selection(offset, offset);
         }
         if let Some(owner) = r.canvases.iter().find(|layer| {
@@ -950,8 +1098,11 @@ fn open_text_editor(at: (f32, f32), index: Option<usize>, scale: f32) {
             original,
             bounds: b,
             laid_out_content: editor.get_value().to_string(),
+            caret: CaretBlink { visible: true },
+            caret_timer: slint::Timer::default(),
         });
         r.text_editor = Some(editor);
+        reset_text_caret(r);
         later(move || show_text_editor(generation, id, 0));
     });
     let generation = REGISTRY.with(|slot| slot.borrow().as_ref().map(|r| r.generation));
@@ -1045,6 +1196,7 @@ pub(crate) fn escape() {
         let mut slot = s.borrow_mut();
         let r = slot.as_mut()?;
         if r.gesture.is_some() {
+            cancel_sequence_placement(r);
             r.session.cancel_drag();
             r.gesture = None;
             r.draft = None;
@@ -1453,6 +1605,10 @@ fn settle_canvas(weak: slint::Weak<AnnotationCanvas>, bounds: Rect, remaining: u
 fn pointer_canvas(weak: slint::Weak<AnnotationCanvas>) -> crate::bridge::PopupPointerSink {
     Rc::new(move |input| {
         if let Some(window) = weak.upgrade() {
+            if let PopupPointerInput::LeftCancelled { x, y } = input {
+                let scale = window.window().scale_factor().max(0.1);
+                window.invoke_pointer(3, x / scale, y / scale);
+            }
             dispatch(window.window(), input);
         }
     })
@@ -1640,7 +1796,9 @@ fn toolbar_tools(r: &Registry) -> Vec<i32> {
 fn adopt_selected_style(r: &mut Registry, index: usize) -> bool {
     let object = r.session.objects[index].clone();
     let tool = object.kind.tool();
-    let group = if tool == 8 {
+    let group = if tool == 10 {
+        4
+    } else if tool == 8 {
         3
     } else if tool >= 5 {
         2
@@ -1717,6 +1875,32 @@ fn adopt_selected_style(r: &mut Registry, index: usize) -> bool {
                 (values.text_bg_color_index, values.text_bg_custom_color) =
                     color_to_values(palette, background.color);
             }
+        }
+        Extra::Sequence(s) => {
+            values.text_size = s.size.round() as i32;
+            values.shape = s.shape as i32;
+            values.format = s.format as i32;
+            values.start = r.session.next_sequence;
+            values.sequence_ratio = s.caption_ratio as i32;
+            values.sequence_guide = s.guide;
+            values.sequence_text_color = if s.caption_custom_color {
+                color::hex(s.caption_color).into()
+            } else {
+                "".into()
+            };
+            values.text_outline = s.caption.outline.is_some();
+            if let Some(outline) = &s.caption.outline {
+                values.text_outline_width = outline.width.round() as i32;
+                let (i, c) = color_to_values(palette, outline.color);
+                values.text_outline_color_index = i;
+                values.text_outline_custom_color = c;
+            }
+            values.line_end = endpoint_index(s.endpoint);
+            values.font = r
+                .fonts
+                .iter()
+                .position(|f| f == &s.caption.font_family)
+                .unwrap_or(0) as i32;
         }
         Extra::None => {}
     }
@@ -1808,6 +1992,9 @@ fn connector_index(value: MagnifierConnector) -> i32 {
 }
 
 fn active_kind(r: &Registry) -> Option<Kind> {
+    if r.mode == InteractionMode::Tool(4) {
+        return Some(Kind::Sequence);
+    }
     if r.mode == InteractionMode::Tool(3) {
         return (r.selected[3] == 8).then_some(Kind::Text);
     }
@@ -1840,6 +2027,141 @@ fn active_kind(r: &Registry) -> Option<Kind> {
         }),
         _ => None,
     }
+}
+
+fn sync_sequence_counter(r: &mut Registry) {
+    r.values[10].start = r.session.next_sequence.max(1);
+    let format = match r.values[10].format {
+        1 => SequenceFormat::Roman,
+        2 => SequenceFormat::LowerAlpha,
+        3 => SequenceFormat::UpperAlpha,
+        4 => SequenceFormat::Chinese,
+        _ => SequenceFormat::Decimal,
+    };
+    r.values[10].sequence_label =
+        lexift_core::domain::annotation::sequence_label(r.values[10].start, format).into();
+    if let Some(panel) = &r.panel
+        && panel.get_tool() == 10
+    {
+        let mut v = panel.get_values();
+        v.start = r.values[10].start;
+        v.sequence_label = r.values[10].sequence_label.clone();
+        panel.set_values(v);
+    }
+}
+fn update_sequence_style(
+    object: &mut Object,
+    v: &AnnotationValues,
+    fonts: &[String],
+    style: Style,
+) {
+    let Extra::Sequence(s) = &mut object.extra else {
+        return;
+    };
+    s.size = v.text_size.max(5) as f32;
+    s.shape = match v.shape {
+        0 => SequenceShape::Circle,
+        1 => SequenceShape::CircleWhiteBorder,
+        2 => SequenceShape::Outline,
+        3 => SequenceShape::Plain,
+        _ => SequenceShape::Square,
+    };
+    s.format = match v.format {
+        1 => SequenceFormat::Roman,
+        2 => SequenceFormat::LowerAlpha,
+        3 => SequenceFormat::UpperAlpha,
+        4 => SequenceFormat::Chinese,
+        _ => SequenceFormat::Decimal,
+    };
+    s.caption.font_family = fonts
+        .get(v.font.max(0) as usize)
+        .cloned()
+        .unwrap_or_else(|| "Microsoft YaHei".into());
+    s.caption.outline = v.text_outline.then(|| TextOutline {
+        width: v.text_outline_width.max(1) as f32,
+        color: palette_color(
+            palette(10),
+            v.text_outline_color_index,
+            &v.text_outline_custom_color,
+        ),
+    });
+    s.caption_ratio = v.sequence_ratio.clamp(0, 4) as usize;
+    s.guide = v.sequence_guide;
+    s.caption_color = color::parse_hex(&v.sequence_text_color).unwrap_or(style.color);
+    s.caption_custom_color = color::parse_hex(&v.sequence_text_color).is_some();
+    s.endpoint = endpoint(v.line_end);
+    object.style = style;
+    crate::annotation_sequence::layout(object);
+}
+fn sequence_from_values(r: &Registry, at: (f32, f32), scale: f32) -> Object {
+    let v = &r.values[10];
+    let mut caption = text_from_values(r, String::new());
+    caption.outline = None;
+    caption.background = None;
+    caption.bold = false;
+    caption.italic = false;
+    let b = Bounds::from_corners(at, at);
+    let mut object = Object {
+        kind: Kind::Sequence,
+        bounds: b,
+        style: current_style(r, 10),
+        points: Vec::new(),
+        extra: Extra::Sequence(SequenceAnnotation {
+            value: r.session.next_sequence.max(1),
+            format: SequenceFormat::Decimal,
+            shape: SequenceShape::Square,
+            size: 16.,
+            scale,
+            caption,
+            caption_bounds: b,
+            caption_color: current_style(r, 10).color,
+            caption_custom_color: false,
+            caption_ratio: 2,
+            guide: true,
+            endpoint: Endpoint::FilledArrow,
+        }),
+    };
+    update_sequence_style(&mut object, v, &r.fonts, current_style(r, 10));
+    object
+}
+
+/// The press snapshot includes selection and numbering; no undo entry exists until release.
+fn begin_sequence_placement(r: &mut Registry, point: (f32, f32), scale: f32) {
+    let object = sequence_from_values(r, point, scale);
+    r.session.begin_drag();
+    if !r.session.add(object.clone()) {
+        r.session.cancel_drag();
+        return;
+    }
+    let index = r.session.objects.len() - 1;
+    r.session.selected = None;
+    r.gesture_object = Some(object);
+    r.gesture = Some(Gesture::PlaceSequence {
+        start: point,
+        index,
+    });
+    sync_sequence_counter(r);
+}
+
+fn update_sequence_placement(r: &mut Registry, point: (f32, f32)) {
+    let Some(Gesture::PlaceSequence { start, index }) = r.gesture else {
+        return;
+    };
+    if let Some(mut object) = r.gesture_object.clone() {
+        object.move_by(point.0 - start.0, point.1 - start.1);
+        r.session.objects[index] = object;
+    }
+}
+
+fn cancel_sequence_placement(r: &mut Registry) -> bool {
+    if !matches!(r.gesture, Some(Gesture::PlaceSequence { .. })) {
+        return false;
+    }
+    r.session.cancel_drag();
+    r.gesture = None;
+    r.gesture_object = None;
+    sync_sequence_counter(r);
+    true
 }
 
 /// Integer toolbar values must not quantize scaled geometry on unrelated edits.
@@ -1962,7 +2284,44 @@ fn update_geometry_values(generation: u64, tool: i32, values: AnnotationValues) 
         if tool == 2 {
             r.session.set_spotlight_opacity(r.values[2].strength / 100.);
         }
-        if let Some(kind) = kind {
+        if tool == 10 {
+            if edited.start != previous_values.start {
+                r.session.next_sequence = edited.start.max(1);
+            }
+            let fonts = r.fonts.clone();
+            r.session.update_selected(|object| {
+                if object.kind == Kind::Sequence {
+                    update_sequence_style(object, &edited, &fonts, style);
+                }
+            });
+            if let Some(index) = r.text_edit.as_ref().and_then(|e| e.index)
+                && let Some(object) = r.session.objects.get(index)
+                && let Extra::Sequence(s) = &object.extra
+                && let (Some(edit), Some(editor)) = (&mut r.text_edit, &r.text_editor)
+            {
+                edit.original = s.caption.clone();
+                editor.set_text_size(s.caption.font_size);
+                editor.set_font_name(s.caption.font_family.clone().into());
+                editor.set_ink(slint::Color::from_rgb_u8(
+                    s.caption_color[0],
+                    s.caption_color[1],
+                    s.caption_color[2],
+                ));
+                let mut preview = object.clone();
+                if let Extra::Sequence(s) = &mut preview.extra {
+                    s.caption.content = editor_preview(editor).0;
+                }
+                crate::annotation_sequence::layout(&mut preview);
+                let caption = preview.sequence_caption().unwrap();
+                let Extra::Text(text) = &caption.extra else {
+                    unreachable!()
+                };
+                edit.bounds = caption.bounds;
+                edit.at = (caption.bounds.left, caption.bounds.top);
+                edit.laid_out_content = text.content.clone();
+                place_text_editor(editor, caption.bounds, edit.scale, text, &r.canvases);
+            }
+        } else if let Some(kind) = kind {
             r.session.update_selected(|object| {
                 if object.kind.tool() == kind.tool() {
                     if object.kind != kind && kind.tool() == 4 {
@@ -2056,6 +2415,10 @@ fn update_geometry_values(generation: u64, tool: i32, values: AnnotationValues) 
         if let Some(main) = &r.main {
             main.set_can_undo(r.session.can_undo());
         }
+        if tool == 10 {
+            sync_sequence_counter(r);
+        }
+        position_panel(r);
         Some((r.generation, r.style_edit_revision))
     });
     if let Some((generation, revision)) = edit {
@@ -2234,22 +2597,50 @@ fn select_editing_text(r: &Registry, point: (f32, f32), anchor: Option<usize>) -
     offset
 }
 
+/// Restore the existing edit only after its originating toolbar interaction completes.
 fn restore_text_focus(r: &Registry) {
     let (Some(edit), Some(_)) = (&r.text_edit, &r.text_editor) else {
         return;
     };
-    let (generation, id) = (r.generation, edit.id);
-    later(move || {
-        REGISTRY.with(|slot| {
-            let slot = slot.borrow();
-            if let Some(r) = slot.as_ref().filter(|r| {
-                r.generation == generation && text_edit_matches(r, id) && r.choice.is_none()
-            }) && let Some(editor) = &r.text_editor
-            {
-                (r.lifecycle.activate_user_requested_window)(editor.window());
-            }
-        })
+    let (generation, id, panel_revision, choice_revision) =
+        (r.generation, edit.id, r.panel_revision, r.choice_revision);
+    next_frame(move || {
+        if restore_matching_text_focus(generation, id, panel_revision, choice_revision) {
+            schedule_render(generation);
+        }
     });
+}
+
+fn restore_matching_text_focus(
+    generation: u64,
+    id: u64,
+    panel_revision: u64,
+    choice_revision: u64,
+) -> bool {
+    REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot.as_mut().filter(|r| {
+            r.generation == generation
+                && text_edit_matches(r, id)
+                && r.panel_revision == panel_revision
+                && r.choice_revision == choice_revision
+                && r.choice.is_none()
+                && !r.parameter_dragging
+                && !r
+                    .panel
+                    .as_ref()
+                    .is_some_and(|p| p.get_parameter_input_active())
+        }) else {
+            return false;
+        };
+        let Some(editor) = &r.text_editor else {
+            return false;
+        };
+        editor.invoke_focus_input();
+        (r.lifecycle.activate_user_requested_window)(editor.window());
+        reset_text_caret(r);
+        true
+    })
 }
 
 fn begin_text_handle(
@@ -2437,7 +2828,9 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
             0 => {
                 if r.text_editor.is_some() {
                     if let Some(object) = editing_text_object(r) {
-                        if let Some(handle) = text_handle_at(&object, point, scale) {
+                        if !editing_sequence(r)
+                            && let Some(handle) = text_handle_at(&object, point, scale)
+                        {
                             begin_text_handle(r, object, handle, point, scale, true);
                             return Some((r.generation, false));
                         }
@@ -2452,8 +2845,9 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                         .text_editor
                         .as_ref()
                         .is_some_and(|editor| editor.get_value().trim().is_empty());
+                    let sequence = editing_sequence(r);
                     finish_text_edit_registry(r, true);
-                    if empty {
+                    if empty && !sequence {
                         // Losing focus on an empty draft ends this gesture; the
                         // same click must not start another blank editor.
                         r.gesture = None;
@@ -2477,6 +2871,10 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                     match r.session.hit(point, scale) {
                         Some(Hit::Handle(handle)) => {
                             let index = r.session.selected.unwrap();
+                            if r.session.objects[index].kind == Kind::Sequence && handle < 5 {
+                                r.gesture = Some(Gesture::SequenceControl { index, handle });
+                                return Some((r.generation, false));
+                            }
                             if r.session.objects[index].kind == Kind::Text && handle == 3 {
                                 begin_text_handle(
                                     r,
@@ -2520,6 +2918,11 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                         }
                         None => {
                             r.pending_edit_panel = false;
+                            if r.mode == InteractionMode::Tool(4) {
+                                begin_sequence_placement(r, point, scale);
+                                cursor::refresh(r);
+                                return Some((r.generation, false));
+                            }
                             r.session.selected = None;
                             if r.mode == InteractionMode::Tool(3) && r.selected[3] == 8 {
                                 r.gesture = Some(Gesture::CreateText { at: point, scale });
@@ -2558,6 +2961,8 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 }
             }
             1 => match r.gesture {
+                Some(Gesture::PlaceSequence { .. }) => update_sequence_placement(r, point),
+                Some(Gesture::SequenceControl { .. }) => {}
                 Some(Gesture::DeleteText | Gesture::ToggleTextArrow { .. }) => {}
                 Some(Gesture::CreateText { .. }) => {}
                 Some(Gesture::PlacePoint) => {
@@ -2640,6 +3045,48 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 }
             },
             2 => {
+                if let Some(Gesture::PlaceSequence { index, .. }) = r.gesture {
+                    update_sequence_placement(r, point);
+                    r.session.selected = Some(index);
+                    r.session.finish_drag();
+                    r.gesture = None;
+                    r.gesture_object = None;
+                    if let Some(main) = &r.main {
+                        main.set_can_undo(r.session.can_undo());
+                    }
+                    cursor::refresh(r);
+                    return Some((r.generation, false));
+                }
+                if let Some(Gesture::SequenceControl { index, handle }) = r.gesture {
+                    r.gesture = None;
+                    if r.session.selected == Some(index)
+                        && r.session.hit(point, scale) == Some(Hit::Handle(handle))
+                    {
+                        if handle == 4 {
+                            text_to_open = Some((point, Some(index), scale));
+                        } else if handle == 2 {
+                            r.session.delete_selected();
+                        } else {
+                            r.session.update_selected(|object| {
+                                if handle == 3 {
+                                    object.toggle_text_arrow(scale);
+                                } else if let Extra::Sequence(s) = &mut object.extra {
+                                    s.value = if handle == 0 {
+                                        s.value.saturating_add(1)
+                                    } else {
+                                        (s.value - 1).max(1)
+                                    };
+                                }
+                                crate::annotation_sequence::layout(object);
+                            });
+                        }
+                    }
+                    if let Some(main) = &r.main {
+                        main.set_can_undo(r.session.can_undo());
+                    }
+                    cursor::refresh(r);
+                    return Some((r.generation, false));
+                }
                 if let Some(Gesture::TextSelection { anchor }) = r.gesture {
                     select_editing_text(r, point, Some(anchor));
                     r.gesture = None;
@@ -2769,7 +3216,16 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                     }
                 } else {
                     if let Some(Gesture::Move { start, index, .. }) = r.gesture
-                        && r.session.objects[index].kind == Kind::Text
+                        && (r.session.objects[index].kind == Kind::Text
+                            || (r.session.objects[index].kind == Kind::Sequence
+                                && r.session.objects[index]
+                                    .sequence_caption()
+                                    .is_some_and(|o| {
+                                        point.0 >= o.bounds.left
+                                            && point.0 <= o.bounds.right
+                                            && point.1 >= o.bounds.top
+                                            && point.1 <= o.bounds.bottom
+                                    })))
                         && (point.0 - start.0).hypot(point.1 - start.1) <= 3. * scale
                     {
                         text_to_open = Some((point, Some(index), scale));
@@ -2784,6 +3240,7 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 r.gesture_object = None;
             }
             3 => {
+                cancel_sequence_placement(r);
                 if matches!(r.gesture, Some(Gesture::TextHandle { editing: true, .. }))
                     && let Some(object) = r.gesture_object.take()
                 {
@@ -2908,6 +3365,10 @@ fn editing_text_object(r: &Registry) -> Option<Object> {
             extra: Extra::None,
         });
     object.bounds = edit.bounds;
+    if let Extra::Sequence(s) = &object.extra {
+        object.style.color = s.caption_color;
+    }
+    object.kind = Kind::Text;
     object.extra = Extra::Text(visible);
     Some(object)
 }
@@ -2926,7 +3387,14 @@ fn visible_session(r: &Registry) -> Session {
     };
     if let Some(index) = edit.index {
         if let Some(object) = session.objects.get_mut(index) {
-            *object = visible;
+            if let Extra::Sequence(s) = &mut object.extra {
+                if let Extra::Text(t) = visible.extra {
+                    s.caption = t;
+                    s.caption_bounds = visible.bounds;
+                }
+            } else {
+                *object = visible;
+            }
             session.selected = Some(index);
         }
     } else {
@@ -3012,6 +3480,7 @@ fn render_canvases(generation: u64) {
                         offset,
                         preedit,
                         editor.get_anchor_offset().max(0) as usize,
+                        r.text_edit.as_ref().is_some_and(|e| e.caret.visible),
                     )
                 })
             });
@@ -3031,7 +3500,8 @@ fn render_canvases(generation: u64) {
                 r.draft.as_ref(),
                 r.hovered,
             );
-            if let Some((_, offset, ref preedit, anchor)) = caret {
+            if let Some((_, offset, ref preedit, anchor, visible)) = caret {
+                signature ^= u64::from(visible).wrapping_mul(0xa24b_aed4_963e_e407);
                 signature ^= (offset as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
                 signature ^= (preedit.start as u64).wrapping_mul(0x517c_c1b7_2722_0a95);
                 signature ^= (preedit.len() as u64).wrapping_mul(0x94d0_49bb_1331_11eb);
@@ -3050,9 +3520,11 @@ fn render_canvases(generation: u64) {
                 r.hovered,
                 confirmed.as_deref(),
             ) {
-                if let Some((index, offset, ref preedit, anchor)) = caret
+                if let Some((index, offset, ref preedit, anchor, visible)) = caret
                     && let Some(object) = display_session.objects.get(index)
                 {
+                    let caption = object.sequence_caption();
+                    let object = caption.as_ref().unwrap_or(object);
                     if preedit.is_empty() {
                         crate::annotation_text::draw_selection(
                             &mut frame,
@@ -3068,14 +3540,16 @@ fn render_canvases(generation: u64) {
                         layer.bounds,
                         layer.window.window().scale_factor(),
                     );
-                    crate::annotation_text::draw_caret(
-                        &mut frame,
-                        object,
-                        offset,
-                        layer.bounds,
-                        layer.window.window().scale_factor(),
-                        confirmed.as_deref(),
-                    );
+                    if visible {
+                        crate::annotation_text::draw_caret(
+                            &mut frame,
+                            object,
+                            offset,
+                            layer.bounds,
+                            layer.window.window().scale_factor(),
+                            confirmed.as_deref(),
+                        );
+                    }
                 }
                 if measure_first_frame && let Some(timing) = r.first_magnifier_timing.as_mut() {
                     timing.raster += raster_start.elapsed();
@@ -3237,7 +3711,7 @@ fn render_signature(
     for (index, object) in session.objects.iter().chain(draft).enumerate() {
         let b = object.bounds;
         let margin = (object.style.width / 2. + 8.) * scale;
-        let output_visible = if matches!(object.extra, Extra::Text(_)) {
+        let output_visible = if matches!(object.extra, Extra::Text(_) | Extra::Sequence(_)) {
             // Rotation and a connector can be visible while the unrotated body is not.
             true
         } else if let Extra::Magnifier { output, .. } = object.extra {
@@ -3314,6 +3788,10 @@ fn undo() {
     let generation = REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
         let r = slot.as_mut()?;
+        if cancel_sequence_placement(r) {
+            cursor::refresh(r);
+            return Some(r.generation);
+        }
         if r.text_editor.is_some() {
             finish_text_edit_registry(r, true);
         }
@@ -3321,9 +3799,10 @@ fn undo() {
         if !r.session.undo() {
             return None;
         }
+        sync_sequence_counter(r);
         adopt_watermark_style(r);
         refresh_hovered(r);
-        if matches!(r.mode, InteractionMode::Tool(0 | 1))
+        if matches!(r.mode, InteractionMode::Tool(0 | 1 | 4))
             && let Some(index) = r.session.selected
         {
             adopt_selected_style(r, index);
@@ -3550,7 +4029,7 @@ fn open_panel(group: usize, menu: bool) {
         };
         crate::theme::apply(&panel);
         let tool = r.selected[group];
-        if matches!(tool, 8 | 9) && r.fonts.is_empty() {
+        if matches!(tool, 8..=10) && r.fonts.is_empty() {
             r.fonts = crate::annotation_text::font_families();
             if let Some(index) = r
                 .fonts
@@ -3560,6 +4039,7 @@ fn open_panel(group: usize, menu: bool) {
             {
                 r.values[8].font = index as i32;
                 r.values[9].font = index as i32;
+                r.values[10].font = index as i32;
             }
         }
         panel.set_font_families(ModelRc::new(VecModel::from(
@@ -3581,11 +4061,22 @@ fn open_panel(group: usize, menu: bool) {
         )));
         let generation = r.generation;
         let panel_revision = r.panel_revision;
-        if !menu && group <= 3 {
+        if !menu && group <= 4 {
             panel.on_values_changed(move |values| {
                 later(move || update_geometry_values(generation, tool, values))
             });
         }
+        panel.on_parameter_input_finished(move || {
+            later(move || {
+                REGISTRY.with(|slot| {
+                    if let Some(r) = slot.borrow().as_ref().filter(|r| {
+                        r.generation == generation && r.panel_revision == panel_revision
+                    }) {
+                        restore_text_focus(r);
+                    }
+                });
+            });
+        });
         panel.on_watermark_edit_requested(move || later(move || open_watermark_input(generation)));
         panel.on_parameter_dragging(move |active| {
             later(move || {
@@ -3599,6 +4090,7 @@ fn open_panel(group: usize, menu: bool) {
                         r.parameter_dragging = active;
                         if !active {
                             r.finish_style_edit();
+                            restore_text_focus(r);
                         }
                     }
                 })
@@ -3923,6 +4415,13 @@ fn position_panel(r: &Registry) {
         780f32.min(available)
     } else if panel.get_tool() == 9 {
         1000f32.min(available)
+    } else if panel.get_tool() == 10 {
+        (if panel.get_values().sequence_expanded {
+            1320f32
+        } else {
+            710f32
+        })
+        .min(available)
     } else if panel.get_tool() == 6 {
         1030f32.min(available)
     } else if panel.get_tool() == 5 {
@@ -3956,6 +4455,18 @@ fn position_panel(r: &Registry) {
         if width < 774. { 106. } else { 58. }
     } else if panel.get_tool() == 9 {
         if width < 988. { 154. } else { 58. }
+    } else if panel.get_tool() == 10 {
+        if width < 708. {
+            if panel.get_values().sequence_expanded {
+                if width < 614. { 214. } else { 166. }
+            } else {
+                116.
+            }
+        } else if panel.get_values().sequence_expanded && width < 1302. {
+            116.
+        } else {
+            62.
+        }
     } else {
         80. + ((fields(panel.get_tool()).len() as f32 / columns as f32).ceil()) * 62.
     };
@@ -4037,7 +4548,18 @@ fn pointer_panel(
                                     && cursor.x < p.x + size.width as i32
                                     && cursor.y < p.y + size.height as i32
                             });
-                        if on_main {
+                        let on_panel = (r.lifecycle.toolbar_cursor_position)()
+                            .zip(r.panel.as_ref())
+                            .is_some_and(|(cursor, panel)| {
+                                let p = panel.window().position();
+                                let size = panel.window().size();
+                                cursor.x >= p.x
+                                    && cursor.y >= p.y
+                                    && cursor.x < p.x + size.width as i32
+                                    && cursor.y < p.y + size.height as i32
+                            });
+                        // Returning keyboard focus to the editor is not an outside click.
+                        if on_main || on_panel {
                             if let Some(panel) = &r.panel {
                                 (r.lifecycle.set_popup_dismissal)(panel.window(), false);
                                 (r.lifecycle.set_popup_dismissal)(panel.window(), true);
@@ -4049,8 +4571,30 @@ fn pointer_panel(
                 })
             });
         } else if let Some(w) = weak.upgrade() {
+            if let PopupPointerInput::LeftPressed { x, y } = input {
+                let scale = w.window().scale_factor().max(0.1);
+                let (x, y) = (x / scale, y / scale);
+                if x < w.get_parameter_input_x()
+                    || y < w.get_parameter_input_y()
+                    || x >= w.get_parameter_input_x() + w.get_parameter_input_width()
+                    || y >= w.get_parameter_input_y() + w.get_parameter_input_height()
+                {
+                    w.invoke_release_parameter_input();
+                }
+            }
             choice::panel_pointer(input);
             dispatch(w.window(), input);
+            if matches!(input, PopupPointerInput::LeftReleased { .. }) {
+                later(move || {
+                    REGISTRY.with(|slot| {
+                        if let Some(r) = slot.borrow().as_ref().filter(|r| {
+                            r.generation == generation && r.panel_revision == panel_revision
+                        }) {
+                            restore_text_focus(r);
+                        }
+                    });
+                });
+            }
         }
     })
 }
@@ -4087,6 +4631,374 @@ pub(crate) fn apply_theme() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn caret_blinks_resets_and_stays_visible_during_composition_or_selection() {
+        let mut caret = super::CaretBlink { visible: true };
+        assert!(caret.tick(false));
+        assert!(!caret.visible);
+        assert!(caret.tick(true));
+        assert!(caret.visible);
+        assert!(!caret.tick(true));
+        assert!(caret.tick(false));
+        caret.reset();
+        assert!(caret.visible);
+    }
+
+    #[test]
+    fn sequence_press_drag_release_and_cancellation_do_not_create_hover_frames() {
+        use slint::platform::{
+            Platform, WindowAdapter, WindowEvent,
+            software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+        };
+        struct TestPlatform;
+        impl Platform for TestPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer))
+            }
+        }
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        init(
+            |_| PassiveWindowPreparation::Ready,
+            WindowLifecycleCallbacks::new(
+                |_, _| true,
+                |_| true,
+                |_| false,
+                |_, _, _| false,
+                |_, _| true,
+                |_, _| true,
+                || false,
+            ),
+        );
+        for dpi in [1., 1.25] {
+            REGISTRY.with(|slot| {
+                let mut slot = slot.borrow_mut();
+                let r = slot.as_mut().unwrap();
+                r.pending_displays = vec![Rect {
+                    left: -500,
+                    top: -300,
+                    right: 500,
+                    bottom: 500,
+                }];
+                create_canvas(r, 0);
+                r.canvases[0]
+                    .window
+                    .window()
+                    .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
+                r.annotation_ready = true;
+                r.mode = InteractionMode::Tool(4);
+            });
+            for x in 40..100 {
+                canvas_pointer(0, 1, x as f32, 80.);
+                REGISTRY.with(|slot| {
+                    let slot = slot.borrow();
+                    let r = slot.as_ref().unwrap();
+                    assert!(r.draft.is_none() && r.session.objects.is_empty());
+                    assert!(!r.render_queued);
+                    assert_eq!(
+                        r.canvases[0].window.get_cursor(),
+                        crate::AnnotationCursor::Drawing
+                    );
+                });
+            }
+            canvas_pointer(0, 0, 80., 80.);
+            REGISTRY.with(|slot| {
+                let slot = slot.borrow();
+                let r = slot.as_ref().unwrap();
+                assert_eq!(r.session.objects.len(), 1);
+                assert_eq!(
+                    r.session.objects[0].bounds.center(),
+                    (-500. + 80. * dpi, -300. + 80. * dpi)
+                );
+                assert_eq!(r.session.next_sequence, 2);
+                assert!(r.session.selected.is_none() && !r.session.can_undo());
+            });
+            canvas_pointer(0, 1, 280., 200.);
+            canvas_pointer(0, 2, 300., 210.);
+            REGISTRY.with(|slot| {
+                let slot = slot.borrow();
+                let r = slot.as_ref().unwrap();
+                assert_eq!(
+                    r.session.objects[0].bounds.center(),
+                    (-500. + 300. * dpi, -300. + 210. * dpi)
+                );
+                assert_eq!(r.session.selected, Some(0));
+                assert!(r.session.can_undo());
+            });
+            undo();
+            for cancel in 0..4 {
+                canvas_pointer(0, 0, 80., 80.);
+                canvas_pointer(0, 1, 200., 180.);
+                match cancel {
+                    0 => escape(),
+                    1 => canvas_pointer(0, 3, 200., 180.),
+                    2 => {
+                        let sink = REGISTRY.with(|slot| {
+                            pointer_canvas(
+                                slot.borrow().as_ref().unwrap().canvases[0].window.as_weak(),
+                            )
+                        });
+                        sink(PopupPointerInput::LeftCancelled {
+                            x: 200. * dpi,
+                            y: 180. * dpi,
+                        });
+                    }
+                    _ => REGISTRY.with(|slot| {
+                        slot.borrow_mut()
+                            .as_mut()
+                            .unwrap()
+                            .set_mode(InteractionMode::Tool(0));
+                    }),
+                }
+                REGISTRY.with(|slot| {
+                    let mut slot = slot.borrow_mut();
+                    let r = slot.as_mut().unwrap();
+                    assert!(r.session.objects.is_empty() && !r.session.can_undo());
+                    assert_eq!(r.session.next_sequence, 1);
+                    assert!(r.gesture.is_none() && r.gesture_object.is_none());
+                    r.mode = InteractionMode::Tool(4);
+                });
+            }
+            canvas_pointer(0, 0, 80., 80.);
+            canvas_pointer(0, 2, 80., 80.);
+            open_text_editor((-100., 0.), Some(0), dpi);
+            let (generation, old_id) = REGISTRY.with(|slot| {
+                let slot = slot.borrow();
+                let r = slot.as_ref().unwrap();
+                let edit = r.text_edit.as_ref().unwrap();
+                assert!(edit.caret.visible && edit.caret_timer.running());
+                assert!(edit.original.content.is_empty());
+                (r.generation, edit.id)
+            });
+            tick_text_caret(generation, old_id);
+            REGISTRY.with(|slot| {
+                let mut slot = slot.borrow_mut();
+                let r = slot.as_mut().unwrap();
+                assert!(!r.text_edit.as_ref().unwrap().caret.visible);
+                reset_text_caret(r);
+                assert!(r.text_edit.as_ref().unwrap().caret.visible);
+                r.text_edit.as_mut().unwrap().selection_anchor = Some(0);
+            });
+            tick_text_caret(generation, old_id);
+            REGISTRY.with(|slot| {
+                let mut slot = slot.borrow_mut();
+                let r = slot.as_mut().unwrap();
+                assert!(r.text_edit.as_ref().unwrap().caret.visible);
+                finish_text_edit_registry(r, false);
+            });
+            open_text_editor((-100., 0.), Some(0), dpi);
+            tick_text_caret(generation, old_id);
+            REGISTRY.with(|slot| {
+                let mut slot = slot.borrow_mut();
+                let r = slot.as_mut().unwrap();
+                assert_ne!(r.text_edit.as_ref().unwrap().id, old_id);
+                assert!(r.text_edit.as_ref().unwrap().caret.visible);
+                finish_text_edit_registry(r, false);
+            });
+            tick_text_caret(generation, old_id);
+            REGISTRY.with(|slot| {
+                let mut slot = slot.borrow_mut();
+                let r = slot.as_mut().unwrap();
+                assert_eq!(r.session.objects.len(), 1);
+                assert!(r.session.undo());
+                assert!(!r.session.can_undo());
+                r.close();
+            });
+        }
+        REGISTRY.with(|slot| {
+            slot.borrow_mut().take();
+        });
+    }
+
+    #[test]
+    fn sequence_panel_parameters_reach_the_session_before_the_panel_closes() {
+        use slint::platform::{
+            Platform, WindowAdapter,
+            software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+        };
+        struct TestPlatform;
+        impl Platform for TestPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer))
+            }
+        }
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        init(
+            |_| PassiveWindowPreparation::Ready,
+            WindowLifecycleCallbacks::new(
+                |_, _| true,
+                |_| true,
+                |_| false,
+                |_, _, _| false,
+                |_, _| true,
+                |_, _| true,
+                || false,
+            ),
+        );
+        REGISTRY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            r.main = Some(AnnotationToolbar::new().unwrap());
+            let mut object = crate::annotation_sequence::tests::badge(1.25);
+            crate::annotation_sequence::layout(&mut object);
+            assert!(r.session.add(object));
+        });
+        open_panel(4, false);
+        REGISTRY.with(|slot| {
+            let slot = slot.borrow();
+            let panel = slot.as_ref().unwrap().panel.as_ref().unwrap();
+            let mut v = panel.get_values();
+            v.shape = 0;
+            v.format = 4;
+            v.text_size = 28;
+            v.start = 8;
+            v.sequence_ratio = 4;
+            panel.set_values(v.clone());
+            panel.invoke_values_changed(v);
+        });
+        slint::platform::update_timers_and_animations();
+        open_text_editor((-100., 80.), Some(0), 1.25);
+        slint::platform::update_timers_and_animations();
+        let (generation, edit_id, panel_revision, choice_revision) = REGISTRY.with(|slot| {
+            let slot = slot.borrow();
+            let r = slot.as_ref().unwrap();
+            let editor = r.text_editor.as_ref().unwrap();
+            editor.set_value("ABC".into());
+            editor.invoke_place_selection(1, 2);
+            r.panel.as_ref().unwrap().set_parameter_input_active(true);
+            (
+                r.generation,
+                r.text_edit.as_ref().unwrap().id,
+                r.panel_revision,
+                r.choice_revision,
+            )
+        });
+        assert!(!restore_matching_text_focus(
+            generation,
+            edit_id,
+            panel_revision,
+            choice_revision
+        ));
+        REGISTRY.with(|slot| {
+            let slot = slot.borrow();
+            slot.as_ref()
+                .unwrap()
+                .panel
+                .as_ref()
+                .unwrap()
+                .set_parameter_input_active(false);
+        });
+        assert!(!restore_matching_text_focus(
+            generation,
+            edit_id,
+            panel_revision,
+            choice_revision.wrapping_sub(1)
+        ));
+        assert!(!restore_matching_text_focus(
+            generation,
+            edit_id.wrapping_sub(1),
+            panel_revision,
+            choice_revision
+        ));
+        assert!(!restore_matching_text_focus(
+            generation,
+            edit_id,
+            panel_revision.wrapping_sub(1),
+            choice_revision
+        ));
+        assert!(restore_matching_text_focus(
+            generation,
+            edit_id,
+            panel_revision,
+            choice_revision
+        ));
+        REGISTRY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            assert_eq!(r.text_edit.as_ref().unwrap().id, edit_id);
+            assert!(r.text_edit.as_ref().unwrap().caret.visible);
+            let editor = r.text_editor.as_ref().unwrap();
+            assert_eq!(editor.get_value(), "ABC");
+            assert_eq!(
+                (editor.get_anchor_offset(), editor.get_cursor_offset()),
+                (1, 2)
+            );
+            editor
+                .window()
+                .dispatch_event(slint::platform::WindowEvent::KeyPressed { text: "X".into() });
+            assert_eq!(editor.get_value(), "AXC");
+            finish_text_edit_registry(r, false);
+            assert_eq!(r.session.next_sequence, 8);
+            let Extra::Sequence(s) = &r.session.objects[0].extra else {
+                unreachable!()
+            };
+            assert_eq!(s.shape, SequenceShape::Circle);
+            assert_eq!(s.format, SequenceFormat::Chinese);
+            assert_eq!(s.size, 28.);
+            assert_eq!(s.caption.font_size, 52.5);
+            let preview = sequence_from_values(r, (500., 200.), 1.25);
+            let Extra::Sequence(s) = &preview.extra else {
+                unreachable!()
+            };
+            assert_eq!(
+                lexift_core::domain::annotation::sequence_label(s.value, s.format),
+                "八"
+            );
+            r.close();
+            assert_eq!(r.session.next_sequence, 1);
+            assert_eq!(r.values[10].sequence_label, "1");
+            assert!(r.text_editor.is_none() && r.choice.is_none() && r.panel.is_none());
+            slot.take();
+        });
+    }
+
+    #[test]
+    fn sequence_caption_and_connector_invalidate_another_monitors_frame() {
+        let mut session = Session::new();
+        let mut object = crate::annotation_sequence::tests::badge(1.);
+        crate::annotation_sequence::layout(&mut object);
+        session.add(object);
+        session.selected = None;
+        let monitor = Rect {
+            left: 0,
+            top: 0,
+            right: 500,
+            bottom: 300,
+        };
+        let before = render_signature(&session, monitor, 1., None, None);
+        if let Extra::Sequence(s) = &mut session.objects[0].extra {
+            s.caption.content = "跨屏更新".into();
+        }
+        crate::annotation_sequence::layout(&mut session.objects[0]);
+        assert_ne!(before, render_signature(&session, monitor, 1., None, None));
+        let before = render_signature(&session, monitor, 1., None, None);
+        session.objects[0].toggle_text_arrow(1.);
+        session.objects[0].edit_handle(5, (300., 150.), 1.);
+        assert_ne!(before, render_signature(&session, monitor, 1., None, None));
+    }
+
+    #[test]
+    fn caption_color_inherits_badge_until_explicitly_chosen() {
+        let mut object = crate::annotation_sequence::tests::badge(1.);
+        let mut values = defaults(10);
+        let blue = Style {
+            color: [89, 143, 223],
+            ..Style::default()
+        };
+        update_sequence_style(&mut object, &values, &[], blue);
+        let Extra::Sequence(s) = &object.extra else {
+            unreachable!()
+        };
+        assert_eq!(s.caption_color, blue.color);
+        assert!(!s.caption_custom_color);
+        values.sequence_text_color = "#123456".into();
+        update_sequence_style(&mut object, &values, &[], Style::default());
+        let Extra::Sequence(s) = &object.extra else {
+            unreachable!()
+        };
+        assert_eq!(s.caption_color, [18, 52, 86]);
+        assert!(s.caption_custom_color);
+        assert_eq!(s.endpoint, Endpoint::FilledArrow);
+    }
     #[test]
     fn watermark_pointer_bridge_reaches_controls_and_stale_instances_are_ignored() {
         use slint::platform::{

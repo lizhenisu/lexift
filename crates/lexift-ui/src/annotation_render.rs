@@ -20,6 +20,11 @@ fn draw_text_control_icon(pixmap: &mut Pixmap, handle: usize, center: (f32, f32)
         0 => include_str!("../ui/icons/text-rotate.svg"),
         2 => include_str!("../ui/icons/text-link-arrow.svg"),
         3 => include_str!("../ui/icons/text-resize.svg"),
+        8 => include_str!("../ui/icons/sequence-plus.svg"),
+        9 => include_str!("../ui/icons/sequence-minus.svg"),
+        10 => include_str!("../ui/icons/sequence-delete.svg"),
+        11 => include_str!("../ui/icons/text-link-arrow.svg"),
+        12 => include_str!("../ui/icons/sequence-caption.svg"),
         _ => return,
     };
     let size = (18. * scale).round().max(1.) as u32;
@@ -98,6 +103,9 @@ fn color_paint(color: [u8; 3]) -> Paint<'static> {
     p
 }
 
+fn draw_sequence_control_icon(pixmap: &mut Pixmap, handle: usize, center: (f32, f32), scale: f32) {
+    draw_text_control_icon(pixmap, handle + 8, center, scale);
+}
 fn draw_brush(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) {
     let Some(&(x, y)) = object.points.first() else {
         return;
@@ -163,6 +171,13 @@ fn draw_brush(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) {
 }
 
 fn draw_object(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) {
+    if object.kind == Kind::Sequence {
+        crate::annotation_sequence::draw(pixmap, object, monitor);
+        if let Some(arrow) = object.text_link_arrow() {
+            draw_line_annotation(pixmap, &arrow, monitor, scale);
+        }
+        return;
+    }
     if object.kind == Kind::Text {
         crate::annotation_text::draw_text(pixmap, object, monitor, scale);
         if let Some(arrow) = object.text_link_arrow() {
@@ -990,6 +1005,26 @@ pub(crate) fn render_editing(
             .map(|_| i)
     }) {
         let selected = &session.objects[index];
+        if selected.kind == Kind::Sequence
+            && let Some(rect) = tiny_skia::Rect::from_xywh(
+                selected.bounds.left - monitor.left as f32,
+                selected.bounds.top - monitor.top as f32,
+                selected.bounds.width(),
+                selected.bounds.height(),
+            )
+        {
+            let path = PathBuilder::from_rect(rect);
+            pixmap.stroke_path(
+                &path,
+                &color_paint([28, 28, 28]),
+                &Stroke {
+                    width: scale.max(1.),
+                    ..Stroke::default()
+                },
+                Transform::identity(),
+                None,
+            );
+        }
         if let Extra::Text(text) = &selected.extra {
             let b = selected.bounds;
             let corners = [
@@ -1023,7 +1058,30 @@ pub(crate) fn render_editing(
             }
         }
         for (handle, (x, y)) in selected.edit_handles(scale).into_iter().enumerate() {
-            if (selected.kind == Kind::Arrow && handle == 2)
+            if selected.kind == Kind::Sequence && handle < 5 {
+                let center = (x - monitor.left as f32, y - monitor.top as f32);
+                if let Some(rect) = tiny_skia::Rect::from_xywh(
+                    center.0 - 9. * scale,
+                    center.1 - 9. * scale,
+                    18. * scale,
+                    18. * scale,
+                ) {
+                    pixmap.fill_rect(
+                        rect,
+                        &color_paint(if handle == 2 {
+                            [229, 60, 39]
+                        } else {
+                            [40, 129, 255]
+                        }),
+                        Transform::identity(),
+                        None,
+                    );
+                }
+                draw_sequence_control_icon(&mut pixmap, handle, center, scale);
+                continue;
+            }
+            if (selected.kind == Kind::Sequence && handle == 6)
+                || (selected.kind == Kind::Arrow && handle == 2)
                 || (selected.kind == Kind::Text && handle == 5)
             {
                 let center = (x - monitor.left as f32, y - monitor.top as f32);

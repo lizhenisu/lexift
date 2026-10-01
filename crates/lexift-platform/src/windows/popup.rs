@@ -824,11 +824,11 @@ unsafe extern "system" fn popup_input_subclass(
             let _ = unsafe { ReleaseCapture() };
             return LRESULT(0);
         }
-        WM_CAPTURECHANGED => {
+        WM_CAPTURECHANGED | WM_CANCELMODE => {
             if bridge.pressed {
                 bridge.pressed = false;
                 let (x, y) = bridge.last_position;
-                (bridge.handler)(PopupPointerEvent::LeftReleased { x, y });
+                (bridge.handler)(PopupPointerEvent::LeftCancelled { x, y });
             }
         }
         WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {

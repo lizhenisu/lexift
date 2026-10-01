@@ -120,6 +120,11 @@ pub enum PopupCornerMode {
 /// its logical coordinate system before dispatching them to the rendering backend.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PopupPointerEvent {
+    /// Native capture loss is not a user release; canvases must cancel pending placement.
+    LeftCancelled {
+        x: f32,
+        y: f32,
+    },
     Moved {
         x: f32,
         y: f32,

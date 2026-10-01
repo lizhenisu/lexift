@@ -759,3 +759,36 @@ msgstr "Oben rechts"
 
 msgid "No connection"
 msgstr "Keine Verbindung"
+
+msgid "Filled circle"
+msgstr "Gefüllter Kreis"
+
+msgid "Circle with white border"
+msgstr "Kreis mit weißem Rand"
+
+msgid "Outline circle"
+msgstr "Kreisumriss"
+
+msgid "Number only"
+msgstr "Nur Nummer"
+
+msgid "Filled square"
+msgstr "Gefülltes Quadrat"
+
+msgid "Size"
+msgstr "Größe"
+
+msgid "Guide"
+msgstr "Führungslinie"
+
+msgid "Smallest"
+msgstr "Am kleinsten"
+
+msgid "Small"
+msgstr "Klein"
+
+msgid "Medium"
+msgstr "Mittel"
+
+msgid "Largest"
+msgstr "Am größten"

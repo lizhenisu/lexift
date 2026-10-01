@@ -759,3 +759,36 @@ msgstr "오른쪽 위"
 
 msgid "No connection"
 msgstr "연결선 없음"
+
+msgid "Filled circle"
+msgstr "채운 원"
+
+msgid "Circle with white border"
+msgstr "흰 테두리 원"
+
+msgid "Outline circle"
+msgstr "원 테두리"
+
+msgid "Number only"
+msgstr "번호만"
+
+msgid "Filled square"
+msgstr "채운 사각형"
+
+msgid "Size"
+msgstr "크기"
+
+msgid "Guide"
+msgstr "안내선"
+
+msgid "Smallest"
+msgstr "최소"
+
+msgid "Small"
+msgstr "작게"
+
+msgid "Medium"
+msgstr "중간"
+
+msgid "Largest"
+msgstr "최대"

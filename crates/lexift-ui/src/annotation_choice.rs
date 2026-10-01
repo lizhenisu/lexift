@@ -8,13 +8,19 @@ const TEXT_BACKGROUND: i32 = -4;
 const OUTLINE_COLOR: i32 = -5;
 const BACKGROUND_COLOR: i32 = -6;
 const WATERMARK_PRESET: i32 = -7;
+const SEQUENCE_TEXT_COLOR: i32 = -8;
 
 fn is_color(field: i32) -> bool {
-    matches!(field, -2 | OUTLINE_COLOR | BACKGROUND_COLOR)
+    matches!(
+        field,
+        -2 | OUTLINE_COLOR | BACKGROUND_COLOR | SEQUENCE_TEXT_COLOR
+    )
 }
 
 fn target_color(values: &AnnotationValues, palette: [[u8; 3]; 8], field: i32) -> [u8; 3] {
     match field {
+        SEQUENCE_TEXT_COLOR => color::parse_hex(&values.sequence_text_color)
+            .unwrap_or_else(|| palette_color(palette, values.color_index, &values.custom_color)),
         OUTLINE_COLOR => palette_color(
             palette,
             values.text_outline_color_index,
@@ -32,6 +38,7 @@ fn target_color(values: &AnnotationValues, palette: [[u8; 3]; 8], field: i32) ->
 fn set_target_color(values: &mut AnnotationValues, field: i32, rgb: [u8; 3]) {
     let hex = color::hex(rgb).into();
     match field {
+        SEQUENCE_TEXT_COLOR => values.sequence_text_color = hex,
         OUTLINE_COLOR => {
             values.text_outline_color_index = 8;
             values.text_outline_custom_color = hex;
@@ -94,8 +101,11 @@ pub(super) fn close(r: &mut Registry) {
         let _ = menu.window.hide();
         if is_color(menu.request.field) || text_style_mode(menu.request.field) != 0 {
             r.finish_style_edit();
-            restore_text_focus(r);
         }
+        if let Some(panel) = &r.panel {
+            panel.invoke_release_parameter_input();
+        }
+        restore_text_focus(r);
     }
     if let Some(panel) = &r.panel {
         panel.set_active_choice(-1);
@@ -261,7 +271,7 @@ fn open_menu(
         let Some(panel) = &r.panel else { return };
         let values = panel.get_values();
         if mode != 0
-            && (panel.get_tool() != 8
+            && (!matches!(panel.get_tool(), 8 | 10)
                 || (mode == 1 && !values.text_outline)
                 || (mode == 2 && !values.text_background))
         {
@@ -272,6 +282,7 @@ fn open_menu(
         };
         crate::theme::apply(&window);
         window.set_options(request.options.clone());
+        window.set_sequence_shapes(request.field == 23);
         window.set_lines(request.lines);
         window.set_connectors(request.connectors);
         window.set_disabled_index(if panel.get_tool() == 4 && request.field == 6 {
@@ -610,6 +621,8 @@ fn set_value(values: &mut AnnotationValues, field: i32, index: i32) {
         19 => values.line_start = index,
         20 => values.line_end = index,
         21 => values.connector_style = index,
+        23 => values.shape = index,
+        24 => values.sequence_ratio = index,
         _ => {}
     }
 }
@@ -718,6 +731,8 @@ fn place(r: &Registry) {
         360.
     } else if q.field == 12 {
         300.
+    } else if q.field == 23 {
+        240.
     } else if q.lines {
         112.
     } else if q.connectors {

@@ -759,3 +759,36 @@ msgstr "右上角"
 
 msgid "No connection"
 msgstr "无连线"
+
+msgid "Filled circle"
+msgstr "实心圆"
+
+msgid "Circle with white border"
+msgstr "圆加白边"
+
+msgid "Outline circle"
+msgstr "空心圆"
+
+msgid "Number only"
+msgstr "仅编号"
+
+msgid "Filled square"
+msgstr "实心方块"
+
+msgid "Size"
+msgstr "大小"
+
+msgid "Guide"
+msgstr "导向线"
+
+msgid "Smallest"
+msgstr "最小"
+
+msgid "Small"
+msgstr "小"
+
+msgid "Medium"
+msgstr "中"
+
+msgid "Largest"
+msgstr "最大"

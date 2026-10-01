@@ -29,8 +29,12 @@ fn resolve(mode: InteractionMode, gesture: Option<Gesture>, hit: Option<Hit>) ->
         return AnnotationCursor::Idle;
     }
     match gesture {
-        Some(Gesture::PlacePoint | Gesture::FinishArrow) => AnnotationCursor::Drawing,
-        Some(Gesture::DeleteText | Gesture::ToggleTextArrow { .. }) => AnnotationCursor::Idle,
+        Some(Gesture::PlacePoint | Gesture::FinishArrow | Gesture::PlaceSequence { .. }) => {
+            AnnotationCursor::Drawing
+        }
+        Some(
+            Gesture::DeleteText | Gesture::ToggleTextArrow { .. } | Gesture::SequenceControl { .. },
+        ) => AnnotationCursor::Idle,
         Some(Gesture::CreateText { .. }) => AnnotationCursor::Drawing,
         Some(Gesture::Draw { .. }) => AnnotationCursor::Drawing,
         Some(Gesture::Move { .. }) => AnnotationCursor::Moving,
@@ -74,6 +78,13 @@ fn at_point(
             _ => None,
         };
         if let Some(handle) = handle {
+            if object.kind == Kind::Sequence {
+                return if handle == 6 {
+                    AnnotationCursor::Vertical
+                } else {
+                    AnnotationCursor::Idle
+                };
+            }
             if object.kind == Kind::Text && handle < 4 {
                 return AnnotationCursor::Idle;
             }
@@ -123,11 +134,18 @@ pub(super) fn refresh(r: &Registry) {
         None
     };
     for (index, layer) in r.canvases.iter().enumerate() {
-        let editing_control = editing.as_ref().and_then(|object| {
-            layer.last_pointer.and_then(|point| {
-                editing_control_cursor(object, point, layer.window.window().scale_factor().max(0.1))
-            })
-        });
+        let editing_control = editing
+            .as_ref()
+            .filter(|_| !super::editing_sequence(r))
+            .and_then(|object| {
+                layer.last_pointer.and_then(|point| {
+                    editing_control_cursor(
+                        object,
+                        point,
+                        layer.window.window().scale_factor().max(0.1),
+                    )
+                })
+            });
         let desired = if let Some(cursor) = editing_control {
             cursor
         } else if r.arrow_pending.is_some() {

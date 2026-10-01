@@ -29,6 +29,11 @@ use crate::{
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PopupPointerInput {
+    /// Cancels the canvas gesture before clearing Slint's pressed pointer state.
+    LeftCancelled {
+        x: f32,
+        y: f32,
+    },
     Moved {
         x: f32,
         y: f32,
@@ -1649,7 +1654,8 @@ fn popup_pointer_sink(popup: slint::Weak<TranslationPopup>) -> PopupPointerSink 
                 position: position(x, y),
                 button: PointerEventButton::Left,
             },
-            PopupPointerInput::LeftReleased { x, y } => WindowEvent::PointerReleased {
+            PopupPointerInput::LeftReleased { x, y }
+            | PopupPointerInput::LeftCancelled { x, y } => WindowEvent::PointerReleased {
                 position: position(x, y),
                 button: PointerEventButton::Left,
             },
@@ -1691,7 +1697,8 @@ fn language_menu_pointer_sink(menu: slint::Weak<PopupLanguageMenuWindow>) -> Pop
                 position: position(x, y),
                 button: PointerEventButton::Left,
             },
-            PopupPointerInput::LeftReleased { x, y } => WindowEvent::PointerReleased {
+            PopupPointerInput::LeftReleased { x, y }
+            | PopupPointerInput::LeftCancelled { x, y } => WindowEvent::PointerReleased {
                 position: position(x, y),
                 button: PointerEventButton::Left,
             },
@@ -2002,7 +2009,8 @@ fn toolbar_pointer_sink(weak: slint::Weak<SelectionToolbarWindow>) -> PopupPoint
                 position: position(x, y),
                 button: PointerEventButton::Left,
             },
-            PopupPointerInput::LeftReleased { x, y } => WindowEvent::PointerReleased {
+            PopupPointerInput::LeftReleased { x, y }
+            | PopupPointerInput::LeftCancelled { x, y } => WindowEvent::PointerReleased {
                 position: position(x, y),
                 button: PointerEventButton::Left,
             },
@@ -3530,10 +3538,12 @@ pub(crate) fn dispatch_pointer_input(window: &slint::Window, input: PopupPointer
             position: pos(x, y),
             button: PointerEventButton::Left,
         },
-        PopupPointerInput::LeftReleased { x, y } => WindowEvent::PointerReleased {
-            position: pos(x, y),
-            button: PointerEventButton::Left,
-        },
+        PopupPointerInput::LeftReleased { x, y } | PopupPointerInput::LeftCancelled { x, y } => {
+            WindowEvent::PointerReleased {
+                position: pos(x, y),
+                button: PointerEventButton::Left,
+            }
+        }
         PopupPointerInput::Scrolled {
             x,
             y,

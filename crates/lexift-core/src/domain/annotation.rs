@@ -1,5 +1,7 @@
 //! Transient screen annotation state in physical virtual-desktop coordinates.
 use crate::domain::geometry::Rect;
+mod sequence;
+pub use sequence::{SequenceAnnotation, SequenceFormat, SequenceShape, sequence_label};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Bounds {
@@ -101,6 +103,7 @@ pub enum Kind {
     Polyline,
     Magnifier,
     Text,
+    Sequence,
 }
 impl Kind {
     pub fn is_spotlight(self) -> bool {
@@ -245,6 +248,7 @@ pub enum Extra {
         shadow: bool,
     },
     Text(TextAnnotation),
+    Sequence(SequenceAnnotation),
 }
 
 impl Kind {
@@ -256,6 +260,7 @@ impl Kind {
             Self::Polyline => 6,
             Self::Magnifier => 7,
             Self::Text => 8,
+            Self::Sequence => 10,
             Self::SpotlightRectangle | Self::SpotlightEllipse => 2,
             _ => 0,
         }
@@ -268,6 +273,15 @@ impl Object {
         self.kind != Kind::Pencil
     }
     pub fn toggle_text_arrow(&mut self, scale: f32) {
+        if let Extra::Sequence(s) = &mut self.extra {
+            s.caption.linked_arrow = if s.caption.linked_arrow.is_some() {
+                None
+            } else {
+                Some((self.bounds.right + 100. * scale, self.bounds.center().1))
+            };
+            s.caption.linked_arrow_control = None;
+            return;
+        }
         let b = self.bounds;
         if let Extra::Text(text) = &mut self.extra {
             text.linked_arrow = if text.linked_arrow.is_some() {
@@ -279,6 +293,9 @@ impl Object {
         }
     }
     pub fn text_arrow_anchor(&self) -> Option<(f32, f32)> {
+        if self.kind == Kind::Sequence {
+            return self.sequence_badge_proxy()?.text_arrow_anchor();
+        }
         let Extra::Text(text) = &self.extra else {
             return None;
         };
@@ -304,6 +321,14 @@ impl Object {
     }
     /// Projects the text connector into the same geometry used by standalone arrows.
     pub fn text_link_arrow(&self) -> Option<Object> {
+        if let Extra::Sequence(s) = &self.extra {
+            let mut arrow = self.sequence_badge_proxy()?.text_link_arrow()?;
+            arrow.style.width = (s.size * 0.12).max(1.);
+            if let Extra::Arrow { end, .. } = &mut arrow.extra {
+                *end = s.endpoint;
+            }
+            return Some(arrow);
+        }
         let Extra::Text(text) = &self.extra else {
             return None;
         };
@@ -442,6 +467,9 @@ impl Object {
                 .any(|p| segment_distance(point, p[0], p[1]) <= tolerance)
     }
     pub fn edit_handles(&self, scale: f32) -> Vec<(f32, f32)> {
+        if self.kind == Kind::Sequence {
+            return self.sequence_handles(scale);
+        }
         if !self.is_editable() {
             return Vec::new();
         }
@@ -516,6 +544,9 @@ impl Object {
             return;
         }
         self.bounds = self.bounds.moved(dx, dy);
+        if let Extra::Sequence(s) = &mut self.extra {
+            s.caption_bounds = s.caption_bounds.moved(dx, dy);
+        }
         for p in &mut self.points {
             p.0 += dx;
             p.1 += dy;
@@ -551,6 +582,18 @@ impl Object {
         self.bounds = target;
     }
     pub fn edit_handle(&mut self, handle: usize, point: (f32, f32), scale: f32) {
+        if self.kind == Kind::Sequence {
+            if matches!(handle, 5 | 6)
+                && let Some(mut arrow) = self.text_link_arrow()
+            {
+                arrow.edit_handle(if handle == 5 { 1 } else { 2 }, point, scale);
+                if let Extra::Sequence(s) = &mut self.extra {
+                    s.caption.linked_arrow = Some(arrow.points[1]);
+                    s.caption.linked_arrow_control = arrow.points.get(2).copied();
+                }
+            }
+            return;
+        }
         if !self.is_editable() {
             return;
         }
@@ -749,6 +792,7 @@ fn segment_distance(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
 
 #[derive(Clone, Debug, PartialEq)]
 struct Snapshot {
+    next_sequence: i32,
     objects: Vec<Object>,
     selected: Option<usize>,
     opacity: f32,
@@ -764,6 +808,7 @@ pub enum Hit {
 /// Owns the undoable document; a drag is committed as one undo step on release.
 #[derive(Default)]
 pub struct Session {
+    pub next_sequence: i32,
     pub objects: Vec<Object>,
     pub selected: Option<usize>,
     pub spotlight_opacity: f32,
@@ -777,12 +822,14 @@ pub struct Session {
 impl Session {
     pub fn new() -> Self {
         Self {
+            next_sequence: 1,
             spotlight_opacity: 0.1,
             ..Self::default()
         }
     }
     fn snapshot(&self) -> Snapshot {
         Snapshot {
+            next_sequence: self.next_sequence,
             objects: self.objects.clone(),
             selected: self.editable_selected(),
             opacity: self.spotlight_opacity,
@@ -814,6 +861,9 @@ impl Session {
         !self.undo.is_empty()
     }
     pub fn add(&mut self, object: Object) -> bool {
+        if object.kind == Kind::Sequence && self.next_sequence == i32::MAX {
+            return false;
+        }
         if !matches!(
             object.kind,
             Kind::Pencil | Kind::HighlightLine | Kind::Arrow | Kind::Polyline
@@ -821,7 +871,13 @@ impl Session {
         {
             return false;
         }
-        self.undo.push(self.snapshot());
+        // Creation can be part of a placement drag; its snapshot is committed on release.
+        if self.drag_before.is_none() {
+            self.undo.push(self.snapshot());
+        }
+        if object.kind == Kind::Sequence {
+            self.next_sequence = self.next_sequence.max(1) + 1;
+        }
         self.objects.push(object);
         self.selected = self
             .objects
@@ -844,6 +900,7 @@ impl Session {
     pub fn cancel_drag(&mut self) {
         if let Some(before) = self.drag_before.take() {
             self.objects = before.objects;
+            self.next_sequence = before.next_sequence;
             self.selected = before.selected;
             self.selected = self.editable_selected();
             self.spotlight_opacity = before.opacity;
@@ -873,6 +930,7 @@ impl Session {
         };
         self.drag_before = None;
         self.objects = before.objects;
+        self.next_sequence = before.next_sequence;
         self.selected = before.selected;
         self.selected = self.editable_selected();
         self.spotlight_opacity = before.opacity;
@@ -887,6 +945,7 @@ impl Session {
             for (handle, (x, y)) in self.objects[index].edit_handles(scale).iter().enumerate() {
                 let tolerance = if (self.objects[index].kind == Kind::Arrow && handle == 2)
                     || (self.objects[index].kind == Kind::Text && (handle < 4 || handle == 5))
+                    || (self.objects[index].kind == Kind::Sequence && (handle < 5 || handle == 6))
                 {
                     9. * scale
                 } else {
@@ -902,6 +961,15 @@ impl Session {
             .enumerate()
             .rev()
             .find_map(|(index, object)| {
+                if let Extra::Sequence(s) = &object.extra {
+                    return (inside(object.bounds, point, 6. * scale)
+                        || (!s.caption.content.is_empty()
+                            && inside(s.caption_bounds, point, 6. * scale))
+                        || object
+                            .text_link_arrow()
+                            .is_some_and(|a| a.hit_path(point, scale)))
+                    .then_some(Hit::Object(index));
+                }
                 if !object.is_editable() {
                     return None;
                 }

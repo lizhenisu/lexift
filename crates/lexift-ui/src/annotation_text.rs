@@ -242,6 +242,7 @@ fn glyph_path(
 
 /// Physical line geometry shared by glyphs, caret, selection and pointer hit testing.
 struct TextLayout {
+    ink_bounds: Option<Bounds>,
     baseline: f32,
     line_height: f32,
     ascent: f32,
@@ -272,6 +273,7 @@ fn text_layout(text: &TextAnnotation, scale: f32) -> TextLayout {
         let mut left = 0_f32;
         let mut right = 0_f32;
         let mut lines = Vec::new();
+        let mut ink_bounds: Option<Bounds> = None;
         let mut offset = 0;
         for (row, line) in text.content.split('\n').enumerate() {
             let mut positions = vec![(offset, padding)];
@@ -294,6 +296,19 @@ fn text_layout(text: &TextAnnotation, scale: f32) -> TextLayout {
                         )
                         .and_then(|path| path.compute_tight_bounds())
                         {
+                            let ink = Bounds::from_corners(
+                                (x + bounds.left(), row as f32 * line_height + bounds.top()),
+                                (
+                                    x + bounds.right(),
+                                    row as f32 * line_height + bounds.bottom(),
+                                ),
+                            );
+                            ink_bounds = Some(ink_bounds.map_or(ink, |previous| Bounds {
+                                left: previous.left.min(ink.left),
+                                top: previous.top.min(ink.top),
+                                right: previous.right.max(ink.right),
+                                bottom: previous.bottom.max(ink.bottom),
+                            }));
                             top = top.min(row as f32 * line_height + bounds.top());
                             bottom = bottom.max(row as f32 * line_height + bounds.bottom());
                             left = left.min(x - padding + bounds.left());
@@ -327,8 +342,10 @@ fn text_layout(text: &TextAnnotation, scale: f32) -> TextLayout {
             }
         }
         let height = lines.len() as f32 * line_height;
+        let baseline = padding + (height - (bottom - top)) * 0.5 - top;
         TextLayout {
-            baseline: padding + (height - (bottom - top)) * 0.5 - top,
+            ink_bounds: ink_bounds.map(|bounds| bounds.moved(-left, baseline)),
+            baseline,
             line_height,
             ascent,
             descent,
@@ -338,6 +355,12 @@ fn text_layout(text: &TextAnnotation, scale: f32) -> TextLayout {
             lines,
         }
     })
+}
+
+/// Visible fill extents in local physical coordinates, from the same paths as rendering.
+/// Input width, caret reserve and font side bearings are deliberately excluded.
+pub(crate) fn text_ink_bounds(text: &TextAnnotation, scale: f32) -> Option<Bounds> {
+    text_layout(text, scale).ink_bounds
 }
 
 fn layout_with_reference(text: &TextAnnotation, scale: f32, reference: Option<&str>) -> TextLayout {
@@ -1240,6 +1263,24 @@ mod tests {
                     );
                     assert_eq!(caret_at(&object, point), offset);
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn empty_caption_caret_renders_at_both_dpis_and_large_sizes() {
+        let monitor = Rect {
+            left: -400,
+            top: -300,
+            right: 600,
+            bottom: 500,
+        };
+        for dpi in [1., 1.25] {
+            for size in [22., 220.] {
+                let object = layout_test_object("", size, dpi);
+                let mut frame = Pixmap::new(1000, 800).unwrap();
+                draw_caret(&mut frame, &object, 0, monitor, dpi, None);
+                assert!(frame.pixels().iter().any(|pixel| pixel.alpha() > 0));
             }
         }
     }

@@ -759,3 +759,36 @@ msgstr "Arriba a la derecha"
 
 msgid "No connection"
 msgstr "Sin conexión"
+
+msgid "Filled circle"
+msgstr "Círculo relleno"
+
+msgid "Circle with white border"
+msgstr "Círculo con borde blanco"
+
+msgid "Outline circle"
+msgstr "Contorno circular"
+
+msgid "Number only"
+msgstr "Solo número"
+
+msgid "Filled square"
+msgstr "Cuadrado relleno"
+
+msgid "Size"
+msgstr "Tamaño"
+
+msgid "Guide"
+msgstr "Línea guía"
+
+msgid "Smallest"
+msgstr "Mínimo"
+
+msgid "Small"
+msgstr "Pequeño"
+
+msgid "Medium"
+msgstr "Mediano"
+
+msgid "Largest"
+msgstr "Máximo"

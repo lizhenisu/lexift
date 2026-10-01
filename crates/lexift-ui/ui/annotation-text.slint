@@ -22,6 +22,8 @@ export component AnnotationTextInput inherits Window {
     out property <string> preedit: editor.preedit-text;
     out property <bool> native-visual: false;
     callback pointer(int, float, float);
+    callback focus-input();
+    focus-input => { editor.focus(); }
     callback place-selection(int, int);
     place-selection(anchor, focus) => { editor.set-selection-offsets(anchor, focus); }
     callback content-changed(string);
