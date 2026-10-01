@@ -4337,7 +4337,7 @@ fn show_panel(generation: u64, panel_revision: u64, attempt: u8) {
                     r.close_panel();
                     return;
                 }
-                (r.lifecycle.set_popup_dismissal)(panel.window(), true);
+                (r.lifecycle.set_popup_dismissal)(panel.window(), panel.get_menu());
             }
             PassiveWindowPreparation::Pending if attempt < 20 => {
                 let _ = panel.show();
@@ -4532,7 +4532,9 @@ fn pointer_panel(
             later(move || {
                 REGISTRY.with(|s| {
                     if let Some(r) = s.borrow_mut().as_mut().filter(|r| {
-                        r.generation == generation && r.panel_revision == panel_revision
+                        r.generation == generation
+                            && r.panel_revision == panel_revision
+                            && r.panel.as_ref().is_some_and(|panel| panel.get_menu())
                     }) {
                         if choice::cursor_inside(r) {
                             choice::rearm_panel(r);
@@ -4807,6 +4809,100 @@ mod tests {
         REGISTRY.with(|slot| {
             slot.borrow_mut().take();
         });
+    }
+
+    #[test]
+    fn parameter_panels_ignore_native_dismissal_while_tool_menus_still_close() {
+        use slint::platform::{
+            Platform, WindowAdapter, WindowEvent,
+            software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+        };
+        struct TestPlatform;
+        impl Platform for TestPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer))
+            }
+        }
+        thread_local! { static WATCHES: RefCell<Vec<bool>> = const { RefCell::new(Vec::new()) }; }
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        init(
+            |_| PassiveWindowPreparation::Ready,
+            WindowLifecycleCallbacks::new(
+                |_, _| true,
+                |_| true,
+                |_| false,
+                |_, _, _| false,
+                |_, _| true,
+                |_, _| true,
+                || false,
+            ),
+        );
+        REGISTRY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            r.main = Some(AnnotationToolbar::new().unwrap());
+            r.lifecycle.set_popup_dismissal = Rc::new(|_, enabled| {
+                WATCHES.with(|events| events.borrow_mut().push(enabled));
+                true
+            });
+        });
+        for dpi in [1., 1.25] {
+            for group in [0, 4] {
+                open_panel(group, false);
+                let (generation, revision, sink) = REGISTRY.with(|slot| {
+                    let slot = slot.borrow();
+                    let r = slot.as_ref().unwrap();
+                    let panel = r.panel.as_ref().unwrap();
+                    panel
+                        .window()
+                        .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
+                    (
+                        r.generation,
+                        r.panel_revision,
+                        pointer_panel(panel.as_weak(), r.generation, r.panel_revision),
+                    )
+                });
+                WATCHES.with(|events| events.borrow_mut().clear());
+                show_panel(generation, revision, 0);
+                REGISTRY.with(|slot| choice::rearm_panel(slot.borrow().as_ref().unwrap()));
+                WATCHES.with(|events| {
+                    assert!(!events.borrow().is_empty());
+                    assert!(events.borrow().iter().all(|enabled| !enabled));
+                });
+                sink(PopupPointerInput::DismissRequested);
+                slint::platform::update_timers_and_animations();
+                REGISTRY.with(|slot| {
+                    let slot = slot.borrow();
+                    let r = slot.as_ref().unwrap();
+                    assert_eq!(r.panel_revision, revision);
+                    assert!(r.panel.as_ref().is_some_and(|p| !p.get_menu()));
+                });
+                // The same button explicitly toggles the panel closed.
+                open_panel(group, false);
+                REGISTRY.with(|slot| assert!(slot.borrow().as_ref().unwrap().panel.is_none()));
+                open_panel(group, true);
+                let (generation, revision, menu_sink) = REGISTRY.with(|slot| {
+                    let slot = slot.borrow();
+                    let r = slot.as_ref().unwrap();
+                    let panel = r.panel.as_ref().unwrap();
+                    (
+                        r.generation,
+                        r.panel_revision,
+                        pointer_panel(panel.as_weak(), r.generation, r.panel_revision),
+                    )
+                });
+                show_panel(generation, revision, 0);
+                WATCHES.with(|events| assert_eq!(events.borrow().last(), Some(&true)));
+                // An old parameter-window event cannot dismiss its replacement menu.
+                sink(PopupPointerInput::DismissRequested);
+                slint::platform::update_timers_and_animations();
+                REGISTRY.with(|slot| assert!(slot.borrow().as_ref().unwrap().panel.is_some()));
+                menu_sink(PopupPointerInput::DismissRequested);
+                slint::platform::update_timers_and_animations();
+                REGISTRY.with(|slot| assert!(slot.borrow().as_ref().unwrap().panel.is_none()));
+            }
+        }
+        shutdown();
     }
 
     #[test]

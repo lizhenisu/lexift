@@ -798,7 +798,7 @@ pub(super) fn cursor_inside(r: &Registry) -> bool {
 pub(super) fn rearm_panel(r: &Registry) {
     if let Some(panel) = &r.panel {
         (r.lifecycle.set_popup_dismissal)(panel.window(), false);
-        (r.lifecycle.set_popup_dismissal)(panel.window(), true);
+        (r.lifecycle.set_popup_dismissal)(panel.window(), panel.get_menu());
     }
 }
 
