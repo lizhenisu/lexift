@@ -170,6 +170,17 @@ pub(crate) fn font_families() -> Vec<String> {
     })
 }
 
+/// Preserve the font's own language-tagged aliases for UI default selection.
+pub(crate) fn font_family_aliases() -> Vec<Vec<(String, fontdb::Language)>> {
+    FONTS.with(|slot| {
+        slot.borrow()
+            .db
+            .faces()
+            .map(|face| face.families.clone())
+            .collect()
+    })
+}
+
 fn normalize_family_names(names: &mut Vec<String>) {
     names.sort_by_cached_key(|name| (name.to_lowercase(), name.clone()));
     names.dedup_by(|a, b| a.to_lowercase() == b.to_lowercase());

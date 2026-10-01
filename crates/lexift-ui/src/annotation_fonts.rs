@@ -1,10 +1,64 @@
 //! Installed-font defaults and per-tool preferences; object fonts remain independent.
 use super::*;
 use lexift_core::domain::ui_language::UiLanguage;
+use std::collections::HashMap;
+
+type Aliases = HashMap<String, Vec<(String, fontdb::Language)>>;
 
 #[derive(Default)]
 pub(super) struct Preferences {
     manual: [Option<String>; 3],
+    aliases: Aliases,
+}
+
+fn name_language(language: UiLanguage) -> fontdb::Language {
+    use fontdb::Language as L;
+    match language {
+        UiLanguage::SimplifiedChinese => L::Chinese_PeoplesRepublicOfChina,
+        UiLanguage::TraditionalChinese => L::Chinese_Taiwan,
+        UiLanguage::EnglishUs => L::English_UnitedStates,
+        UiLanguage::EnglishUk => L::English_UnitedKingdom,
+        UiLanguage::Japanese => L::Japanese_Japan,
+        UiLanguage::Korean => L::Korean_Korea,
+        UiLanguage::German => L::German_Germany,
+        UiLanguage::French => L::French_France,
+        UiLanguage::Spanish => L::Spanish_ModernSort_Spain,
+        UiLanguage::Italian => L::Italian_Italy,
+        UiLanguage::PortuguesePortugal => L::Portuguese_Portugal,
+        UiLanguage::PortugueseBrazil => L::Portuguese_Brazil,
+    }
+}
+
+/// Index aliases once, merging regular/bold faces without changing the sorted menu.
+fn alias_index(families: Vec<Vec<(String, fontdb::Language)>>) -> Aliases {
+    let mut result = Aliases::new();
+    for family in families {
+        for (name, _) in &family {
+            let aliases = result.entry(name.to_lowercase()).or_default();
+            for alias in &family {
+                if !aliases.contains(alias) {
+                    aliases.push(alias.clone());
+                }
+            }
+            aliases.sort_by_cached_key(|(name, _)| (name.to_lowercase(), name.clone()));
+        }
+    }
+    result
+}
+
+fn local_name(names: &[String], aliases: &Aliases, name: String, language: UiLanguage) -> String {
+    aliases
+        .get(&name.to_lowercase())
+        .into_iter()
+        .flatten()
+        .filter(|(_, lang)| *lang == name_language(language))
+        .find_map(|(alias, _)| {
+            names
+                .iter()
+                .find(|n| n.eq_ignore_ascii_case(alias))
+                .cloned()
+        })
+        .unwrap_or(name)
 }
 
 fn candidates(language: UiLanguage) -> &'static [&'static str] {
@@ -17,8 +71,13 @@ fn candidates(language: UiLanguage) -> &'static [&'static str] {
     }
 }
 
-fn resolve(names: &[String], language: UiLanguage, sans: Option<&str>) -> String {
-    candidates(language)
+fn resolve(
+    names: &[String],
+    aliases: &Aliases,
+    language: UiLanguage,
+    sans: Option<&str>,
+) -> String {
+    let name = candidates(language)
         .iter()
         .copied()
         .chain(sans)
@@ -29,7 +88,8 @@ fn resolve(names: &[String], language: UiLanguage, sans: Option<&str>) -> String
                 .cloned()
         })
         .or_else(|| names.first().cloned())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    local_name(names, aliases, name, language)
 }
 
 pub(super) fn preferred(r: &Registry, tool: usize) -> String {
@@ -38,6 +98,7 @@ pub(super) fn preferred(r: &Registry, tool: usize) -> String {
         .unwrap_or_else(|| {
             resolve(
                 &r.fonts,
+                &r.font_preferences.aliases,
                 crate::i18n::language(),
                 crate::annotation_text::system_sans_family().as_deref(),
             )
@@ -47,6 +108,7 @@ pub(super) fn preferred(r: &Registry, tool: usize) -> String {
 pub(super) fn ensure(r: &mut Registry) {
     if r.fonts.is_empty() {
         r.fonts = crate::annotation_text::font_families();
+        r.font_preferences.aliases = alias_index(crate::annotation_text::font_family_aliases());
         reset_defaults(r);
     }
 }
@@ -140,6 +202,26 @@ mod tests {
                     assert_eq!(chosen_font(r, tool), candidates(language)[0]);
                 }
             }
+            r.fonts.push("微软雅黑".into());
+            r.font_preferences.aliases = alias_index(vec![vec![
+                (
+                    "Microsoft YaHei".into(),
+                    fontdb::Language::English_UnitedStates,
+                ),
+                (
+                    "微软雅黑".into(),
+                    fontdb::Language::Chinese_PeoplesRepublicOfChina,
+                ),
+            ]]);
+            crate::i18n::select(UiLanguage::SimplifiedChinese);
+            reset_defaults(r);
+            for tool in 8..=10 {
+                assert_eq!(chosen_font(r, tool), "微软雅黑");
+            }
+            choose(r, 8, 3);
+            reset_defaults(r);
+            assert_eq!(chosen_font(r, 8), "Microsoft YaHei");
+            assert_eq!(chosen_font(r, 9), "微软雅黑");
             choose(r, 8, 0);
             crate::i18n::select(UiLanguage::Japanese);
             reset_defaults(r);
@@ -193,7 +275,7 @@ mod tests {
         .map(String::from);
         for language in UiLanguage::ALL {
             assert_eq!(
-                resolve(&names, language, Some("Arial")),
+                resolve(&names, &Aliases::new(), language, Some("Arial")),
                 candidates(language)[0]
             );
             let remaining = names
@@ -201,13 +283,67 @@ mod tests {
                 .filter(|n| n.as_str() != candidates(language)[0])
                 .cloned()
                 .collect::<Vec<_>>();
-            let resolved = resolve(&remaining, language, Some("Arial"));
+            let resolved = resolve(&remaining, &Aliases::new(), language, Some("Arial"));
             assert!(remaining.contains(&resolved));
         }
         assert_eq!(
-            resolve(&["Generic".into()], UiLanguage::Japanese, Some("Generic")),
+            resolve(
+                &["Generic".into()],
+                &Aliases::new(),
+                UiLanguage::Japanese,
+                Some("Generic")
+            ),
             "Generic"
         );
-        assert_eq!(resolve(&[], UiLanguage::Korean, None), "");
+        assert_eq!(resolve(&[], &Aliases::new(), UiLanguage::Korean, None), "");
+    }
+
+    #[test]
+    fn localized_aliases_respect_all_languages_catalog_and_fallback() {
+        for language in UiLanguage::ALL {
+            let candidate = candidates(language)[0].to_owned();
+            let localized = if language == UiLanguage::EnglishUs {
+                candidate.clone()
+            } else {
+                format!("local-{}", language.code())
+            };
+            let families = vec![vec![
+                (candidate.clone(), fontdb::Language::English_UnitedStates),
+                (localized.clone(), name_language(language)),
+            ]];
+            let aliases = alias_index(families.clone());
+            let names = vec![candidate.clone(), localized.clone()];
+            // English-US records are indistinguishable here; use the real canonical name.
+            let expected = if language == UiLanguage::EnglishUs {
+                &candidate
+            } else {
+                &localized
+            };
+            assert_eq!(resolve(&names, &aliases, language, None), *expected);
+            assert_eq!(
+                resolve(std::slice::from_ref(&candidate), &aliases, language, None),
+                candidate
+            );
+            let unrelated = ["Unrelated".to_owned()];
+            assert_eq!(resolve(&unrelated, &aliases, language, None), "Unrelated");
+            let generic = "Generic Sans".to_owned();
+            let fallback_aliases = alias_index(vec![vec![
+                (generic.clone(), fontdb::Language::English_UnitedStates),
+                (localized.clone(), name_language(language)),
+            ]]);
+            let names = vec![generic.clone(), localized.clone()];
+            let expected = if language == UiLanguage::EnglishUs {
+                &generic
+            } else {
+                &localized
+            };
+            assert_eq!(
+                resolve(&names, &fallback_aliases, language, Some(&generic)),
+                *expected
+            );
+            let mut duplicated = families.clone();
+            duplicated.extend(families);
+            assert_eq!(alias_index(duplicated), aliases);
+        }
     }
 }
