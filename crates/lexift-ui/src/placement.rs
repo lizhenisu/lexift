@@ -1,5 +1,112 @@
 use lexift_core::domain::geometry::{Point, Rect};
 
+/// Finds unobstructed physical space for annotation controls. Cropping changes
+/// the viewport, not the content; callers supply scrolling for reduced sizes.
+pub(crate) fn place_annotation_popup(
+    anchor: Rect,
+    desired: (u32, u32),
+    area: Rect,
+    obstacles: &[Rect],
+    prefer_above: bool,
+    gap: i32,
+) -> Option<AttachedMenuPlacement> {
+    let gap = gap.max(0);
+    let blocked: Vec<_> = obstacles
+        .iter()
+        .map(|r| Rect {
+            left: r.left.saturating_sub(gap).max(area.left),
+            top: r.top.saturating_sub(gap).max(area.top),
+            right: r.right.saturating_add(gap).min(area.right),
+            bottom: r.bottom.saturating_add(gap).min(area.bottom),
+        })
+        .filter(|r| r.left < r.right && r.top < r.bottom)
+        .collect();
+    let mut xs = vec![area.left, area.right];
+    let mut ys = vec![area.top, area.bottom];
+    for r in &blocked {
+        xs.extend([r.left, r.right]);
+        ys.extend([r.top, r.bottom]);
+    }
+    xs.sort_unstable();
+    xs.dedup();
+    ys.sort_unstable();
+    ys.dedup();
+    let (dw, dh) = (i64::from(desired.0.max(1)), i64::from(desired.1.max(1)));
+    let mut best = None;
+    for (ix, &left) in xs.iter().enumerate() {
+        for &right in &xs[ix + 1..] {
+            for (iy, &top) in ys.iter().enumerate() {
+                for &bottom in &ys[iy + 1..] {
+                    if blocked.iter().any(|r| {
+                        left < r.right && right > r.left && top < r.bottom && bottom > r.top
+                    }) {
+                        continue;
+                    }
+                    let w = dw.min(i64::from(right) - i64::from(left));
+                    let h = dh.min(i64::from(bottom) - i64::from(top));
+                    if w <= 0 || h <= 0 {
+                        continue;
+                    }
+                    for direction in 0..4 {
+                        let above =
+                            (direction == 0 && prefer_above) || (direction == 1 && !prefer_above);
+                        let (x, y) = match direction {
+                            0 | 1 => (
+                                i64::from(anchor.left),
+                                if above {
+                                    i64::from(anchor.top) - i64::from(gap) - h
+                                } else {
+                                    i64::from(anchor.bottom) + i64::from(gap)
+                                },
+                            ),
+                            2 => (
+                                i64::from(anchor.left) - i64::from(gap) - w,
+                                i64::from(anchor.top),
+                            ),
+                            _ => (
+                                i64::from(anchor.right) + i64::from(gap),
+                                i64::from(anchor.top),
+                            ),
+                        };
+                        let x = x.clamp(i64::from(left), i64::from(right) - w);
+                        let y = y.clamp(i64::from(top), i64::from(bottom) - h);
+                        // A clamped candidate must still lie on its requested side.
+                        let side_ok = match direction {
+                            0 | 1 if above => y + h <= i64::from(anchor.top),
+                            0 | 1 => y >= i64::from(anchor.bottom),
+                            2 => x + w <= i64::from(anchor.left),
+                            _ => x >= i64::from(anchor.right),
+                        };
+                        if !side_ok {
+                            continue;
+                        }
+                        let distance =
+                            (x - i64::from(anchor.left)).abs() + (y - i64::from(anchor.top)).abs();
+                        let score = (w == dw && h == dh, w * h, -direction, -distance);
+                        // Full-sized candidates use direction before distance; area
+                        // only decides between reduced, scrollable viewports.
+                        if best.as_ref().is_none_or(|(s, _)| score > *s) {
+                            best = Some((
+                                score,
+                                AttachedMenuPlacement {
+                                    position: Point {
+                                        x: x as i32,
+                                        y: y as i32,
+                                    },
+                                    width: w as u32,
+                                    height: h as u32,
+                                    opens_below: y >= i64::from(anchor.bottom),
+                                },
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    best.map(|(_, result)| result)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Side {
     After,
@@ -189,6 +296,139 @@ fn clamp_i32(value: i64) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn annotation_menus_avoid_actual_toolbars_at_all_edges_and_dpis() {
+        for scale in [1., 1.25] {
+            let rect = |l: f32, t: f32, r: f32, b: f32| Rect {
+                left: (l * scale) as i32,
+                top: (t * scale) as i32,
+                right: (r * scale) as i32,
+                bottom: (b * scale) as i32,
+            };
+            let area = rect(-1200., -300., 0., 600.);
+            for (x, y) in [(-1200., -300.), (-900., 0.), (-650., 400.), (-650., -300.)] {
+                let main = rect(x, y, x + 650., y + 54.);
+                let panel_y = if y > 300. { y - 70. } else { y + 62. };
+                let panel = rect(x, panel_y, x + 900., panel_y + 58.);
+                let anchor = rect(x + 160., panel_y + 10., x + 198., panel_y + 48.);
+                for (w, h) in [
+                    (112., 188.),
+                    (180., 440.),
+                    (240., 188.),
+                    (300., 320.),
+                    (320., 300.),
+                    (330., 80.),
+                    (360., 160.),
+                    (500., 200.),
+                ] {
+                    let result = place_annotation_popup(
+                        anchor,
+                        ((w * scale) as u32, (h * scale) as u32),
+                        area,
+                        &[main, panel],
+                        panel_y < y,
+                        4,
+                    )
+                    .unwrap();
+                    let r = Rect {
+                        left: result.position.x,
+                        top: result.position.y,
+                        right: result.position.x + result.width as i32,
+                        bottom: result.position.y + result.height as i32,
+                    };
+                    assert!(
+                        r.left >= area.left
+                            && r.top >= area.top
+                            && r.right <= area.right
+                            && r.bottom <= area.bottom
+                    );
+                    for bar in [main, panel] {
+                        assert!(
+                            r.right <= bar.left - 4
+                                || r.left >= bar.right + 4
+                                || r.bottom <= bar.top - 4
+                                || r.top >= bar.bottom + 4,
+                            "{r:?} intersects {bar:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn annotation_placement_uses_sides_free_gaps_and_scrollable_viewports() {
+        let area = Rect {
+            left: 0,
+            top: 0,
+            right: 500,
+            bottom: 200,
+        };
+        let main = Rect {
+            left: 0,
+            top: 40,
+            right: 250,
+            bottom: 90,
+        };
+        let panel = Rect {
+            left: 0,
+            top: 100,
+            right: 250,
+            bottom: 160,
+        };
+        let anchor = Rect {
+            left: 10,
+            top: 110,
+            right: 48,
+            bottom: 148,
+        };
+        let result =
+            place_annotation_popup(anchor, (240, 180), area, &[main, panel], false, 4).unwrap();
+        assert!(
+            result.position.x >= 254,
+            "full-height right side beats truncated vertical space"
+        );
+        let full = Rect {
+            left: 0,
+            top: 0,
+            right: 500,
+            bottom: 200,
+        };
+        assert!(place_annotation_popup(anchor, (300, 300), area, &[full], false, 4).is_none());
+        let a = Rect {
+            left: 0,
+            top: 0,
+            right: 500,
+            bottom: 70,
+        };
+        let b = Rect {
+            left: 0,
+            top: 130,
+            right: 500,
+            bottom: 200,
+        };
+        let anchor = Rect {
+            left: 10,
+            top: 20,
+            right: 48,
+            bottom: 60,
+        };
+        let result = place_annotation_popup(anchor, (320, 300), area, &[a, b], false, 4).unwrap();
+        assert_eq!(result.height, 52);
+        assert_eq!(result.position.y, 74);
+        let other_screen = Rect {
+            left: 600,
+            top: 0,
+            right: 1000,
+            bottom: 200,
+        };
+        assert_eq!(
+            result,
+            place_annotation_popup(anchor, (320, 300), area, &[a, b, other_screen], false, 4)
+                .unwrap()
+        );
+    }
 
     const WORK_AREA: Rect = Rect {
         left: 0,

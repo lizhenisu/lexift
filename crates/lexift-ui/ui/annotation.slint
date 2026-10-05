@@ -4,6 +4,7 @@ import { Spacing } from "design/spacing.slint";
 import { Typography } from "design/typography.slint";
 import { Metrics } from "design/metrics.slint";
 import { ComboBox, SpinBox, CheckBox, Slider, LineEdit, AnnotationChoiceRequest } from "annotation-fields.slint";
+import { ScrollView } from "std-widgets.slint";
 
 export struct AnnotationValues {
     size: int, rounding: int, text-size: int, start: int, strength: float,
@@ -211,7 +212,12 @@ export component AnnotationPanel inherits Window {
     Rectangle {
         x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px;
         border-radius: 10px; border-width: 1px; border-color: Colors.outline; background: Colors.surface;
-        if root.menu: VerticalLayout {
+        if root.menu: ScrollView {
+            width: 100%; height: 100%; content-width: self.visible-width;
+            content-height: 46px + root.menu-tools.length * 42px;
+            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+            VerticalLayout {
+            width: 100%; height: 46px + root.menu-tools.length * 42px;
             padding: 8px; spacing: 2px;
             for kind[i] in root.menu-tools: Rectangle {
                 height: 40px; border-radius: 5px;
@@ -221,6 +227,7 @@ export component AnnotationPanel inherits Window {
                 option := TouchArea { clicked => { root.selected(kind); } }
             }
             Text { height: 28px; text: @tr("Adjust — unavailable"); color: Colors.secondary-foreground; font-size: 12px; horizontal-alignment: right; vertical-alignment: center; }
+            }
         }
         if !root.menu && root.tool <= 4: Rectangle {
             x: 12px; y: 10px; width: parent.width - 24px; height: parent.height - 20px;

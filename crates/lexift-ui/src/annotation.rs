@@ -4819,7 +4819,10 @@ fn show_panel(generation: u64, panel_revision: u64, attempt: u8) {
         };
         match (r.prepare)(panel.window()) {
             PassiveWindowPreparation::Ready => {
-                position_panel(r);
+                if !position_panel(r) {
+                    r.close_panel();
+                    return;
+                }
                 let panel = r.panel.get().unwrap();
                 if !r.main.get().is_some_and(|main| {
                     (r.lifecycle.attach_tool_window)(panel.window(), main.window())
@@ -4934,14 +4937,15 @@ fn canvas_at(bounds: impl IntoIterator<Item = Rect>, point: Point) -> Option<usi
     })
 }
 
-fn position_panel(r: &Registry) {
+fn position_panel(r: &Registry) -> bool {
     let (Some(main), Some(panel)) = (r.main.get(), r.panel.get()) else {
-        return;
+        // Ownership preparation decides whether a missing main window can retry.
+        return true;
     };
     let p = main.window().position();
     let m = main.window().size();
     let Some(area) = (r.lifecycle.popup_work_area)(Point { x: p.x, y: p.y }) else {
-        return;
+        return !panel.get_menu();
     };
     let scale = panel.window().scale_factor().max(0.1);
     let available = ((area.right - area.left) as f32 / scale).max(1.);
@@ -5018,6 +5022,34 @@ fn position_panel(r: &Registry) {
             80. + ((fields(panel.get_tool()).len() as f32 / columns as f32).ceil()) * 62.
         }
     };
+    if panel.get_menu() {
+        let main_rect = Rect {
+            left: p.x,
+            top: p.y,
+            right: p.x.saturating_add(m.width as i32),
+            bottom: p.y.saturating_add(m.height as i32),
+        };
+        let desired = slint::LogicalSize::new(width, height).to_physical(scale);
+        let Some(placed) = placement::place_annotation_popup(
+            main_rect,
+            (desired.width, desired.height),
+            area,
+            &[main_rect],
+            false,
+            (8. * scale).ceil() as i32,
+        ) else {
+            tracing::warn!("no unobstructed space for annotation tool group");
+            return false;
+        };
+        panel
+            .window()
+            .set_size(slint::PhysicalSize::new(placed.width, placed.height));
+        panel.window().set_position(slint::PhysicalPosition::new(
+            placed.position.x,
+            placed.position.y,
+        ));
+        return true;
+    }
     let size = slint::LogicalSize::new(width, height.min((area.bottom - area.top) as f32 / scale));
     let physical = size.to_physical(scale);
     if panel.window().size() != physical {
@@ -5036,6 +5068,7 @@ fn position_panel(r: &Registry) {
             .window()
             .set_position(slint::PhysicalPosition::new(target.x, target.y));
     }
+    true
 }
 
 fn panel_position(
@@ -7793,6 +7826,21 @@ mod tests {
                 || false,
             ),
         );
+        // Native placement now requires a known work area; provide one in the fixture.
+        REGISTRY.with(|slot| {
+            slot.borrow_mut()
+                .as_mut()
+                .unwrap()
+                .lifecycle
+                .popup_work_area = Rc::new(|_| {
+                Some(Rect {
+                    left: -2000,
+                    top: -1000,
+                    right: 2000,
+                    bottom: 2000,
+                })
+            });
+        });
         REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
@@ -7978,6 +8026,21 @@ mod tests {
             (r.generation, r.session.objects[0].id)
         });
         open_panel(0, false);
+        // Native placement now requires a known work area; provide one in the fixture.
+        REGISTRY.with(|slot| {
+            slot.borrow_mut()
+                .as_mut()
+                .unwrap()
+                .lifecycle
+                .popup_work_area = Rc::new(|_| {
+                Some(Rect {
+                    left: -2000,
+                    top: -1000,
+                    right: 2000,
+                    bottom: 2000,
+                })
+            });
+        });
         REGISTRY.with(|slot| {
             let slot = slot.borrow();
             let panel = slot.as_ref().unwrap().panel.get().unwrap();
@@ -8172,6 +8235,21 @@ mod tests {
                 || false,
             ),
         );
+        // Native placement now requires a known work area; provide one in the fixture.
+        REGISTRY.with(|slot| {
+            slot.borrow_mut()
+                .as_mut()
+                .unwrap()
+                .lifecycle
+                .popup_work_area = Rc::new(|_| {
+                Some(Rect {
+                    left: -2000,
+                    top: -1000,
+                    right: 2000,
+                    bottom: 2000,
+                })
+            });
+        });
         REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
@@ -8266,6 +8344,21 @@ mod tests {
                 || false,
             ),
         );
+        // Native placement now requires a known work area; provide one in the fixture.
+        REGISTRY.with(|slot| {
+            slot.borrow_mut()
+                .as_mut()
+                .unwrap()
+                .lifecycle
+                .popup_work_area = Rc::new(|_| {
+                Some(Rect {
+                    left: -2000,
+                    top: -1000,
+                    right: 2000,
+                    bottom: 2000,
+                })
+            });
+        });
         REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
@@ -9492,6 +9585,21 @@ mod tests {
                 || false,
             ),
         );
+        // Native placement now requires a known work area; provide one in the fixture.
+        REGISTRY.with(|slot| {
+            slot.borrow_mut()
+                .as_mut()
+                .unwrap()
+                .lifecycle
+                .popup_work_area = Rc::new(|_| {
+                Some(Rect {
+                    left: -2000,
+                    top: -1000,
+                    right: 2000,
+                    bottom: 2000,
+                })
+            });
+        });
         REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
@@ -10213,6 +10321,21 @@ mod tests {
             r.generation
         });
         open_watermark_input(generation);
+        // Native placement now requires a known work area; provide one in the fixture.
+        REGISTRY.with(|slot| {
+            slot.borrow_mut()
+                .as_mut()
+                .unwrap()
+                .lifecycle
+                .popup_work_area = Rc::new(|_| {
+                Some(Rect {
+                    left: -2000,
+                    top: -1000,
+                    right: 2000,
+                    bottom: 2000,
+                })
+            });
+        });
         let old_revision =
             REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().watermark.revision());
         show_watermark_input(generation, old_revision, 0, focus::Origin::Unobserved);
@@ -11530,6 +11653,21 @@ mod tests {
         );
         let ready = Rc::new(Cell::new(false));
         let calls = Rc::new(Cell::new(0));
+        // Native placement now requires a known work area; provide one in the fixture.
+        REGISTRY.with(|slot| {
+            slot.borrow_mut()
+                .as_mut()
+                .unwrap()
+                .lifecycle
+                .popup_work_area = Rc::new(|_| {
+                Some(Rect {
+                    left: -2000,
+                    top: -1000,
+                    right: 2000,
+                    bottom: 2000,
+                })
+            });
+        });
         REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();

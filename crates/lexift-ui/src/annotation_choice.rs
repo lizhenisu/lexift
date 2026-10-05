@@ -1080,8 +1080,10 @@ fn settle(r: &Registry, generation: u64, panel_revision: u64, revision: u64, rem
                 {
                     if let Some(menu) = &r.menus.current
                         && let Some(parent) = owner(r, menu)
+                        && !menu.place(parent, &*r.lifecycle.popup_work_area, &toolbar_rects(r))
                     {
-                        menu.place(parent, &*r.lifecycle.popup_work_area, &toolbar_rects(r));
+                        close(r, CloseReason::PresentationFailed);
+                        return;
                     }
                     if remaining == 1 {
                         r.menus.current.as_mut().unwrap().transition_region = None;
@@ -1119,7 +1121,9 @@ impl Menu {
         match (services.prepare)(self.window.window()) {
             PassiveWindowPreparation::Pending => ShowResult::Pending,
             PassiveWindowPreparation::Ready => {
-                self.place(services.parent, services.work_area, &services.avoid);
+                if !self.place(services.parent, services.work_area, &services.avoid) {
+                    return ShowResult::Failed;
+                }
                 let window = self.window.window();
                 if !(services.configure)(window) {
                     return ShowResult::Failed;
@@ -1135,7 +1139,9 @@ impl Menu {
                     tracing::warn!("could not show annotation parameter menu");
                     ShowResult::Failed
                 } else {
-                    self.place(services.parent, services.work_area, &services.avoid);
+                    if !self.place(services.parent, services.work_area, &services.avoid) {
+                        return ShowResult::Failed;
+                    }
                     if !(services.attach)(window, services.parent) {
                         let _ = self.window.hide();
                         return ShowResult::Pending;
@@ -1146,7 +1152,7 @@ impl Menu {
             _ => ShowResult::Failed,
         }
     }
-    fn place(&self, parent: &slint::Window, work_area: WorkArea<'_>, avoid: &[Rect]) {
+    fn place(&self, parent: &slint::Window, work_area: WorkArea<'_>, avoid: &[Rect]) -> bool {
         let menu = self;
         let scale = parent.scale_factor().max(0.1);
         let p = parent.position();
@@ -1157,11 +1163,11 @@ impl Menu {
             right: p.x + ((q.x + q.width) * scale).round() as i32,
             bottom: p.y + ((q.y + q.height) * scale).round() as i32,
         };
-        let Some(mut area) = work_area(Point {
+        let Some(area) = work_area(Point {
             x: anchor.left,
             y: anchor.top,
         }) else {
-            return;
+            return false;
         };
         let menu_scale = menu.window.window().scale_factor().max(0.1);
         let minimum_width = if is_color(q.field) {
@@ -1181,35 +1187,38 @@ impl Menu {
         } else {
             180.
         };
-        if text_style_mode(q.field) != 0
-            || self
-                .return_request
-                .as_ref()
-                .is_some_and(|q| text_style_mode(q.field) != 0)
-        {
-            area = style_menu_area(
-                area,
-                avoid,
-                anchor,
-                minimum_width * menu_scale,
-                menu.window.get_menu_height() * menu_scale,
-                (3. * menu_scale).ceil() as i32,
-            );
-        }
-        let width = ((q.width * scale).max(minimum_width * menu_scale).ceil() as i32)
-            .min(area.right - area.left);
-        let height = ((menu.window.get_menu_height() * menu_scale).ceil() as i32)
-            .min(area.bottom - area.top);
-        let position = menu_position(anchor, width, height, area, (3. * menu_scale).ceil() as i32);
+        let desired_width = (q.width * scale).max(minimum_width * menu_scale).ceil() as u32;
+        let desired_height = (menu.window.get_menu_height() * menu_scale).ceil() as u32;
+        let prefer_above = avoid.first().is_some_and(|main| {
+            i64::from(anchor.top) + i64::from(anchor.bottom)
+                < i64::from(main.top) + i64::from(main.bottom)
+        });
+        let Some(placed) = crate::placement::place_annotation_popup(
+            anchor,
+            (desired_width, desired_height),
+            area,
+            avoid,
+            prefer_above,
+            (3. * menu_scale).ceil() as i32,
+        ) else {
+            tracing::warn!("no unobstructed space for annotation menu");
+            return false;
+        };
+        menu.window
+            .set_content_width(desired_width as f32 / menu_scale);
         menu.window
             .window()
-            .set_size(slint::PhysicalSize::new(width as u32, height as u32));
+            .set_size(slint::PhysicalSize::new(placed.width, placed.height));
         menu.window
             .window()
-            .set_position(slint::PhysicalPosition::new(position.x, position.y));
+            .set_position(slint::PhysicalPosition::new(
+                placed.position.x,
+                placed.position.y,
+            ));
         if q.field == 12 {
             menu.window.invoke_center_selection();
         }
+        true
     }
 }
 
@@ -1233,62 +1242,8 @@ fn toolbar_rects(r: &Registry) -> Vec<Rect> {
     .collect()
 }
 
-/// Free strips around the toolbar group keep all controls reachable, even when scrolling is necessary.
-fn style_menu_area(
-    area: Rect,
-    avoid: &[Rect],
-    anchor: Rect,
-    width: f32,
-    height: f32,
-    gap: i32,
-) -> Rect {
-    let Some(first) = avoid.first() else {
-        return area;
-    };
-    let union = avoid.iter().fold(*first, |a, b| Rect {
-        left: a.left.min(b.left),
-        top: a.top.min(b.top),
-        right: a.right.max(b.right),
-        bottom: a.bottom.max(b.bottom),
-    });
-    let above = Rect {
-        bottom: (union.top - gap).clamp(area.top, area.bottom),
-        ..area
-    };
-    let below = Rect {
-        top: (union.bottom + gap).clamp(area.top, area.bottom),
-        ..area
-    };
-    let left = Rect {
-        right: (union.left - gap).clamp(area.left, area.right),
-        ..area
-    };
-    let right = Rect {
-        left: (union.right + gap).clamp(area.left, area.right),
-        ..area
-    };
-    let strips = if anchor.top + anchor.bottom < union.top + union.bottom {
-        [above, below, left, right]
-    } else {
-        [below, above, left, right]
-    };
-    strips
-        .iter()
-        .copied()
-        .find(|r| (r.right - r.left) as f32 >= width && (r.bottom - r.top) as f32 >= height)
-        .or_else(|| {
-            strips
-                .into_iter()
-                .filter(|r| r.right > r.left && r.bottom > r.top)
-                .max_by_key(|r| {
-                    (r.right - r.left).min(width.ceil() as i32) as i64
-                        * (r.bottom - r.top).min(height.ceil() as i32) as i64
-                })
-        })
-        .unwrap_or(area)
-}
-
 /// Use physical coordinates throughout, including negative monitor origins.
+#[cfg(test)]
 fn menu_position(anchor: Rect, width: i32, height: i32, area: Rect, gap: i32) -> Point {
     let below = anchor.bottom + gap;
     let y = if below + height <= area.bottom {
@@ -1445,57 +1400,6 @@ mod tests {
     };
     use slint::{ModelRc, VecModel};
     use std::cell::{Cell, RefCell};
-
-    #[test]
-    fn style_popup_avoids_both_toolbars_and_uses_scrollable_space() {
-        for scale in [1., 1.25] {
-            let rect = |l: f32, t: f32, r: f32, b: f32| Rect {
-                left: (l * scale) as i32,
-                top: (t * scale) as i32,
-                right: (r * scale) as i32,
-                bottom: (b * scale) as i32,
-            };
-            let area = rect(-1000., -600., 1000., 600.);
-            for (main, panel) in [
-                (rect(-500., 0., 300., 54.), rect(-500., -70., 450., -12.)),
-                (rect(-500., 0., 300., 54.), rect(-500., 70., 450., 128.)),
-                (
-                    rect(-990., -590., -300., -536.),
-                    rect(-990., -530., -250., -472.),
-                ),
-            ] {
-                let free =
-                    style_menu_area(area, &[main, panel], panel, 360. * scale, 160. * scale, 4);
-                let point =
-                    menu_position(panel, (360. * scale) as i32, (160. * scale) as i32, free, 4);
-                let menu = Rect {
-                    left: point.x,
-                    top: point.y,
-                    right: point.x + (360. * scale) as i32,
-                    bottom: point.y + (160. * scale) as i32,
-                };
-                for bar in [main, panel] {
-                    assert!(
-                        menu.right <= bar.left
-                            || menu.left >= bar.right
-                            || menu.bottom <= bar.top
-                            || menu.top >= bar.bottom
-                    );
-                }
-                assert!(
-                    menu.left >= area.left
-                        && menu.right <= area.right
-                        && menu.top >= area.top
-                        && menu.bottom <= area.bottom
-                );
-            }
-            let area = rect(0., 0., 400., 220.);
-            let panel = rect(0., 80., 400., 140.);
-            let free = style_menu_area(area, &[panel], panel, 360. * scale, 160. * scale, 4);
-            assert!(free.bottom - free.top < (160. * scale) as i32);
-            assert!(free.bottom <= panel.top || free.top >= panel.bottom);
-        }
-    }
 
     #[test]
     fn background_toggle_is_atomic_and_style_popup_allows_only_current_editor_focus() {
@@ -1835,6 +1739,44 @@ mod tests {
             std::fs::create_dir_all(&directory).unwrap();
             std::fs::write(directory.join("parameter-callback-outline.ppm"), ppm).unwrap();
         }
+        // A reduced picker viewport must still allow the user to reach HEX.
+        window.set_text_style_mode(0);
+        window.set_color_mode(true);
+        window.set_content_width(320.);
+        window.set_parameter_input_active(false);
+        window
+            .window()
+            .set_size(slint::LogicalSize::new(220., 120.));
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                position: slint::LogicalPosition::new(100., 50.),
+                delta_x: 0.,
+                delta_y: -1000.,
+            });
+        slint::platform::update_timers_and_animations();
+        assert!(!window.get_parameter_input_active());
+        for y in (10..110).step_by(5) {
+            for event in [
+                slint::platform::WindowEvent::PointerPressed {
+                    position: slint::LogicalPosition::new(80., y as f32),
+                    button: slint::platform::PointerEventButton::Left,
+                },
+                slint::platform::WindowEvent::PointerReleased {
+                    position: slint::LogicalPosition::new(80., y as f32),
+                    button: slint::platform::PointerEventButton::Left,
+                },
+            ] {
+                window.window().dispatch_event(event);
+            }
+            if window.get_parameter_input_active() {
+                break;
+            }
+        }
+        assert!(
+            window.get_parameter_input_active(),
+            "scrolling a clipped picker must expose the HEX input"
+        );
         window.hide().unwrap();
     }
 
@@ -1959,6 +1901,82 @@ mod tests {
         let size = menu.window.window().size();
         assert!(origin.x >= area.left && origin.x + size.width as i32 <= area.right);
         assert!(origin.y >= area.top && origin.y + size.height as i32 <= 285);
+        let avoid = [
+            Rect {
+                left: -500,
+                top: -40,
+                right: 200,
+                bottom: 14,
+            },
+            Rect {
+                left: -500,
+                top: 22,
+                right: 400,
+                bottom: 80,
+            },
+        ];
+        parent
+            .window()
+            .set_position(slint::PhysicalPosition::new(-500, 22));
+        values.text_outline = true;
+        values.text_background = true;
+        for field in [
+            -2,
+            -3,
+            -4,
+            -5,
+            -6,
+            -8,
+            2,
+            6,
+            12,
+            14,
+            16,
+            18,
+            19,
+            20,
+            21,
+            23,
+            24,
+            WATERMARK_PRESET,
+        ] {
+            let request = AnnotationChoiceRequest {
+                field,
+                x: 150.,
+                y: 8.,
+                width: 38.,
+                height: 38.,
+                options: ModelRc::new(VecModel::from(vec!["choice".into(); 11])),
+                ..Default::default()
+            };
+            let window = build_window(&request, 10, &values).unwrap();
+            let popup = Menu {
+                input: InputWork::new(),
+                window,
+                dismissal: Rc::new(|_, _| true),
+                request,
+                panel_position: parent.window().position(),
+                dragging: false,
+                return_request: None,
+                transition_region: None,
+                return_pending: false,
+                watermark_revision: None,
+                target: None,
+            };
+            assert!(
+                popup.place(parent.window(), &work_area, &avoid),
+                "field {field}"
+            );
+            // MinimalSoftwareWindow does not implement native window positioning;
+            // physical disjointness is asserted by the placement matrix tests.
+            let size = popup.window.window().size();
+            assert!(size.width > 0 && size.height > 0);
+            assert!(size.width <= (area.right - area.left) as u32);
+            assert!(size.height <= (area.bottom - area.top) as u32);
+            if is_color(field) {
+                assert!(popup.window.get_content_width() >= 320.);
+            }
+        }
     }
 
     #[test]

@@ -32,6 +32,7 @@ export component AnnotationChoiceWindow inherits Window {
     callback hex-edited(string,bool);
     callback color-dragging(bool);
     in-out property <bool> parameter-input-active: false;
+    in property <float> content-width: 320;
     callback parameter-input-finished();
     in-out property <int> selected;
     out property <length> menu-height: root.text-style-mode == 1 ? 80px : root.text-style-mode == 2 ? 160px : root.color-mode ? 300px : root.font-mode ? 320px : root.options.length * MenuMetrics.row-height + 8px;
@@ -66,8 +67,12 @@ export component AnnotationChoiceWindow inherits Window {
         border-radius: MenuMetrics.row-radius; border-width: 1px;
         border-color: Colors.outline; background: Colors.surface;
         accessible-role: list;
-        if root.color-mode: AnnotationColorPicker {
-            width: parent.width; height: parent.height;
+        if root.color-mode: ScrollView {
+            width: 100%; height: 100%;
+            content-width: max(self.visible-width, root.content-width * 1px);
+            content-height: root.menu-height;
+            AnnotationColorPicker {
+            width: parent.width; height: root.menu-height;
             hue <=> root.hue; saturation <=> root.saturation; value <=> root.value;
             preview: root.preview; bright: root.bright; hex-text <=> root.hex-text; invalid: root.invalid;
             hsv-edited(h,s,v) => { root.hsv-edited(h,s,v); }
@@ -75,11 +80,11 @@ export component AnnotationChoiceWindow inherits Window {
             input-active <=> root.parameter-input-active;
             input-finished => { root.parameter-input-finished(); }
             dragging(active) => { root.parameter-input-active = false; root.color-dragging(active); }
+            }
         }
         if root.text-style-mode != 0: ScrollView {
-            width: 100%; height: 100%; content-width: self.visible-width;
+            width: 100%; height: 100%; content-width: max(self.visible-width, root.content-width * 1px);
             content-height: root.menu-height;
-            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
             if root.text-style-mode == 1: Rectangle {
                 width: 100%; height: root.menu-height;
                 Text { x: 10px; y: 9px; text: @tr("Outline width"); color: Colors.foreground; }
