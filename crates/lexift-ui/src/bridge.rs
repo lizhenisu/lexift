@@ -27,6 +27,12 @@ use crate::{
     SettingsWindow, TranslationPopup, binding, mapper, placement,
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PopupDismissCause {
+    PointerOutside,
+    ForegroundChanged,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PopupPointerInput {
     /// Cancels the canvas gesture before clearing Slint's pressed pointer state.
@@ -53,7 +59,9 @@ pub enum PopupPointerInput {
         delta_x: f32,
         delta_y: f32,
     },
-    DismissRequested,
+    DismissRequested {
+        cause: PopupDismissCause,
+    },
     NativeTopResizeRequested,
     Resized {
         width: f32,
@@ -107,7 +115,11 @@ type ToolbarCursorPosition = Rc<dyn Fn() -> Option<Point>>;
 type AnnotationDisplays = Rc<dyn Fn() -> Vec<Rect>>;
 type AnnotationClickThrough = Rc<dyn Fn(&slint::Window, bool) -> bool>;
 type AnnotationCornerCursor = Rc<dyn Fn(&slint::Window, bool) -> bool>;
+type AnnotationBrushCursor = Rc<dyn Fn(&slint::Window, f32) -> bool>;
 type AnnotationFramePresenter = Rc<dyn Fn(&slint::Window, &[u8], u32, u32) -> bool>;
+type AnnotationForeground = Rc<dyn Fn() -> Option<lexift_core::ports::magnifier::WindowToken>>;
+type AnnotationWindowToken =
+    Rc<dyn Fn(&slint::Window) -> Option<lexift_core::ports::magnifier::WindowToken>>;
 type AnnotationMagnifierSync =
     Rc<dyn Fn(&[lexift_core::ports::magnifier::MagnifierSpec], &[&slint::Window]) -> bool>;
 type AnnotationMagnifierRefresh = Rc<dyn Fn() -> bool>;
@@ -137,9 +149,16 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) annotation_displays: AnnotationDisplays,
     pub(crate) annotation_click_through: AnnotationClickThrough,
     pub(crate) annotation_corner_cursor: AnnotationCornerCursor,
+    pub(crate) annotation_brush_cursor: AnnotationBrushCursor,
     pub(crate) annotation_frame_presenter: AnnotationFramePresenter,
     pub(crate) annotation_magnifier_sync: AnnotationMagnifierSync,
     pub(crate) annotation_magnifier_refresh: AnnotationMagnifierRefresh,
+    pub(crate) annotation_screen_capture:
+        Option<std::sync::Arc<dyn lexift_core::ports::screen_capture::ScreenCapturePort>>,
+    pub(crate) annotation_window_token: AnnotationWindowToken,
+    pub(crate) annotation_foreground: Option<AnnotationForeground>,
+    pub(crate) annotation_renderer:
+        Option<std::sync::Arc<dyn lexift_core::ports::annotation_render::AnnotationRenderPort>>,
     trim_process_working_set: fn() -> bool,
     pub(crate) configure_menu_window: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) tray_menu_cancelled: Rc<dyn Fn()>,
@@ -172,9 +191,14 @@ impl WindowLifecycleCallbacks {
             annotation_displays: Rc::new(Vec::new),
             annotation_click_through: Rc::new(|_, _| false),
             annotation_corner_cursor: Rc::new(|_, _| false),
+            annotation_brush_cursor: Rc::new(|_, _| false),
             annotation_frame_presenter: Rc::new(|_, _, _, _| false),
             annotation_magnifier_sync: Rc::new(|_, _| false),
             annotation_magnifier_refresh: Rc::new(|| false),
+            annotation_screen_capture: None,
+            annotation_window_token: Rc::new(|_| None),
+            annotation_foreground: None,
+            annotation_renderer: None,
             trim_process_working_set,
             configure_menu_window: Rc::new(|_| true),
             tray_menu_cancelled: Rc::new(|| {}),
@@ -233,6 +257,14 @@ impl WindowLifecycleCallbacks {
         self
     }
 
+    pub fn with_annotation_brush_cursor(
+        mut self,
+        cursor: impl Fn(&slint::Window, f32) -> bool + 'static,
+    ) -> Self {
+        self.annotation_brush_cursor = Rc::new(cursor);
+        self
+    }
+
     pub fn with_annotation_magnifier(
         mut self,
         sync: impl Fn(&[lexift_core::ports::magnifier::MagnifierSpec], &[&slint::Window]) -> bool
@@ -241,6 +273,44 @@ impl WindowLifecycleCallbacks {
     ) -> Self {
         self.annotation_magnifier_sync = Rc::new(sync);
         self.annotation_magnifier_refresh = Rc::new(refresh);
+        self
+    }
+
+    /// Injects the asynchronous Core capture capability without a UI/platform dependency.
+    pub fn with_annotation_screen_capture(
+        mut self,
+        port: Option<std::sync::Arc<dyn lexift_core::ports::screen_capture::ScreenCapturePort>>,
+    ) -> Self {
+        self.annotation_screen_capture = port;
+        self
+    }
+
+    /// Resolve native input surfaces through App without a UI/platform dependency.
+    pub fn with_annotation_window_token(
+        mut self,
+        query: impl Fn(&slint::Window) -> Option<lexift_core::ports::magnifier::WindowToken> + 'static,
+    ) -> Self {
+        self.annotation_window_token = Rc::new(query);
+        self
+    }
+
+    /// Observe foreground identity without coupling UI to native window APIs.
+    pub fn with_annotation_foreground(
+        mut self,
+        query: impl Fn() -> Option<lexift_core::ports::magnifier::WindowToken> + 'static,
+    ) -> Self {
+        self.annotation_foreground = Some(Rc::new(query));
+        self
+    }
+
+    /// The native adapter is created by App; UI only submits Core scenes.
+    pub fn with_annotation_renderer(
+        mut self,
+        port: Option<
+            std::sync::Arc<dyn lexift_core::ports::annotation_render::AnnotationRenderPort>,
+        >,
+    ) -> Self {
+        self.annotation_renderer = port;
         self
     }
 
@@ -1583,7 +1653,7 @@ fn popup_pointer_sink(popup: slint::Weak<TranslationPopup>) -> PopupPointerSink 
                 }
                 return;
             }
-            PopupPointerInput::DismissRequested => {
+            PopupPointerInput::DismissRequested { .. } => {
                 let session_id = popup.get_session_id().max(0) as u64;
                 schedule_popup_dismissal(session_id);
                 return;
@@ -1681,7 +1751,7 @@ fn language_menu_pointer_sink(menu: slint::Weak<PopupLanguageMenuWindow>) -> Pop
         let Some(menu) = menu.upgrade() else {
             return;
         };
-        if input == PopupPointerInput::DismissRequested {
+        if matches!(input, PopupPointerInput::DismissRequested { .. }) {
             schedule_language_menu_dismissal();
             return;
         }
@@ -1712,7 +1782,8 @@ fn language_menu_pointer_sink(menu: slint::Weak<PopupLanguageMenuWindow>) -> Pop
                 delta_x: delta_x / scale,
                 delta_y: delta_y / scale,
             },
-            PopupPointerInput::DismissRequested | PopupPointerInput::NativeTopResizeRequested => {
+            PopupPointerInput::DismissRequested { .. }
+            | PopupPointerInput::NativeTopResizeRequested => {
                 return;
             }
             PopupPointerInput::Resized { .. } | PopupPointerInput::ResizeFinished { .. } => return,
@@ -1987,7 +2058,7 @@ fn update_toolbar_fade() {
 fn toolbar_pointer_sink(weak: slint::Weak<SelectionToolbarWindow>) -> PopupPointerSink {
     Rc::new(move |input| {
         let Some(window) = weak.upgrade() else { return };
-        if input == PopupPointerInput::DismissRequested {
+        if matches!(input, PopupPointerInput::DismissRequested { .. }) {
             SELECTION_TOOLBAR_REGISTRY.with(|slot| {
                 if let Some(registry) = slot.borrow().as_ref()
                     && let Some(handler) = registry.handler.as_ref()

@@ -8,6 +8,7 @@ export component AnnotationPalette inherits Rectangle {
     in property <length> inset: 4px;
     in property <length> radius: 8px;
     in property <bool> custom-active;
+    callback preset-selected();
     callback custom-requested(float,float,float,float);
     width: 8 * 32px + root.button-size; height: root.button-size;
     for ink[i] in root.palette: Rectangle {
@@ -16,7 +17,7 @@ export component AnnotationPalette inherits Rectangle {
         border-color: root.selected == i ? Colors.primary : Colors.outline;
         Rectangle { x: root.inset; y: root.inset; width: parent.width - 2 * root.inset; height: parent.height - 2 * root.inset;
             border-radius: root.radius - 3px; background: ink; }
-        TouchArea { clicked => { root.selected = i; } }
+        TouchArea { clicked => { root.selected = i; root.preset-selected(); } }
     }
     custom := Rectangle {
         x: 8 * 32px; width: root.button-size; height: root.button-size; border-radius: root.radius;

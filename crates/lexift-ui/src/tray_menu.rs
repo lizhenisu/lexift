@@ -184,7 +184,7 @@ fn schedule_show(generation: u64, request: TrayMenuRequest, attempt: u8) {
                         place(window, request, &r.lifecycle);
                         let weak = window.as_weak();
                         let sink = Rc::new(move |input| {
-                            if input == PopupPointerInput::DismissRequested {
+                            if matches!(input, PopupPointerInput::DismissRequested { .. }) {
                                 finish_later(generation, None, false);
                             } else if let Some(window) = weak.upgrade() {
                                 crate::bridge::dispatch_pointer_input(window.window(), input);

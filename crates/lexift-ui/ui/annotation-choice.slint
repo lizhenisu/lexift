@@ -31,6 +31,8 @@ export component AnnotationChoiceWindow inherits Window {
     callback hsv-edited(float,float,float);
     callback hex-edited(string,bool);
     callback color-dragging(bool);
+    in-out property <bool> parameter-input-active: false;
+    callback parameter-input-finished();
     in-out property <int> selected;
     out property <length> menu-height: root.text-style-mode == 1 ? 80px : root.text-style-mode == 2 ? 160px : root.color-mode ? 300px : root.font-mode ? 320px : root.options.length * MenuMetrics.row-height + 8px;
     in-out property <length> font-scroll-y: 0px;
@@ -70,34 +72,49 @@ export component AnnotationChoiceWindow inherits Window {
             preview: root.preview; bright: root.bright; hex-text <=> root.hex-text; invalid: root.invalid;
             hsv-edited(h,s,v) => { root.hsv-edited(h,s,v); }
             hex-edited(text,commit) => { root.hex-edited(text,commit); }
-            dragging(active) => { root.color-dragging(active); }
+            input-active <=> root.parameter-input-active;
+            input-finished => { root.parameter-input-finished(); }
+            dragging(active) => { root.parameter-input-active = false; root.color-dragging(active); }
         }
+        if root.text-style-mode != 0: ScrollView {
+            width: 100%; height: 100%; content-width: self.visible-width;
+            content-height: root.menu-height;
+            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
             if root.text-style-mode == 1: Rectangle {
-                width: 100%; height: 100%;
+                width: 100%; height: root.menu-height;
                 Text { x: 10px; y: 9px; text: @tr("Outline width"); color: Colors.foreground; }
-                SpinBox { x: 150px; y: 6px; width: 80px; height: 30px; minimum: 1; maximum: 20; value <=> root.style-values.text-outline-width; }
+                SpinBox { x: 150px; y: 6px; width: 80px; height: 30px; minimum: 1; maximum: 20; value <=> root.style-values.text-outline-width;
+                    input-editing(active) => { root.parameter-input-active = active; }
+                    input-confirmed => { root.parameter-input-finished(); } input-finished => { root.parameter-input-finished(); } }
                 AnnotationPalette {
                     x: (parent.width - self.width) / 2; y: 44px; button-size: 27px; inset: 3px; radius: 6px;
                     selected <=> root.style-values.text-outline-color-index;
+                    preset-selected => { root.parameter-input-active = false; root.parameter-input-finished(); }
                     custom-requested(x,y,w,h) => { root.custom-requested(x,y,w,h); }
                 }
             }
             if root.text-style-mode == 2: Rectangle {
-                width: 100%; height: 100%;
+                width: 100%; height: root.menu-height;
                 Text { x: 10px; y: 9px; text: @tr("Opacity"); color: Colors.foreground; }
                 Slider { x: 110px; y: 14px; width: 185px; minimum: 0; maximum: 100;
                     value: root.style-values.text-bg-opacity; changed value => { root.style-values.text-bg-opacity = round(self.value); }
-                    dragging(active) => { root.color-dragging(active); } }
+                    dragging(active) => { root.parameter-input-active = false; root.color-dragging(active); } }
                 Text { x: 10px; y: 45px; text: @tr("Corner radius"); color: Colors.foreground; }
-                SpinBox { x: 120px; y: 40px; width: 80px; height: 30px; minimum: 0; maximum: 100; value <=> root.style-values.text-bg-rounding; }
+                SpinBox { x: 120px; y: 40px; width: 80px; height: 30px; minimum: 0; maximum: 100; value <=> root.style-values.text-bg-rounding;
+                    input-editing(active) => { root.parameter-input-active = active; }
+                    input-confirmed => { root.parameter-input-finished(); } input-finished => { root.parameter-input-finished(); } }
                 Text { x: 10px; y: 82px; text: @tr("Padding"); color: Colors.foreground; }
-                SpinBox { x: 120px; y: 78px; width: 80px; height: 30px; minimum: 0; maximum: 100; value <=> root.style-values.text-bg-padding; }
+                SpinBox { x: 120px; y: 78px; width: 80px; height: 30px; minimum: 0; maximum: 100; value <=> root.style-values.text-bg-padding;
+                    input-editing(active) => { root.parameter-input-active = active; }
+                    input-confirmed => { root.parameter-input-finished(); } input-finished => { root.parameter-input-finished(); } }
                 AnnotationPalette {
                     x: (parent.width - self.width) / 2; y: 122px; button-size: 27px; inset: 3px; radius: 6px;
                     selected <=> root.style-values.text-bg-color-index;
+                    preset-selected => { root.parameter-input-active = false; root.parameter-input-finished(); }
                     custom-requested(x,y,w,h) => { root.custom-requested(x,y,w,h); }
                 }
             }
+        }
         if !root.color-mode && root.text-style-mode == 0: ScrollView {
             content-y <=> root.font-scroll-y;
             width: 100%; height: 100%;

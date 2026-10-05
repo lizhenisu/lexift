@@ -65,6 +65,62 @@ pub(crate) fn place_attached_menu(
     }
 }
 
+/// Place a fixed-size tool window above or below its physical toolbar bounds.
+/// Oversized windows retain their size and align to the work-area origin.
+pub(crate) fn place_toolbar_popup(
+    anchor: Rect,
+    popup_width: u32,
+    popup_height: u32,
+    work_area: Option<Rect>,
+    gap: i32,
+    preferred: Side,
+) -> Point {
+    let width = i64::from(popup_width);
+    let height = i64::from(popup_height);
+    let gap = i64::from(gap.max(0));
+    let before = i64::from(anchor.top) - gap - height;
+    let after = i64::from(anchor.bottom) + gap;
+    let (preferred_y, other_y) = match preferred {
+        Side::Before => (before, after),
+        Side::After => (after, before),
+    };
+    let Some(area) = work_area else {
+        return Point {
+            x: anchor.left,
+            y: clamp_i32(preferred_y),
+        };
+    };
+    let y = if preferred_y >= i64::from(area.top) && preferred_y + height <= i64::from(area.bottom)
+    {
+        preferred_y
+    } else {
+        other_y
+    };
+    Point {
+        x: clamp_i32(clamp_origin(
+            i64::from(anchor.left),
+            width,
+            i64::from(area.left),
+            i64::from(area.right),
+        )),
+        y: clamp_i32(clamp_origin(
+            y,
+            height,
+            i64::from(area.top),
+            i64::from(area.bottom),
+        )),
+    }
+}
+
+fn clamp_origin(candidate: i64, size: i64, start: i64, end: i64) -> i64 {
+    let latest_start = end - size;
+    if latest_start < start {
+        start
+    } else {
+        candidate.clamp(start, latest_start)
+    }
+}
+
 /// Places a physical-size popup near an anchor and clamps it to the monitor work area.
 pub(crate) fn place_popup(
     anchor: Point,
@@ -122,12 +178,7 @@ fn place_axis(
     } else {
         (anchor - gap - size, Side::Before)
     };
-    let latest_start = usable_end - size;
-    let clamped = if latest_start < usable_start {
-        usable_start
-    } else {
-        candidate.clamp(usable_start, latest_start)
-    };
+    let clamped = clamp_origin(candidate, size, usable_start, usable_end);
     (clamped, side)
 }
 
@@ -148,6 +199,63 @@ mod tests {
 
     fn place(anchor: Point, area: Rect) -> PopupPlacement {
         place_popup(anchor, 420, 240, area, 12, 8)
+    }
+
+    #[test]
+    fn toolbar_placement_preserves_side_preference_and_saturates_extreme_dimensions() {
+        let toolbar = Rect {
+            left: 50,
+            top: 300,
+            right: 860,
+            bottom: 360,
+        };
+        let area = Rect {
+            left: 0,
+            top: 0,
+            right: 1000,
+            bottom: 700,
+        };
+        assert_eq!(
+            place_toolbar_popup(toolbar, 440, 270, Some(area), 15, Side::Before),
+            Point { x: 50, y: 15 }
+        );
+        assert_eq!(
+            place_toolbar_popup(toolbar, 440, 270, Some(area), 8, Side::After),
+            Point { x: 50, y: 368 }
+        );
+        let low = Rect {
+            top: 640,
+            bottom: 700,
+            ..toolbar
+        };
+        assert_eq!(
+            place_toolbar_popup(low, 440, 270, Some(area), 8, Side::After),
+            Point { x: 50, y: 362 }
+        );
+        let extreme = Rect {
+            left: i32::MIN,
+            top: i32::MIN,
+            right: i32::MAX,
+            bottom: i32::MAX,
+        };
+        assert_eq!(
+            place_toolbar_popup(extreme, u32::MAX, u32::MAX, None, i32::MAX, Side::Before),
+            Point {
+                x: i32::MIN,
+                y: i32::MIN
+            }
+        );
+        assert_eq!(
+            place_toolbar_popup(
+                extreme,
+                u32::MAX,
+                u32::MAX,
+                Some(area),
+                i32::MAX,
+                Side::After
+            ),
+            Point { x: 0, y: 0 }
+        );
     }
 
     #[test]

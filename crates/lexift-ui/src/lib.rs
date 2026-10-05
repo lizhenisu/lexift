@@ -1,6 +1,10 @@
 mod annotation;
+mod annotation_fingerprint;
+mod annotation_path;
 mod annotation_render;
+mod annotation_scene;
 mod annotation_sequence;
+mod annotation_signature;
 mod annotation_text;
 mod binding;
 mod bridge;
@@ -13,6 +17,6 @@ mod tray_menu;
 slint::include_modules!();
 
 pub use bridge::{
-    PassiveWindowPreparation, PopupPointerInput, PopupPointerSink, PopupResizeEdge, Ui, UiHandle,
-    WindowLifecycleCallbacks,
+    PassiveWindowPreparation, PopupDismissCause, PopupPointerInput, PopupPointerSink,
+    PopupResizeEdge, Ui, UiHandle, WindowLifecycleCallbacks,
 };

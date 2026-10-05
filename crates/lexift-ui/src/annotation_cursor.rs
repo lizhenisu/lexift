@@ -2,7 +2,7 @@
 use super::{Gesture, InteractionMode, Registry};
 use crate::AnnotationCursor;
 use lexift_core::domain::{
-    annotation::{Hit, Kind, Object, Session},
+    annotation::{Extra, Hit, Kind, Object, Session},
     geometry::Rect,
 };
 use slint::ComponentHandle;
@@ -29,7 +29,7 @@ fn resolve(mode: InteractionMode, gesture: Option<Gesture>, hit: Option<Hit>) ->
         return AnnotationCursor::Idle;
     }
     match gesture {
-        Some(Gesture::PlacePoint | Gesture::FinishArrow | Gesture::PlaceSequence { .. }) => {
+        Some(Gesture::PlacePoint | Gesture::FinishArrow | Gesture::PlaceSequence) => {
             AnnotationCursor::Drawing
         }
         Some(
@@ -37,7 +37,7 @@ fn resolve(mode: InteractionMode, gesture: Option<Gesture>, hit: Option<Hit>) ->
         ) => AnnotationCursor::Idle,
         Some(Gesture::CreateText { .. }) => AnnotationCursor::Drawing,
         Some(Gesture::Draw { .. }) => AnnotationCursor::Drawing,
-        Some(Gesture::Move { .. }) => AnnotationCursor::Moving,
+        Some(Gesture::Move) => AnnotationCursor::Moving,
         Some(Gesture::TextSelection { .. }) => AnnotationCursor::Text,
         Some(Gesture::Resize { handle, .. }) => handle_cursor(handle),
         Some(Gesture::TextHandle { handle, .. }) => {
@@ -91,7 +91,7 @@ fn at_point(
             if object.kind == Kind::Text && handle == 5 {
                 return AnnotationCursor::Vertical;
             }
-            if object.kind == Kind::HighlightRectangle && handle >= 8 {
+            if matches!(object.kind, Kind::HighlightRectangle | Kind::MosaicArea) && handle >= 8 {
                 return AnnotationCursor::CornerRadius;
             }
             if object.kind == Kind::HighlightLine {
@@ -128,7 +128,7 @@ fn editing_control_cursor(
 /// Updating feedback does not enqueue annotation rasterization. Slint applies it only
 /// to the hovered canvas TouchArea, leaving tool windows and click-through apps alone.
 pub(super) fn refresh(r: &Registry) {
-    let editing = if r.gesture.is_none() && !r.mode.is_mouse() {
+    let editing = if r.gesture().is_none() && !r.mode.is_mouse() {
         super::editing_text_object(r)
     } else {
         None
@@ -148,19 +148,19 @@ pub(super) fn refresh(r: &Registry) {
             });
         let desired = if let Some(cursor) = editing_control {
             cursor
-        } else if r.arrow_pending.is_some() {
+        } else if r.arrow_pending().is_some() {
             AnnotationCursor::Drawing
         } else {
             at_point(
                 &r.session,
                 r.mode,
-                r.gesture,
+                r.gesture(),
                 layer.last_pointer,
                 layer.window.window().scale_factor().max(0.1),
             )
         };
-        let hovered_text = r.text_editor.is_some()
-            && r.gesture.is_none()
+        let hovered_text = r.editor.window().is_some()
+            && r.gesture().is_none()
             && layer.last_pointer.is_some_and(|point| {
                 matches!(r.session.hit(point, layer.window.window().scale_factor().max(0.1)),
                 Some(Hit::Object(index)) if r.session.objects[index].kind == Kind::Text)
@@ -176,7 +176,29 @@ pub(super) fn refresh(r: &Registry) {
             desired
         };
         let was_custom = layer.window.get_cursor() == AnnotationCursor::CornerRadius;
-        let cursor = if desired == AnnotationCursor::CornerRadius {
+        let brush = desired == AnnotationCursor::Drawing
+            && super::active_kind(r) == Some(Kind::MosaicBrush)
+            && layer.last_pointer.is_some();
+        if !brush && layer.window.get_cursor() == AnnotationCursor::Brush {
+            (r.lifecycle.annotation_brush_cursor)(layer.window.window(), 0.);
+        }
+        let cursor = if brush {
+            let diameter = super::gestures::display_draft(&r.gesture, &r.pending_drawing)
+                .and_then(|object| match &object.extra {
+                    Extra::Mosaic(value) if object.kind == Kind::MosaicBrush => {
+                        Some(value.diameter)
+                    }
+                    _ => None,
+                })
+                .unwrap_or(
+                    r.values(11).size.clamp(1, 100) as f32 * layer.window.window().scale_factor(),
+                );
+            if (r.lifecycle.annotation_brush_cursor)(layer.window.window(), diameter) {
+                AnnotationCursor::Brush
+            } else {
+                AnnotationCursor::Drawing
+            }
+        } else if desired == AnnotationCursor::CornerRadius {
             if layer.corner_cursor_failed.get() {
                 AnnotationCursor::Moving
             } else if was_custom
@@ -199,19 +221,25 @@ pub(super) fn refresh(r: &Registry) {
             // Re-evaluate the stationary pointer after this event, only on a change.
             if let Some(point) = layer.last_pointer {
                 let generation = r.generation;
-                super::later(move || refresh_stationary_pointer(generation, index, point));
+                let revision = layer.revision();
+                layer
+                    .input()
+                    .post(move || refresh_stationary_pointer(generation, index, revision, point));
             }
         }
     }
 }
 
-fn refresh_stationary_pointer(generation: u64, index: usize, point: (f32, f32)) {
+fn refresh_stationary_pointer(generation: u64, index: usize, revision: u64, point: (f32, f32)) {
     let target = super::REGISTRY.with(|slot| {
         let slot = slot.borrow();
         let r = slot
             .as_ref()
             .filter(|r| r.generation == generation && !r.mode.is_mouse())?;
-        let layer = r.canvases.get(index)?;
+        let layer = r
+            .canvases
+            .get(index)
+            .filter(|layer| layer.revision() == revision)?;
         // Do not replay a stale position or change a tool window's cursor.
         let cursor = (r.lifecycle.toolbar_cursor_position)()?;
         if layer.last_pointer != Some(point)
@@ -228,9 +256,10 @@ fn refresh_stationary_pointer(generation: u64, index: usize, point: (f32, f32)) 
                 && cursor.x < p.x + size.width as i32
                 && cursor.y < p.y + size.height as i32
         };
-        if r.main.as_ref().is_some_and(|w| over_window(w.window()))
-            || r.panel.as_ref().is_some_and(|w| over_window(w.window()))
-            || r.choice
+        if r.main.get().is_some_and(|w| over_window(w.window()))
+            || r.panel.get().is_some_and(|w| over_window(w.window()))
+            || r.menus
+                .current
                 .as_ref()
                 .is_some_and(|m| over_window(m.window.window()))
         {
@@ -249,6 +278,17 @@ fn refresh_stationary_pointer(generation: u64, index: usize, point: (f32, f32)) 
         let _ = window
             .window()
             .dispatch_event_with_result(slint::platform::WindowEvent::PointerMoved { position });
+        // Slint can apply its fallback cursor after dispatching the pointer event.
+        // Reapply the native shape after that update, for a stationary first hover.
+        super::REGISTRY.with(|slot| {
+            if let Some(r) = slot
+                .borrow()
+                .as_ref()
+                .filter(|r| r.generation == generation)
+            {
+                refresh(r);
+            }
+        });
     }
 }
 
@@ -261,6 +301,7 @@ mod tests {
             for rotation in [0., 0.6] {
                 let bounds = Bounds::from_corners((-240., -100.), (-208., -72.));
                 let object = Object {
+                    id: Default::default(),
                     kind: Kind::Text,
                     bounds,
                     points: Vec::new(),
@@ -294,11 +335,7 @@ mod tests {
                         at_point(
                             &session,
                             TOOL,
-                            Some(Gesture::Resize {
-                                initial: bounds,
-                                index: 0,
-                                handle,
-                            }),
+                            Some(Gesture::Resize { handle }),
                             Some((400., 400.)),
                             scale
                         ),
@@ -323,11 +360,7 @@ mod tests {
                     at_point(
                         &session,
                         TOOL,
-                        Some(Gesture::Move {
-                            start: bounds.center(),
-                            initial: bounds,
-                            index: 0,
-                        }),
+                        Some(Gesture::Move),
                         Some(bounds.center()),
                         scale
                     ),
@@ -342,6 +375,38 @@ mod tests {
     const TOOL: InteractionMode = InteractionMode::Tool(0);
 
     #[test]
+    fn foreign_objects_and_handles_keep_the_current_drawing_cursor() {
+        for scale in [1., 1.25] {
+            let mut session = Session::new();
+            session.add(Object {
+                id: Default::default(),
+                kind: Kind::Rectangle,
+                bounds: Bounds::from_corners((-200., -100.), (-40., 20.)),
+                points: Vec::new(),
+                style: Style {
+                    fill: true,
+                    ..Style::default()
+                },
+                extra: Extra::None,
+            });
+            let center = session.objects[0].bounds.center();
+            let handle = session.objects[0].edit_handles(scale)[0];
+            session.set_edit_scope(lexift_core::domain::annotation::EditScope::Magnifier);
+            for point in [center, handle] {
+                assert_eq!(
+                    at_point(&session, InteractionMode::Tool(2), None, Some(point), scale),
+                    AnnotationCursor::Drawing
+                );
+            }
+            session.set_edit_scope(lexift_core::domain::annotation::EditScope::Geometry);
+            assert_eq!(
+                at_point(&session, TOOL, None, Some(center), scale),
+                AnnotationCursor::Moving
+            );
+        }
+    }
+
+    #[test]
     fn highlighter_handles_keep_their_edit_cursor_during_drag() {
         for kind in [Kind::HighlightRectangle, Kind::HighlightLine] {
             let mut session = Session::new();
@@ -352,6 +417,7 @@ mod tests {
                 Vec::new()
             };
             session.add(Object {
+                id: Default::default(),
                 kind,
                 bounds,
                 points,
@@ -372,11 +438,7 @@ mod tests {
                     at_point(
                         &session,
                         TOOL,
-                        Some(Gesture::Resize {
-                            initial: bounds,
-                            index: 0,
-                            handle
-                        }),
+                        Some(Gesture::Resize { handle }),
                         Some((500., 500.)),
                         1.
                     ),
@@ -393,17 +455,7 @@ mod tests {
                 AnnotationCursor::Moving
             );
             assert_eq!(
-                at_point(
-                    &session,
-                    TOOL,
-                    Some(Gesture::Move {
-                        start: body,
-                        initial: bounds,
-                        index: 0
-                    }),
-                    Some((500., 500.)),
-                    1.
-                ),
+                at_point(&session, TOOL, Some(Gesture::Move), Some((500., 500.)), 1.),
                 AnnotationCursor::Moving
             );
         }
@@ -433,7 +485,6 @@ mod tests {
 
     #[test]
     fn active_drag_keeps_its_cursor_when_crossing_other_hit_regions() {
-        let initial = Bounds::from_corners((0., 0.), (200., 100.));
         assert_eq!(
             resolve(
                 InteractionMode::Tool(2),
@@ -445,28 +496,13 @@ mod tests {
         let gestures = [
             (
                 Gesture::Draw {
-                    start: (0., 0.),
                     kind: Kind::Rectangle,
-                    style: Style::default(),
-                    start_scale: 1.,
-                    max_distance: 0.,
                 },
                 AnnotationCursor::Drawing,
             ),
+            (Gesture::Move, AnnotationCursor::Moving),
             (
-                Gesture::Move {
-                    start: (0., 0.),
-                    initial,
-                    index: 0,
-                },
-                AnnotationCursor::Moving,
-            ),
-            (
-                Gesture::Resize {
-                    initial,
-                    index: 0,
-                    handle: 7,
-                },
+                Gesture::Resize { handle: 7 },
                 AnnotationCursor::DiagonalDown,
             ),
         ];
@@ -496,6 +532,7 @@ mod tests {
             let mut session = Session::new();
             let curved = points.len() == 3;
             let mut arrow = Object {
+                id: Default::default(),
                 bounds: Bounds::from_corners(points[0], points[1]),
                 points,
                 kind: Kind::Arrow,
@@ -520,11 +557,7 @@ mod tests {
                 at_point(
                     &session,
                     TOOL,
-                    Some(Gesture::Resize {
-                        initial: session.objects[0].bounds,
-                        index: 0,
-                        handle: 2,
-                    }),
+                    Some(Gesture::Resize { handle: 2 }),
                     Some((500., 500.)),
                     1.,
                 ),
@@ -563,6 +596,7 @@ mod tests {
                     screen_point(display, (300., 200.), scale),
                 );
                 session.add(Object {
+                    id: Default::default(),
                     points: Vec::new(),
                     bounds,
                     kind,

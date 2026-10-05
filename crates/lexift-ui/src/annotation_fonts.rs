@@ -1,14 +1,77 @@
 //! Installed-font defaults and per-tool preferences; object fonts remain independent.
-use super::*;
 use lexift_core::domain::ui_language::UiLanguage;
 use std::collections::HashMap;
 
 type Aliases = HashMap<String, Vec<(String, fontdb::Language)>>;
 
+/// The three font preferences are independent of object style snapshots.
+#[derive(Clone, Copy)]
+pub(super) enum Tool {
+    Text,
+    Watermark,
+    Sequence,
+}
+
+impl Tool {
+    pub fn from_index(index: usize) -> Option<Self> {
+        match index {
+            8 => Some(Self::Text),
+            9 => Some(Self::Watermark),
+            10 => Some(Self::Sequence),
+            _ => None,
+        }
+    }
+
+    fn slot(self) -> usize {
+        match self {
+            Self::Text => 0,
+            Self::Watermark => 1,
+            Self::Sequence => 2,
+        }
+    }
+}
+
+/// Process-local installed catalog and manual choices, without window/session ownership.
 #[derive(Default)]
-pub(super) struct Preferences {
+pub(super) struct Directory {
+    names: Vec<String>,
     manual: [Option<String>; 3],
     aliases: Aliases,
+    sans: Option<String>,
+    loaded: bool,
+}
+
+impl Directory {
+    /// Loading is one-shot even when the installed catalog is empty.
+    pub fn ensure(&mut self) -> bool {
+        if self.loaded {
+            return false;
+        }
+        self.names = crate::annotation_text::font_families();
+        self.aliases = alias_index(crate::annotation_text::font_family_aliases());
+        self.sans = crate::annotation_text::system_sans_family();
+        self.loaded = true;
+        true
+    }
+
+    pub fn names(&self) -> &[String] {
+        &self.names
+    }
+
+    pub fn preferred(&self, tool: Tool, language: UiLanguage) -> String {
+        self.manual[tool.slot()]
+            .clone()
+            .unwrap_or_else(|| resolve(&self.names, &self.aliases, language, self.sans.as_deref()))
+    }
+
+    /// Invalid Slint indices cannot turn an object backfill into a manual preference.
+    pub fn choose(&mut self, tool: Tool, index: i32) {
+        if let Ok(index) = usize::try_from(index)
+            && let Some(name) = self.names.get(index)
+        {
+            self.manual[tool.slot()] = Some(name.clone());
+        }
+    }
 }
 
 fn name_language(language: UiLanguage) -> fontdb::Language {
@@ -92,71 +155,50 @@ fn resolve(
     local_name(names, aliases, name, language)
 }
 
-pub(super) fn preferred(r: &Registry, tool: usize) -> String {
-    r.font_preferences.manual[tool - 8]
-        .clone()
-        .unwrap_or_else(|| {
-            resolve(
-                &r.fonts,
-                &r.font_preferences.aliases,
-                crate::i18n::language(),
-                crate::annotation_text::system_sans_family().as_deref(),
-            )
-        })
-}
-
-pub(super) fn ensure(r: &mut Registry) {
-    if r.fonts.is_empty() {
-        r.fonts = crate::annotation_text::font_families();
-        r.font_preferences.aliases = alias_index(crate::annotation_text::font_family_aliases());
-        reset_defaults(r);
-    }
-}
-
-/// Refresh only idle tool defaults; selected objects and active drafts keep their actual fonts.
-pub(super) fn reset_defaults(r: &mut Registry) {
-    for tool in 8..=10 {
-        let selected = r
-            .session
-            .selected
-            .and_then(|i| r.session.objects.get(i))
-            .is_some_and(|o| {
-                (tool == 8 && o.kind == Kind::Text) || (tool == 10 && o.kind == Kind::Sequence)
-            });
-        let editing = r.text_edit.as_ref().is_some_and(|e| {
-            if tool == 8 {
-                !editing_sequence(r)
-                    && e.index.is_none_or(|i| {
-                        r.session
-                            .objects
-                            .get(i)
-                            .is_some_and(|o| o.kind == Kind::Text)
-                    })
-            } else {
-                tool == 10 && editing_sequence(r)
-            }
-        });
-        if selected || editing || (tool == 9 && r.session.watermark.is_some()) {
-            continue;
-        }
-        let name = preferred(r, tool);
-        if let Some(index) = r.fonts.iter().position(|f| f.eq_ignore_ascii_case(&name)) {
-            r.values[tool].font = index as i32;
-        }
-    }
-}
-
-pub(super) fn choose(r: &mut Registry, tool: usize, index: i32) {
-    if (8..=10).contains(&tool)
-        && let Some(name) = r.fonts.get(index.max(0) as usize)
-    {
-        r.font_preferences.manual[tool - 8] = Some(name.clone());
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::{
+        REGISTRY, adopt_selected_style, chosen_font, create_canvas, init, sequence_from_values,
+        shutdown,
+    };
     use super::*;
+    use crate::bridge::{PassiveWindowPreparation, WindowLifecycleCallbacks};
+    use lexift_core::domain::{annotation::Extra, geometry::Rect};
+    use std::rc::Rc;
+
+    #[test]
+    fn independent_preferences_reject_invalid_indices_and_preserve_exact_names() {
+        let mut directory = Directory {
+            names: vec!["Microsoft YaHei".into(), "微软雅黑".into(), "Arial".into()],
+            aliases: alias_index(vec![vec![
+                (
+                    "Microsoft YaHei".into(),
+                    fontdb::Language::English_UnitedStates,
+                ),
+                (
+                    "微软雅黑".into(),
+                    fontdb::Language::Chinese_PeoplesRepublicOfChina,
+                ),
+            ]]),
+            loaded: true,
+            ..Directory::default()
+        };
+        directory.choose(Tool::Text, 0);
+        directory.choose(Tool::Sequence, 2);
+        for tool in [Tool::Text, Tool::Watermark, Tool::Sequence] {
+            directory.choose(tool, -1);
+            directory.choose(tool, i32::MAX);
+        }
+        for language in UiLanguage::ALL {
+            assert_eq!(directory.preferred(Tool::Text, language), "Microsoft YaHei");
+            assert_eq!(directory.preferred(Tool::Sequence, language), "Arial");
+        }
+        assert_eq!(
+            directory.preferred(Tool::Watermark, UiLanguage::SimplifiedChinese),
+            "微软雅黑"
+        );
+        assert!(directory.manual[Tool::Watermark.slot()].is_none());
+    }
     #[test]
     fn language_changes_preserve_manual_preferences_and_existing_objects() {
         use slint::platform::{
@@ -185,7 +227,7 @@ mod tests {
         REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
-            r.fonts = [
+            r.fonts.names = [
                 "Arial",
                 "Malgun Gothic",
                 "Microsoft JhengHei",
@@ -195,15 +237,16 @@ mod tests {
             ]
             .map(String::from)
             .to_vec();
+            r.fonts.loaded = true;
             for language in UiLanguage::ALL {
                 crate::i18n::select(language);
-                reset_defaults(r);
+                r.reset_font_defaults();
                 for tool in 8..=10 {
                     assert_eq!(chosen_font(r, tool), candidates(language)[0]);
                 }
             }
-            r.fonts.push("微软雅黑".into());
-            r.font_preferences.aliases = alias_index(vec![vec![
+            r.fonts.names.push("微软雅黑".into());
+            r.fonts.aliases = alias_index(vec![vec![
                 (
                     "Microsoft YaHei".into(),
                     fontdb::Language::English_UnitedStates,
@@ -214,17 +257,17 @@ mod tests {
                 ),
             ]]);
             crate::i18n::select(UiLanguage::SimplifiedChinese);
-            reset_defaults(r);
+            r.reset_font_defaults();
             for tool in 8..=10 {
                 assert_eq!(chosen_font(r, tool), "微软雅黑");
             }
-            choose(r, 8, 3);
-            reset_defaults(r);
+            r.fonts.choose(Tool::Text, 3);
+            r.reset_font_defaults();
             assert_eq!(chosen_font(r, 8), "Microsoft YaHei");
             assert_eq!(chosen_font(r, 9), "微软雅黑");
-            choose(r, 8, 0);
+            r.fonts.choose(Tool::Text, 0);
             crate::i18n::select(UiLanguage::Japanese);
-            reset_defaults(r);
+            r.reset_font_defaults();
             assert_eq!(chosen_font(r, 8), "Arial");
             assert_eq!(chosen_font(r, 9), "Yu Gothic");
             let mut object = crate::annotation_sequence::tests::badge(1.25);
@@ -232,6 +275,7 @@ mod tests {
                 s.caption.font_family = "Arial".into();
             }
             crate::annotation_sequence::layout(&mut object);
+            assert!(r.set_mode(super::super::InteractionMode::Tool(4)));
             assert!(r.session.add(object));
             r.pending_displays = vec![Rect {
                 left: -400,
@@ -241,11 +285,11 @@ mod tests {
             }];
             create_canvas(r, 0);
             adopt_selected_style(r, 0);
-            assert!(r.font_preferences.manual[2].is_none());
+            assert!(r.fonts.manual[2].is_none());
             crate::i18n::select(UiLanguage::Korean);
-            reset_defaults(r);
+            r.reset_font_defaults();
             assert_eq!(chosen_font(r, 10), "Arial");
-            assert_eq!(preferred(r, 10), "Malgun Gothic");
+            assert_eq!(r.preferred_font(10), "Malgun Gothic");
             let new = sequence_from_values(r, (0., 0.), 1.25);
             let Extra::Sequence(s) = new.extra else {
                 unreachable!()
@@ -256,7 +300,7 @@ mod tests {
             };
             assert_eq!(existing.caption.font_family, "Arial");
             r.close();
-            assert_eq!(preferred(r, 8), "Arial");
+            assert_eq!(r.preferred_font(8), "Arial");
         });
         shutdown();
     }

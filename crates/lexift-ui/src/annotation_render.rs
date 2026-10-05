@@ -1,4 +1,11 @@
 //! Rasterizes the transient annotation document into a transparent monitor surface.
+#[path = "annotation_mosaic.rs"]
+pub(crate) mod mosaic;
+#[path = "annotation_mosaic_lens.rs"]
+pub(crate) mod mosaic_lens;
+#[path = "annotation_mosaic_worker.rs"]
+pub(crate) mod mosaic_worker;
+use crate::annotation_scene::Document;
 use lexift_core::domain::{
     annotation::{Bounds, Endpoint, Extra, Kind, MagnifierConnector, Object, Session},
     geometry::Rect,
@@ -171,6 +178,28 @@ fn draw_brush(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) {
 }
 
 fn draw_object(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) {
+    if matches!(
+        object.kind,
+        Kind::Rectangle | Kind::Ellipse | Kind::HighlightRectangle
+    ) {
+        // Fixed-point curve clipping must not depend on an asset's cropped
+        // origin; otherwise a shape crossing displays acquires different AA.
+        let padding = object.style.width.max(1.) * scale * 5. + 2.;
+        let geometry = Rect {
+            left: (object.bounds.left - padding).floor() as i32,
+            top: (object.bounds.top - padding).floor() as i32,
+            right: (object.bounds.right + padding).ceil() as i32,
+            bottom: (object.bounds.bottom + padding).ceil() as i32,
+        };
+        crate::annotation_path::draw_cells(pixmap, monitor, geometry, |tile, origin| {
+            draw_object_content(tile, object, origin, scale);
+        });
+    } else {
+        draw_object_content(pixmap, object, monitor, scale);
+    }
+}
+
+fn draw_object_content(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) {
     if object.kind == Kind::Sequence {
         crate::annotation_sequence::draw(pixmap, object, monitor);
         if let Some(arrow) = object.text_link_arrow() {
@@ -248,6 +277,23 @@ fn draw_object(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) 
             ..Stroke::default()
         };
         pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+    }
+}
+
+pub(crate) fn draw_content_object(
+    pixmap: &mut Pixmap,
+    object: &Object,
+    monitor: Rect,
+    scale: f32,
+    reference: Option<&str>,
+) {
+    if object.kind == Kind::Text && reference.is_some() {
+        crate::annotation_text::draw_text_with_reference(pixmap, object, monitor, scale, reference);
+        if let Some(arrow) = object.text_link_arrow() {
+            draw_line_annotation(pixmap, &arrow, monitor, scale);
+        }
+    } else {
+        draw_object(pixmap, object, monitor, scale);
     }
 }
 
@@ -350,6 +396,18 @@ fn draw_endpoint(
 
 fn draw_line_annotation(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) {
     let points = object.stroke_points();
+    draw_line_annotation_prepared(pixmap, object, monitor, scale, &points);
+}
+
+/// Draw a previously interpolated centerline. Keep viewport-local path arithmetic
+/// and endpoint construction identical to uncached rendering.
+pub(crate) fn draw_line_annotation_prepared(
+    pixmap: &mut Pixmap,
+    object: &Object,
+    monitor: Rect,
+    scale: f32,
+    points: &[(f32, f32)],
+) {
     if points.len() < 2 {
         return;
     }
@@ -514,14 +572,32 @@ fn magnifier_connector_segment(
     Some((start, frame_anchor(output, ellipse, source_center)))
 }
 
+/// Borrowed layer range plus composition policy. Preserve source indices even
+/// when a lens excludes other lenses or later effects from its sampled marks.
+#[derive(Clone, Copy)]
+struct LayerScope<'a> {
+    document: Document<'a>,
+    limit: usize,
+    interaction: bool,
+    lens_index: Option<usize>,
+}
+
+impl<'a> LayerScope<'a> {
+    fn objects(self) -> impl ExactSizeIterator<Item = &'a Object> {
+        self.document.objects().take(self.limit)
+    }
+}
+
 /// Composites only Lexift marks. The native magnifier always excludes every
 /// annotation HWND, preventing its own guide and handles from being sampled.
 fn draw_magnified_marks(
     pixmap: &mut Pixmap,
     session: &Session,
+    scope: LayerScope<'_>,
     draft: Option<&Object>,
     object: &Object,
     monitor: Rect,
+    effects: Option<mosaic_worker::View<'_>>,
 ) {
     let Extra::Magnifier {
         output,
@@ -553,21 +629,18 @@ fn draw_magnified_marks(
     if width == 0 || height == 0 || width as u64 * height as u64 > 40_000_000 {
         return;
     }
-    let mut marks = Session::new();
-    marks.spotlight_opacity = session.spotlight_opacity;
-    marks.watermark = session.watermark.clone();
-    marks.displays = session.displays.clone();
-    marks.objects = session
-        .objects
-        .iter()
-        .filter(|o| o.kind != Kind::Magnifier)
-        .cloned()
-        .collect();
-    let draft = draft.filter(|o| o.kind != Kind::Magnifier);
-    if marks.objects.is_empty() && draft.is_none() && marks.watermark.is_none() {
+    let draft = draft.filter(|o| {
+        !matches!(
+            o.kind,
+            Kind::Magnifier | Kind::MosaicArea | Kind::MosaicBrush
+        )
+    });
+    if scope.limit == 0 && draft.is_none() && session.watermark.is_none() {
         return;
     }
-    let Some(sampled) = render(&marks, sample, 1., draft, None) else {
+    let Some(sampled) =
+        render_effect_layers(session, scope, sample, 1., draft, None, None, effects, None)
+    else {
         return;
     };
     let Some(mut enlarged) = Pixmap::new(width, height) else {
@@ -612,7 +685,12 @@ fn draw_magnified_marks(
     );
 }
 
-fn draw_magnifier_overlay(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) {
+pub(crate) fn draw_magnifier_overlay(
+    pixmap: &mut Pixmap,
+    object: &Object,
+    monitor: Rect,
+    scale: f32,
+) {
     let Extra::Magnifier {
         output,
         ellipse,
@@ -731,6 +809,50 @@ fn draw_magnifier_overlay(pixmap: &mut Pixmap, object: &Object, monitor: Rect, s
             },
             Transform::identity(),
             None,
+        );
+    }
+}
+
+pub(crate) fn draw_magnifier_mask(pixmap: &mut Pixmap, object: &Object, monitor: Rect) {
+    let Extra::Magnifier {
+        output, ellipse, ..
+    } = object.extra
+    else {
+        return;
+    };
+    if let Some(shape) = path(
+        output,
+        if ellipse {
+            Kind::Ellipse
+        } else {
+            Kind::Rectangle
+        },
+        0.,
+        Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        },
+    ) {
+        let geometry = Rect {
+            left: output.left.floor() as i32,
+            top: output.top.floor() as i32,
+            right: output.right.ceil() as i32,
+            bottom: output.bottom.ceil() as i32,
+        };
+        crate::annotation_path::paint_coverage(
+            pixmap,
+            monitor,
+            geometry,
+            &color_paint([255; 3]),
+            |target, origin, white| {
+                if let Some(path) =
+                    crate::annotation_path::normalize(shape.clone(), Transform::identity(), origin)
+                {
+                    target.fill_path(&path, white, FillRule::Winding, Transform::identity(), None);
+                }
+            },
         );
     }
 }
@@ -873,36 +995,236 @@ pub(crate) fn render_editing(
     hovered: Option<usize>,
     reference: Option<&str>,
 ) -> Option<Pixmap> {
+    render_editing_with_effects(
+        session,
+        monitor,
+        scale,
+        in_progress,
+        hovered,
+        reference,
+        None,
+    )
+}
+
+pub(crate) fn render_editing_with_effects(
+    session: &Session,
+    monitor: Rect,
+    scale: f32,
+    in_progress: Option<&Object>,
+    hovered: Option<usize>,
+    reference: Option<&str>,
+    effects: Option<mosaic_worker::View<'_>>,
+) -> Option<Pixmap> {
+    render_document_with_effects(
+        session.into(),
+        monitor,
+        scale,
+        in_progress,
+        hovered,
+        reference,
+        effects,
+    )
+}
+
+pub(crate) fn render_document_with_effects(
+    document: Document<'_>,
+    monitor: Rect,
+    scale: f32,
+    in_progress: Option<&Object>,
+    hovered: Option<usize>,
+    reference: Option<&str>,
+    effects: Option<mosaic_worker::View<'_>>,
+) -> Option<Pixmap> {
+    render_effect_layers(
+        document.session,
+        LayerScope {
+            document,
+            limit: document.len(),
+            interaction: true,
+            lens_index: None,
+        },
+        monitor,
+        scale,
+        in_progress,
+        hovered,
+        reference,
+        effects,
+        None,
+    )
+}
+
+pub(crate) fn render_captured_effects(
+    session: &Session,
+    before_index: usize,
+    monitor: Rect,
+    scale: f32,
+    effects: mosaic_worker::View<'_>,
+    capture: &lexift_core::ports::screen_capture::ScreenCaptureFrame,
+) -> Option<Pixmap> {
+    session.objects.get(..before_index)?;
+    render_effect_layers(
+        session,
+        LayerScope {
+            document: session.into(),
+            limit: before_index,
+            interaction: false,
+            lens_index: None,
+        },
+        monitor,
+        scale,
+        None,
+        None,
+        None,
+        Some(effects),
+        Some(capture),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_effect_layers(
+    session: &Session,
+    scope: LayerScope<'_>,
+    monitor: Rect,
+    scale: f32,
+    in_progress: Option<&Object>,
+    hovered: Option<usize>,
+    reference: Option<&str>,
+    effects: Option<mosaic_worker::View<'_>>,
+    capture: Option<&lexift_core::ports::screen_capture::ScreenCaptureFrame>,
+) -> Option<Pixmap> {
     let width = u32::try_from(monitor.right - monitor.left).ok()?;
     let height = u32::try_from(monitor.bottom - monitor.top).ok()?;
     if width == 0 || height == 0 || width as u64 * height as u64 > 40_000_000 {
         return None;
     }
     let mut pixmap = Pixmap::new(width, height)?;
-    if let Some(watermark) = &session.watermark {
-        if session.displays.is_empty() {
-            crate::annotation_text::draw_watermark(&mut pixmap, watermark, monitor, monitor, scale);
-        } else {
-            for display in &session.displays {
-                if display.left < monitor.right
-                    && display.right > monitor.left
-                    && display.top < monitor.bottom
-                    && display.bottom > monitor.top
+    draw_backdrop_objects(
+        &mut pixmap,
+        session,
+        scope.objects(),
+        monitor,
+        scale,
+        in_progress,
+    )?;
+    for (index, object) in scope.objects().chain(in_progress).enumerate() {
+        if scope.lens_index.is_some_and(|lens| {
+            object.kind == Kind::Magnifier
+                || (index >= lens && matches!(object.kind, Kind::MosaicArea | Kind::MosaicBrush))
+        }) {
+            continue;
+        }
+        if matches!(object.kind, Kind::MosaicArea | Kind::MosaicBrush) {
+            if matches!(&object.extra, Extra::Mosaic(m) if m.strength > 0)
+                && let Some(view) = effects
+            {
+                for tile in view.frame.tiles.iter().filter(|t| {
+                    t.index == index
+                        && t.object.kind == object.kind
+                        && (matches!((&t.object.extra, &object.extra),
+                            (Extra::Mosaic(a), Extra::Mosaic(b)) if a.id == b.id && (b.id != 0
+                                || view.preview.is_some_and(|(i, original)| i == index && original == &t.object)))
+                            || view
+                                .preview
+                                .is_some_and(|(i, original)| i == index && original == &t.object))
+                }) {
+                if view.remask
+                    && view
+                        .preview
+                        .is_some_and(|(i, original)| i == index && original == &tile.object)
                 {
-                    crate::annotation_text::draw_watermark(
-                        &mut pixmap,
-                        watermark,
-                        monitor,
-                        *display,
-                        scale,
-                    );
+                    mosaic::blit_current_mask(&mut pixmap, monitor, tile, object);
+                } else if tile.object.bounds == object.bounds && tile.object.points == object.points
+                {
+                    mosaic::blit(&mut pixmap, monitor, tile);
+                } else if view
+                    .preview
+                    .is_some_and(|(i, original)| i == index && original == &tile.object)
+                {
+                    if view.remask {
+                        mosaic::blit_current_mask(&mut pixmap, monitor, tile, object);
+                    } else {
+                        mosaic::blit_transformed(&mut pixmap, monitor, tile, object.bounds);
+                    }
+                }
                 }
             }
+        } else if object.kind == Kind::Magnifier {
+            if let Some(capture) = capture {
+                mosaic_lens::draw(&mut pixmap, object, monitor, capture)?;
+            } else {
+                mosaic_lens::reveal_native(
+                    &mut pixmap,
+                    object,
+                    scope.objects().take(index),
+                    monitor,
+                );
+            }
+            draw_magnified_marks(
+                &mut pixmap,
+                session,
+                LayerScope {
+                    interaction: false,
+                    lens_index: Some(index),
+                    ..scope
+                },
+                in_progress,
+                object,
+                monitor,
+                effects,
+            );
+            draw_magnifier_overlay(&mut pixmap, object, monitor, scale);
+        } else if object.kind == Kind::Text
+            && scope.document.selected() == Some(index)
+            && reference.is_some()
+        {
+            crate::annotation_text::draw_text_with_reference(
+                &mut pixmap,
+                object,
+                monitor,
+                scale,
+                reference,
+            );
+            if let Some(arrow) = object.text_link_arrow() {
+                draw_line_annotation(&mut pixmap, &arrow, monitor, scale);
+            }
+        } else {
+            draw_object(&mut pixmap, object, monitor, scale);
         }
     }
-    let spotlight = session
-        .objects
-        .iter()
+    if scope.interaction {
+        draw_document_interaction(&mut pixmap, scope.document, monitor, scale, hovered);
+    }
+    Some(pixmap)
+}
+
+pub(crate) fn draw_backdrop(
+    pixmap: &mut Pixmap,
+    session: &Session,
+    monitor: Rect,
+    scale: f32,
+    in_progress: Option<&Object>,
+) -> Option<()> {
+    draw_backdrop_objects(
+        pixmap,
+        session,
+        session.objects.iter(),
+        monitor,
+        scale,
+        in_progress,
+    )
+}
+
+fn draw_backdrop_objects<'a>(
+    pixmap: &mut Pixmap,
+    session: &Session,
+    objects: impl Iterator<Item = &'a Object>,
+    monitor: Rect,
+    scale: f32,
+    in_progress: Option<&'a Object>,
+) -> Option<()> {
+    let width = pixmap.width();
+    let height = pixmap.height();
+    let spotlight = objects
         .chain(in_progress)
         .filter(|o| o.kind.is_spotlight())
         .collect::<Vec<_>>();
@@ -944,33 +1266,96 @@ pub(crate) fn render_editing(
         }
         pixmap.data_mut().copy_from_slice(mask.data());
     }
-    for (index, object) in session.objects.iter().chain(in_progress).enumerate() {
-        if object.kind == Kind::Magnifier {
-            draw_magnified_marks(&mut pixmap, session, in_progress, object, monitor);
-            draw_magnifier_overlay(&mut pixmap, object, monitor, scale);
-        } else if object.kind == Kind::Text
-            && session.selected == Some(index)
-            && reference.is_some()
-        {
-            crate::annotation_text::draw_text_with_reference(
-                &mut pixmap,
-                object,
-                monitor,
-                scale,
-                reference,
-            );
-            if let Some(arrow) = object.text_link_arrow() {
-                draw_line_annotation(&mut pixmap, &arrow, monitor, scale);
-            }
+    // Watermarks remain visible over both the dimmed backdrop and its clear holes.
+    if let Some(watermark) = &session.watermark {
+        if session.displays.is_empty() {
+            crate::annotation_text::draw_watermark(pixmap, watermark, monitor, monitor, scale);
         } else {
-            draw_object(&mut pixmap, object, monitor, scale);
+            for display in &session.displays {
+                if display.left < monitor.right
+                    && display.right > monitor.left
+                    && display.top < monitor.bottom
+                    && display.bottom > monitor.top
+                {
+                    crate::annotation_text::draw_watermark(
+                        pixmap, watermark, monitor, *display, scale,
+                    );
+                }
+            }
         }
     }
+    Some(())
+}
+pub(crate) fn draw_interaction(
+    pixmap: &mut Pixmap,
+    session: &Session,
+    monitor: Rect,
+    scale: f32,
+    hovered: Option<usize>,
+) {
+    draw_document_interaction(pixmap, session.into(), monitor, scale, hovered);
+}
+
+fn draw_document_interaction(
+    pixmap: &mut Pixmap,
+    document: Document<'_>,
+    monitor: Rect,
+    scale: f32,
+    hovered: Option<usize>,
+) {
+    let selected = document
+        .selected()
+        .and_then(|index| document.get(index))
+        .filter(|object| object.is_editable());
+    let hovered = hovered
+        .and_then(|index| document.get(index))
+        .filter(|object| {
+            matches!(
+                object.kind,
+                Kind::Rectangle | Kind::Ellipse | Kind::HighlightRectangle
+            )
+        });
+    let mut bounds: Option<Bounds> = None;
+    for object in selected.into_iter().chain(hovered) {
+        let mut points = vec![
+            (object.bounds.left, object.bounds.top),
+            (object.bounds.right, object.bounds.bottom),
+        ];
+        points.extend(object.edit_handles(scale));
+        for (x, y) in points {
+            let b = bounds.get_or_insert(Bounds::from_corners((x, y), (x, y)));
+            b.left = b.left.min(x);
+            b.right = b.right.max(x);
+            b.top = b.top.min(y);
+            b.bottom = b.bottom.max(y);
+        }
+    }
+    let Some(bounds) = bounds else {
+        return;
+    };
+    let padding = 18. * scale + 2.;
+    let geometry = Rect {
+        left: (bounds.left - padding).floor() as i32,
+        top: (bounds.top - padding).floor() as i32,
+        right: (bounds.right + padding).ceil() as i32,
+        bottom: (bounds.bottom + padding).ceil() as i32,
+    };
+    crate::annotation_path::draw_cells(pixmap, monitor, geometry, |frame, origin| {
+        draw_interaction_content(frame, selected, hovered, origin, scale)
+    });
+}
+
+fn draw_interaction_content(
+    pixmap: &mut Pixmap,
+    selected: Option<&Object>,
+    hovered: Option<&Object>,
+    monitor: Rect,
+    scale: f32,
+) {
     // Hover feedback belongs to the object boundary, while edit handles belong only
     // to the selected object. Keep the outline above the translucent fill.
-    for (index, is_hover) in [(hovered, true), (session.selected, false)] {
-        let Some(index) = index else { continue };
-        if let Some(object) = session.objects.get(index).filter(|o| {
+    for (object, is_hover) in [(hovered, true), (selected, false)] {
+        if let Some(object) = object.filter(|o| {
             if is_hover {
                 matches!(
                     o.kind,
@@ -997,14 +1382,7 @@ pub(crate) fn render_editing(
             );
         }
     }
-    if let Some(index) = session.selected.and_then(|i| {
-        session
-            .objects
-            .get(i)
-            .filter(|o| o.is_editable())
-            .map(|_| i)
-    }) {
-        let selected = &session.objects[index];
+    if let Some(selected) = selected {
         if selected.kind == Kind::Sequence
             && let Some(rect) = tiny_skia::Rect::from_xywh(
                 selected.bounds.left - monitor.left as f32,
@@ -1077,7 +1455,7 @@ pub(crate) fn render_editing(
                         None,
                     );
                 }
-                draw_sequence_control_icon(&mut pixmap, handle, center, scale);
+                draw_sequence_control_icon(pixmap, handle, center, scale);
                 continue;
             }
             if (selected.kind == Kind::Sequence && handle == 6)
@@ -1122,7 +1500,7 @@ pub(crate) fn render_editing(
             ) else {
                 continue;
             };
-            if handle >= 8 && selected.kind == Kind::HighlightRectangle {
+            if handle >= 8 && matches!(selected.kind, Kind::HighlightRectangle | Kind::MosaicArea) {
                 if let Some(circle) =
                     PathBuilder::from_circle(x - monitor.left as f32, y - monitor.top as f32, half)
                 {
@@ -1162,7 +1540,7 @@ pub(crate) fn render_editing(
                     let cy = y - monitor.top as f32;
                     let s = scale;
                     if handle == 0 || handle == 2 || handle == 3 {
-                        draw_text_control_icon(&mut pixmap, handle, (cx, cy), scale);
+                        draw_text_control_icon(pixmap, handle, (cx, cy), scale);
                         continue;
                     }
                     let mut symbol = PathBuilder::new();
@@ -1212,14 +1590,27 @@ pub(crate) fn render_editing(
             );
         }
     }
-    Some(pixmap)
 }
-
 #[cfg(test)]
 pub(crate) fn preview_image(pixmap: &Pixmap) -> Image {
     let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(pixmap.width(), pixmap.height());
     buffer.make_mut_bytes().copy_from_slice(pixmap.data());
     Image::from_rgba8_premultiplied(buffer)
+}
+
+/// Shared rounded geometry for transient canvas feedback.
+pub(crate) fn notice_path(bounds: Bounds, rounding: f32) -> Option<tiny_skia::Path> {
+    path(
+        bounds,
+        Kind::Rectangle,
+        rounding,
+        Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -1244,6 +1635,7 @@ mod tests {
         };
         let b = crate::annotation_text::text_bounds((60., 100.), &text, dpi);
         let mut object = Object {
+            id: Default::default(),
             kind: Kind::Text,
             bounds: b,
             style: Style::default(),
@@ -1308,6 +1700,7 @@ mod tests {
             };
             let mut session = Session::new();
             session.add(Object {
+                id: Default::default(),
                 bounds: crate::annotation_text::text_bounds((70., 50.), &text, scale),
                 kind: Kind::Text,
                 points: Vec::new(),
@@ -1353,6 +1746,7 @@ mod tests {
         for kind in [Kind::Rectangle, Kind::Ellipse] {
             let mut session = Session::new();
             session.add(Object {
+                id: Default::default(),
                 kind,
                 points: Vec::new(),
                 bounds: Bounds::from_corners((20., 20.), (80., 70.)),
@@ -1394,6 +1788,7 @@ mod tests {
         };
         let mut session = Session::new();
         session.add(Object {
+            id: Default::default(),
             kind: Kind::HighlightRectangle,
             points: Vec::new(),
             bounds: Bounds::from_corners((20., 20.), (80., 70.)),
@@ -1421,6 +1816,7 @@ mod tests {
             bottom: 100,
         };
         let mut object = Object {
+            id: Default::default(),
             kind: Kind::Pencil,
             points: vec![(0., 0.), (200., 0.)],
             bounds: Bounds::from_corners((0., 0.), (200., 0.)),
@@ -1461,6 +1857,63 @@ mod tests {
         assert!(p.pixel(100, 50).unwrap().alpha() > 77);
     }
     #[test]
+    fn watermark_ink_survives_spotlight_holes_shadows_and_edges() {
+        use lexift_core::domain::annotation::{Watermark, WatermarkPosition};
+        let monitor = Rect {
+            left: -160,
+            top: -120,
+            right: 160,
+            bottom: 120,
+        };
+        for scale in [1., 1.25] {
+            for opacity in [35, 100] {
+                let mut session = Session::new();
+                session.displays = vec![monitor];
+                session.watermark = Some(Watermark {
+                    template: "WATERMARK".into(),
+                    content: "WATERMARK".into(),
+                    font_family: "Arial".into(),
+                    font_size: 32.,
+                    opacity,
+                    color: [240, 60, 30],
+                    position: WatermarkPosition::Center,
+                });
+                let mut ink = Pixmap::new(320, 240).unwrap();
+                draw_backdrop(&mut ink, &session, monitor, scale, None).unwrap();
+                assert!(ink.pixels().iter().filter(|p| p.red() > 0).count() > 100);
+                for kind in [Kind::SpotlightRectangle, Kind::SpotlightEllipse] {
+                    // Entire ink inside the hole, outside it, and across its edge.
+                    for bounds in [
+                        Bounds::from_corners((-150., -100.), (150., 100.)),
+                        Bounds::from_corners((-150., -100.), (-120., -70.)),
+                        Bounds::from_corners((-150., -100.), (0., 100.)),
+                    ] {
+                        session.objects.clear();
+                        session.add(Object {
+                            id: Default::default(),
+                            points: Vec::new(),
+                            bounds,
+                            kind,
+                            style: Default::default(),
+                            extra: Default::default(),
+                        });
+                        let mut actual = Pixmap::new(320, 240).unwrap();
+                        draw_backdrop(&mut actual, &session, monitor, scale, None).unwrap();
+                        // Black shadow contributes no RGB: watermark ink must retain
+                        // exactly its own premultiplied color, including translucency.
+                        for (a, b) in actual.pixels().iter().zip(ink.pixels()) {
+                            assert_eq!(
+                                (a.red(), a.green(), a.blue()),
+                                (b.red(), b.green(), b.blue())
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn renders_negative_origin_and_multiple_spotlights() {
         let monitor = Rect {
             left: -100,
@@ -1471,6 +1924,7 @@ mod tests {
         let mut session = Session::new();
         for left in [-80., 20.] {
             session.add(Object {
+                id: Default::default(),
                 points: Vec::new(),
                 bounds: Bounds::from_corners((left, -40.), (left + 30., 0.)),
                 kind: Kind::SpotlightEllipse,
@@ -1500,6 +1954,7 @@ mod tests {
         };
         let mut session = Session::new();
         session.add(Object {
+            id: Default::default(),
             bounds: Bounds::from_corners((-80., -70.), (40., -70.)),
             kind: Kind::Arrow,
             points: vec![(-80., -70.), (40., -70.)],
@@ -1516,6 +1971,7 @@ mod tests {
             },
         });
         session.add(Object {
+            id: Default::default(),
             bounds: Bounds::from_corners((-50., -20.), (50., 60.)),
             kind: Kind::Polyline,
             points: vec![(-50., -20.), (50., -20.), (0., 60.)],
@@ -1557,6 +2013,7 @@ mod tests {
         ] {
             let mut session = Session::new();
             session.add(Object {
+                id: Default::default(),
                 bounds: Bounds::from_corners(points[0], points[1]),
                 kind: Kind::Arrow,
                 points,
@@ -1645,6 +2102,7 @@ mod tests {
         let output = Bounds::from_corners((50., 10.), (90., 50.));
         let mut session = Session::new();
         session.add(Object {
+            id: Default::default(),
             kind: Kind::Rectangle,
             bounds: Bounds::from_corners((15., 15.), (25., 25.)),
             points: vec![],
@@ -1656,6 +2114,7 @@ mod tests {
             extra: Extra::None,
         });
         session.add(Object {
+            id: Default::default(),
             kind: Kind::Magnifier,
             bounds: source,
             points: vec![],
@@ -1707,6 +2166,7 @@ mod tests {
         for ellipse in [false, true] {
             let mut session = Session::new();
             session.add(Object {
+                id: Default::default(),
                 kind: Kind::Magnifier,
                 bounds: Bounds::from_corners((10., 20.), (50., 60.)),
                 points: vec![],

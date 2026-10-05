@@ -792,3 +792,9 @@ msgstr "중간"
 
 msgid "Largest"
 msgstr "최대"
+
+msgid "Screen capture unavailable. Try again."
+msgstr "화면을 캡처할 수 없습니다. 다시 시도하세요."
+
+msgid "Mosaic is unavailable on this platform."
+msgstr "이 플랫폼에서는 모자이크를 사용할 수 없습니다."

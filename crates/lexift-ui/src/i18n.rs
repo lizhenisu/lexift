@@ -56,6 +56,43 @@ pub(crate) fn tray_labels() -> TrayMenuLabels {
     }
 }
 
+/// Shared software/native-canvas raster fixture output, enabled only in tests.
+#[cfg(test)]
+pub(crate) fn write_test_bitmap(
+    directory: &str,
+    name: &str,
+    width: u32,
+    height: u32,
+    pixels: impl IntoIterator<Item = [u8; 4]>,
+) {
+    let mut bmp = Vec::new();
+    bmp.extend_from_slice(b"BM");
+    for value in [
+        54 + width * height * 4,
+        0,
+        54,
+        40,
+        width,
+        (-(height as i32)) as u32,
+    ] {
+        bmp.extend_from_slice(&value.to_le_bytes());
+    }
+    bmp.extend_from_slice(&1u16.to_le_bytes());
+    bmp.extend_from_slice(&32u16.to_le_bytes());
+    for value in [0u32, width * height * 4, 0, 0, 0, 0] {
+        bmp.extend_from_slice(&value.to_le_bytes());
+    }
+    for [r, g, b, a] in pixels {
+        bmp.extend_from_slice(&[b, g, r, a]);
+    }
+    std::fs::create_dir_all(directory).unwrap();
+    std::fs::write(
+        std::path::Path::new(&directory).join(format!("{name}.bmp")),
+        bmp,
+    )
+    .unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,32 +129,13 @@ mod tests {
         assert!(window.draw_if_needed(|renderer| {
             renderer.render(&mut pixels, width as usize);
         }));
-        let mut bmp = Vec::new();
-        bmp.extend_from_slice(b"BM");
-        for value in [
-            54 + width * height * 4,
-            0,
-            54,
-            40,
+        write_test_bitmap(
+            &directory,
+            name,
             width,
-            (-(height as i32)) as u32,
-        ] {
-            bmp.extend_from_slice(&value.to_le_bytes());
-        }
-        bmp.extend_from_slice(&1u16.to_le_bytes());
-        bmp.extend_from_slice(&32u16.to_le_bytes());
-        for value in [0u32, width * height * 4, 0, 0, 0, 0] {
-            bmp.extend_from_slice(&value.to_le_bytes());
-        }
-        for pixel in pixels {
-            bmp.extend_from_slice(&[pixel.b, pixel.g, pixel.r, 255]);
-        }
-        std::fs::create_dir_all(&directory).unwrap();
-        std::fs::write(
-            std::path::Path::new(&directory).join(format!("{name}.bmp")),
-            bmp,
-        )
-        .unwrap();
+            height,
+            pixels.into_iter().map(|p| [p.r, p.g, p.b, 255]),
+        );
     }
     #[test]
     fn all_languages_update_existing_windows_without_losing_user_state() {
@@ -431,6 +449,7 @@ mod tests {
         canvas.on_pointer(move |kind, _, _| recorded.borrow_mut().push(kind));
         let mut document = lexift_core::domain::annotation::Session::new();
         document.add(lexift_core::domain::annotation::Object {
+            id: Default::default(),
             points: Vec::new(),
             bounds: lexift_core::domain::annotation::Bounds::from_corners((20., 20.), (140., 90.)),
             kind: lexift_core::domain::annotation::Kind::Rectangle,

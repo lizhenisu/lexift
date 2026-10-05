@@ -10,6 +10,8 @@ export component AnnotationColorPicker inherits Rectangle {
     callback hsv-edited(float,float,float);
     callback hex-edited(string,bool);
     callback dragging(bool);
+    in-out property <bool> input-active: false;
+    callback input-finished();
     function select-color(x: length, y: length) {
         root.hue = clamp(x / spectrum.width,0,1) * 360;
         root.saturation = 1 - clamp(y / spectrum.height,0,1);
@@ -59,13 +61,25 @@ export component AnnotationColorPicker inherits Rectangle {
         x: 12px; y: brightness.y + 25px; width: parent.width - 24px; height: 30px;
         border-radius: 5px; border-width: 1px; border-color: root.invalid ? Colors.error : Colors.outline; background: Colors.background;
         Text { x: 9px; width: 34px; height: parent.height; text: "HEX"; color: Colors.secondary-foreground; vertical-alignment: center; font-size: 12px; }
-        TextInput {
+        hex := TextInput {
+            enabled: root.input-active;
             single-line: true;
             x: 46px; width: parent.width - 54px; height: parent.height; text <=> root.hex-text;
             font-size: 13px; color: Colors.foreground; vertical-alignment: center;
             selection-background-color: Colors.primary-container; selection-foreground-color: Colors.foreground;
             edited => { root.hex-edited(self.text,false); }
             accepted => { root.hex-edited(self.text,true); }
+            changed has-focus => {
+                if !self.has-focus && root.input-active {
+                    root.input-active = false;
+                    root.input-finished();
+                }
+            }
+        }
+        // Native activation must not start HEX editing without an explicit click.
+        if !root.input-active: TouchArea {
+            mouse-cursor: text;
+            clicked => { root.input-active = true; hex.focus(); }
         }
     }
     if root.invalid: Text {

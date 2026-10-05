@@ -792,3 +792,9 @@ msgstr "Moyen"
 
 msgid "Largest"
 msgstr "Maximal"
+
+msgid "Screen capture unavailable. Try again."
+msgstr "Capture indisponible. Réessayez."
+
+msgid "Mosaic is unavailable on this platform."
+msgstr "La mosaïque est indisponible sur cette plateforme."

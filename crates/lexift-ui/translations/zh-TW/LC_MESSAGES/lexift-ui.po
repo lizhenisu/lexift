@@ -792,3 +792,9 @@ msgstr "中"
 
 msgid "Largest"
 msgstr "最大"
+
+msgid "Screen capture unavailable. Try again."
+msgstr "無法擷取螢幕，請重試。"
+
+msgid "Mosaic is unavailable on this platform."
+msgstr "此平台暫不支援馬賽克。"

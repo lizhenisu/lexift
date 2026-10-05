@@ -30,6 +30,7 @@ export component AnnotationTextInput inherits Window {
     callback caret-changed();
     callback done(string);
     callback cancel();
+    callback escape-requested();
     forward-focus: editor;
     editor := TextInput {
             x: (root.content-x + root.text-padding) * 1px;
@@ -45,7 +46,7 @@ export component AnnotationTextInput inherits Window {
             selection-foreground-color: transparent;
             vertical-alignment: TextVerticalAlignment.top;
             key-pressed(event) => {
-                if event.text == Key.Escape { root.cancel(); return accept; }
+                if event.text == Key.Escape { root.escape-requested(); return accept; }
                 if event.text == Key.Return && event.modifiers.control { root.done(root.value); return accept; }
                 return reject;
             }

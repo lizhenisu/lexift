@@ -446,6 +446,34 @@ pub(crate) fn caret_at(object: &Object, point: (f32, f32)) -> usize {
         .map_or(0, |p| p.0)
 }
 
+fn text_transform(bounds: Bounds, rotation: f32, monitor: Rect) -> Transform {
+    let center = bounds.center();
+    Transform::from_translate(bounds.left, bounds.top)
+        .post_concat(Transform::from_rotate_at(
+            rotation.to_degrees(),
+            center.0,
+            center.1,
+        ))
+        .post_translate(-monitor.left as f32, -monitor.top as f32)
+}
+
+fn text_path(
+    path: tiny_skia::Path,
+    bounds: Bounds,
+    rotation: f32,
+    monitor: Rect,
+) -> Option<tiny_skia::Path> {
+    if rotation == 0. {
+        return Some(path);
+    }
+    let desktop = Rect {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    crate::annotation_path::normalize(path, text_transform(bounds, rotation, desktop), monitor)
+}
 pub(crate) fn draw_selection(
     target: &mut Pixmap,
     object: &Object,
@@ -459,16 +487,9 @@ pub(crate) fn draw_selection(
         return;
     }
     let layout = text_layout(text, object_scale(object));
-    let center = object.bounds.center();
-    let transform = Transform::from_translate(
-        object.bounds.left - monitor.left as f32,
-        object.bounds.top - monitor.top as f32,
-    )
-    .post_concat(Transform::from_rotate_at(
-        text.rotation.to_degrees(),
-        center.0 - monitor.left as f32,
-        center.1 - monitor.top as f32,
-    ));
+    // Compose in desktop coordinates first. Otherwise changing a raster tile's
+    // origin changes cancellation/rounding inside rotate-at and shifts coverage.
+    let transform = text_transform(object.bounds, text.rotation, monitor);
     let mut paint = Paint::default();
     paint.set_color_rgba8(55, 130, 255, 75);
     for (row, positions) in layout.lines.iter().enumerate() {
@@ -925,22 +946,18 @@ pub(crate) fn draw_text_with_reference(
     if !size.is_finite() || size <= 0. {
         return;
     }
-    let center = object.bounds.center();
-    let transform = Transform::from_translate(
-        object.bounds.left - monitor.left as f32,
-        object.bounds.top - monitor.top as f32,
-    )
-    .post_concat(Transform::from_rotate_at(
-        text.rotation.to_degrees(),
-        center.0 - monitor.left as f32,
-        center.1 - monitor.top as f32,
-    ));
+    let transform = if text.rotation == 0. {
+        text_transform(object.bounds, text.rotation, monitor)
+    } else {
+        Transform::identity()
+    };
     if let Some(bg) = &text.background
         && let Some(path) = background_path(
             object.bounds.width(),
             object.bounds.height(),
             bg.rounding * scale,
         )
+        .and_then(|path| text_path(path, object.bounds, text.rotation, monitor))
     {
         let mut paint = Paint::default();
         paint.set_color_rgba8(bg.color[0], bg.color[1], bg.color[2], bg.opacity);
@@ -968,6 +985,7 @@ pub(crate) fn draw_text_with_reference(
                                 scaled.v_scale_factor(),
                                 shear,
                             )
+                            .and_then(|path| text_path(path, object.bounds, text.rotation, monitor))
                         {
                             paths.push(path);
                         }
@@ -1200,6 +1218,7 @@ mod tests {
             linked_arrow_control: None,
         };
         Object {
+            id: Default::default(),
             bounds: text_bounds((-300., -40.), &text, dpi),
             kind: Kind::Text,
             style: Style::default(),
@@ -1443,6 +1462,7 @@ mod tests {
             assert!((after.height() / before.height() - 100.).abs() < 0.01);
             assert!((text_padding(&text, dpi) / pad - 100.).abs() < 0.01);
             let object = Object {
+                id: Default::default(),
                 bounds: after,
                 kind: Kind::Text,
                 style: Style::default(),
@@ -1530,6 +1550,7 @@ mod tests {
                 bottom: 160,
             };
             let make_object = |text: TextAnnotation| Object {
+                id: Default::default(),
                 bounds: text_bounds((10., 10.), &text, scale),
                 kind: Kind::Text,
                 style: Style::default(),
@@ -1587,6 +1608,7 @@ mod tests {
         for scale in [1., 1.25] {
             let bounds = text_bounds((0., 0.), &text, scale);
             let object = Object {
+                id: Default::default(),
                 bounds,
                 kind: Kind::Text,
                 style: Style::default(),
@@ -1739,6 +1761,7 @@ mod tests {
             linked_arrow: Some((-40., 100.)),
         };
         session.add(Object {
+            id: Default::default(),
             bounds: text_bounds((-190., -60.), &text, 1.),
             kind: lexift_core::domain::annotation::Kind::Text,
             style: Style::default(),

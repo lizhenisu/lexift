@@ -123,6 +123,8 @@ export component CheckBox inherits Rectangle {
 }
 
 export component Slider inherits Rectangle {
+    in property <bool> enabled: true;
+    opacity: root.enabled ? 1 : 0.45;
     callback dragging(bool);
     in-out property <float> value;
     in property <float> minimum;
@@ -134,7 +136,7 @@ export component Slider inherits Rectangle {
     Rectangle { x: (parent.width - 16px) * (root.value - root.minimum) / max(1,root.maximum - root.minimum); y: 4px;
         width: 16px; height: 16px; border-radius: 8px; background: Colors.primary;
         border-width: 2px; border-color: Colors.surface; }
-    TouchArea {
+    TouchArea { enabled: root.enabled;
         pointer-event(event) => { if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {root.dragging(false);} if event.kind == PointerEventKind.down { root.dragging(true); root.value = root.minimum + clamp((self.mouse-x - 8px)/(self.width - 16px),0,1) * (root.maximum - root.minimum); } }
         moved => { if self.pressed { root.value = root.minimum + clamp((self.mouse-x - 8px)/(self.width - 16px),0,1) * (root.maximum - root.minimum); } }
     }

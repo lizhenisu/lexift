@@ -69,6 +69,8 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
     let screen_for_annotation = services.screen.clone();
     let magnifier_for_annotation = lexift_platform::annotation_magnifier_port();
     let magnifier_for_refresh = magnifier_for_annotation.clone();
+    let screen_capture_for_annotation = lexift_platform::annotation_screen_capture_port();
+    let renderer_for_annotation = lexift_platform::annotation_render_port();
     let tray_for_cancel = services.tray.clone();
     let ui = lexift_ui::Ui::new(
         &initial_state,
@@ -245,6 +247,15 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 Ok(()) => true,
                 Err(error) => { tracing::warn!(%error, "annotation magnifier refresh failed"); false }
             }
+        })
+        .with_annotation_screen_capture(screen_capture_for_annotation)
+        .with_annotation_renderer(renderer_for_annotation)
+        .with_annotation_window_token(|window| {
+            lexift_platform::annotation_window_token(&window.window_handle())
+        })
+        .with_annotation_foreground(lexift_platform::annotation_foreground_token)
+        .with_annotation_brush_cursor(|window, diameter| {
+            lexift_platform::set_annotation_brush_cursor(&window.window_handle(), diameter).is_ok()
         })
         .with_annotation_corner_cursor(|window, active| {
             match lexift_platform::set_annotation_corner_cursor(&window.window_handle(), active) {
@@ -459,8 +470,17 @@ fn map_pointer_event(event: lexift_platform::PopupPointerEvent) -> lexift_ui::Po
             delta_x,
             delta_y,
         },
-        lexift_platform::PopupPointerEvent::DismissRequested => {
-            lexift_ui::PopupPointerInput::DismissRequested
+        lexift_platform::PopupPointerEvent::DismissRequested { cause } => {
+            lexift_ui::PopupPointerInput::DismissRequested {
+                cause: match cause {
+                    lexift_platform::PopupDismissCause::PointerOutside => {
+                        lexift_ui::PopupDismissCause::PointerOutside
+                    }
+                    lexift_platform::PopupDismissCause::ForegroundChanged => {
+                        lexift_ui::PopupDismissCause::ForegroundChanged
+                    }
+                },
+            }
         }
         lexift_platform::PopupPointerEvent::NativeTopResizeRequested => {
             lexift_ui::PopupPointerInput::NativeTopResizeRequested
@@ -534,6 +554,27 @@ mod tests {
         let tray: Arc<dyn TrayPort> = Arc::new(FailingTray);
         assert!(!register_tray(Some(&tray), Arc::new(|_| {})));
         assert!(!register_tray(None, Arc::new(|_| {})));
+    }
+
+    #[test]
+    fn popup_dismissal_mapping_preserves_the_native_reason() {
+        for (native, expected) in [
+            (
+                lexift_platform::PopupDismissCause::PointerOutside,
+                lexift_ui::PopupDismissCause::PointerOutside,
+            ),
+            (
+                lexift_platform::PopupDismissCause::ForegroundChanged,
+                lexift_ui::PopupDismissCause::ForegroundChanged,
+            ),
+        ] {
+            assert_eq!(
+                map_pointer_event(lexift_platform::PopupPointerEvent::DismissRequested {
+                    cause: native
+                }),
+                lexift_ui::PopupPointerInput::DismissRequested { cause: expected }
+            );
+        }
     }
 
     #[test]
