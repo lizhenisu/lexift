@@ -1022,6 +1022,145 @@ pub(crate) fn draw_text_with_reference(
     }
 }
 
+/// Tile layout measured from the reference artwork: the words read at -45° and
+/// the lattice rows follow that same reading direction, which turns the pattern
+/// into the diagonal banding the reference shows. Spacing follows the glyph ink
+/// box, so it stays proportional at every font size and DPI.
+const TILE_ANGLE_RADIANS: f32 = -std::f32::consts::FRAC_PI_4;
+const TILE_LATTICE_RADIANS: f32 = std::f32::consts::FRAC_PI_4;
+/// Neighbouring tiles are separated by the same gap on both lattice axes; the
+/// reference keeps it at 0.885 of the glyph ink height.
+const TILE_GAP_RATIO: f32 = 0.885;
+/// A tiny font on a very large display could otherwise request hundreds of
+/// thousands of tiles. Past this many the lattice widens uniformly, which keeps
+/// the proportion but bounds the work of one backdrop rebuild.
+const TILE_LIMIT: usize = 25_000;
+
+/// Axis-aligned extents of a `width`×`height` box rotated by `angle`.
+fn rotated_extents(width: f32, height: f32, angle: f32) -> (f32, f32) {
+    let (sin, cos) = angle.sin_cos();
+    (
+        width * cos.abs() + height * sin.abs(),
+        width * sin.abs() + height * cos.abs(),
+    )
+}
+
+/// Bounding box of the drawn pixels of a rasterised watermark. Tiling follows the
+/// ink rather than the line box, which also carries ascent and descent.
+fn ink_extents(image: &Pixmap) -> Option<(f32, f32)> {
+    let width = image.width() as usize;
+    if width == 0 {
+        return None;
+    }
+    let (mut min_x, mut min_y) = (usize::MAX, usize::MAX);
+    let (mut max_x, mut max_y) = (0usize, 0usize);
+    for (index, pixel) in image.pixels().iter().enumerate() {
+        if pixel.alpha() == 0 {
+            continue;
+        }
+        let (x, y) = (index % width, index / width);
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+    }
+    (min_x <= max_x).then(|| ((max_x - min_x + 1) as f32, (max_y - min_y + 1) as f32))
+}
+
+/// Lattice steps for one tile: the column step runs at -45° and the row step at
+/// +45°, both separated by the same ink-height gap.
+fn tile_steps(width: f32, height: f32, spacing: f32) -> ((f32, f32), (f32, f32)) {
+    let gap = height * TILE_GAP_RATIO * spacing;
+    let (sin, cos) = TILE_LATTICE_RADIANS.sin_cos();
+    let column = width + gap;
+    let row = height + gap;
+    ((column * cos, -column * sin), (row * cos, row * sin))
+}
+
+/// Every tile centre whose rotated box can touch `viewport`. `ink` sets the
+/// rhythm while `raster` sets the coverage padding, because the drawn bitmap is
+/// slightly taller than its ink. The lattice is anchored to the viewport origin
+/// so a rebuild never makes the pattern crawl.
+fn tile_centres(viewport: Rect, ink: (f32, f32), raster: (f32, f32)) -> Vec<(f32, f32)> {
+    let (width, height) = ink;
+    if !width.is_finite() || !height.is_finite() || width <= 0. || height <= 0. {
+        return Vec::new();
+    }
+    let (box_width, box_height) = rotated_extents(raster.0, raster.1, TILE_ANGLE_RADIANS);
+    if !box_width.is_finite() || !box_height.is_finite() {
+        return Vec::new();
+    }
+    let origin = (viewport.left as f32, viewport.top as f32);
+    let (half_width, half_height) = (box_width / 2., box_height / 2.);
+    let corners = [
+        (
+            viewport.left as f32 - half_width,
+            viewport.top as f32 - half_height,
+        ),
+        (
+            viewport.right as f32 + half_width,
+            viewport.top as f32 - half_height,
+        ),
+        (
+            viewport.left as f32 - half_width,
+            viewport.bottom as f32 + half_height,
+        ),
+        (
+            viewport.right as f32 + half_width,
+            viewport.bottom as f32 + half_height,
+        ),
+    ];
+    let mut spacing = 1.;
+    for _ in 0..2 {
+        let (column, row) = tile_steps(width, height, spacing);
+        let determinant = column.0 * row.1 - column.1 * row.0;
+        if !determinant.is_finite() || determinant == 0. {
+            return Vec::new();
+        }
+        let (mut first_i, mut last_i, mut first_j, mut last_j) =
+            (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+        for (x, y) in corners {
+            let (dx, dy) = (x - origin.0, y - origin.1);
+            let i = (row.1 * dx - row.0 * dy) / determinant;
+            let j = (column.0 * dy - column.1 * dx) / determinant;
+            first_i = first_i.min(i);
+            last_i = last_i.max(i);
+            first_j = first_j.min(j);
+            last_j = last_j.max(j);
+        }
+        if !first_i.is_finite()
+            || !last_i.is_finite()
+            || !first_j.is_finite()
+            || !last_j.is_finite()
+        {
+            return Vec::new();
+        }
+        let (first_i, last_i) = (first_i.floor(), last_i.ceil());
+        let (first_j, last_j) = (first_j.floor(), last_j.ceil());
+        let columns = (last_i - first_i + 1.).max(0.);
+        let rows = (last_j - first_j + 1.).max(0.);
+        let count = (columns * rows) as usize;
+        if count <= TILE_LIMIT || spacing > 1. {
+            let mut centres = Vec::with_capacity(count);
+            let mut j = first_j;
+            while j <= last_j {
+                let mut i = first_i;
+                while i <= last_i {
+                    centres.push((
+                        origin.0 + i * column.0 + j * row.0,
+                        origin.1 + i * column.1 + j * row.1,
+                    ));
+                    i += 1.;
+                }
+                j += 1.;
+            }
+            return centres;
+        }
+        spacing = (count as f32 / TILE_LIMIT as f32).sqrt();
+    }
+    Vec::new()
+}
+
 pub(crate) fn draw_watermark(
     target: &mut Pixmap,
     watermark: &Watermark,
@@ -1062,28 +1201,22 @@ pub(crate) fn draw_watermark(
     let mh = (layout_monitor.bottom - layout_monitor.top) as f32;
     let margin = 16. * scale;
     if watermark.position == WatermarkPosition::Tile {
-        let step_x = (w * 1.75).max(160. * scale);
-        let step_y = (h * 3.5).max(90. * scale);
-        let mut y = top - w;
-        while y < top + mh + w {
-            let mut x = left - w;
-            while x < left + mw + w {
-                composite(
-                    target,
-                    &image,
-                    Bounds {
-                        left: x,
-                        top: y,
-                        right: x + w,
-                        bottom: y + h,
-                    },
-                    -std::f32::consts::FRAC_PI_4,
-                    region,
-                    watermark.opacity,
-                );
-                x += step_x;
-            }
-            y += step_y;
+        let (tile_width, tile_height) = (width as f32, height as f32);
+        let ink = ink_extents(&image).unwrap_or((tile_width, tile_height));
+        for (center_x, center_y) in tile_centres(layout_monitor, ink, (tile_width, tile_height)) {
+            composite(
+                target,
+                &image,
+                Bounds {
+                    left: center_x - tile_width / 2.,
+                    top: center_y - tile_height / 2.,
+                    right: center_x + tile_width / 2.,
+                    bottom: center_y + tile_height / 2.,
+                },
+                TILE_ANGLE_RADIANS,
+                region,
+                watermark.opacity,
+            );
         }
         return;
     }
@@ -1648,6 +1781,133 @@ mod tests {
             "水印2026/09/30 12:34:56 $"
         );
         assert_eq!(resolve_watermark_template("price $", at), "price $");
+    }
+
+    #[test]
+    #[ignore = "writes the tiled watermark bitmap selected by LEXIFT_ANNOTATION_RENDER_DIR"]
+    fn dump_tiled_watermark_for_reference_comparison() {
+        use lexift_core::domain::annotation::Session;
+        let Some(directory) = std::env::var_os("LEXIFT_ANNOTATION_RENDER_DIR") else {
+            return;
+        };
+        let directory = directory.to_string_lossy().into_owned();
+        let monitor = Rect {
+            left: 0,
+            top: 0,
+            right: 1490,
+            bottom: 818,
+        };
+        for (name, font_size) in [("tile-22", 22.0f32), ("tile-46", 46.0f32)] {
+            let mut session = Session::new();
+            session.displays.push(monitor);
+            session.set_watermark(Some(Watermark {
+                template: "水印".into(),
+                content: "水印".into(),
+                font_family: "Microsoft YaHei".into(),
+                font_size,
+                opacity: 100,
+                color: [227, 195, 100],
+                position: WatermarkPosition::Tile,
+            }));
+            let image =
+                crate::annotation_render::render(&session, monitor, 1., None, None).unwrap();
+            let pixels = image.data().as_chunks::<4>().0.iter().map(|pixel| {
+                let alpha = pixel[3] as u32;
+                let over = |value: u8| (value as u32 + 255 - alpha).min(255) as u8;
+                [over(pixel[0]), over(pixel[1]), over(pixel[2]), 255]
+            });
+            crate::i18n::write_test_bitmap(&directory, name, image.width(), image.height(), pixels);
+        }
+    }
+
+    #[test]
+    fn tiled_watermark_lattice_matches_reference_rhythm() {
+        // Reference artwork: an 85.3 × 43.2 ink box on a lattice whose measured
+        // steps are (87, -87) and (58, 58).
+        let (width, height) = (85.3, 43.2);
+        let (column, row) = tile_steps(width, height, 1.);
+        let length = |vector: (f32, f32)| vector.0.hypot(vector.1);
+        assert!(
+            (length(column) - 123.0).abs() < 2.5,
+            "column step {column:?}"
+        );
+        assert!((length(row) - 82.0).abs() < 2.0, "row step {row:?}");
+        assert!((column.1.atan2(column.0).to_degrees() + 45.).abs() < 0.5);
+        assert!((row.1.atan2(row.0).to_degrees() - 45.).abs() < 0.5);
+        // Both axes keep the same gap, which is what fixes the density.
+        let column_gap = length(column) - width;
+        let row_gap = length(row) - height;
+        assert!((column_gap - row_gap).abs() < 0.5);
+        assert!((column_gap - TILE_GAP_RATIO * height).abs() < 0.5);
+        // The column step runs along the reading direction and the row step is
+        // perpendicular to it, which is what produces the diagonal banding.
+        let text = (TILE_ANGLE_RADIANS.cos(), TILE_ANGLE_RADIANS.sin());
+        let column_drift = (column.0 * text.0 + column.1 * text.1) / length(column);
+        let row_drift = (row.0 * text.0 + row.1 * text.1) / length(row);
+        assert!(
+            (column_drift - 1.).abs() < 0.001,
+            "column drift {column_drift}"
+        );
+        assert!(row_drift.abs() < 0.001, "row drift {row_drift}");
+    }
+
+    #[test]
+    fn tiled_watermark_centres_cover_monitor_edges() {
+        let (width, height) = (43.0, 22.0);
+        let (box_width, box_height) = rotated_extents(width, height, TILE_ANGLE_RADIANS);
+        let (column, row) = tile_steps(width, height, 1.);
+        let cell = (column.0 * row.1 - column.1 * row.0).abs();
+        for viewport in [
+            Rect {
+                left: 0,
+                top: 0,
+                right: 512,
+                bottom: 256,
+            },
+            Rect {
+                left: -1920,
+                top: -1080,
+                right: -1408,
+                bottom: -824,
+            },
+        ] {
+            let padded = ((viewport.right - viewport.left) as f32 + box_width)
+                * ((viewport.bottom - viewport.top) as f32 + box_height);
+            let centres = tile_centres(viewport, (width, height), (width, height));
+            assert!(centres.len() > 8, "{} tiles", centres.len());
+            let min_x = centres.iter().map(|c| c.0).fold(f32::MAX, f32::min);
+            let max_x = centres.iter().map(|c| c.0).fold(f32::MIN, f32::max);
+            let min_y = centres.iter().map(|c| c.1).fold(f32::MAX, f32::min);
+            let max_y = centres.iter().map(|c| c.1).fold(f32::MIN, f32::max);
+            // Partly visible tiles must still be emitted, and no more than one
+            // step of padding is allowed beyond the viewport.
+            assert!(min_x <= viewport.left as f32 - box_width / 2.);
+            assert!(max_x >= viewport.right as f32 + box_width / 2.);
+            assert!(min_y <= viewport.top as f32 - box_height / 2.);
+            assert!(max_y >= viewport.bottom as f32 + box_height / 2.);
+            // Iterating the index-space box may overhang the padded viewport,
+            // but it must stay within a small multiple of the tile count.
+            assert!(
+                centres.len() as f32 <= 5. * padded / cell + 8.,
+                "{} tiles for {padded} px",
+                centres.len()
+            );
+            // The lattice is anchored to the viewport origin, so a rebuild never
+            // makes the pattern crawl.
+            assert_eq!(
+                centres,
+                tile_centres(viewport, (width, height), (width, height))
+            );
+        }
+        let origin = Rect {
+            left: 0,
+            top: 0,
+            right: 512,
+            bottom: 256,
+        };
+        assert!(tile_centres(origin, (0., 22.), (0., 22.)).is_empty());
+        assert!(tile_centres(origin, (f32::NAN, 22.), (43., 22.)).is_empty());
+        assert!(tile_centres(origin, (43., 0.), (43., 22.)).is_empty());
     }
 
     #[test]
