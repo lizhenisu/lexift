@@ -114,6 +114,13 @@ pub enum PopupCornerMode {
     SlintRounded,
 }
 
+/// Why the existing popup monitor requested dismissal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PopupDismissCause {
+    PointerOutside,
+    ForegroundChanged,
+}
+
 /// A native pointer event captured from a translation popup tool window.
 ///
 /// Positions and scroll deltas use physical client-area pixels. The UI adapter converts them to
@@ -145,7 +152,9 @@ pub enum PopupPointerEvent {
         delta_y: f32,
     },
     /// The user continued working outside an unpinned popup.
-    DismissRequested,
+    DismissRequested {
+        cause: PopupDismissCause,
+    },
     /// A real non-client top-edge press is about to enter Windows' sizing loop.
     NativeTopResizeRequested,
     /// The native client area changed size, in physical pixels.
@@ -250,6 +259,22 @@ pub fn set_annotation_corner_cursor(
     }
 }
 
+/// A centered native brush ring in physical pixels; zero releases the cursor.
+pub fn set_annotation_brush_cursor(
+    window: &impl raw_window_handle::HasWindowHandle,
+    diameter: f32,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::annotation_cursor::set_brush(window, diameter)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, diameter);
+        Err(lexift_core::Error::new("Brush cursor is unavailable"))
+    }
+}
+
 /// Presents a premultiplied RGBA frame on a transparent annotation window.
 pub fn present_annotation_frame(
     window: &impl raw_window_handle::HasWindowHandle,
@@ -292,6 +317,18 @@ pub fn annotation_window_token(
     }
 }
 
+/// Current foreground identity for validating a deferred, user-requested annotation activation.
+pub fn annotation_foreground_token() -> Option<lexift_core::ports::magnifier::WindowToken> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::popup::foreground_token()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
 /// Windows magnification is kept behind the Core capability interface.
 pub fn annotation_magnifier_port()
 -> Option<std::sync::Arc<dyn lexift_core::ports::magnifier::MagnifierPort>> {
@@ -300,6 +337,34 @@ pub fn annotation_magnifier_port()
         Some(std::sync::Arc::new(
             windows::annotation_magnifier::WindowsMagnifierPort,
         ))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
+/// Creates a lazy worker for clean, per-window desktop composition.
+pub fn annotation_screen_capture_port()
+-> Option<std::sync::Arc<dyn lexift_core::ports::screen_capture::ScreenCapturePort>> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::screen_capture::WindowsScreenCapturePort::new()
+            .map(|port| std::sync::Arc::new(port) as _)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
+/// Native scene renderer. UI selects its backend through this Core capability.
+pub fn annotation_render_port()
+-> Option<std::sync::Arc<dyn lexift_core::ports::annotation_render::AnnotationRenderPort>> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::annotation_gpu::WindowsAnnotationRenderPort::new()
+            .map(|port| std::sync::Arc::new(port) as _)
     }
     #[cfg(not(target_os = "windows"))]
     {

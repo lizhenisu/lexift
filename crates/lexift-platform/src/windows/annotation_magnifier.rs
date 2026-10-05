@@ -222,6 +222,12 @@ fn create_view(preview: bool) -> Result<View> {
         )
     }
     .map_err(|e| Error::new(format!("Could not create magnifier host: {e}")))?;
+    if let Err(error) = super::annotation_overlay::mark(host) {
+        let _ = unsafe { DestroyWindow(host) };
+        return Err(Error::new(format!(
+            "Could not mark magnifier host: {error}"
+        )));
+    }
     if let Err(e) =
         unsafe { SetLayeredWindowAttributes(host, COLORREF(0), WARMUP_ALPHA, LWA_ALPHA) }
     {

@@ -1,6 +1,8 @@
 //! Transient screen annotation state in physical virtual-desktop coordinates.
 use crate::domain::geometry::Rect;
+mod mosaic;
 mod sequence;
+pub use mosaic::{MosaicAnnotation, MosaicEffect};
 pub use sequence::{SequenceAnnotation, SequenceFormat, SequenceShape, sequence_label};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -104,6 +106,45 @@ pub enum Kind {
     Magnifier,
     Text,
     Sequence,
+    MosaicArea,
+    MosaicBrush,
+}
+/// Transient editing permission; never stored in document or undo snapshots.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EditScope {
+    #[default]
+    All,
+    None,
+    Geometry,
+    Spotlight,
+    Highlight,
+    Arrow,
+    Polyline,
+    Magnifier,
+    Text,
+    Sequence,
+    Mosaic,
+}
+impl EditScope {
+    pub fn allows(self, kind: Kind) -> bool {
+        kind != Kind::Pencil && (self == Self::All || self == kind.edit_scope())
+    }
+}
+impl Kind {
+    pub fn edit_scope(self) -> EditScope {
+        match self {
+            Self::Rectangle | Self::Ellipse => EditScope::Geometry,
+            Self::SpotlightRectangle | Self::SpotlightEllipse => EditScope::Spotlight,
+            Self::HighlightLine | Self::HighlightRectangle => EditScope::Highlight,
+            Self::Arrow => EditScope::Arrow,
+            Self::Polyline => EditScope::Polyline,
+            Self::Magnifier => EditScope::Magnifier,
+            Self::Text => EditScope::Text,
+            Self::Sequence => EditScope::Sequence,
+            Self::MosaicArea | Self::MosaicBrush => EditScope::Mosaic,
+            Self::Pencil => EditScope::None,
+        }
+    }
 }
 impl Kind {
     pub fn is_spotlight(self) -> bool {
@@ -133,8 +174,21 @@ impl Default for Style {
     }
 }
 
+/// Session-local identity. Drafts remain unassigned until document insertion.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct ObjectId(u64);
+
+impl ObjectId {
+    pub const DRAFT: Self = Self(0);
+
+    pub fn value(self) -> u64 {
+        self.0
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Object {
+    pub id: ObjectId,
     pub bounds: Bounds,
     pub kind: Kind,
     pub style: Style,
@@ -249,6 +303,7 @@ pub enum Extra {
     },
     Text(TextAnnotation),
     Sequence(SequenceAnnotation),
+    Mosaic(MosaicAnnotation),
 }
 
 impl Kind {
@@ -261,6 +316,7 @@ impl Kind {
             Self::Magnifier => 7,
             Self::Text => 8,
             Self::Sequence => 10,
+            Self::MosaicArea | Self::MosaicBrush => 11,
             Self::SpotlightRectangle | Self::SpotlightEllipse => 2,
             _ => 0,
         }
@@ -339,6 +395,7 @@ impl Object {
             points.push(control);
         }
         Some(Object {
+            id: Default::default(),
             kind: Kind::Arrow,
             bounds: Bounds::from_corners(anchor, tip),
             style: self.style,
@@ -428,6 +485,15 @@ impl Object {
                 self.bounds.right = self.bounds.right.max(x);
                 self.bounds.bottom = self.bounds.bottom.max(y);
             }
+            if self.kind == Kind::MosaicBrush
+                && let Extra::Mosaic(mosaic) = &self.extra
+            {
+                let radius = mosaic.diameter / 2.;
+                self.bounds.left -= radius;
+                self.bounds.top -= radius;
+                self.bounds.right += radius;
+                self.bounds.bottom += radius;
+            }
         }
     }
     /// Drops redundant samples while retaining corners and the newest endpoint.
@@ -449,7 +515,11 @@ impl Object {
         self.refresh_bounds();
     }
     pub fn hit_path(&self, point: (f32, f32), scale: f32) -> bool {
-        let tolerance = (self.style.width / 2. + 6.) * scale;
+        let tolerance = if let Extra::Mosaic(mosaic) = &self.extra {
+            mosaic.diameter / 2. + 6. * scale
+        } else {
+            (self.style.width / 2. + 6.) * scale
+        };
         let rendered = self.stroke_points();
         let points = rendered.as_slice();
         if self.kind == Kind::Polyline
@@ -522,9 +592,14 @@ impl Object {
         if let Extra::Magnifier { output, .. } = self.extra {
             handles.extend(output.handles());
         }
-        if self.kind == Kind::HighlightRectangle {
+        if matches!(self.kind, Kind::HighlightRectangle | Kind::MosaicArea) {
             let b = self.bounds;
-            let r = (self.style.rounding * scale)
+            let rounding_scale = if let Extra::Mosaic(mosaic) = &self.extra {
+                mosaic.creation_scale
+            } else {
+                scale
+            };
+            let r = (self.style.rounding * rounding_scale)
                 .min(b.width() / 2.)
                 .min(b.height() / 2.);
             let inset = (r * 0.5 + 10. * scale)
@@ -575,6 +650,35 @@ impl Object {
             return;
         }
         let b = self.bounds;
+        if self.kind == Kind::MosaicBrush
+            && let Extra::Mosaic(mosaic) = &mut self.extra
+        {
+            // Map the centreline inside the resized round-cap envelope. Using the
+            // envelope itself would count the cap radius twice on every resize.
+            let radius = mosaic.diameter / 2.;
+            let factor = ((target.width() / b.width().max(1.))
+                * (target.height() / b.height().max(1.)))
+            .sqrt();
+            let diameter = (mosaic.diameter * factor)
+                .min(target.width().min(target.height()))
+                .max(1.);
+            let next_radius = diameter / 2.;
+            for p in &mut self.points {
+                let axis = |v: f32, old: f32, extent: f32, next: f32, size: f32| {
+                    if extent <= mosaic.diameter + f32::EPSILON {
+                        next + size / 2.
+                    } else {
+                        next + next_radius
+                            + (v - old - radius) / (extent - mosaic.diameter) * (size - diameter)
+                    }
+                };
+                p.0 = axis(p.0, b.left, b.width(), target.left, target.width());
+                p.1 = axis(p.1, b.top, b.height(), target.top, target.height());
+            }
+            mosaic.diameter = diameter;
+            self.refresh_bounds();
+            return;
+        }
         for p in &mut self.points {
             p.0 = target.left + (p.0 - b.left) / b.width().max(1.) * target.width();
             p.1 = target.top + (p.1 - b.top) / b.height().max(1.) * target.height();
@@ -726,7 +830,12 @@ impl Object {
                 output.right = output.left + self.bounds.width() * *zoom;
                 output.bottom = output.top + self.bounds.height() * *zoom;
             }
-        } else if handle >= 8 && self.kind == Kind::HighlightRectangle {
+        } else if handle >= 8 && matches!(self.kind, Kind::HighlightRectangle | Kind::MosaicArea) {
+            let scale = if let Extra::Mosaic(mosaic) = &self.extra {
+                mosaic.creation_scale
+            } else {
+                scale
+            };
             let b = self.bounds;
             let x = if handle == 8 || handle == 10 {
                 point.0 - b.left
@@ -817,6 +926,8 @@ pub struct Session {
     pub displays: Vec<Rect>,
     undo: Vec<Snapshot>,
     drag_before: Option<Snapshot>,
+    next_object_id: u64,
+    edit_scope: EditScope,
 }
 
 impl Session {
@@ -836,9 +947,20 @@ impl Session {
             watermark: self.watermark.clone(),
         }
     }
+    /// Change interaction permissions without recording a document edit.
+    pub fn set_edit_scope(&mut self, scope: EditScope) {
+        self.edit_scope = scope;
+        self.selected = self.editable_selected();
+    }
+    pub fn can_edit(&self, object: &Object) -> bool {
+        object.is_editable() && self.edit_scope.allows(object.kind)
+    }
     fn editable_selected(&self) -> Option<usize> {
-        self.selected
-            .filter(|&index| self.objects.get(index).is_some_and(Object::is_editable))
+        self.selected.filter(|&index| {
+            self.objects
+                .get(index)
+                .is_some_and(|object| self.can_edit(object))
+        })
     }
     pub fn set_spotlight_opacity(&mut self, opacity: f32) {
         let opacity = opacity.clamp(0., 1.);
@@ -860,13 +982,19 @@ impl Session {
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }
-    pub fn add(&mut self, object: Object) -> bool {
+    /// Resolve a committed identity without retaining an index across document edits.
+    pub fn object_index(&self, id: ObjectId) -> Option<usize> {
+        (id != ObjectId::DRAFT)
+            .then(|| self.objects.iter().position(|object| object.id == id))
+            .flatten()
+    }
+    pub fn add(&mut self, mut object: Object) -> bool {
         if object.kind == Kind::Sequence && self.next_sequence == i32::MAX {
             return false;
         }
         if !matches!(
             object.kind,
-            Kind::Pencil | Kind::HighlightLine | Kind::Arrow | Kind::Polyline
+            Kind::Pencil | Kind::HighlightLine | Kind::Arrow | Kind::Polyline | Kind::MosaicBrush
         ) && (object.bounds.width() < 2. || object.bounds.height() < 2.)
         {
             return false;
@@ -878,17 +1006,24 @@ impl Session {
         if object.kind == Kind::Sequence {
             self.next_sequence = self.next_sequence.max(1) + 1;
         }
+        self.next_object_id = self
+            .next_object_id
+            .checked_add(1)
+            .expect("annotation identity exhausted");
+        object.id = ObjectId(self.next_object_id);
+        if let Extra::Mosaic(mosaic) = &mut object.extra {
+            mosaic.id = object.id.value();
+        }
         self.objects.push(object);
         self.selected = self
-            .objects
-            .last()
-            .unwrap()
-            .is_editable()
+            .can_edit(self.objects.last().unwrap())
             .then_some(self.objects.len() - 1);
         true
     }
     pub fn begin_drag(&mut self) {
-        self.drag_before = Some(self.snapshot());
+        if self.drag_before.is_none() {
+            self.drag_before = Some(self.snapshot());
+        }
     }
     pub fn finish_drag(&mut self) {
         if let Some(before) = self.drag_before.take()
@@ -899,27 +1034,42 @@ impl Session {
     }
     pub fn cancel_drag(&mut self) {
         if let Some(before) = self.drag_before.take() {
-            self.objects = before.objects;
-            self.next_sequence = before.next_sequence;
-            self.selected = before.selected;
-            self.selected = self.editable_selected();
-            self.spotlight_opacity = before.opacity;
-            self.watermark = before.watermark;
+            self.restore_snapshot(before);
         }
+    }
+    fn restore_snapshot(&mut self, before: Snapshot) {
+        // Identity allocation belongs to the session lifetime, not undo history.
+        self.objects = before.objects;
+        self.next_sequence = before.next_sequence;
+        self.selected = before.selected;
+        self.selected = self.editable_selected();
+        self.spotlight_opacity = before.opacity;
+        self.watermark = before.watermark;
     }
     pub fn update_selected(&mut self, change: impl FnOnce(&mut Object)) {
         let Some(index) = self.editable_selected() else {
             return;
         };
-        let before = self.snapshot();
+        // Continuous edits already own a snapshot. Avoid cloning the complete
+        // document on every slider tick or pointer update inside that transaction.
+        let before = self.drag_before.is_none().then(|| self.snapshot());
+        let id = self.objects[index].id;
         change(&mut self.objects[index]);
-        if before != self.snapshot() && self.drag_before.is_none() {
+        self.objects[index].id = id;
+        if let Extra::Mosaic(mosaic) = &mut self.objects[index].extra {
+            mosaic.id = id.value();
+        }
+        if let Some(before) = before
+            && before != self.snapshot()
+        {
             self.undo.push(before);
         }
     }
     pub fn delete_selected(&mut self) {
         if let Some(index) = self.editable_selected() {
-            self.undo.push(self.snapshot());
+            if self.drag_before.is_none() {
+                self.undo.push(self.snapshot());
+            }
             self.selected = None;
             self.objects.remove(index);
         }
@@ -929,16 +1079,86 @@ impl Session {
             return false;
         };
         self.drag_before = None;
-        self.objects = before.objects;
-        self.next_sequence = before.next_sequence;
-        self.selected = before.selected;
-        self.selected = self.editable_selected();
-        self.spotlight_opacity = before.opacity;
-        self.watermark = before.watermark;
+        self.restore_snapshot(before);
         true
     }
     pub fn clear(&mut self) {
+        let next_object_id = self.next_object_id;
+        let edit_scope = self.edit_scope;
         *self = Self::new();
+        self.next_object_id = next_object_id;
+        self.edit_scope = edit_scope;
+    }
+    /// Reject provisional masks whose first capture failed, including their edits
+    /// in history. Later operations on unrelated objects keep their original order.
+    pub fn discard_mosaics(&mut self, ids: &[u64]) {
+        fn remove(snapshot: &mut Snapshot, ids: &[u64]) {
+            let selected = snapshot.selected;
+            let mut next_selected = None;
+            let mut index = 0;
+            let mut kept = 0;
+            snapshot.objects.retain(|object| {
+                let keep = !matches!(&object.extra, Extra::Mosaic(m) if ids.contains(&m.id));
+                if keep && selected == Some(index) {
+                    next_selected = Some(kept);
+                }
+                if keep {
+                    kept += 1;
+                }
+                index += 1;
+                keep
+            });
+            snapshot.selected = next_selected;
+        }
+        fn same_document(a: &Snapshot, b: &Snapshot) -> bool {
+            a.objects == b.objects
+                && a.next_sequence == b.next_sequence
+                && a.opacity == b.opacity
+                && a.watermark == b.watermark
+        }
+        if ids.is_empty() {
+            return;
+        }
+        let selected_removed = self
+            .selected
+            .and_then(|i| self.objects.get(i))
+            .is_some_and(|o| matches!(&o.extra, Extra::Mosaic(m) if ids.contains(&m.id)));
+        let previous_selection = selected_removed
+            .then(|| {
+                self.undo.iter().rev().find_map(|before| {
+                    before
+                        .selected
+                        .and_then(|i| before.objects.get(i))
+                        .filter(|o| !matches!(&o.extra, Extra::Mosaic(m) if ids.contains(&m.id)))
+                        .cloned()
+                })
+            })
+            .flatten();
+        let mut current = self.snapshot();
+        remove(&mut current, ids);
+        for before in &mut self.undo {
+            remove(before, ids);
+        }
+        if let Some(before) = &mut self.drag_before {
+            remove(before, ids);
+        }
+        let old = std::mem::take(&mut self.undo);
+        self.undo = old
+            .iter()
+            .enumerate()
+            .filter_map(|(i, before)| {
+                let after = old
+                    .get(i + 1)
+                    .unwrap_or(self.drag_before.as_ref().unwrap_or(&current));
+                (!same_document(before, after)).then(|| before.clone())
+            })
+            .collect();
+        self.objects = current.objects;
+        self.selected = current.selected.or_else(|| {
+            previous_selection
+                .and_then(|previous| self.objects.iter().position(|object| object == &previous))
+        });
+        self.selected = self.editable_selected();
     }
     pub fn hit(&self, point: (f32, f32), scale: f32) -> Option<Hit> {
         if let Some(index) = self.editable_selected() {
@@ -961,6 +1181,9 @@ impl Session {
             .enumerate()
             .rev()
             .find_map(|(index, object)| {
+                if !self.can_edit(object) {
+                    return None;
+                }
                 if let Extra::Sequence(s) = &object.extra {
                     return (inside(object.bounds, point, 6. * scale)
                         || (!s.caption.content.is_empty()
@@ -985,7 +1208,11 @@ impl Session {
                 }
                 if matches!(
                     object.kind,
-                    Kind::Pencil | Kind::HighlightLine | Kind::Arrow | Kind::Polyline
+                    Kind::Pencil
+                        | Kind::HighlightLine
+                        | Kind::Arrow
+                        | Kind::Polyline
+                        | Kind::MosaicBrush
                 ) {
                     return object.hit_path(point, scale).then_some(Hit::Object(index));
                 }
@@ -1005,6 +1232,7 @@ impl Session {
                 if object.style.fill
                     || object.kind.is_spotlight()
                     || object.kind == Kind::HighlightRectangle
+                    || object.kind == Kind::MosaicArea
                 {
                     return Some(Hit::Object(index));
                 }
@@ -1025,8 +1253,164 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn object_identity_survives_edits_and_undo_but_is_never_reused() {
+        let mut session = Session::new();
+        let draft = text_object();
+        assert_eq!(draft.id, ObjectId::DRAFT);
+        assert!(session.add(draft.clone()));
+        let first = session.objects[0].id;
+        session.update_selected(|object| *object = draft.clone());
+        assert_eq!(session.objects[0].id, first);
+        assert_eq!(session.object_index(first), Some(0));
+        assert_eq!(session.object_index(ObjectId::DRAFT), None);
+        session.begin_drag();
+        assert!(session.add(draft.clone()));
+        let cancelled = session.objects[1].id;
+        session.cancel_drag();
+        assert_eq!(session.object_index(cancelled), None);
+        assert_eq!(session.object_index(first), Some(0));
+        assert!(session.add(draft.clone()));
+        let second = session.objects[1].id;
+        assert!(second.value() > cancelled.value());
+        session.selected = Some(0);
+        session.delete_selected();
+        assert_eq!(session.object_index(second), Some(0));
+        assert_eq!(session.object_index(first), None);
+        assert!(session.undo());
+        assert_eq!(session.object_index(first), Some(0));
+        assert_eq!(session.object_index(second), Some(1));
+        session.clear();
+        assert!(session.add(draft));
+        assert!(session.objects[0].id.value() > second.value());
+    }
+
+    #[test]
+    fn cloned_committed_objects_get_distinct_identity_on_insertion() {
+        let mut session = Session::new();
+        assert!(session.add(text_object()));
+        let committed = session.objects[0].clone();
+        assert!(session.add(committed.clone()));
+        assert_ne!(session.objects[1].id, committed.id);
+        assert_eq!(session.object_index(committed.id), Some(0));
+        session.update_selected(|object| object.bounds = committed.bounds.moved(10., 0.));
+        let edited = session.objects[1].id;
+        assert!(session.undo());
+        assert_eq!(session.objects[1].id, edited);
+        assert!(session.undo());
+        assert_eq!(session.object_index(edited), None);
+        assert_eq!(session.object_index(committed.id), Some(0));
+    }
+
+    #[test]
+    fn continuous_edits_share_the_original_transaction_including_deletion() {
+        let mut session = Session::new();
+        session.add(text_object());
+        let original = session.objects[0].clone();
+        session.begin_drag();
+        session.update_selected(|object| object.style.width = 10.);
+        session.begin_drag();
+        session.update_selected(|object| object.style.width = 20.);
+        session.cancel_drag();
+        assert_eq!(session.objects[0], original);
+        session.begin_drag();
+        session.update_selected(|object| object.style.width = 30.);
+        session.delete_selected();
+        session.finish_drag();
+        assert!(session.objects.is_empty());
+        assert!(session.undo());
+        assert_eq!(session.objects, vec![original]);
+        assert!(session.undo());
+        assert!(session.objects.is_empty());
+        assert!(!session.can_undo());
+    }
+    #[test]
+    fn edit_scope_matrix_keeps_families_distinct_and_pencil_locked() {
+        let families = [
+            (EditScope::Geometry, vec![Kind::Rectangle, Kind::Ellipse]),
+            (
+                EditScope::Spotlight,
+                vec![Kind::SpotlightRectangle, Kind::SpotlightEllipse],
+            ),
+            (
+                EditScope::Highlight,
+                vec![Kind::HighlightLine, Kind::HighlightRectangle],
+            ),
+            (EditScope::Arrow, vec![Kind::Arrow]),
+            (EditScope::Polyline, vec![Kind::Polyline]),
+            (EditScope::Magnifier, vec![Kind::Magnifier]),
+            (EditScope::Text, vec![Kind::Text]),
+            (EditScope::Sequence, vec![Kind::Sequence]),
+            (EditScope::Mosaic, vec![Kind::MosaicArea, Kind::MosaicBrush]),
+        ];
+        for (scope, kinds) in &families {
+            for (other_scope, other_kinds) in &families {
+                for &kind in other_kinds {
+                    assert_eq!(scope.allows(kind), scope == other_scope);
+                    assert_eq!(kind.edit_scope(), *other_scope);
+                    assert!(EditScope::All.allows(kind));
+                    assert!(!EditScope::None.allows(kind));
+                }
+            }
+            assert!(!scope.allows(Kind::Pencil));
+            for &kind in kinds {
+                let mut session = Session::new();
+                let mut object = text_object();
+                object.kind = kind;
+                session.add(object);
+                session.set_edit_scope(*scope);
+                session.update_selected(|o| o.style.width = 12.);
+                assert_eq!(session.objects[0].style.width, 12.);
+                let before = session.objects[0].clone();
+                session.set_edit_scope(EditScope::None);
+                assert_eq!(session.selected, None);
+                session.selected = Some(0); // Reject stale callers, not just UI deselection.
+                session.update_selected(|o| o.move_by(100., 100.));
+                session.delete_selected();
+                assert_eq!(session.objects, vec![before]);
+            }
+        }
+        assert!(!EditScope::All.allows(Kind::Pencil));
+    }
+
+    #[test]
+    fn filtered_hit_skips_foreign_overlays_and_scope_survives_undo_and_clear() {
+        for scale in [1., 1.25] {
+            let mut session = Session::new();
+            let mut rectangle = text_object();
+            rectangle.kind = Kind::Rectangle;
+            rectangle.extra = Extra::None;
+            rectangle.style.fill = true;
+            session.add(rectangle.clone());
+            let mut overlay = rectangle;
+            overlay.kind = Kind::HighlightRectangle;
+            session.add(overlay);
+            session.set_edit_scope(EditScope::Geometry);
+            assert_eq!(session.selected, None);
+            assert_eq!(session.hit((-40., 40.), scale), Some(Hit::Object(0)));
+            session.selected = Some(0);
+            assert!(matches!(
+                session.hit((-100., 20.), scale),
+                Some(Hit::Handle(_))
+            ));
+            session.set_edit_scope(EditScope::Magnifier);
+            assert_eq!(session.hit((-100., 20.), scale), None);
+            assert!(session.undo());
+            assert_eq!(session.selected, None);
+            assert_eq!(session.hit((-40., 40.), scale), None);
+            session.clear();
+            session.add(text_object());
+            assert_eq!(session.selected, None);
+            session.set_edit_scope(EditScope::Text);
+            assert_eq!(session.hit((-40., 40.), scale), Some(Hit::Object(0)));
+            assert_eq!(session.selected, None, "switching back does not reselect");
+        }
+    }
+
     fn text_object() -> Object {
         Object {
+            id: Default::default(),
             bounds: Bounds::from_corners((-100., 20.), (20., 70.)),
             kind: Kind::Text,
             style: Style::default(),
@@ -1206,6 +1590,7 @@ mod tests {
     }
     fn brush(kind: Kind, points: Vec<(f32, f32)>) -> Object {
         let mut o = Object {
+            id: Default::default(),
             kind,
             points,
             style: Style {
@@ -1230,6 +1615,7 @@ mod tests {
         assert!(!o.hit_path((-50., -50.), 1.));
         let mut s = Session::new();
         assert!(s.add(o.clone()));
+        o.id = s.objects[0].id;
         assert_eq!(s.selected, None);
         assert!(o.edit_handles(1.).is_empty());
         assert_eq!(s.hit((-50., -100.), 1.), None);
@@ -1281,11 +1667,13 @@ mod tests {
         assert_eq!(line.points[0], (-50., 20.));
         let mut s = Session::new();
         assert!(s.add(line.clone()));
+        line.id = s.objects[0].id;
         s.begin_drag();
         s.objects[0].edit_handle(1, (200., 100.), 1.);
         s.cancel_drag();
         assert_eq!(s.objects[0], line);
         let mut rect = Object {
+            id: Default::default(),
             kind: Kind::HighlightRectangle,
             points: vec![],
             style: Style::default(),
@@ -1302,6 +1690,7 @@ mod tests {
     fn drawing_selection_and_undo() {
         let mut s = Session::new();
         let obj = Object {
+            id: Default::default(),
             bounds: Bounds::from_corners((120., 80.), (-30., -20.)),
             kind: Kind::Rectangle,
             style: Style::default(),
@@ -1326,6 +1715,7 @@ mod tests {
     fn continuous_style_adjustment_is_one_undo_step() {
         let mut s = Session::new();
         s.add(Object {
+            id: Default::default(),
             bounds: Bounds::from_corners((0., 0.), (100., 100.)),
             kind: Kind::SpotlightRectangle,
             style: Style::default(),
@@ -1348,6 +1738,7 @@ mod tests {
     fn curved_arrow_uses_its_visible_midpoint_for_hit_and_edit() {
         let mut session = Session::new();
         let mut arrow = Object {
+            id: Default::default(),
             bounds: Bounds::from_corners((0., 0.), (100., 0.)),
             kind: Kind::Arrow,
             style: Style::default(),
@@ -1377,6 +1768,7 @@ mod tests {
     #[test]
     fn straight_arrow_midpoint_bends_and_snaps_back_to_straight() {
         let mut arrow = Object {
+            id: Default::default(),
             bounds: Bounds::from_corners((-100., -50.), (0., -50.)),
             kind: Kind::Arrow,
             style: Style::default(),
@@ -1401,6 +1793,7 @@ mod tests {
     #[test]
     fn smooth_filled_polyline_hits_interior_and_keeps_editable_nodes() {
         let mut shape = Object {
+            id: Default::default(),
             bounds: Bounds::from_corners((0., 0.), (0., 0.)),
             kind: Kind::Polyline,
             style: Style {
@@ -1429,6 +1822,7 @@ mod tests {
         let output = Bounds::from_corners((0., 50.), (150., 125.));
         let mut session = Session::new();
         session.add(Object {
+            id: Default::default(),
             bounds: source,
             kind: Kind::Magnifier,
             style: Style::default(),
@@ -1478,6 +1872,7 @@ mod tests {
         let source = Bounds::from_corners((0., 0.), (100., 60.));
         let output = Bounds::from_corners((200., 10.), (350., 100.));
         let object = Object {
+            id: Default::default(),
             bounds: source,
             kind: Kind::Magnifier,
             style: Style::default(),
@@ -1536,6 +1931,7 @@ mod tests {
         assert_eq!(magnifier_output_for_source(source, 1.), source);
         assert_eq!(magnifier_output_for_source(source, 8.).width(), 1200.);
         let mut object = Object {
+            id: Default::default(),
             bounds: source,
             kind: Kind::Magnifier,
             style: Style::default(),
@@ -1562,6 +1958,7 @@ mod tests {
         let source = Bounds::from_corners((-180., -120.), (-80., -60.));
         let output = Bounds::from_corners((200., 100.), (350., 190.));
         let object = Object {
+            id: Default::default(),
             bounds: source,
             kind: Kind::Magnifier,
             style: Style::default(),
@@ -1578,6 +1975,7 @@ mod tests {
         };
         let mut session = Session::new();
         assert!(session.add(object.clone()));
+        let object = session.objects[0].clone();
         session.begin_drag();
         session.update_selected(|selected| selected.set_magnifier_zoom_centered(2.));
         session.update_selected(|selected| selected.set_magnifier_zoom_centered(8.));

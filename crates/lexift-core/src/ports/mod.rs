@@ -1,3 +1,4 @@
+pub mod annotation_render;
 pub mod autostart;
 pub mod clipboard;
 pub mod credential;
@@ -5,6 +6,7 @@ pub mod hotkey;
 pub mod instance;
 pub mod magnifier;
 pub mod screen;
+pub mod screen_capture;
 pub mod selection;
 pub mod settings;
 pub mod speech;

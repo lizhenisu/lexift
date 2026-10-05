@@ -121,6 +121,7 @@ impl Object {
             return None;
         };
         Some(Object {
+            id: Default::default(),
             kind: Kind::Text,
             bounds: s.caption_bounds,
             style: Style {
@@ -138,6 +139,7 @@ impl Object {
         let mut text = s.caption.clone();
         text.rotation = 0.;
         Some(Object {
+            id: Default::default(),
             kind: Kind::Text,
             extra: Extra::Text(text),
             ..self.clone()
@@ -165,6 +167,7 @@ mod tests {
     use super::*;
     fn object(scale: f32) -> Object {
         Object {
+            id: Default::default(),
             kind: Kind::Sequence,
             bounds: Bounds::from_corners((-100., -100.), (-60., -60.)),
             points: Vec::new(),
@@ -262,6 +265,7 @@ mod tests {
             assert_eq!(arrow.edit_handles(scale)[2], (-20., -150.));
             let mut s = Session::new();
             s.add(o.clone());
+            o.id = s.objects[0].id;
             s.selected = None;
             assert_eq!(s.hit((-30., -80.), scale), Some(Hit::Object(0)));
             s.begin_drag();

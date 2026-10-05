@@ -1,9 +1,9 @@
-//! DPI-aware cursor for editing a highlighter rectangle's corner radius.
+//! Native corner-radius and centered brush cursors for annotation canvases.
 //! The subclass is attached only to its canvas HWND and owns the cursor until WM_NCDESTROY.
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::{
-    Foundation::{HANDLE, HWND, LPARAM, LRESULT, WPARAM},
+    Foundation::{HANDLE, HWND, LPARAM, LRESULT, POINT, WPARAM},
     Graphics::Gdi::{
         BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateBitmap, CreateDIBSection, DIB_RGB_COLORS,
         DeleteObject, HGDIOBJ,
@@ -12,8 +12,9 @@ use windows::Win32::{
         HiDpi::GetDpiForWindow,
         Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
         WindowsAndMessaging::{
-            CreateIconIndirect, DestroyCursor, GetCursor, GetPropW, HCURSOR, ICONINFO, IDC_ARROW,
-            LoadCursorW, RemovePropW, SetCursor, SetPropW, WM_NCDESTROY, WM_SETCURSOR,
+            CreateIconIndirect, DestroyCursor, GetCursor, GetCursorPos, GetPropW, HCURSOR,
+            ICONINFO, IDC_ARROW, LoadCursorW, RemovePropW, SetCursor, SetPropW, WM_NCDESTROY,
+            WM_SETCURSOR, WindowFromPoint,
         },
     },
 };
@@ -27,6 +28,7 @@ struct CursorState {
     cursor: HCURSOR,
     size: i32,
     active: bool,
+    brush: bool,
 }
 
 fn hwnd(window: &impl HasWindowHandle) -> lexift_core::Result<HWND> {
@@ -70,6 +72,26 @@ fn pixels(size: i32) -> &'static [u8] {
 }
 
 fn make_cursor(size: i32) -> lexift_core::Result<HCURSOR> {
+    make_bitmap_cursor(size, pixels(size), size as u32 * POINTER_TIP_UNITS / 32)
+}
+
+fn make_brush_cursor(size: i32) -> lexift_core::Result<HCURSOR> {
+    let mut rgba = vec![0; (size * size * 4) as usize];
+    let center = size as f32 / 2.;
+    let radius = (size - 4) as f32 / 2.;
+    for y in 0..size {
+        for x in 0..size {
+            let distance = (x as f32 + 0.5 - center).hypot(y as f32 + 0.5 - center);
+            let alpha = ((1.5 - (distance - radius).abs()).clamp(0., 1.) * 255.).round() as u8;
+            let color = if distance < radius { alpha } else { 0 };
+            let index = ((y * size + x) * 4) as usize;
+            rgba[index..index + 4].copy_from_slice(&[color, color, color, alpha]);
+        }
+    }
+    make_bitmap_cursor(size, &rgba, size as u32 / 2)
+}
+
+fn make_bitmap_cursor(size: i32, source: &[u8], hotspot: u32) -> lexift_core::Result<HCURSOR> {
     let info = BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
             biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -85,7 +107,6 @@ fn make_cursor(size: i32) -> lexift_core::Result<HCURSOR> {
     let mut bits = std::ptr::null_mut();
     let color = unsafe { CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0) }
         .map_err(|_| lexift_core::Error::new("Could not create annotation cursor bitmap"))?;
-    let source = pixels(size);
     let destination = unsafe { std::slice::from_raw_parts_mut(bits.cast::<u8>(), source.len()) };
     // resvg's output is already premultiplied RGBA; only reorder for Win32 BGRA.
     for (rgba, bgra) in source
@@ -110,8 +131,8 @@ fn make_cursor(size: i32) -> lexift_core::Result<HCURSOR> {
     let icon = unsafe {
         CreateIconIndirect(&ICONINFO {
             fIcon: false.into(),
-            xHotspot: size as u32 * POINTER_TIP_UNITS / 32,
-            yHotspot: size as u32 * POINTER_TIP_UNITS / 32,
+            xHotspot: hotspot,
+            yHotspot: hotspot,
             hbmMask: mask,
             hbmColor: color,
         })
@@ -132,8 +153,36 @@ fn release_cursor(cursor: HCURSOR, replacement: Option<HCURSOR>) {
     let _ = unsafe { DestroyCursor(cursor) };
 }
 
+fn apply_on_hover(hwnd: HWND, cursor: HCURSOR) {
+    let mut point = POINT::default();
+    if unsafe { GetCursorPos(&mut point) }.is_ok() && unsafe { WindowFromPoint(point) } == hwnd {
+        unsafe {
+            SetCursor(Some(cursor));
+        }
+    }
+}
+
 /// Enables the custom cursor; failure leaves Slint free to show its ordinary move cursor.
 pub(crate) fn set(window: &impl HasWindowHandle, active: bool) -> lexift_core::Result<()> {
+    set_shape(window, active, None)
+}
+
+pub(crate) fn set_brush(window: &impl HasWindowHandle, diameter: f32) -> lexift_core::Result<()> {
+    if !diameter.is_finite() || diameter <= 0. {
+        return set_shape(window, false, None);
+    }
+    set_shape(
+        window,
+        true,
+        Some(diameter.round().clamp(1., 2048.) as i32 + 4),
+    )
+}
+
+fn set_shape(
+    window: &impl HasWindowHandle,
+    active: bool,
+    brush_size: Option<i32>,
+) -> lexift_core::Result<()> {
     let hwnd = hwnd(window)?;
     let pointer = unsafe { GetPropW(hwnd, w!("Lexift.AnnotationCornerCursor")) }.0 as usize;
     if pointer != 0 {
@@ -150,25 +199,36 @@ pub(crate) fn set(window: &impl HasWindowHandle, active: bool) -> lexift_core::R
             release_cursor(state.cursor, None);
             return Ok(());
         }
-        let size = cursor_size(hwnd);
-        if state.size != size {
-            let cursor = make_cursor(size)?;
+        let size = brush_size.unwrap_or_else(|| cursor_size(hwnd));
+        if state.size != size || state.brush != brush_size.is_some() {
+            let cursor = if brush_size.is_some() {
+                make_brush_cursor(size)?
+            } else {
+                make_cursor(size)?
+            };
             release_cursor(state.cursor, Some(cursor));
             state.cursor = cursor;
             state.size = size;
+            state.brush = brush_size.is_some();
         }
         state.active = true;
+        apply_on_hover(hwnd, state.cursor);
         return Ok(());
     }
     if !active {
         return Ok(());
     }
-    let size = cursor_size(hwnd);
-    let cursor = make_cursor(size)?;
+    let size = brush_size.unwrap_or_else(|| cursor_size(hwnd));
+    let cursor = if brush_size.is_some() {
+        make_brush_cursor(size)?
+    } else {
+        make_cursor(size)?
+    };
     let pointer = Box::into_raw(Box::new(CursorState {
         cursor,
         size,
         active,
+        brush: brush_size.is_some(),
     }));
     if unsafe {
         SetPropW(
@@ -194,6 +254,7 @@ pub(crate) fn set(window: &impl HasWindowHandle, active: bool) -> lexift_core::R
             "Could not install annotation cursor",
         ));
     }
+    apply_on_hover(hwnd, cursor);
     Ok(())
 }
 
@@ -233,6 +294,35 @@ unsafe extern "system" fn subclass(
 mod tests {
     use super::*;
     use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, HICON};
+
+    #[test]
+    fn brush_cursor_hotspot_and_bitmap_follow_the_physical_diameter() {
+        use windows::Win32::Graphics::Gdi::{BITMAP, GetObjectW};
+        for diameter in [1, 15, 40, 125] {
+            let size = diameter + 4;
+            let cursor = make_brush_cursor(size).unwrap();
+            let mut info = ICONINFO::default();
+            unsafe { GetIconInfo(HICON(cursor.0), &mut info) }.unwrap();
+            assert_eq!(info.xHotspot, size as u32 / 2);
+            assert_eq!(info.yHotspot, size as u32 / 2);
+            let mut bitmap = BITMAP::default();
+            assert_ne!(
+                unsafe {
+                    GetObjectW(
+                        HGDIOBJ(info.hbmColor.0),
+                        std::mem::size_of::<BITMAP>() as i32,
+                        Some(&mut bitmap as *mut _ as _),
+                    )
+                },
+                0
+            );
+            assert_eq!(bitmap.bmWidth, size);
+            assert_eq!(bitmap.bmHeight, size);
+            let _ = unsafe { DeleteObject(HGDIOBJ(info.hbmMask.0)) };
+            let _ = unsafe { DeleteObject(HGDIOBJ(info.hbmColor.0)) };
+            unsafe { DestroyCursor(cursor) }.unwrap();
+        }
+    }
 
     #[test]
     fn cursor_resource_has_a_hotspot_at_all_dpi_sizes() {
