@@ -105,7 +105,8 @@ fn register(hwnd: HWND, role: Role) -> Result<()> {
 }
 
 pub(super) fn canvas(hwnd: HWND) -> Result<()> {
-    register(hwnd, Role::Canvas)
+    register(hwnd, Role::Canvas)?;
+    super::annotation_overlay::mark(hwnd)
 }
 pub(super) fn visual(hwnd: HWND) -> Result<()> {
     register(hwnd, Role::Visual)
@@ -118,6 +119,9 @@ pub(super) fn tool(hwnd: HWND, owner: HWND) -> Result<()> {
         .find(|entry| entry.window() == owner && !matches!(entry.role, Role::Visual))
     {
         register(hwnd, Role::Tool { owner: owner.id })?;
+        // One-shot capture freezes its explicit HWND list. A menu/canvas created
+        // after that request must still be excluded before its first show.
+        super::annotation_overlay::mark(hwnd)?;
     }
     Ok(())
 }
@@ -396,6 +400,27 @@ mod tests {
             let _ = DeleteObject(brush.into());
             ReleaseDC(Some(window.0), dc);
         }
+    }
+
+    #[test]
+    fn newly_registered_annotation_windows_are_excluded_before_first_show() {
+        let canvas = window(0, 0, 40, 40);
+        super::canvas(canvas.0).unwrap();
+        let toolbar = window(0, 0, 40, 40);
+        super::tool(toolbar.0, canvas.0).unwrap();
+        let menu = window(0, 0, 40, 40);
+        super::tool(menu.0, toolbar.0).unwrap();
+        for window in [&canvas, &toolbar, &menu] {
+            assert!(super::super::annotation_overlay::contains(window.0));
+            assert!(!unsafe { IsWindowVisible(window.0) }.as_bool());
+        }
+        let normal_owner = window(0, 0, 40, 40);
+        let normal_popup = window(0, 0, 40, 40);
+        super::tool(normal_popup.0, normal_owner.0).unwrap();
+        assert!(!super::super::annotation_overlay::contains(normal_popup.0));
+        let retired = menu.0;
+        drop(menu);
+        assert!(!super::super::annotation_overlay::contains(retired));
     }
 
     #[test]

@@ -117,9 +117,9 @@ export component ComboBox inherits Rectangle {
     if root.connectors: ConnectorStylePreview {
         x: 9px; y: 5px; width: parent.width - 36px; height: 20px; style: root.current-index;
     }
-    Path { x: parent.width - 19px; y: 13px; width: 10px; height: 5px;
-        viewbox-width: 10; viewbox-height: 5; commands: "M1 1L5 4L9 1";
-        fill: transparent; stroke: Colors.secondary-foreground; stroke-width: 1.5px; }
+    Image { x: parent.width - 19px; y: (parent.height - self.height) / 2;
+        width: 10px; height: 5px; source: @image-url("icons/dropdown-indicator.svg");
+        colorize: Colors.secondary-foreground; }
     area := TouchArea { enabled: root.enabled; clicked => { root.menu-requested({
         field: root.field, options: root.model, selected: root.current-index,
         x: root.absolute-position.x / 1px, y: root.absolute-position.y / 1px,

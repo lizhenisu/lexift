@@ -822,3 +822,9 @@ msgstr "Mattglasstruktur"
 
 msgid "Texture size"
 msgstr "Strukturgröße"
+
+msgid "Save annotation screenshot"
+msgstr "Kommentierten Screenshot speichern"
+
+msgid "Could not save screenshot. Try again."
+msgstr "Screenshot konnte nicht gespeichert werden. Bitte erneut versuchen."

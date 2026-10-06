@@ -822,3 +822,9 @@ msgstr "磨砂顆粒"
 
 msgid "Texture size"
 msgstr "紋理大小"
+
+msgid "Save annotation screenshot"
+msgstr "儲存標註截圖"
+
+msgid "Could not save screenshot. Try again."
+msgstr "無法儲存截圖，請重試。"

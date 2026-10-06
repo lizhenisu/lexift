@@ -249,6 +249,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
             }
         })
         .with_annotation_screen_capture(screen_capture_for_annotation)
+        .with_annotation_export(lexift_platform::annotation_screen_capture_port, lexift_platform::annotation_save_port())
         .with_annotation_renderer(renderer_for_annotation)
         .with_annotation_window_token(|window| {
             lexift_platform::annotation_window_token(&window.window_handle())
@@ -268,6 +269,9 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         })
         .with_toolbar_cursor_position(move || {
             screen_for_toolbar.as_ref()?.cursor_position().ok()
+        })
+        .with_toolbar_drag_cancellation(|window| {
+            lexift_platform::cancel_toolbar_drag_on_escape(&window.window_handle())
         })
         .with_passive_toolbar_interaction(|window, sink| {
             match lexift_platform::enable_passive_tool_window_interaction(

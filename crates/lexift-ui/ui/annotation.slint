@@ -82,6 +82,7 @@ export component AnnotationToolbar inherits Window {
     in property <int> active-group: -1;
     in property <bool> operate: false;
     in property <bool> can-undo: false;
+    in property <bool> can-download: false;
     out property <length> notice-width: Metrics.toast-width;
     out property <length> notice-height: Metrics.toast-height;
     out property <length> notice-margin: Spacing.medium;
@@ -90,6 +91,7 @@ export component AnnotationToolbar inherits Window {
     callback tool-clicked(int, bool);
     callback operate-requested();
     callback undo-requested();
+    callback download-requested();
     callback delete-requested();
     callback finish-path-requested();
     callback backspace-requested();
@@ -137,7 +139,7 @@ export component AnnotationToolbar inherits Window {
             }
             Rectangle { width: 1px; background: Colors.outline; }
             ToolButton { kind: 14; enabled: root.can-undo; clicked => { root.undo-requested(); } }
-            ToolButton { kind: 15; enabled: false; }
+                ToolButton { kind: 15; enabled: root.can-download; clicked => { root.download-requested(); } }
             ToolButton { kind: 16; clicked => { root.finish-requested(); } }
         }
     }

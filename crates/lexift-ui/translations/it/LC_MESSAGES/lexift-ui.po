@@ -822,3 +822,9 @@ msgstr "Grana smerigliata"
 
 msgid "Texture size"
 msgstr "Dimensione texture"
+
+msgid "Save annotation screenshot"
+msgstr "Salva schermata annotata"
+
+msgid "Could not save screenshot. Try again."
+msgstr "Impossibile salvare la schermata. Riprova."

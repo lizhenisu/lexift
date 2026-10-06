@@ -113,6 +113,8 @@ type BeginWindowResize = Rc<dyn Fn(&slint::Window, PopupResizeEdge, bool) -> boo
 type PopupWorkArea = Rc<dyn Fn(Point) -> Option<Rect>>;
 type ToolbarCursorPosition = Rc<dyn Fn() -> Option<Point>>;
 type AnnotationDisplays = Rc<dyn Fn() -> Vec<Rect>>;
+type AnnotationExportCaptureFactory =
+    fn() -> Option<std::sync::Arc<dyn lexift_core::ports::screen_capture::ScreenCapturePort>>;
 type AnnotationClickThrough = Rc<dyn Fn(&slint::Window, bool) -> bool>;
 type AnnotationCornerCursor = Rc<dyn Fn(&slint::Window, bool) -> bool>;
 type AnnotationBrushCursor = Rc<dyn Fn(&slint::Window, f32) -> bool>;
@@ -144,6 +146,7 @@ pub struct WindowLifecycleCallbacks {
     begin_window_resize: BeginWindowResize,
     pub(crate) popup_work_area: PopupWorkArea,
     pub(crate) toolbar_cursor_position: ToolbarCursorPosition,
+    pub(crate) cancel_toolbar_drag_on_escape: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) set_popup_dismissal: SetPopupDismissal,
     pub(crate) attach_tool_window: AttachToolWindow,
     pub(crate) annotation_displays: AnnotationDisplays,
@@ -155,6 +158,9 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) annotation_magnifier_refresh: AnnotationMagnifierRefresh,
     pub(crate) annotation_screen_capture:
         Option<std::sync::Arc<dyn lexift_core::ports::screen_capture::ScreenCapturePort>>,
+    pub(crate) annotation_export_capture: Option<AnnotationExportCaptureFactory>,
+    pub(crate) annotation_save:
+        Option<std::sync::Arc<dyn lexift_core::ports::annotation_save::AnnotationSavePort>>,
     pub(crate) annotation_window_token: AnnotationWindowToken,
     pub(crate) annotation_foreground: Option<AnnotationForeground>,
     pub(crate) annotation_renderer:
@@ -186,6 +192,7 @@ impl WindowLifecycleCallbacks {
             begin_window_resize: Rc::new(begin_window_resize),
             popup_work_area: Rc::new(|_| None),
             toolbar_cursor_position: Rc::new(|| None),
+            cancel_toolbar_drag_on_escape: Rc::new(|_| false),
             set_popup_dismissal: Rc::new(set_popup_dismissal),
             attach_tool_window: Rc::new(attach_tool_window),
             annotation_displays: Rc::new(Vec::new),
@@ -196,6 +203,8 @@ impl WindowLifecycleCallbacks {
             annotation_magnifier_sync: Rc::new(|_, _| false),
             annotation_magnifier_refresh: Rc::new(|| false),
             annotation_screen_capture: None,
+            annotation_export_capture: None,
+            annotation_save: None,
             annotation_window_token: Rc::new(|_| None),
             annotation_foreground: None,
             annotation_renderer: None,
@@ -285,6 +294,17 @@ impl WindowLifecycleCallbacks {
         self
     }
 
+    /// Each export acquires a new capture instance, isolated from live effects.
+    pub fn with_annotation_export(
+        mut self,
+        capture: AnnotationExportCaptureFactory,
+        save: Option<std::sync::Arc<dyn lexift_core::ports::annotation_save::AnnotationSavePort>>,
+    ) -> Self {
+        self.annotation_export_capture = Some(capture);
+        self.annotation_save = save;
+        self
+    }
+
     /// Resolve native input surfaces through App without a UI/platform dependency.
     pub fn with_annotation_window_token(
         mut self,
@@ -320,6 +340,15 @@ impl WindowLifecycleCallbacks {
         query: impl Fn() -> Option<Point> + 'static,
     ) -> Self {
         self.toolbar_cursor_position = Rc::new(query);
+        self
+    }
+
+    /// Cancels captured passive toolbar dragging without activating the toolbar.
+    pub fn with_toolbar_drag_cancellation(
+        mut self,
+        cancel: impl Fn(&slint::Window) -> bool + 'static,
+    ) -> Self {
+        self.cancel_toolbar_drag_on_escape = Rc::new(cancel);
         self
     }
 

@@ -822,3 +822,9 @@ msgstr "반투명 입자"
 
 msgid "Texture size"
 msgstr "텍스처 크기"
+
+msgid "Save annotation screenshot"
+msgstr "주석 스크린샷 저장"
+
+msgid "Could not save screenshot. Try again."
+msgstr "스크린샷을 저장할 수 없습니다. 다시 시도하세요."

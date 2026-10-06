@@ -358,6 +358,21 @@ pub fn annotation_screen_capture_port()
     }
 }
 
+/// Native PNG save dialog and encoding, invoked on a job-owned worker.
+pub fn annotation_save_port()
+-> Option<std::sync::Arc<dyn lexift_core::ports::annotation_save::AnnotationSavePort>> {
+    #[cfg(target_os = "windows")]
+    {
+        Some(std::sync::Arc::new(
+            windows::annotation_save::WindowsAnnotationSavePort,
+        ))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
 /// Native scene renderer. UI selects its backend through this Core capability.
 pub fn annotation_render_port()
 -> Option<std::sync::Arc<dyn lexift_core::ports::annotation_render::AnnotationRenderPort>> {
@@ -423,6 +438,19 @@ pub fn enable_passive_tool_window_interaction(
     #[cfg(not(target_os = "windows"))]
     let _ = (window, pointer_handler);
     Ok(())
+}
+
+/// Releases a captured passive toolbar drag when Escape is held.
+pub fn cancel_toolbar_drag_on_escape(window: &impl raw_window_handle::HasWindowHandle) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        windows::popup::cancel_toolbar_drag_on_escape(window)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+        false
+    }
 }
 
 /// Attaches a tool-window surface to its owning application window.

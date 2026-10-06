@@ -822,3 +822,9 @@ msgstr "Grano esmerilado"
 
 msgid "Texture size"
 msgstr "Tamaño de textura"
+
+msgid "Save annotation screenshot"
+msgstr "Guardar captura con anotaciones"
+
+msgid "Could not save screenshot. Try again."
+msgstr "No se pudo guardar la captura. Inténtalo de nuevo."

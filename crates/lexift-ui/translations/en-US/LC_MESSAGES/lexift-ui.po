@@ -822,3 +822,9 @@ msgstr "Frosted grain"
 
 msgid "Texture size"
 msgstr "Texture size"
+
+msgid "Save annotation screenshot"
+msgstr "Save annotation screenshot"
+
+msgid "Could not save screenshot. Try again."
+msgstr "Could not save screenshot. Try again."

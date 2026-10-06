@@ -110,6 +110,27 @@ pub(crate) fn enable_passive_interaction(
     install_pointer_bridge(window, pointer_handler, false)
 }
 
+/// Passive client dragging retains the previous foreground window, so Escape
+/// cannot be delivered as a toolbar key event. Query it only while this HWND
+/// owns capture; releasing capture also clears the native pressed state.
+pub(crate) fn cancel_toolbar_drag_on_escape(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, GetCapture, ReleaseCapture, VK_ESCAPE,
+    };
+    let Ok(hwnd) = required_hwnd(window) else {
+        return false;
+    };
+    unsafe {
+        if GetCapture() != hwnd || GetAsyncKeyState(VK_ESCAPE.0 as i32) >= 0 {
+            return false;
+        }
+        let _ = ReleaseCapture();
+    }
+    true
+}
+
 pub(crate) fn attach_owner(
     child: &impl raw_window_handle::HasWindowHandle,
     owner: &impl raw_window_handle::HasWindowHandle,

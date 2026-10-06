@@ -647,6 +647,15 @@ fn fail(r: &mut Registry, detail: &str) {
         super::cancel_active_gesture(r);
     }
     r.mosaic.waiting_since = None;
+    notify(r, "Screen capture unavailable. Try again.");
+}
+
+/// Shared transient feedback; export failures must not cancel live mosaics.
+pub(super) fn notify(r: &mut Registry, message: &str) {
+    notify_on(r, message, None);
+}
+
+pub(super) fn notify_on(r: &mut Registry, message: &str, monitor: Option<Rect>) {
     r.mosaic.notice_revision = r.mosaic.notice_revision.wrapping_add(1);
     let revision = r.mosaic.notice_revision;
     let generation = r.generation;
@@ -654,13 +663,13 @@ fn fail(r: &mut Registry, detail: &str) {
     if let Some(canvas) = r
         .canvases
         .iter()
-        .find(|c| c.last_pointer.is_some())
+        .find(|c| monitor.map_or(c.last_pointer.is_some(), |bounds| c.bounds == bounds))
         .or_else(|| r.canvases.first())
     {
         r.mosaic.notice = Some(Notice {
             revision,
             bounds: canvas.bounds,
-            message: crate::i18n::tr("Screen capture unavailable. Try again."),
+            message: crate::i18n::tr(message),
         });
         r.mosaic.tasks.notice_timer.start(
             slint::TimerMode::SingleShot,

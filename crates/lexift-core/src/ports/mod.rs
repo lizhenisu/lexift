@@ -1,4 +1,5 @@
 pub mod annotation_render;
+pub mod annotation_save;
 pub mod autostart;
 pub mod clipboard;
 pub mod credential;

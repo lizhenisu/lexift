@@ -822,3 +822,9 @@ msgstr "Grain dépoli"
 
 msgid "Texture size"
 msgstr "Taille de texture"
+
+msgid "Save annotation screenshot"
+msgstr "Enregistrer la capture annotée"
+
+msgid "Could not save screenshot. Try again."
+msgstr "Impossible d’enregistrer la capture. Réessayez."

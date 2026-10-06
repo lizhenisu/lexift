@@ -47,6 +47,10 @@ use drawing::{ArrowPending, PendingState, Polyline};
 mod editor;
 #[path = "annotation_erase.rs"]
 mod eraser;
+#[path = "annotation_export.rs"]
+mod export;
+#[path = "annotation_toolbar.rs"]
+mod toolbar;
 #[path = "annotation_tools.rs"]
 mod tools;
 #[cfg(test)]
@@ -95,6 +99,7 @@ struct Registry {
     scene_revision: u64,
     native_presenter: presenter::Presenter,
     mosaic: mosaic::State,
+    export: export::State,
     main: window::Slot<AnnotationToolbar>,
     panel: window::Slot<AnnotationPanel>,
     editor: editor::State,
@@ -109,6 +114,9 @@ struct Registry {
     cold_open_measured: bool,
     cold_open_timing: Option<ColdOpenTiming>,
     toolbar_owner: Option<(usize, u64, u64)>,
+    toolbar_press: Option<toolbar::Drag>,
+    toolbar_drag: Option<toolbar::Drag>,
+    panel_preparation: toolbar::Preparation,
     session: Session,
     hovered: Option<usize>,
     gesture: Option<Active>,
@@ -391,6 +399,7 @@ pub(crate) fn init(
             scene_revision: 0,
             native_presenter: Default::default(),
             mosaic: mosaic::State::default(),
+            export: export::State::default(),
             main: window::Slot::default(),
             panel: window::Slot::default(),
             editor: editor::State::default(),
@@ -405,6 +414,9 @@ pub(crate) fn init(
             cold_open_measured: false,
             cold_open_timing: None,
             toolbar_owner: None,
+            toolbar_press: None,
+            toolbar_drag: None,
+            panel_preparation: Default::default(),
             session: {
                 let mut session = Session::new();
                 session.set_edit_scope(EditScope::Geometry);
@@ -832,6 +844,7 @@ impl Registry {
 
     fn close_panel(&mut self) {
         // Reject reentrant owner events before dropping child windows and hooks.
+        self.panel_preparation = Default::default();
         self.panel.retire_input();
         self.deferred_parameters.clear();
         self.focus.cancel();
@@ -859,7 +872,10 @@ impl Registry {
         self.focus.cancel();
     }
     fn close(&mut self) {
+        self.export.cancel();
         drag_timing::clear();
+        self.toolbar_drag = None;
+        self.toolbar_press = None;
         // Invalidate queued input before native teardown can emit callbacks.
         // No parameter replay or editor restoration belongs to a dying session.
         self.generation = self.generation.wrapping_add(1);
@@ -1416,6 +1432,22 @@ fn escape() {
 }
 
 fn escape_from(origin: focus::Origin) {
+    let restored = REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot.as_mut() else { return false };
+        let Some(drag) = r.toolbar_drag.take() else {
+            return false;
+        };
+        if let Some(main) = r.main.get() {
+            main.window().set_position(drag.origin);
+        }
+        true
+    });
+    if restored {
+        reposition_panel();
+        return;
+    }
+
     if choice::dismiss_from(origin) {
         return;
     }
@@ -1559,6 +1591,9 @@ pub(crate) fn toggle(requested_at: Instant) {
         let input = r.main.input();
         main.on_undo_requested(move || later_main(&input, generation, revision, undo));
         let input = r.main.input();
+        main.on_download_requested(move || later_main(&input, generation, revision, export::start));
+        main.set_can_download(export::available(r));
+        let input = r.main.input();
         main.on_delete_requested(move || later_main(&input, generation, revision, delete_selected));
         let input = r.main.input();
         main.on_finish_path_requested(move || {
@@ -1576,25 +1611,20 @@ pub(crate) fn toggle(requested_at: Instant) {
             let origin = focus_origin(&lifecycle);
             later_main(&input, generation, revision, move || escape_from(origin));
         });
-        let input = r.main.input();
         let lifecycle = r.lifecycle.clone();
         main.on_drag_requested(move || {
             let origin = focus_origin(&lifecycle);
-            later_main(&input, generation, revision, move || {
-                choice::dismiss_from(origin);
-                let target = REGISTRY.with(|s| {
-                    let slot = s.borrow();
-                    let r = slot.as_ref()?;
-                    if !permits_focus_activation(r, origin) {
-                        return None;
-                    }
-                    Some((r.main.get()?.clone_strong(), r.lifecycle.begin_window_drag))
-                });
-                if let Some((main, drag)) = target {
-                    drag(main.window());
-                    reposition_panel();
+            if !main_current(generation, revision) {
+                return;
+            }
+            choice::dismiss_from(origin);
+            REGISTRY.with(|slot| {
+                if let Some(r) = slot.borrow_mut().as_mut()
+                    && permits_focus_activation(r, origin)
+                {
+                    r.toolbar_drag = r.toolbar_press;
                 }
-            })
+            });
         });
         let input = r.main.input();
         main.window().on_close_requested(move || {
@@ -4592,7 +4622,8 @@ fn open_panel(group: usize, menu: bool) {
                     REGISTRY.with(|slot| {
                         if let Some(r) = slot.borrow().as_ref().filter(|r| {
                             r.generation == generation && r.panel.revision() == panel_revision
-                        }) {
+                        }) && r.panel_preparation.ready
+                        {
                             position_panel(r);
                         }
                     })
@@ -4999,46 +5030,71 @@ fn show_panel(generation: u64, panel_revision: u64, attempt: u8) {
         else {
             return;
         };
-        let Some(panel) = r.panel.get() else {
+        let Some(panel) = r.panel.get() else { return };
+        if r.panel_preparation.ready {
             return;
-        };
+        }
         match (r.prepare)(panel.window()) {
             PassiveWindowPreparation::Ready => {
+                if !r.panel_preparation.measured {
+                    // Evaluate the hidden component with its actual renderer.
+                    // Text/layout caches may otherwise acquire their final metrics
+                    // only during show(), after our width measurement has finished.
+                    let _ = panel.window().take_snapshot();
+                    r.panel_preparation.measured = true;
+                }
                 if !position_panel(r) {
                     r.close_panel();
                     return;
                 }
                 let panel = r.panel.get().unwrap();
+                // Solve the final-width layout before observing its height.
+                // A renderer evaluation can invalidate lazy Flexbox measurements.
+                let _ = panel.window().take_snapshot();
                 if !r.main.get().is_some_and(|main| {
                     (r.lifecycle.attach_tool_window)(panel.window(), main.window())
                 }) {
-                    retry_panel_owner(r, generation, panel_revision, attempt);
+                    retry_panel_preparation(r, generation, panel_revision, attempt);
                     return;
                 }
-                if panel.show().is_err()
-                    || !(r.lifecycle.complete_passive_window_show)(
-                        panel.window(),
-                        pointer_panel(panel.as_weak(), generation, panel_revision, r.panel.input()),
-                    )
-                {
+                let layout = toolbar::Layout {
+                    token: (r.lifecycle.annotation_window_token)(panel.window()),
+                    scale: panel.window().scale_factor(),
+                    position: panel.window().position(),
+                    size: panel.window().size(),
+                    content: (
+                        panel.get_tool(),
+                        panel.get_menu(),
+                        panel.get_numeric_content_width(),
+                        panel.get_numeric_content_height(),
+                    ),
+                    values: panel.get_values(),
+                    language: panel.get_language_revision(),
+                };
+                if !r.panel_preparation.observe(layout) {
+                    retry_panel_preparation(r, generation, panel_revision, attempt);
+                    return;
+                }
+                // Configure the frame and input bridge while hidden. Winit paints
+                // the final transparent Slint frame before mapping this HWND.
+                if !(r.lifecycle.complete_passive_window_show)(
+                    panel.window(),
+                    pointer_panel(panel.as_weak(), generation, panel_revision, r.panel.input()),
+                ) {
                     r.close_panel();
                     return;
                 }
-                if !r.main.get().is_some_and(|main| {
-                    (r.lifecycle.attach_tool_window)(panel.window(), main.window())
-                }) {
-                    let _ = panel.hide();
-                    retry_panel_owner(r, generation, panel_revision, attempt);
+                (r.lifecycle.set_popup_dismissal)(panel.window(), panel.get_menu());
+                if panel.show().is_err() {
+                    r.close_panel();
                     return;
                 }
-                (r.lifecycle.set_popup_dismissal)(panel.window(), panel.get_menu());
+                r.panel_preparation.ready = true;
             }
-            PassiveWindowPreparation::Pending if attempt < 20 => {
-                let _ = panel.show();
-                let _ = panel.hide();
-                r.panel.prepare_after(Duration::from_millis(16), move || {
-                    show_panel(generation, panel_revision, attempt + 1)
-                });
+            PassiveWindowPreparation::Pending => {
+                // The backend creates registered adapters with a hidden HWND on
+                // its next event-loop turn; never prime it with a visible frame.
+                retry_panel_preparation(r, generation, panel_revision, attempt);
             }
             _ => r.close_panel(),
         }
@@ -5048,8 +5104,19 @@ fn show_panel(generation: u64, panel_revision: u64, attempt: u8) {
 fn reposition_panel() {
     let changed = REGISTRY.with(|s| {
         if let Some(r) = s.borrow_mut().as_mut() {
+            if let Some(drag) = r.toolbar_drag
+                && let Some(main) = r.main.get()
+                && (r.lifecycle.cancel_toolbar_drag_on_escape)(main.window())
+            {
+                main.window().set_position(drag.origin);
+                r.toolbar_drag = None;
+                r.toolbar_press = None;
+            }
+            move_toolbar(r, None);
             sync_toolbar_owner(r);
-            position_panel(r);
+            if r.panel_preparation.ready {
+                position_panel(r);
+            }
             choice::close_if_context_changed(r);
             if r.native_presenter
                 .exclusions_changed(&capture_exclusions(r))
@@ -5062,6 +5129,44 @@ fn reposition_panel() {
     if let Some(generation) = changed {
         schedule_render(generation);
     }
+}
+
+/// Both input and the existing follow timer use this path, so a native DPI
+/// change can settle the grab offset without waiting for another mouse move.
+fn move_toolbar(r: &mut Registry, client_fallback: Option<(f32, f32)>) -> bool {
+    if r.toolbar_drag.is_none() {
+        return false;
+    }
+    let Some(main) = r.main.get() else {
+        return false;
+    };
+    let current = main.window().position();
+    let cursor = (r.lifecycle.toolbar_cursor_position)()
+        .map(|p| slint::PhysicalPosition::new(p.x, p.y))
+        .or_else(|| {
+            client_fallback.map(|(x, y)| {
+                slint::PhysicalPosition::new(
+                    current.x.saturating_add(x.round() as i32),
+                    current.y.saturating_add(y.round() as i32),
+                )
+            })
+        });
+    let Some(cursor) = cursor else { return false };
+    let area = (r.lifecycle.popup_work_area)(Point {
+        x: cursor.x,
+        y: cursor.y,
+    });
+    let target = r.toolbar_drag.as_mut().unwrap().snapped_position(
+        cursor,
+        main.window().scale_factor(),
+        main.window().size(),
+        area,
+    );
+    if target == current {
+        return false;
+    }
+    main.window().set_position(target);
+    true
 }
 
 /// Keep the toolbar owned by the canvas under its physical center so activating
@@ -5102,13 +5207,15 @@ fn retry_main_owner(r: &mut Registry, generation: u64, revision: u64, attempt: u
     }
 }
 
-fn retry_panel_owner(r: &mut Registry, generation: u64, revision: u64, attempt: u8) {
+fn retry_panel_preparation(r: &mut Registry, generation: u64, revision: u64, attempt: u8) {
     if attempt < 20 {
         r.panel.prepare_after(Duration::from_millis(16), move || {
             show_panel(generation, revision, attempt + 1)
         });
     } else {
-        tracing::warn!("could not attach annotation panel after preparation retries");
+        tracing::warn!(
+            "annotation panel did not finish hidden native/layout preparation after retries"
+        );
         r.close_panel();
     }
 }
@@ -5163,7 +5270,7 @@ fn position_panel(r: &Registry) -> bool {
             right: p.x.saturating_add(m.width as i32),
             bottom: p.y.saturating_add(m.height as i32),
         };
-        let desired = slint::LogicalSize::new(width, height).to_physical(scale);
+        let desired = toolbar::physical_size(width, height, scale);
         let Some(placed) = placement::place_annotation_popup(
             main_rect,
             (desired.width, desired.height),
@@ -5185,9 +5292,9 @@ fn position_panel(r: &Registry) -> bool {
         return true;
     }
     let size = slint::LogicalSize::new(width, height.min((area.bottom - area.top) as f32 / scale));
-    let physical = size.to_physical(scale);
+    let physical = toolbar::physical_size(size.width, size.height, scale);
     if panel.window().size() != physical {
-        panel.window().set_size(size);
+        panel.window().set_size(physical);
     }
     let target = panel_position(
         Point { x: p.x, y: p.y },
@@ -5276,6 +5383,46 @@ fn pointer_main(
             if main_current(generation, revision)
                 && let Some(w) = weak.upgrade()
             {
+                let moved = REGISTRY.with(|slot| {
+                    let mut slot = slot.borrow_mut();
+                    let Some(r) = slot.as_mut() else { return false };
+                    match input {
+                        PopupPointerInput::LeftPressed { x, y } => {
+                            r.toolbar_press = Some(toolbar::Drag::new(
+                                w.window().position(),
+                                x,
+                                y,
+                                w.window().scale_factor(),
+                            ));
+                        }
+                        PopupPointerInput::Moved { x, y } => {
+                            return move_toolbar(r, Some((x, y)));
+                        }
+                        PopupPointerInput::LeftReleased { .. }
+                        | PopupPointerInput::LeftCancelled { .. } => {
+                            r.toolbar_press = None;
+                            r.toolbar_drag = None;
+                        }
+                        _ => {}
+                    }
+                    false
+                });
+                if moved {
+                    reposition_panel();
+                }
+                // Native capture keeps delivery on this toolbar. Keep Slint's
+                // hover on the grip as well, even when a queued move was reported
+                // relative to the toolbar's previous screen position.
+                let input = REGISTRY.with(|slot| {
+                    if let PopupPointerInput::Moved { .. } = input
+                        && let Some(drag) = slot.borrow().as_ref().and_then(|r| r.toolbar_drag)
+                    {
+                        let (x, y) = drag.client_position(w.window().scale_factor());
+                        PopupPointerInput::Moved { x, y }
+                    } else {
+                        input
+                    }
+                });
                 dispatch(w.window(), input);
             }
         }),
@@ -8288,7 +8435,9 @@ mod tests {
                     )
                 });
                 WATCHES.with(|events| events.borrow_mut().clear());
-                show_panel(generation, revision, 0);
+                for attempt in 0..4 {
+                    show_panel(generation, revision, attempt);
+                }
                 REGISTRY.with(|slot| choice::rearm_panel(slot.borrow().as_ref().unwrap()));
                 WATCHES.with(|events| {
                     assert!(!events.borrow().is_empty());
@@ -8333,7 +8482,9 @@ mod tests {
                         ),
                     )
                 });
-                show_panel(generation, revision, 0);
+                for attempt in 0..4 {
+                    show_panel(generation, revision, attempt);
+                }
                 WATCHES.with(|events| assert_eq!(events.borrow().last(), Some(&true)));
                 // An old parameter-window event cannot dismiss its replacement menu.
                 sink(PopupPointerInput::DismissRequested {
@@ -8381,7 +8532,9 @@ mod tests {
                     });
                     (r.generation, r.panel.revision(), sink)
                 });
-                show_panel(generation, revision, 0);
+                for attempt in 0..4 {
+                    show_panel(generation, revision, attempt);
+                }
                 foreground_sink(PopupPointerInput::DismissRequested {
                     cause: PopupDismissCause::ForegroundChanged,
                 });
@@ -12289,8 +12442,15 @@ mod tests {
             }
         }
         slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        thread_local! { static NATIVE_READY: Cell<bool> = const { Cell::new(false) }; }
         init(
-            |_| PassiveWindowPreparation::Ready,
+            |_| {
+                if NATIVE_READY.with(Cell::get) {
+                    PassiveWindowPreparation::Ready
+                } else {
+                    PassiveWindowPreparation::Pending
+                }
+            },
             WindowLifecycleCallbacks::new(
                 |_, _| true,
                 |_| true,
@@ -12303,6 +12463,7 @@ mod tests {
         );
         let ready = Rc::new(Cell::new(false));
         let calls = Rc::new(Cell::new(0));
+        let completed = Rc::new(Cell::new(0));
         // Native placement now requires a known work area; provide one in the fixture.
         REGISTRY.with(|slot| {
             slot.borrow_mut()
@@ -12322,6 +12483,15 @@ mod tests {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
             r.main.open(AnnotationToolbar::new().unwrap());
+            let completed = completed.clone();
+            r.lifecycle.complete_passive_window_show = Rc::new(move |window, _| {
+                assert!(
+                    !window.is_visible(),
+                    "input and frame preparation must precede visibility"
+                );
+                completed.set(completed.get() + 1);
+                true
+            });
             let (ready, calls) = (ready.clone(), calls.clone());
             r.lifecycle.attach_tool_window = Rc::new(move |_, _| {
                 calls.set(calls.get() + 1);
@@ -12335,18 +12505,42 @@ mod tests {
             (r.generation, r.panel.revision())
         });
         show_panel(generation, old_revision, 0);
+        assert_eq!(
+            calls.get(),
+            0,
+            "pending HWND must not prime visibility or ownership"
+        );
+        REGISTRY.with(|slot| {
+            assert!(
+                !slot
+                    .borrow()
+                    .as_ref()
+                    .unwrap()
+                    .panel
+                    .get()
+                    .unwrap()
+                    .window()
+                    .is_visible()
+            )
+        });
+        NATIVE_READY.with(|ready| ready.set(true));
+        show_panel(generation, old_revision, 0);
         assert_eq!(calls.get(), 1);
         REGISTRY.with(|slot| {
             let slot = slot.borrow();
             let panel = slot.as_ref().unwrap().panel.get().unwrap();
             assert!(!panel.window().is_visible());
         });
+        assert_eq!(completed.get(), 0);
         ready.set(true);
         show_panel(generation, old_revision, 1);
+        assert_eq!(completed.get(), 0, "first layout observation stays hidden");
+        show_panel(generation, old_revision, 2);
+        assert_eq!(completed.get(), 1);
         assert_eq!(
             calls.get(),
             3,
-            "owner must be confirmed before and after show"
+            "owner must be established on every hidden preparation pass"
         );
         REGISTRY.with(|slot| slot.borrow_mut().as_mut().unwrap().close_panel());
         open_panel(0, true);

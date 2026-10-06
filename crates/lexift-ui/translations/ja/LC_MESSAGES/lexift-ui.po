@@ -822,3 +822,9 @@ msgstr "すりガラス粒子"
 
 msgid "Texture size"
 msgstr "テクスチャサイズ"
+
+msgid "Save annotation screenshot"
+msgstr "注釈付きスクリーンショットを保存"
+
+msgid "Could not save screenshot. Try again."
+msgstr "スクリーンショットを保存できませんでした。もう一度お試しください。"

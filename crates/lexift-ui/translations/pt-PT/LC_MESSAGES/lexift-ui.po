@@ -822,3 +822,9 @@ msgstr "Grão fosco"
 
 msgid "Texture size"
 msgstr "Tamanho da textura"
+
+msgid "Save annotation screenshot"
+msgstr "Guardar captura com anotações"
+
+msgid "Could not save screenshot. Try again."
+msgstr "Não foi possível guardar a captura. Tente novamente."

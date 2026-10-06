@@ -1150,6 +1150,25 @@ pub(crate) fn render_captured_effects(
     )
 }
 
+/// Export uses the same effect and erasure composition, without editor or
+/// selection decorations. Samples and document belong to one frozen job.
+pub(crate) fn render_export(
+    session: &Session,
+    monitor: Rect,
+    scale: f32,
+    effects: mosaic_worker::View<'_>,
+    capture: &lexift_core::ports::screen_capture::ScreenCaptureFrame,
+) -> Option<Pixmap> {
+    render_captured_effects(
+        session,
+        session.objects.len(),
+        monitor,
+        scale,
+        effects,
+        capture,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_effect_layers(
     session: &Session,

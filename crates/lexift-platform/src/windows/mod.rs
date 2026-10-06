@@ -2,6 +2,7 @@
 
 pub(super) mod annotation_cursor;
 pub(super) mod annotation_gpu;
+pub(super) mod annotation_save;
 pub(super) mod annotation_magnifier;
 mod annotation_overlay;
 mod annotation_window_order;

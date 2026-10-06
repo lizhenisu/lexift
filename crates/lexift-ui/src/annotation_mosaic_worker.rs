@@ -296,6 +296,11 @@ impl Drop for Worker {
 }
 /// Render every monitor intersection into the sampling ROI, including marks on
 /// the other side of a DPI boundary. Earlier effects are composited once.
+/// One-shot exports share the live worker's effect pipeline without its mailbox.
+pub(crate) fn process_once(job: &Job, cancelled: &dyn Fn() -> bool) -> Option<Frame> {
+    process(job, cancelled, &mut mosaic::Scratch::default())
+}
+
 fn process(
     job: &Job,
     cancelled: &dyn Fn() -> bool,
