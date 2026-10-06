@@ -200,6 +200,10 @@ fn draw_object(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) 
 }
 
 fn draw_object_content(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) {
+    if matches!(object.kind, Kind::StickerArea | Kind::StickerBrush) {
+        crate::annotation_sticker::draw(pixmap, object, monitor);
+        return;
+    }
     if object.kind == Kind::Sequence {
         crate::annotation_sequence::draw(pixmap, object, monitor);
         if let Some(arrow) = object.text_link_arrow() {
@@ -1602,7 +1606,12 @@ fn draw_interaction_content(
             ) else {
                 continue;
             };
-            if handle >= 8 && matches!(selected.kind, Kind::HighlightRectangle | Kind::MosaicArea) {
+            if handle >= 8
+                && matches!(
+                    selected.kind,
+                    Kind::HighlightRectangle | Kind::MosaicArea | Kind::StickerArea
+                )
+            {
                 if let Some(circle) =
                     PathBuilder::from_circle(x - monitor.left as f32, y - monitor.top as f32, half)
                 {

@@ -5,6 +5,7 @@ mod annotation_render;
 mod annotation_scene;
 mod annotation_sequence;
 mod annotation_signature;
+mod annotation_sticker;
 mod annotation_text;
 mod binding;
 mod bridge;

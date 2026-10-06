@@ -3,12 +3,12 @@ import { AnnotationChoiceRequest, Slider, SpinBox } from "annotation-fields.slin
 
 export global NumericPresentation {
     public pure function name(field:int, tool:int) -> string {
-        return field == -9 ? (tool == 3 || tool == 11 || tool == 13 ? @tr("Brush size") : @tr("Width")) : field == -100 || field == -106 ? @tr("Corner radius")
-            : field == -101 ? (tool == 9 ? @tr("Opacity") : @tr("Intensity")) : field == -102 ? @tr("Text size")
+        return field == -9 ? (tool == 3 || tool == 11 || tool == 12 || tool == 13 ? @tr("Brush size") : @tr("Width")) : field == -100 || field == -106 ? @tr("Corner radius")
+            : field == -101 ? ((tool == 9 || tool == 12) ? @tr("Opacity") : @tr("Intensity")) : field == -102 ? @tr("Text size")
             : field == -103 ? @tr("Magnification") : field == -104 ? @tr("Outline width")
-            : field == -105 ? @tr("Opacity") : field == -107 ? @tr("Padding") : @tr("Caption size");
+            : field == -105 ? @tr("Opacity") : field == -107 ? @tr("Padding") : field == -109 ? @tr("Texture size") : @tr("Caption size");
     }
-    public pure function unit(field:int) -> string { return field == -101 || field == -105 || field == -108 ? "%" : field == -103 ? "×" : ""; }
+    public pure function unit(field:int) -> string { return field == -101 || field == -105 || field == -108 ? "%" : field == -103 ? "×" : field == -109 ? "px" : ""; }
     public pure function display(field:int, value:float) -> string {
         return (field == -103 ? round(value) / 100 : field == -108 ? (value == 0 ? 60 : value == 1 ? 80 : value == 2 ? 100 : value == 3 ? 125 : 150) : round(value)) + NumericPresentation.unit(field);
     }
@@ -17,7 +17,7 @@ export global NumericPresentation {
             : field == -100 || field == -106 ? @image-url("icons/numeric-radius.svg")
             : field == -102 || field == -108 ? @image-url("icons/numeric-font.svg")
             : field == -103 ? @image-url("icons/numeric-zoom.svg")
-            : field == -107 ? @image-url("icons/numeric-padding.svg") : @image-url("icons/numeric-opacity.svg");
+            : field == -109 ? @image-url("icons/sticker-texture.svg") : field == -107 ? @image-url("icons/numeric-padding.svg") : @image-url("icons/numeric-opacity.svg");
     }
 }
 

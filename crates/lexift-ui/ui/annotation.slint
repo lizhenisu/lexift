@@ -21,10 +21,13 @@ export struct AnnotationValues {
     sequence-label: string,
 }
 
-component ToolIcon inherits Path {
+component ToolIcon inherits Rectangle {
     in property <int> kind;
     in property <color> ink: Colors.foreground;
-    width: 24px; height: 24px; viewbox-width: 24; viewbox-height: 24;
+    width: 24px; height: 24px;
+    if root.kind == 12: Image { width:24px;height:24px;source:@image-url("icons/sticker-sheet.svg");colorize:root.ink;image-fit:contain; }
+    if root.kind != 12: Path {
+    width:24px; height:24px; viewbox-width:24; viewbox-height:24;
     fill: kind == 11 || kind == 12 ? root.ink : transparent; stroke: root.ink; stroke-width: 1.8px;
     commands: kind == 0 ? "M4 4H20V20H4Z"
         : kind == 1 ? "M12 3A9 9 0 1 0 12 21A9 9 0 1 0 12 3Z"
@@ -44,6 +47,7 @@ component ToolIcon inherits Path {
         : kind == 18 ? "M4 20L20 4"
         : kind == 17 ? "M4 2L4 21L9 16L13 22L16 20L12 14L20 13Z"
         : "M3 12L9 18L21 5";
+    }
 }
 
 component ToolButton inherits Rectangle {
@@ -142,8 +146,8 @@ export component AnnotationToolbar inherits Window {
 
 export component AnnotationPanel inherits Window {
     clear-label-metrics := Text { text: @tr("Clear all"); font-size: 13px; visible: false; }
-    out property <float> numeric-content-height: (root.tool <= 4 ? numeric-basic.preferred-height : root.tool >= 5 && root.tool <= 7 ? numeric-lines.preferred-height : root.tool == 8 ? numeric-text.preferred-height : root.tool == 9 ? numeric-watermark.preferred-height : root.tool == 10 ? numeric-sequence.preferred-height : root.tool == 11 ? numeric-mosaic.preferred-height : root.tool == 13 ? numeric-eraser.preferred-height : 38px) / 1px + 22;
-    out property <float> numeric-content-width: (root.tool <= 4 ? numeric-basic.preferred-width : root.tool >= 5 && root.tool <= 7 ? numeric-lines.preferred-width : root.tool == 8 ? numeric-text.preferred-width : root.tool == 9 ? numeric-watermark.preferred-width : root.tool == 10 ? numeric-sequence.preferred-width : root.tool == 11 ? numeric-mosaic.preferred-width : numeric-eraser.preferred-width) / 1px + 26;
+    out property <float> numeric-content-height: (root.tool <= 4 ? numeric-basic.preferred-height : root.tool >= 5 && root.tool <= 7 ? numeric-lines.preferred-height : root.tool == 8 ? numeric-text.preferred-height : root.tool == 9 ? numeric-watermark.preferred-height : root.tool == 10 ? numeric-sequence.preferred-height : (root.tool == 11 || root.tool == 12) ? numeric-mosaic.preferred-height : root.tool == 13 ? numeric-eraser.preferred-height : 38px) / 1px + 22;
+    out property <float> numeric-content-width: (root.tool <= 4 ? numeric-basic.preferred-width : root.tool >= 5 && root.tool <= 7 ? numeric-lines.preferred-width : root.tool == 8 ? numeric-text.preferred-width : root.tool == 9 ? numeric-watermark.preferred-width : root.tool == 10 ? numeric-sequence.preferred-width : (root.tool == 11 || root.tool == 12) ? numeric-mosaic.preferred-width : numeric-eraser.preferred-width) / 1px + 26;
     in property <bool> numeric-measuring: false;
     in property <int> language-revision;
     title: @tr("Lexift Annotation Options"); no-frame: true; always-on-top: true;
@@ -208,7 +212,7 @@ export component AnnotationPanel inherits Window {
     keys := FocusScope {
         key-pressed(event) => {
             if event.text == Key.Escape { root.escape-requested(); return accept; }
-            if (root.tool == 11 || root.tool == 13) && !root.parameter-input-active
+            if (root.tool == 11 || root.tool == 12 || root.tool == 13) && !root.parameter-input-active
                 && event.text == "z" && event.modifiers.control {
                 root.undo-requested(); return accept;
             }
@@ -443,13 +447,14 @@ export component AnnotationPanel inherits Window {
             if root.values.sequence-expanded: NumericButton { tool:root.tool; height:38px; field:-108; value:root.values.sequence-ratio; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
             if root.values.sequence-expanded: ComboBox { width:106px;height:38px;field:20;active-field:root.active-choice;model:root.endpoint-options;current-index <=> root.values.line-end;menu-requested(q)=>{root.choice-requested(q);} }
 }
-        numeric-mosaic := FlexboxLayout { flex-wrap:root.numeric-measuring ? no-wrap : wrap; visible: !root.menu && root.tool == 11 && root.mosaic-available;
+        numeric-mosaic := FlexboxLayout { flex-wrap:root.numeric-measuring ? no-wrap : wrap; visible: !root.menu && (root.tool == 12 || (root.tool == 11 && root.mosaic-available));
             x:12px;y:10px;width:parent.width - 24px;height:self.preferred-height;spacing:8px;cross-axis-alignment:center;
             ToolButton { mosaic-style:1;selected:root.values.shape == 0;clicked=>{root.values.shape=0;} }
             ToolButton { mosaic-style:2;selected:root.values.shape == 1;clicked=>{root.values.shape=1;} }
             NumericButton { tool:root.tool;field:-9;value:root.values.size;enabled:root.values.shape == 1;active-field:root.active-choice;requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
-            ComboBox { width:110px;height:30px;field:18;active-field:root.active-choice;model:[@tr("Mosaic"),@tr("Blur")];current-index <=> root.values.mode;menu-requested(q)=>{root.choice-requested(q);} }
+            ComboBox { width:110px;height:30px;field:18;active-field:root.active-choice;model:root.tool == 12 ? [@tr("Glass tiles"),@tr("Frosted grain")] : [@tr("Mosaic"),@tr("Blur")];current-index <=> root.values.mode;menu-requested(q)=>{root.choice-requested(q);} }
             NumericButton { tool:root.tool;field:-101;value:root.values.strength;active-field:root.active-choice;requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
+            if root.tool == 12: NumericButton { tool:root.tool; field:-109; value:root.values.zoom; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
         }
         if !root.menu && root.tool == 11 && !root.mosaic-available: Text {
             x: 12px; width: parent.width - 24px; height: parent.height;
@@ -482,51 +487,7 @@ export component AnnotationPanel inherits Window {
                 }
             }
 
-        if !root.menu && root.tool == 12: Rectangle {
-            x: 12px; y: 8px; width: parent.width - 24px; height: parent.height - 16px;
-            Text { x: 0px; y: 0px; text: root.heading; color: Colors.foreground; font-size: 13px; font-weight: 600; }
-            for field[i] in root.fields: Rectangle {
-                x: Math.mod(i, root.columns) * (parent.width / root.columns);
-                y: 26px + floor(i / root.columns) * 62px;
-                width: parent.width / root.columns - 10px; height: 58px;
-                Text { x: 0px; y: 0px; text: root.labels[field]; font-size: 12px; color: Colors.secondary-foreground; }
-                if field == 0: NumericButton { tool:root.tool; x: 0px; y: 22px; height: 30px; width: 86px; field:-9; value:root.values.size; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
-                if field == 1: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Rectangle"), @tr("Ellipse")]; current-index <=> root.values.shape; }
-                if field == 2: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Solid"), @tr("Dashed")]; current-index <=> root.values.style; }
-                if field == 3: NumericButton { tool:root.tool; x: 0px; y: 22px; height: 30px; width: 86px; field:-100; value:root.values.rounding; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
-                if field == 4: CheckBox { x: 0px; y: 24px; text: @tr("Enabled"); checked <=> root.values.fill; }
-                if field == 5: NumericButton { tool:root.tool; x: 0px; y: 24px; width: 86px; field:-101; value:root.values.strength; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
-                if field == 6: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Normal"), @tr("Multiply")]; current-index <=> root.values.mode; }
-                if field == 7: NumericButton { tool:root.tool; x: 0px; y: 22px; height: 30px; width: 86px; field:-103; value:root.values.zoom; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
-                if field == 8 && root.tool == 7: CheckBox { x: 0px; y: 24px; text: @tr("Include annotations"); checked <=> root.values.include-annotations; }
-                if field == 8 && root.tool != 7: CheckBox { x: 0px; y: 24px; text: @tr("Enabled"); checked <=> root.values.erase; }
-                if field == 9: CheckBox { x: 0px; y: 24px; text: @tr("Enabled"); checked <=> root.values.antialias; }
-                if field == 10: CheckBox { x: 0px; y: 24px; text: @tr("Enabled"); checked <=> root.values.shadow; }
-                if field == 11: LineEdit { x: 0px; y: 22px; width: parent.width; height: 30px; placeholder-text: @tr("Enter text"); text <=> root.values.text; }
-                if field == 12: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: ["Microsoft YaHei", "Segoe UI", "Arial"]; current-index <=> root.values.font; }
-                if field == 13: NumericButton { tool:root.tool; x: 0px; y: 22px; height: 30px; width: 86px; field:-102; value:root.values.text-size; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
-                if field == 14: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Tile"), @tr("Single")]; current-index <=> root.values.mode; }
-                if field == 15: SpinBox {
-                input-editing(active) => { root.report-parameter-input(active, self.absolute-position.x / 1px, self.absolute-position.y / 1px, (self.width - 28px) / 1px, self.height / 1px); }
-                input-confirmed => { root.confirm-parameter-input(); }
-                input-finished => { root.finish-parameter-input(); }
- x: 0px; y: 22px; width: parent.width; height: 30px; minimum: 1; maximum: 999; value <=> root.values.start; }
-                if field == 16: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: ["1, 2, 3", "A, B, C", "a, b, c"]; current-index <=> root.values.format; }
-                if field == 17: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Area"), @tr("Brush")]; current-index <=> root.values.shape; }
-                if field == 18: ComboBox { field: field; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); } language-revision: root.language-revision; x: 0px; y: 22px; width: parent.width; height: 30px; model: [@tr("Mosaic"), @tr("Blur")]; current-index <=> root.values.mode; }
-            }
-            if root.tool < 11: HorizontalLayout {
-                x: 0px; y: 28px + ceil(root.fields.length / root.columns) * 62px;
-                height: 30px; spacing: 8px; alignment: start;
-                for ink[i] in root.palette: Rectangle {
-                    width: 28px; height: 28px; border-radius: 8px;
-                    border-width: root.values.color-index == i ? 2px : 1px;
-                    border-color: root.values.color-index == i ? Colors.primary : Colors.outline;
-                    Rectangle { x: 4px; y: 4px; width: 20px; height: 20px; border-radius: 5px; background: ink; }
-                    TouchArea { clicked => { root.values.color-index = i; } }
-                }
-            }
-        }
+
     }
     }
 }

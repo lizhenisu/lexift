@@ -1,6 +1,8 @@
 //! Transient screen annotation state in physical virtual-desktop coordinates.
 use crate::domain::geometry::Rect;
 mod mosaic;
+mod sticker;
+pub use sticker::{StickerAnnotation, StickerTexture};
 mod sequence;
 pub use mosaic::{MosaicAnnotation, MosaicEffect};
 pub use sequence::{SequenceAnnotation, SequenceFormat, SequenceShape, sequence_label};
@@ -108,6 +110,8 @@ pub enum Kind {
     Sequence,
     MosaicArea,
     MosaicBrush,
+    StickerArea,
+    StickerBrush,
 }
 /// Transient editing permission; never stored in document or undo snapshots.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -124,10 +128,11 @@ pub enum EditScope {
     Text,
     Sequence,
     Mosaic,
+    Sticker,
 }
 impl EditScope {
     pub fn allows(self, kind: Kind) -> bool {
-        kind != Kind::Pencil && (self == Self::All || self == kind.edit_scope())
+        kind.is_editable() && (self == Self::All || self == kind.edit_scope())
     }
 }
 impl Kind {
@@ -142,11 +147,17 @@ impl Kind {
             Self::Text => EditScope::Text,
             Self::Sequence => EditScope::Sequence,
             Self::MosaicArea | Self::MosaicBrush => EditScope::Mosaic,
+            Self::StickerArea | Self::StickerBrush => EditScope::Sticker,
             Self::Pencil => EditScope::None,
         }
     }
 }
 impl Kind {
+    /// Completed freehand marks remain visible and erasable, but cannot be edited.
+    pub fn is_editable(self) -> bool {
+        !matches!(self, Self::Pencil | Self::MosaicBrush | Self::StickerBrush)
+    }
+
     pub fn is_spotlight(self) -> bool {
         matches!(self, Self::SpotlightRectangle | Self::SpotlightEllipse)
     }
@@ -305,6 +316,7 @@ pub enum Extra {
     Text(TextAnnotation),
     Sequence(SequenceAnnotation),
     Mosaic(MosaicAnnotation),
+    Sticker(StickerAnnotation),
 }
 
 impl Kind {
@@ -318,6 +330,7 @@ impl Kind {
             Self::Text => 8,
             Self::Sequence => 10,
             Self::MosaicArea | Self::MosaicBrush => 11,
+            Self::StickerArea | Self::StickerBrush => 12,
             Self::SpotlightRectangle | Self::SpotlightEllipse => 2,
             _ => 0,
         }
@@ -325,9 +338,9 @@ impl Kind {
 }
 
 impl Object {
-    /// Completed pencil strokes are permanent marks until undo or session clearing.
+    /// Editing permission is shared with filtered hit testing and tool scopes.
     pub fn is_editable(&self) -> bool {
-        self.kind != Kind::Pencil
+        self.kind.is_editable()
     }
     pub fn toggle_text_arrow(&mut self, scale: f32) {
         if let Extra::Sequence(s) = &mut self.extra {
@@ -478,6 +491,20 @@ impl Object {
         result.push(*self.points.last().unwrap());
         result
     }
+    pub fn round_brush_diameter(&self) -> Option<f32> {
+        match (&self.kind, &self.extra) {
+            (Kind::MosaicBrush, Extra::Mosaic(m)) => Some(m.diameter),
+            (Kind::StickerBrush, Extra::Sticker(s)) => Some(s.diameter),
+            _ => None,
+        }
+    }
+    pub fn coverage_scale(&self, fallback: f32) -> f32 {
+        match &self.extra {
+            Extra::Mosaic(m) => m.creation_scale,
+            Extra::Sticker(s) => s.creation_scale,
+            _ => fallback,
+        }
+    }
     pub fn refresh_bounds(&mut self) {
         if let Some(&(x, y)) = self.points.first() {
             self.bounds = Bounds::from_corners((x, y), (x, y));
@@ -487,10 +514,8 @@ impl Object {
                 self.bounds.right = self.bounds.right.max(x);
                 self.bounds.bottom = self.bounds.bottom.max(y);
             }
-            if self.kind == Kind::MosaicBrush
-                && let Extra::Mosaic(mosaic) = &self.extra
-            {
-                let radius = mosaic.diameter / 2.;
+            if let Some(diameter) = self.round_brush_diameter() {
+                let radius = diameter / 2.;
                 self.bounds.left -= radius;
                 self.bounds.top -= radius;
                 self.bounds.right += radius;
@@ -517,8 +542,8 @@ impl Object {
         self.refresh_bounds();
     }
     pub fn hit_path(&self, point: (f32, f32), scale: f32) -> bool {
-        let tolerance = if let Extra::Mosaic(mosaic) = &self.extra {
-            mosaic.diameter / 2. + 6. * scale
+        let tolerance = if let Some(diameter) = self.round_brush_diameter() {
+            diameter / 2. + 6. * scale
         } else {
             (self.style.width / 2. + 6.) * scale
         };
@@ -594,13 +619,12 @@ impl Object {
         if let Extra::Magnifier { output, .. } = self.extra {
             handles.extend(output.handles());
         }
-        if matches!(self.kind, Kind::HighlightRectangle | Kind::MosaicArea) {
+        if matches!(
+            self.kind,
+            Kind::HighlightRectangle | Kind::MosaicArea | Kind::StickerArea
+        ) {
             let b = self.bounds;
-            let rounding_scale = if let Extra::Mosaic(mosaic) = &self.extra {
-                mosaic.creation_scale
-            } else {
-                scale
-            };
+            let rounding_scale = self.coverage_scale(scale);
             let r = (self.style.rounding * rounding_scale)
                 .min(b.width() / 2.)
                 .min(b.height() / 2.);
@@ -624,6 +648,10 @@ impl Object {
             cut.move_by(dx, dy);
         }
         self.bounds = self.bounds.moved(dx, dy);
+        if let Extra::Sticker(sticker) = &mut self.extra {
+            sticker.origin.0 += dx;
+            sticker.origin.1 += dy;
+        }
         if let Extra::Sequence(s) = &mut self.extra {
             s.caption_bounds = s.caption_bounds.moved(dx, dy);
         }
@@ -665,35 +693,40 @@ impl Object {
             return;
         }
         let b = self.bounds;
+        if let Extra::Sticker(sticker) = &mut self.extra {
+            sticker.resize(b, target);
+        }
         for cut in &mut self.erased {
             cut.resize(b, target);
         }
-        if self.kind == Kind::MosaicBrush
-            && let Extra::Mosaic(mosaic) = &mut self.extra
-        {
+        if let Some(original_diameter) = self.round_brush_diameter() {
             // Map the centreline inside the resized round-cap envelope. Using the
             // envelope itself would count the cap radius twice on every resize.
-            let radius = mosaic.diameter / 2.;
+            let radius = original_diameter / 2.;
             let factor = ((target.width() / b.width().max(1.))
                 * (target.height() / b.height().max(1.)))
             .sqrt();
-            let diameter = (mosaic.diameter * factor)
+            let diameter = (original_diameter * factor)
                 .min(target.width().min(target.height()))
                 .max(1.);
             let next_radius = diameter / 2.;
             for p in &mut self.points {
                 let axis = |v: f32, old: f32, extent: f32, next: f32, size: f32| {
-                    if extent <= mosaic.diameter + f32::EPSILON {
+                    if extent <= original_diameter + f32::EPSILON {
                         next + size / 2.
                     } else {
                         next + next_radius
-                            + (v - old - radius) / (extent - mosaic.diameter) * (size - diameter)
+                            + (v - old - radius) / (extent - original_diameter) * (size - diameter)
                     }
                 };
                 p.0 = axis(p.0, b.left, b.width(), target.left, target.width());
                 p.1 = axis(p.1, b.top, b.height(), target.top, target.height());
             }
-            mosaic.diameter = diameter;
+            match &mut self.extra {
+                Extra::Mosaic(m) => m.diameter = diameter,
+                Extra::Sticker(s) => s.diameter = diameter,
+                _ => {}
+            }
             self.refresh_bounds();
             return;
         }
@@ -857,12 +890,13 @@ impl Object {
                 output.right = output.left + self.bounds.width() * *zoom;
                 output.bottom = output.top + self.bounds.height() * *zoom;
             }
-        } else if handle >= 8 && matches!(self.kind, Kind::HighlightRectangle | Kind::MosaicArea) {
-            let scale = if let Extra::Mosaic(mosaic) = &self.extra {
-                mosaic.creation_scale
-            } else {
-                scale
-            };
+        } else if handle >= 8
+            && matches!(
+                self.kind,
+                Kind::HighlightRectangle | Kind::MosaicArea | Kind::StickerArea
+            )
+        {
+            let scale = self.coverage_scale(scale);
             let b = self.bounds;
             let x = if handle == 8 || handle == 10 {
                 point.0 - b.left
@@ -1029,7 +1063,12 @@ impl Session {
         }
         if !matches!(
             object.kind,
-            Kind::Pencil | Kind::HighlightLine | Kind::Arrow | Kind::Polyline | Kind::MosaicBrush
+            Kind::Pencil
+                | Kind::HighlightLine
+                | Kind::Arrow
+                | Kind::Polyline
+                | Kind::MosaicBrush
+                | Kind::StickerBrush
         ) && (object.bounds.width() < 2. || object.bounds.height() < 2.)
         {
             return false;
@@ -1392,6 +1431,7 @@ impl Session {
                         | Kind::Arrow
                         | Kind::Polyline
                         | Kind::MosaicBrush
+                        | Kind::StickerBrush
                 ) {
                     return object.hit_path(point, scale).then_some(Hit::Object(index));
                 }
@@ -1420,7 +1460,7 @@ impl Session {
                 if object.style.fill
                     || object.kind.is_spotlight()
                     || object.kind == Kind::HighlightRectangle
-                    || object.kind == Kind::MosaicArea
+                    || matches!(object.kind, Kind::MosaicArea | Kind::StickerArea)
                 {
                     return Some(Hit::Object(index));
                 }
@@ -1514,7 +1554,7 @@ mod tests {
         assert!(!session.can_undo());
     }
     #[test]
-    fn edit_scope_matrix_keeps_families_distinct_and_pencil_locked() {
+    fn edit_scope_matrix_keeps_families_distinct_and_freehand_locked() {
         let families = [
             (EditScope::Geometry, vec![Kind::Rectangle, Kind::Ellipse]),
             (
@@ -1530,7 +1570,8 @@ mod tests {
             (EditScope::Magnifier, vec![Kind::Magnifier]),
             (EditScope::Text, vec![Kind::Text]),
             (EditScope::Sequence, vec![Kind::Sequence]),
-            (EditScope::Mosaic, vec![Kind::MosaicArea, Kind::MosaicBrush]),
+            (EditScope::Mosaic, vec![Kind::MosaicArea]),
+            (EditScope::Sticker, vec![Kind::StickerArea]),
         ];
         for (scope, kinds) in &families {
             for (other_scope, other_kinds) in &families {
@@ -1541,7 +1582,10 @@ mod tests {
                     assert!(!EditScope::None.allows(kind));
                 }
             }
-            assert!(!scope.allows(Kind::Pencil));
+            for kind in [Kind::Pencil, Kind::MosaicBrush, Kind::StickerBrush] {
+                assert!(!scope.allows(kind));
+                assert!(!kind.is_editable());
+            }
             for &kind in kinds {
                 let mut session = Session::new();
                 let mut object = text_object();
@@ -1559,7 +1603,63 @@ mod tests {
                 assert_eq!(session.objects, vec![before]);
             }
         }
-        assert!(!EditScope::All.allows(Kind::Pencil));
+        for kind in [Kind::Pencil, Kind::MosaicBrush, Kind::StickerBrush] {
+            assert!(!EditScope::All.allows(kind));
+            assert!(!EditScope::None.allows(kind));
+        }
+    }
+
+    #[test]
+    fn completed_freehand_rejects_stale_edits_and_remains_erasable() {
+        use crate::domain::annotation_erase::{EraseRegion, EraseTarget};
+        for scale in [1., 1.25] {
+            for kind in [Kind::Pencil, Kind::MosaicBrush, Kind::StickerBrush] {
+                let mut session = Session::new();
+                let mut base = text_object();
+                base.kind = Kind::Rectangle;
+                base.extra = Extra::None;
+                base.style.fill = true;
+                session.add(base);
+                let mut mark = text_object();
+                mark.kind = kind;
+                mark.extra = Extra::None;
+                mark.points = vec![(-90., 40.), (10., 40.)];
+                session.add(mark);
+                assert_eq!(session.selected, None);
+                let mark = session.objects[1].clone();
+                assert!(mark.edit_handles(scale).is_empty());
+                session.set_edit_scope(EditScope::All);
+                assert_eq!(session.hit((-40., 40.), scale), Some(Hit::Object(0)));
+                session.set_edit_scope(kind.edit_scope());
+                session.selected = Some(1); // Simulate an outdated UI target.
+                assert_eq!(session.hit((-100., 20.), scale), None);
+                session.begin_drag();
+                session.update_selected(|o| {
+                    o.move_by(20., 30.);
+                    o.resize_to(Bounds::from_corners((0., 0.), (200., 200.)));
+                    o.style.width = 50.;
+                });
+                session.finish_drag();
+                session.delete_selected();
+                assert_eq!(session.objects[1], mark);
+                session.begin_drag();
+                session.erase(
+                    EraseRegion::Rectangle(Bounds::from_corners((-60., 30.), (-20., 50.))),
+                    &[EraseTarget::Object(mark.id)],
+                );
+                session.finish_drag();
+                assert!(!session.objects[1].erased.is_empty());
+                assert!(session.undo());
+                assert_eq!(session.objects[1], mark);
+                assert_eq!(session.selected, None);
+                assert!(session.clear_all());
+                assert!(session.undo());
+                assert_eq!(session.objects[1], mark);
+                assert_eq!(session.selected, None);
+                assert!(session.undo());
+                assert_eq!(session.objects.len(), 1, "rejected edits add no undo entry");
+            }
+        }
     }
 
     #[test]

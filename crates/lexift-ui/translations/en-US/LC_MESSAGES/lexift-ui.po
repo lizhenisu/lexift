@@ -810,3 +810,15 @@ msgstr "You can also adjust with the mouse wheel."
 
 msgid "Caption size"
 msgstr "Caption size"
+
+msgid "Mosaic sticker"
+msgstr "Mosaic sticker"
+
+msgid "Glass tiles"
+msgstr "Glass tiles"
+
+msgid "Frosted grain"
+msgstr "Frosted grain"
+
+msgid "Texture size"
+msgstr "Texture size"

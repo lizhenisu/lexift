@@ -2575,12 +2575,23 @@ mod tests {
                 options: ModelRc::new(VecModel::from(vec!["choice".into(); 11])),
                 ..Default::default()
             };
-            let tool = if super::super::numeric::Parameter::from_field(field).is_some() {
-                12
-            } else {
-                10
+            let mut values = values.clone();
+            values.text_background = true;
+            values.text_outline = true;
+            values.sequence_expanded = true;
+            values.shape = 0;
+            let tool = match field {
+                -9 => 3,
+                -100 => 0,
+                -101 => 12,
+                -103 => 7,
+                -104 | -102 | -108 => 10,
+                -107..=-105 => 8,
+                -109 => 12,
+                _ => 10,
             };
-            let window = build_window(&request, tool, &values).unwrap();
+            let window = build_window(&request, tool, &values)
+                .unwrap_or_else(|| panic!("field {field}, tool {tool}"));
             let popup = Menu {
                 input: InputWork::new(),
                 window,

@@ -44,6 +44,13 @@ pub(super) fn drawing(tool: usize, shape: i32, capture: bool) -> Drawing {
                 Kind::MosaicArea
             }
         }
+        12 => {
+            if shape == 1 {
+                Kind::StickerBrush
+            } else {
+                Kind::StickerArea
+            }
+        }
         13 => return Drawing::Erase,
         _ => return Drawing::Unavailable,
     };

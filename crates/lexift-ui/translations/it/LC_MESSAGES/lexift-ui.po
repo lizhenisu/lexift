@@ -810,3 +810,15 @@ msgstr "Puoi regolare anche con la rotella del mouse."
 
 msgid "Caption size"
 msgstr "Dimensione descrizione"
+
+msgid "Mosaic sticker"
+msgstr "Pellicola mosaico"
+
+msgid "Glass tiles"
+msgstr "Riquadri di vetro"
+
+msgid "Frosted grain"
+msgstr "Grana smerigliata"
+
+msgid "Texture size"
+msgstr "Dimensione texture"

@@ -659,8 +659,7 @@ fn paint_available_mask(
 pub(crate) fn paint_mask(target: &mut Pixmap, object: &Object, origin: Rect, paint: &Paint<'_>) {
     // Pending feedback may replace points before its saved bounds are updated.
     let mut bounds = object.bounds;
-    if object.kind == Kind::MosaicBrush
-        && let Extra::Mosaic(settings) = &object.extra
+    if let Some(diameter) = object.round_brush_diameter()
         && let Some(&first) = object.points.first()
     {
         bounds = Bounds::from_corners(first, first);
@@ -670,7 +669,7 @@ pub(crate) fn paint_mask(target: &mut Pixmap, object: &Object, origin: Rect, pai
             bounds.top = bounds.top.min(y);
             bounds.bottom = bounds.bottom.max(y);
         }
-        let radius = settings.diameter * 0.5;
+        let radius = diameter * 0.5;
         bounds.left -= radius;
         bounds.right += radius;
         bounds.top -= radius;
@@ -692,14 +691,11 @@ pub(crate) fn paint_mask(target: &mut Pixmap, object: &Object, origin: Rect, pai
 }
 
 fn paint_mask_contour(target: &mut Pixmap, object: &Object, origin: Rect, paint: &Paint<'_>) {
-    let Extra::Mosaic(settings) = &object.extra else {
-        return;
-    };
-    if object.kind == Kind::MosaicBrush {
+    if let Some(diameter) = object.round_brush_diameter() {
         if let Some(first) = object.points.first() {
             let mut path = PathBuilder::new();
             if object.points.len() == 1 {
-                path.push_circle(first.0, first.1, settings.diameter / 2.);
+                path.push_circle(first.0, first.1, diameter / 2.);
                 if let Some(path) = path.finish().and_then(|path| {
                     crate::annotation_path::normalize(path, Transform::identity(), origin)
                 }) {
@@ -715,7 +711,7 @@ fn paint_mask_contour(target: &mut Pixmap, object: &Object, origin: Rect, paint:
                     .and_then(|path| {
                         path.stroke(
                             &Stroke {
-                                width: settings.diameter,
+                                width: diameter,
                                 line_cap: tiny_skia::LineCap::Round,
                                 line_join: tiny_skia::LineJoin::Round,
                                 ..Stroke::default()
@@ -734,7 +730,7 @@ fn paint_mask_contour(target: &mut Pixmap, object: &Object, origin: Rect, paint:
     } else if let Some(path) = super::path(
         object.bounds,
         Kind::Rectangle,
-        object.style.rounding * settings.creation_scale,
+        object.style.rounding * object.coverage_scale(1.),
         Rect {
             left: 0,
             top: 0,

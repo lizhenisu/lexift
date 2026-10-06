@@ -91,7 +91,11 @@ fn at_point(
             if object.kind == Kind::Text && handle == 5 {
                 return AnnotationCursor::Vertical;
             }
-            if matches!(object.kind, Kind::HighlightRectangle | Kind::MosaicArea) && handle >= 8 {
+            if matches!(
+                object.kind,
+                Kind::HighlightRectangle | Kind::MosaicArea | Kind::StickerArea
+            ) && handle >= 8
+            {
                 return AnnotationCursor::CornerRadius;
             }
             if object.kind == Kind::HighlightLine {
@@ -177,8 +181,10 @@ pub(super) fn refresh(r: &Registry) {
         };
         let was_custom = layer.window.get_cursor() == AnnotationCursor::CornerRadius;
         let brush = desired == AnnotationCursor::Drawing
-            && (super::active_kind(r) == Some(Kind::MosaicBrush)
-                || (r.mode == InteractionMode::Tool(6) && r.values(13).shape == 1))
+            && (matches!(
+                super::active_kind(r),
+                Some(Kind::MosaicBrush | Kind::StickerBrush)
+            ) || (r.mode == InteractionMode::Tool(6) && r.values(13).shape == 1))
             && layer.last_pointer.is_some();
         if !brush && layer.window.get_cursor() == AnnotationCursor::Brush {
             (r.lifecycle.annotation_brush_cursor)(layer.window.window(), 0.);
@@ -196,10 +202,19 @@ pub(super) fn refresh(r: &Registry) {
                         Extra::Mosaic(value) if object.kind == Kind::MosaicBrush => {
                             Some(value.diameter)
                         }
+                        Extra::Sticker(value) if object.kind == Kind::StickerBrush => {
+                            Some(value.diameter)
+                        }
                         _ => None,
                     })
                     .unwrap_or(
-                        r.values(11).size.clamp(1, 100) as f32
+                        r.values(if super::active_kind(r) == Some(Kind::StickerBrush) {
+                            12
+                        } else {
+                            11
+                        })
+                        .size
+                        .clamp(1, 100) as f32
                             * layer.window.window().scale_factor(),
                     )
             };

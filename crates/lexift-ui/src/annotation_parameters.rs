@@ -734,7 +734,9 @@ pub(super) fn defaults(tool: i32) -> AnnotationValues {
         text_bg_opacity: 100,
         text_bg_rounding: 0,
         text_bg_padding: 4,
-        strength: if tool == 9 {
+        strength: if tool == 12 {
+            95.
+        } else if tool == 9 {
             100.
         } else if tool == 2 {
             10.
@@ -751,7 +753,13 @@ pub(super) fn defaults(tool: i32) -> AnnotationValues {
         } else {
             i32::from(matches!(tool, 1 | 2))
         },
-        zoom: if tool == 7 { 150 } else { 0 },
+        zoom: if tool == 7 {
+            150
+        } else if tool == 12 {
+            12
+        } else {
+            0
+        },
         head: tool == 5,
         line_end: if matches!(tool, 5 | 10) { 3 } else { 0 },
         mode: 0,
@@ -821,6 +829,15 @@ pub(super) fn refill_object(
         Kind::Ellipse | Kind::SpotlightEllipse | Kind::HighlightRectangle
     ));
     match &object.extra {
+        Extra::Sticker(sticker) => {
+            values.shape = i32::from(object.kind == Kind::StickerBrush);
+            values.mode = i32::from(
+                sticker.texture == lexift_core::domain::annotation::StickerTexture::Frost,
+            );
+            values.strength = sticker.opacity as f32;
+            values.zoom = sticker.displayed_size().round().clamp(1., 64.) as i32;
+            values.size = (sticker.diameter / sticker.creation_scale).round() as i32;
+        }
         Extra::Mosaic(mosaic) => {
             values.shape = i32::from(object.kind == Kind::MosaicBrush);
             values.mode =
@@ -915,7 +932,7 @@ pub(super) fn refill_object(
     if tool != 7 {
         values.erase = object.style.outline;
     }
-    if tool != 11 {
+    if !matches!(tool, 11 | 12) {
         values.strength = spotlight_opacity * 100.;
     }
     (values.color_index, values.custom_color) = color_to_values(palette, object.style.color);

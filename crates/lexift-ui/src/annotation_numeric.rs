@@ -13,6 +13,7 @@ pub(super) enum Parameter {
     BackgroundRounding,
     Padding,
     Caption,
+    TextureSize,
 }
 
 impl Parameter {
@@ -29,20 +30,17 @@ impl Parameter {
     }
     /// The same permission gate is used by buttons, menus and retained callbacks.
     pub fn enabled(self, tool: i32, v: &AnnotationValues) -> bool {
-        if tool == 12 {
-            return true;
-        }
         match self {
             Self::Size => match tool {
                 0 | 1 => !v.fill,
                 2 => v.erase,
                 3 | 5 | 6 | 7 => true,
                 4 => v.shape == 0,
-                11 | 13 => v.shape == 1,
+                11..=13 => v.shape == 1,
                 _ => false,
             },
             Self::Rounding => matches!(tool, 0..=2) && v.shape == 0,
-            Self::Strength => matches!(tool, 2 | 9 | 11),
+            Self::Strength => matches!(tool, 2 | 9 | 11 | 12),
             Self::FontSize => matches!(tool, 8..=10),
             Self::Zoom => tool == 7,
             Self::Outline => matches!(tool, 8 | 10) && v.text_outline,
@@ -50,6 +48,7 @@ impl Parameter {
                 tool == 8 && v.text_background
             }
             Self::Caption => tool == 10 && v.sequence_expanded,
+            Self::TextureSize => tool == 12,
         }
     }
     pub fn from_field(field: i32) -> Option<Self> {
@@ -64,15 +63,16 @@ impl Parameter {
             -106 => Self::BackgroundRounding,
             -107 => Self::Padding,
             -108 => Self::Caption,
+            -109 => Self::TextureSize,
             _ => return None,
         })
     }
     pub fn bounds(self, tool: i32) -> (i32, i32) {
         match self {
             Self::Size => (1, 100),
+            Self::TextureSize => (1, 64),
             Self::FontSize => match tool {
                 9 => (5, 144),
-                12 => (1, 144),
                 _ => (5, i32::MAX),
             },
             Self::Zoom => (100, 800),
@@ -93,6 +93,7 @@ impl Parameter {
             Self::BackgroundRounding => v.text_bg_rounding,
             Self::Padding => v.text_bg_padding,
             Self::Caption => v.sequence_ratio,
+            Self::TextureSize => v.zoom,
         }
     }
     pub fn write(self, v: &mut AnnotationValues, value: i32) {
@@ -107,6 +108,7 @@ impl Parameter {
             Self::BackgroundRounding => v.text_bg_rounding = value,
             Self::Padding => v.text_bg_padding = value,
             Self::Caption => v.sequence_ratio = value,
+            Self::TextureSize => v.zoom = value,
         }
     }
 }
@@ -291,6 +293,7 @@ mod tests {
                     (9, vec![-101, -102]),
                     (10, vec![-102, -108]),
                     (11, vec![-9, -101]),
+                    (12, vec![-9, -101, -109]),
                     (13, vec![-9]),
                 ] {
                     let panel = crate::AnnotationPanel::new().unwrap();
@@ -303,7 +306,7 @@ mod tests {
                     values.fill = false;
                     values.erase = true;
                     values.sequence_expanded = true;
-                    if matches!(tool, 11 | 13) {
+                    if matches!(tool, 11..=13) {
                         values.shape = 1;
                     }
                     panel.set_values(values.clone());

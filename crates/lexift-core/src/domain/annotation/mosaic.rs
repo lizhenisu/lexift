@@ -64,7 +64,7 @@ impl MosaicAnnotation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::annotation::{Bounds, Extra, Hit, Kind, Object, Session, Style};
+    use crate::domain::annotation::{Bounds, Extra, Kind, Object, Session, Style};
 
     fn brush(points: Vec<(f32, f32)>, scale: f32) -> Object {
         let mut object = Object {
@@ -85,16 +85,16 @@ mod tests {
         object
     }
     #[test]
-    fn single_click_has_round_envelope_and_whole_object_handles() {
+    fn single_click_has_round_envelope_but_no_edit_handles() {
         for scale in [1., 1.25] {
             let object = brush(vec![(-200., 100.)], scale);
             assert_eq!(object.bounds.width(), 12. * scale);
             assert_eq!(object.bounds.height(), 12. * scale);
-            assert_eq!(object.edit_handles(scale).len(), 8);
+            assert!(object.edit_handles(scale).is_empty());
             let mut session = Session::new();
             assert!(session.add(object));
             session.selected = None;
-            assert_eq!(session.hit((-200., 100.), scale), Some(Hit::Object(0)));
+            assert_eq!(session.hit((-200., 100.), scale), None);
             assert_eq!(session.hit((-250., 100.), scale), None);
         }
         let mut smallest = brush(vec![(-200., 100.)], 1.);
@@ -108,13 +108,14 @@ mod tests {
         );
     }
     #[test]
-    fn resizing_and_moving_keeps_brush_caps_and_one_undo_transaction() {
+    fn completed_brush_rejects_geometry_changes_and_creation_has_one_undo() {
         let object = brush(vec![(-200., 100.), (-160., 120.)], 1.25);
         let original = object.clone();
         let mut session = Session::new();
         session.begin_drag();
         assert!(session.add(object));
         session.objects[0].move_by(40., -20.);
+        assert_eq!(session.objects[0].bounds, original.bounds);
         session.finish_drag();
         session.undo();
         assert!(session.objects.is_empty());
@@ -130,10 +131,9 @@ mod tests {
         let Extra::Mosaic(value) = &resized.extra else {
             panic!()
         };
-        assert_eq!(value.diameter, 30.);
+        assert_eq!(value.diameter, 15.);
         assert_eq!(value.creation_scale, 1.25);
-        assert_eq!(resized.bounds.width(), b.width() * 2.);
-        assert_eq!(resized.bounds.height(), b.height() * 2.);
+        assert_eq!(resized, original);
         assert!(!resized.hit_path((-200., 145.), 1.25));
     }
     #[test]
@@ -194,8 +194,15 @@ mod tests {
     }
     #[test]
     fn rejecting_a_deleted_mask_cannot_revive_it_through_undo() {
+        let area = |point| {
+            let mut object = brush(vec![point], 1.);
+            object.kind = Kind::MosaicArea;
+            object.points.clear();
+            object.bounds = Bounds::from_corners(point, (point.0 + 20., point.1 + 20.));
+            object
+        };
         let mut session = Session::new();
-        session.add(brush(vec![(10., 10.)], 1.));
+        session.add(area((10., 10.)));
         let Extra::Mosaic(m) = &session.objects[0].extra else {
             unreachable!()
         };
@@ -205,9 +212,9 @@ mod tests {
         session.discard_mosaics(&[id]);
         assert!(!session.can_undo());
         assert!(!session.undo());
-        session.add(brush(vec![(20., 20.)], 1.));
+        session.add(area((20., 20.)));
         let first = session.objects[0].clone();
-        session.add(brush(vec![(30., 30.)], 1.));
+        session.add(area((30., 30.)));
         let Extra::Mosaic(m) = &session.objects[1].extra else {
             unreachable!()
         };

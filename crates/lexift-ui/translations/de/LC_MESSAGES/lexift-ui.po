@@ -810,3 +810,15 @@ msgstr "Auch mit dem Mausrad einstellbar."
 
 msgid "Caption size"
 msgstr "Beschriftungsgröße"
+
+msgid "Mosaic sticker"
+msgstr "Mosaikfolie"
+
+msgid "Glass tiles"
+msgstr "Glaskacheln"
+
+msgid "Frosted grain"
+msgstr "Mattglasstruktur"
+
+msgid "Texture size"
+msgstr "Strukturgröße"

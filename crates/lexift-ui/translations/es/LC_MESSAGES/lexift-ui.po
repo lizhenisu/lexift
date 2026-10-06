@@ -810,3 +810,15 @@ msgstr "También puede ajustar con la rueda del ratón."
 
 msgid "Caption size"
 msgstr "Tamaño de descripción"
+
+msgid "Mosaic sticker"
+msgstr "Adhesivo de mosaico"
+
+msgid "Glass tiles"
+msgstr "Cuadrículas de vidrio"
+
+msgid "Frosted grain"
+msgstr "Grano esmerilado"
+
+msgid "Texture size"
+msgstr "Tamaño de textura"

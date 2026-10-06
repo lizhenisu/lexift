@@ -391,7 +391,10 @@ impl Press {
     ) -> Self {
         let mut press = Self::new(start, kind, style, scale);
         press.values = values.clone();
-        if matches!(kind, Kind::MosaicArea | Kind::MosaicBrush) {
+        if matches!(
+            kind,
+            Kind::MosaicArea | Kind::MosaicBrush | Kind::StickerArea | Kind::StickerBrush
+        ) {
             press.update(start, scale);
         }
         press
@@ -450,7 +453,7 @@ impl Press {
                 .max_distance
                 .max(arrow_distance(self.info.start, point));
         }
-        let scale = if self.info.kind.tool() == 11 {
+        let scale = if matches!(self.info.kind.tool(), 11 | 12) {
             self.info.start_scale
         } else {
             viewport_scale
@@ -476,8 +479,12 @@ pub(super) fn update_draft(
     scale: f32,
     values: &AnnotationValues,
 ) {
-    if kind == Kind::MosaicBrush {
-        let extra = mosaic::settings(values, scale);
+    if matches!(kind, Kind::MosaicBrush | Kind::StickerBrush) {
+        let extra = if kind == Kind::StickerBrush {
+            crate::annotation_sticker::settings(values, start, scale)
+        } else {
+            mosaic::settings(values, scale)
+        };
         let object = draft.get_or_insert_with(|| {
             let mut object = Object {
                 erased: Vec::new(),
@@ -514,6 +521,10 @@ pub(super) fn update_draft(
                 .as_ref()
                 .map(|o| o.extra.clone())
                 .unwrap_or_else(|| mosaic::settings(values, scale)),
+            Kind::StickerArea => draft
+                .as_ref()
+                .map(|o| o.extra.clone())
+                .unwrap_or_else(|| crate::annotation_sticker::settings(values, start, scale)),
             // The drag previews only the source outline. Sampling starts on release.
             Kind::Magnifier => Extra::None,
             _ => Extra::None,

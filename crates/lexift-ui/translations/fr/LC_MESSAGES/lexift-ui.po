@@ -810,3 +810,15 @@ msgstr "Vous pouvez aussi régler avec la molette."
 
 msgid "Caption size"
 msgstr "Taille de la légende"
+
+msgid "Mosaic sticker"
+msgstr "Film mosaïque"
+
+msgid "Glass tiles"
+msgstr "Carreaux de verre"
+
+msgid "Frosted grain"
+msgstr "Grain dépoli"
+
+msgid "Texture size"
+msgstr "Taille de texture"

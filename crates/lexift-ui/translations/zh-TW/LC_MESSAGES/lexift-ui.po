@@ -810,3 +810,15 @@ msgstr "也可以用滾輪調整。"
 
 msgid "Caption size"
 msgstr "說明大小"
+
+msgid "Mosaic sticker"
+msgstr "馬賽克貼紙"
+
+msgid "Glass tiles"
+msgstr "方格玻璃"
+
+msgid "Frosted grain"
+msgstr "磨砂顆粒"
+
+msgid "Texture size"
+msgstr "紋理大小"

@@ -1,6 +1,6 @@
 # Pencil and highlighter
 
-The second annotation group draws editable objects on the live desktop. Pencil
+The second annotation group draws marks on the live desktop. Pencil
 stores a simplified polyline in physical virtual-desktop coordinates; highlighter
 stores either two line endpoints or a filled rounded rectangle. The Core document
 owns hit testing, geometry edits and undo. UI samples pointer input and rasterizes
@@ -12,8 +12,12 @@ the application does not capture the underlying desktop for this feature.
 
 Line endpoints are independently editable. Highlight rectangles expose eight
 resize handles and four linked radius handles; the latter edit one shared radius,
-clamped to half the shorter side. Pencil resizing transforms points without
-changing stroke width. One gesture is one undo entry. Parameters remain ephemeral.
+clamped to half the shorter side. Completed pencil, live mosaic/blur brush and
+mosaic sticker brush marks cannot be selected or edited. They remain erasable,
+undoable and removable through Clear all; area objects remain editable. Live
+mosaic/blur marks keep updating the underlying screen. Parameters affect later
+strokes without changing completed marks. One gesture is one undo entry.
+Parameters remain ephemeral.
 
 The existing transient menu/color picker infrastructure is shared. Pencil defaults
 to red/12/solid; highlighter defaults to green/12/line/translucent, with rectangle
@@ -22,6 +26,12 @@ selected by pointer, keyboard or accessibility callbacks.
 
 ## Verification
 
+- Completed freehand permission regression: Core/UI cover pencil, live mosaic
+  and sticker brush locks, stale parameter targets, drawing over existing marks,
+  defaults-only wheel/slider changes, erasing, cancellation and undo. Native
+  100%/125% checks for mosaic and sticker brushes save completion and post-click
+  screenshots in `target/freehand-*`; no selection frames appear. Negative
+  desktop coordinates are covered by automated tests, not this native run.
 - Core/UI tests cover sampling, point strokes, path hit testing, transforms,
   endpoints, radius limits, drag cancellation, undo, dash rendering and alpha.
 - Workspace tests passed: 242 passed, 15 existing ignored integration tests.

@@ -83,6 +83,10 @@ impl Preview {
 }
 
 impl State {
+    #[cfg(test)]
+    pub(super) fn is_idle(&self) -> bool {
+        self.worker.is_none() && !self.tasks.poll_timer.running() && self.pending.is_empty()
+    }
     /// Only complete effects for the current immutable document can replace GPU pixels.
     pub fn handoff_ready(&self) -> bool {
         self.effects.as_ref().is_some_and(|frame| {

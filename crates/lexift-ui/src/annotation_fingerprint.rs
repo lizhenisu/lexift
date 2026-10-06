@@ -167,6 +167,33 @@ pub(crate) fn extra(value: &Extra, hash: &mut impl Hasher) {
             guide.hash(hash);
             std::mem::discriminant(endpoint).hash(hash);
         }
+        Extra::Sticker(value) => {
+            use lexift_core::domain::annotation::StickerAnnotation;
+            let StickerAnnotation {
+                texture,
+                opacity,
+                texture_size,
+                diameter,
+                creation_scale,
+                seed,
+                origin,
+                stretch,
+            } = value;
+            texture.hash(hash);
+            opacity.hash(hash);
+            seed.hash(hash);
+            for value in [
+                *texture_size,
+                *diameter,
+                *creation_scale,
+                origin.0,
+                origin.1,
+                stretch.0,
+                stretch.1,
+            ] {
+                value.to_bits().hash(hash);
+            }
+        }
         Extra::Mosaic(value) => {
             use lexift_core::domain::annotation::MosaicAnnotation;
             let MosaicAnnotation {

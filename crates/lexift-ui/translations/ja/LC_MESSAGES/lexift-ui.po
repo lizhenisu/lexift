@@ -810,3 +810,15 @@ msgstr "マウスホイールでも調整できます。"
 
 msgid "Caption size"
 msgstr "説明のサイズ"
+
+msgid "Mosaic sticker"
+msgstr "モザイクシート"
+
+msgid "Glass tiles"
+msgstr "ガラスタイル"
+
+msgid "Frosted grain"
+msgstr "すりガラス粒子"
+
+msgid "Texture size"
+msgstr "テクスチャサイズ"

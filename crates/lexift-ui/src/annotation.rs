@@ -337,7 +337,15 @@ fn editing_sequence(r: &Registry) -> bool {
         .is_some_and(|o| o.kind == Kind::Sequence)
 }
 
-const GROUPS: [&[i32]; 7] = [&[0, 2], &[3, 4], &[5, 6, 7], &[8, 9], &[10], &[11], &[13]];
+const GROUPS: [&[i32]; 7] = [
+    &[0, 2],
+    &[3, 4],
+    &[5, 6, 7],
+    &[8, 9],
+    &[10],
+    &[11, 12],
+    &[13],
+];
 const NAMES: [&str; 14] = [
     "Geometry",
     "Ellipse",
@@ -351,7 +359,7 @@ const NAMES: [&str; 14] = [
     "Watermark",
     "Sequence",
     "Mosaic",
-    "Automatic mosaic",
+    "Mosaic sticker",
     "Eraser",
 ];
 
@@ -881,6 +889,7 @@ impl Registry {
             capture.clear();
         }
         self.mosaic = mosaic::State::default();
+        crate::annotation_sticker::clear_cache();
         self.timer.stop();
         self.layout_timer.stop();
         self.magnifier_timer.stop();
@@ -2084,7 +2093,7 @@ fn adopt_selected_style(r: &mut Registry, index: usize) -> bool {
     }
     let object = &r.session.objects[index];
     let tool = object.kind.tool();
-    let group = if tool == 11 {
+    let group = if matches!(tool, 11 | 12) {
         5
     } else if tool == 10 {
         4
@@ -2406,11 +2415,33 @@ fn apply_parameter_values(
                         object.points.clear();
                     }
                 }
-                if kind.tool() != 11 {
+                if !matches!(kind.tool(), 11 | 12) {
                     object.kind = kind;
                 }
                 object.style = style;
                 match kind {
+                    Kind::StickerArea | Kind::StickerBrush => {
+                        if let Extra::Sticker(value) = &mut object.extra {
+                            value.texture = if edited.mode == 1 {
+                                lexift_core::domain::annotation::StickerTexture::Frost
+                            } else {
+                                lexift_core::domain::annotation::StickerTexture::Glass
+                            };
+                            value.opacity = edited.strength.round().clamp(0., 100.) as u8;
+                            if edited.zoom != previous_values.zoom {
+                                value.set_displayed_size(edited.zoom as f32);
+                            }
+                            if edited.size != previous_values.size
+                                && object.kind == Kind::StickerBrush
+                            {
+                                value.diameter =
+                                    edited.size.clamp(1, 100) as f32 * value.creation_scale;
+                            }
+                        }
+                        if object.kind == Kind::StickerBrush {
+                            object.refresh_bounds();
+                        }
+                    }
                     Kind::MosaicArea | Kind::MosaicBrush => {
                         if let Extra::Mosaic(value) = &mut object.extra {
                             value.effect = if edited.mode == 1 {
@@ -2922,7 +2953,7 @@ fn brush_size_scrolled(index: usize, delta: f32) {
         if !delta.is_finite()
             || delta == 0.
             || r.gesture().is_some()
-            || (active_kind(r) != Some(Kind::MosaicBrush)
+            || (!matches!(active_kind(r), Some(Kind::MosaicBrush | Kind::StickerBrush))
                 && !(r.mode == InteractionMode::Tool(6) && r.values(13).shape == 1))
             || index >= r.canvases.len()
         {
@@ -2932,26 +2963,35 @@ fn brush_size_scrolled(index: usize, delta: f32) {
             scroll_eraser_size(r, delta);
             return None;
         }
-        let mut values = r.values(11).clone();
+        let tool = if active_kind(r) == Some(Kind::StickerBrush) {
+            12
+        } else {
+            11
+        };
+        let mut values = r.values(tool).clone();
         values.size = (values.size + if delta > 0. { 1 } else { -1 }).clamp(1, 100);
         if let Some(panel) = r
             .panel
             .get()
-            .filter(|p| !p.get_menu() && p.get_tool() == 11)
+            .filter(|p| !p.get_menu() && p.get_tool() == tool as i32)
         {
             panel.set_values(values.clone());
-            let target = r.parameter_target(11);
+            let target = r.parameter_target(tool as i32);
             apply_geometry_values(r, target, values);
         } else {
-            r.replace_values(11, values);
-            let size = r.values(11).size;
+            r.replace_values(tool, values);
+            let size = r.values(tool).size;
             r.session.update_selected(|object| {
-                if object.kind == Kind::MosaicBrush
-                    && let Extra::Mosaic(value) = &mut object.extra
-                {
-                    value.diameter = size as f32 * value.creation_scale;
-                    object.refresh_bounds();
+                match &mut object.extra {
+                    Extra::Mosaic(value) if object.kind == Kind::MosaicBrush => {
+                        value.diameter = size as f32 * value.creation_scale
+                    }
+                    Extra::Sticker(value) if object.kind == Kind::StickerBrush => {
+                        value.diameter = size as f32 * value.creation_scale
+                    }
+                    _ => return,
                 }
+                object.refresh_bounds();
             });
             cursor::refresh(r);
         }
@@ -4673,7 +4713,7 @@ fn apply_panel_input(generation: u64, revision: u64, group: usize, event: panel:
                         && r.panel.revision() == revision
                         && r.panel
                             .get()
-                            .is_some_and(|p| matches!(p.get_tool(), 11 | 13))
+                            .is_some_and(|p| matches!(p.get_tool(), 11..=13))
                 })
             });
             if current {
@@ -5075,8 +5115,6 @@ fn position_panel(r: &Registry) -> bool {
     let available = ((area.right - area.left) as f32 / scale).max(1.);
     let width = if panel.get_menu() {
         220f32.min(available)
-    } else if panel.get_tool() == 12 {
-        720f32.min(available)
     } else {
         // Wrapped preferred widths are clamped by Slint; measure the same row without wrapping.
         panel.set_numeric_measuring(true);
@@ -5084,7 +5122,7 @@ fn position_panel(r: &Registry) -> bool {
         panel.set_numeric_measuring(false);
         width
     };
-    if !panel.get_menu() && panel.get_tool() != 12 {
+    if !panel.get_menu() {
         let current = panel.window().size().to_logical(scale);
         panel
             .window()
@@ -5094,8 +5132,6 @@ fn position_panel(r: &Registry) -> bool {
     panel.set_columns(columns);
     let height = if panel.get_menu() {
         46. + GROUPS[r.group.unwrap_or(0)].len() as f32 * 42.
-    } else if panel.get_tool() == 12 {
-        80. + ((fields(panel.get_tool()).len() as f32 / columns as f32).ceil()) * 62.
     } else {
         panel.get_numeric_content_height()
     };
@@ -5732,6 +5768,180 @@ mod tests {
             assert_eq!(r.selected[2], 7);
             assert_eq!(r.session.selected, None);
         });
+        shutdown();
+    }
+
+    #[test]
+    fn sticker_only_draws_without_capture_workers_or_repeated_static_submissions() {
+        use lexift_core::ports::screen_capture::{
+            ScreenCaptureFrame, ScreenCapturePort, ScreenCaptureRequest,
+        };
+        use slint::platform::{
+            Platform, WindowAdapter, WindowEvent,
+            software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+        };
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+        };
+        struct TestPlatform;
+        impl Platform for TestPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer))
+            }
+        }
+        struct Capture(Arc<AtomicUsize>, Arc<AtomicBool>);
+        impl ScreenCapturePort for Capture {
+            fn is_available(&self) -> bool {
+                self.1.load(Ordering::Relaxed)
+            }
+            fn request(&self, _: ScreenCaptureRequest) -> lexift_core::Result<()> {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            }
+            fn latest(&self) -> lexift_core::Result<Option<Arc<ScreenCaptureFrame>>> {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                Ok(None)
+            }
+            fn clear(&self) {}
+        }
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        let captures = Arc::new(AtomicUsize::new(0));
+        let available = Arc::new(AtomicBool::new(false));
+        let presents = Rc::new(Cell::new(0));
+        let calls = presents.clone();
+        init(
+            |_| PassiveWindowPreparation::Ready,
+            WindowLifecycleCallbacks::new(
+                |_, _| true,
+                |_| true,
+                |_| false,
+                |_, _, _| false,
+                |_, _| true,
+                |_, _| true,
+                || false,
+            )
+            .with_annotation_screen_capture(Some(Arc::new(Capture(
+                captures.clone(),
+                available.clone(),
+            ))))
+            .with_annotation_canvas(
+                Vec::new,
+                |_, _| true,
+                move |_, _, _, _| {
+                    calls.set(calls.get() + 1);
+                    true
+                },
+            ),
+        );
+        for dpi in [1., 1.25] {
+            available.store(dpi == 1.25, Ordering::Relaxed);
+            for shape in [0, 1] {
+                for texture in [0, 1] {
+                    let generation = REGISTRY.with(|slot| {
+                        let mut slot = slot.borrow_mut();
+                        let r = slot.as_mut().unwrap();
+                        r.close();
+                        r.pending_displays = vec![Rect {
+                            left: -200,
+                            top: -200,
+                            right: 400,
+                            bottom: 400,
+                        }];
+                        r.main.open(AnnotationToolbar::new().unwrap());
+                        create_canvas(r, 0);
+                        r.canvases[0]
+                            .window
+                            .window()
+                            .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
+                        r.annotation_ready = true;
+                        r.selected[5] = 12;
+                        r.set_mode(InteractionMode::Tool(5));
+                        r.edit_values(12).shape = shape;
+                        r.edit_values(12).mode = texture;
+                        r.generation
+                    });
+                    open_panel(5, false);
+                    canvas_pointer(0, 0, 80., 80.);
+                    canvas_pointer(0, 1, 180., 170.);
+                    canvas_pointer(0, 2, 180., 170.);
+                    REGISTRY.with(|slot| {
+                        let slot = slot.borrow();
+                        let r = slot.as_ref().unwrap();
+                        assert_eq!(r.session.objects.len(), 1);
+                        assert_eq!(
+                            r.session.objects[0].kind,
+                            if shape == 0 {
+                                Kind::StickerArea
+                            } else {
+                                Kind::StickerBrush
+                            }
+                        );
+                        assert!(matches!(&r.session.objects[0].extra, Extra::Sticker(s) if s.opacity == 95));
+                        assert_eq!(r.session.selected, (shape == 0).then_some(0));
+                        if shape == 1 {
+                            assert!(r.session.objects[0].edit_handles(dpi).is_empty());
+                            assert_eq!(r.parameter_object(12), None);
+                        }
+                        assert_eq!(r.values(12).strength, 95.);
+                        assert_eq!(r.panel.get().unwrap().get_values().strength, 95.);
+                        assert!(r.mosaic.is_idle());
+                        assert!(!r.native_presenter.active);
+                        assert_eq!(r.panel.get().unwrap().get_tool(), 12);
+                    });
+                    render_canvases(generation);
+                    let count = presents.get();
+                    for _ in 0..3 {
+                        render_canvases(generation);
+                    }
+                    assert_eq!(
+                        presents.get(),
+                        count,
+                        "static sticker must reuse presented pixels"
+                    );
+                    assert_eq!(captures.load(Ordering::Relaxed), 0);
+                    if shape == 1 {
+                        REGISTRY.with(|slot| {
+                            let mut slot = slot.borrow_mut();
+                            let r = slot.as_mut().unwrap();
+                            let before = r.session.objects[0].clone();
+                            let mut stale = r.parameter_target(12);
+                            stale.object = Some(before.id);
+                            let mut values = r.values(12).clone();
+                            values.strength = 80.;
+                            assert!(apply_parameter_values(r, stale, values.clone()).is_none());
+                            assert_eq!(r.values(12).strength, 95.);
+                            let target = r.parameter_target(12);
+                            assert!(apply_parameter_values(r, target, values).is_some());
+                            r.finish_style_edit();
+                            assert_eq!(r.session.objects[0], before);
+                            assert_eq!(r.values(12).strength, 80.);
+                        });
+                        // The old trajectory is not an edit target: drawing over it creates a new mark.
+                        canvas_pointer(0, 0, 100., 100.);
+                        canvas_pointer(0, 1, 160., 150.);
+                        canvas_pointer(0, 2, 160., 150.);
+                        REGISTRY.with(|slot| {
+                            let mut slot = slot.borrow_mut();
+                            let r = slot.as_mut().unwrap();
+                            assert_eq!(r.session.objects.len(), 2);
+                            assert_eq!(r.session.selected, None);
+                            assert!(matches!(&r.session.objects[0].extra, Extra::Sticker(s) if s.opacity == 95));
+                            assert!(matches!(&r.session.objects[1].extra, Extra::Sticker(s) if s.opacity == 80));
+                            assert!(r.session.undo());
+                            assert_eq!(r.session.objects.len(), 1);
+                            assert_eq!(r.session.selected, None);
+                        });
+                    }
+                    REGISTRY.with(|slot| {
+                        let mut slot = slot.borrow_mut();
+                        let r = slot.as_mut().unwrap();
+                        assert!(r.session.undo());
+                        assert!(r.session.objects.is_empty());
+                    });
+                }
+            }
+        }
         shutdown();
     }
 
@@ -7353,15 +7563,15 @@ mod tests {
                         let Extra::Mosaic(value) = &r.session.objects[0].extra else {
                             panic!()
                         };
-                        assert_eq!(value.diameter, 14. * dpi);
+                        assert_eq!(value.diameter, 12. * dpi);
                         assert_eq!(
                             value.effect,
                             lexift_core::domain::annotation::MosaicEffect::Blur
                         );
                         assert_eq!(value.strength, 70);
                         r.finish_style_edit();
-                        assert!(r.session.undo());
                         assert_eq!(r.session.objects, vec![original]);
+                        assert_eq!(r.session.selected, None);
                         assert!(r.session.undo());
                     } else {
                         r.finish_style_edit();
@@ -9474,6 +9684,36 @@ mod tests {
                 }
                 panel.invoke_parameter_dragging(false);
                 slint::platform::update_timers_and_animations();
+                if shape == 1 {
+                    REGISTRY.with(|slot| {
+                        let slot = slot.borrow();
+                        let r = slot.as_ref().unwrap();
+                        assert_eq!(r.session.selected, None);
+                        assert_eq!(r.values(11).strength, 80.);
+                        assert!(matches!(&r.session.objects[0].extra,
+                            Extra::Mosaic(value) if value.strength == 0));
+                    });
+                    canvas_pointer(0, 0, 140., 130.);
+                    canvas_pointer(0, 1, 250., 250.);
+                    REGISTRY.with(|slot| {
+                        let slot = slot.borrow();
+                        let r = slot.as_ref().unwrap();
+                        assert!(r.drawing_press().is_some());
+                        assert!(r.geometry_drag().is_none());
+                    });
+                    canvas_pointer(0, 3, 250., 250.);
+                    REGISTRY.with(|slot| {
+                        let mut slot = slot.borrow_mut();
+                        let r = slot.as_mut().unwrap();
+                        assert_eq!(r.session.objects.len(), 1);
+                        assert_eq!(r.values(11).strength, 80.);
+                        assert!(r.panel.get().is_some());
+                        assert!(r.session.undo());
+                        assert!(r.session.objects.is_empty() && !r.session.can_undo());
+                        r.close();
+                    });
+                    continue;
+                }
                 let press_undo = || {
                     panel.window().dispatch_event(WindowEvent::KeyPressed {
                         text: slint::platform::Key::Control.into(),
