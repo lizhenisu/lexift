@@ -2,11 +2,11 @@ use std::{
     cell::RefCell,
     sync::{
         Arc, Mutex, OnceLock,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
     thread::{self, JoinHandle},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use lexift_core::domain::geometry::Point;
@@ -131,9 +131,54 @@ impl GestureTracker {
 }
 
 struct Monitor {
-    tracker: GestureTracker,
-    sender: mpsc::Sender<(Gesture, Instant)>,
+    sender: mpsc::Sender<PointerSample>,
     max_callback_us: Arc<AtomicU64>,
+}
+
+/// Copy-only hook payload; window lookup and gesture state belong to dispatch.
+#[derive(Clone, Copy)]
+struct PointerSample {
+    down: bool,
+    point: Point,
+    time: u32,
+    sent_at: Instant,
+}
+
+fn resolve_window(point: Point) -> (usize, bool, DoubleClickSettings) {
+    let window = unsafe {
+        WindowFromPoint(windows::Win32::Foundation::POINT {
+            x: point.x,
+            y: point.y,
+        })
+    };
+    let mut process_id = 0;
+    if !window.0.is_null() {
+        unsafe { GetWindowThreadProcessId(window, Some(&mut process_id)) };
+    }
+    (
+        window.0 as usize,
+        process_id == unsafe { GetCurrentProcessId() },
+        DoubleClickSettings::current(),
+    )
+}
+
+fn process_sample(
+    tracker: &mut GestureTracker,
+    sample: PointerSample,
+    resolve: impl FnOnce(Point) -> (usize, bool, DoubleClickSettings),
+) -> Option<Gesture> {
+    // After a long downstream stall, the window under an old point is no longer
+    // a reliable click target. Drop both halves rather than seed a phantom drag.
+    if sample.sent_at.elapsed() > Duration::from_millis(500) {
+        *tracker = GestureTracker::default();
+        return None;
+    }
+    if sample.down {
+        let (window, own_window, settings) = resolve(sample.point);
+        tracker.down(sample.point, sample.time, window, own_window, settings)
+    } else {
+        tracker.up(sample.point)
+    }
 }
 
 thread_local! {
@@ -143,7 +188,8 @@ thread_local! {
 struct MonitorHandle {
     hook_thread: HookMessageThread,
     dispatcher: JoinHandle<()>,
-    sender: mpsc::Sender<(Gesture, Instant)>,
+    sender: mpsc::Sender<PointerSample>,
+    stopped: Arc<AtomicBool>,
     max_callback_us: Arc<AtomicU64>,
     max_dispatch_delay_us: Arc<AtomicU64>,
 }
@@ -161,15 +207,28 @@ pub fn start(handler: Arc<dyn Fn(Gesture) + Send + Sync>) -> lexift_core::Result
     if active.is_some() {
         return Ok(());
     }
-    let (sender, receiver) = mpsc::channel::<(Gesture, Instant)>();
+    let (sender, receiver) = mpsc::channel::<PointerSample>();
+    let stopped = Arc::new(AtomicBool::new(false));
+    let dispatch_stopped = stopped.clone();
     let max_dispatch_delay_us = Arc::new(AtomicU64::new(0));
     let dispatch_delay = Arc::clone(&max_dispatch_delay_us);
     let dispatcher = thread::Builder::new()
         .name("lexift-selection-dispatch".into())
         .spawn(move || {
-            while let Ok((gesture, sent_at)) = receiver.recv() {
-                dispatch_delay.fetch_max(sent_at.elapsed().as_micros() as u64, Ordering::Relaxed);
-                handler(gesture);
+            let mut tracker = GestureTracker::default();
+            while let Ok(sample) = receiver.recv() {
+                if dispatch_stopped.load(Ordering::Acquire) {
+                    break;
+                }
+                dispatch_delay.fetch_max(
+                    sample.sent_at.elapsed().as_micros() as u64,
+                    Ordering::Relaxed,
+                );
+                if let Some(gesture) = process_sample(&mut tracker, sample, resolve_window)
+                    && !dispatch_stopped.load(Ordering::Acquire)
+                {
+                    handler(gesture);
+                }
             }
         })
         .map_err(|error| {
@@ -184,7 +243,6 @@ pub fn start(handler: Arc<dyn Fn(Gesture) + Send + Sync>) -> lexift_core::Result
         )?;
         MONITOR.with(|slot| {
             *slot.borrow_mut() = Some(Monitor {
-                tracker: GestureTracker::default(),
                 sender: hook_sender,
                 max_callback_us: hook_max,
             });
@@ -205,6 +263,7 @@ pub fn start(handler: Arc<dyn Fn(Gesture) + Send + Sync>) -> lexift_core::Result
         hook_thread,
         dispatcher,
         sender,
+        stopped,
         max_callback_us,
         max_dispatch_delay_us,
     });
@@ -217,6 +276,7 @@ pub fn stop() {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .take();
     if let Some(monitor) = monitor {
+        monitor.stopped.store(true, Ordering::Release);
         monitor.hook_thread.stop();
         drop(monitor.sender);
         let _ = monitor.dispatcher.join();
@@ -238,36 +298,15 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
                 x: data.pt.x,
                 y: data.pt.y,
             };
-            let (window, own_window) = if event == WM_LBUTTONDOWN {
-                let window = unsafe { WindowFromPoint(data.pt) };
-                let mut process_id = 0;
-                if !window.0.is_null() {
-                    unsafe { GetWindowThreadProcessId(window, Some(&mut process_id)) };
-                }
-                (
-                    window.0 as usize,
-                    process_id == unsafe { GetCurrentProcessId() },
-                )
-            } else {
-                (0, false)
-            };
             MONITOR.with(|slot| {
-                let mut slot = slot.borrow_mut();
-                let Some(monitor) = slot.as_mut() else { return };
-                let gesture = if event == WM_LBUTTONDOWN {
-                    monitor.tracker.down(
-                        point,
-                        data.time,
-                        window,
-                        own_window,
-                        DoubleClickSettings::current(),
-                    )
-                } else {
-                    monitor.tracker.up(point)
-                };
-                if let Some(gesture) = gesture {
-                    let _ = monitor.sender.send((gesture, Instant::now()));
-                }
+                let slot = slot.borrow();
+                let Some(monitor) = slot.as_ref() else { return };
+                let _ = monitor.sender.send(PointerSample {
+                    down: event == WM_LBUTTONDOWN,
+                    point,
+                    time: data.time,
+                    sent_at: started,
+                });
             });
         }
     }
@@ -373,5 +412,91 @@ mod tests {
         assert_eq!(tracker.up(point(10, 10)), None);
         tracker.down(point(10, 10), 300, 1, false, SETTINGS);
         assert_eq!(tracker.up(point(10, 10)), None);
+    }
+
+    #[test]
+    fn dispatch_uses_original_time_filters_own_windows_and_drops_stale_samples() {
+        use super::{PointerSample, process_sample};
+        use std::time::{Duration, Instant};
+        let mut tracker = GestureTracker::default();
+        let sample = |down, time, x| PointerSample {
+            down,
+            time,
+            point: point(x, 10),
+            sent_at: Instant::now(),
+        };
+        let outside = |_| (1, false, SETTINGS);
+        assert_eq!(
+            process_sample(&mut tracker, sample(true, 100, 10), outside),
+            Some(Gesture::Started)
+        );
+        assert_eq!(
+            process_sample(&mut tracker, sample(false, 150, 10), |_| panic!(
+                "release must not query windows"
+            )),
+            None
+        );
+        assert_eq!(
+            process_sample(&mut tracker, sample(true, 600, 10), outside),
+            Some(Gesture::Started)
+        );
+        assert_eq!(
+            process_sample(&mut tracker, sample(false, 610, 10), outside),
+            Some(Gesture::Completed(point(10, 10)))
+        );
+        assert_eq!(
+            process_sample(&mut tracker, sample(true, 700, 10), |_| (2, true, SETTINGS)),
+            None
+        );
+        assert_eq!(
+            process_sample(&mut tracker, sample(false, 710, 40), outside),
+            None
+        );
+        process_sample(&mut tracker, sample(true, 800, 10), outside);
+        let mut stale = sample(false, 810, 40);
+        stale.sent_at = Instant::now() - Duration::from_secs(1);
+        assert_eq!(
+            process_sample(&mut tracker, stale, |_| panic!(
+                "stale events must not query windows"
+            )),
+            None
+        );
+        assert!(tracker.press.is_none() && tracker.last_click.is_none());
+    }
+
+    #[test]
+    fn slow_resolution_does_not_block_hook_payload_delivery() {
+        use super::{PointerSample, process_sample};
+        use std::{
+            sync::mpsc,
+            time::{Duration, Instant},
+        };
+        let (sender, receiver) = mpsc::channel();
+        let (entered, busy) = mpsc::channel();
+        let (resume, gate) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let mut tracker = GestureTracker::default();
+            let sample = receiver.recv().unwrap();
+            process_sample(&mut tracker, sample, |_| {
+                entered.send(()).unwrap();
+                gate.recv().unwrap();
+                (1, false, SETTINGS)
+            });
+            process_sample(&mut tracker, receiver.recv().unwrap(), |_| unreachable!())
+        });
+        let sample = |down, x| PointerSample {
+            down,
+            point: point(x, 10),
+            time: 100,
+            sent_at: Instant::now(),
+        };
+        sender.send(sample(true, 10)).unwrap();
+        busy.recv_timeout(Duration::from_secs(2)).unwrap();
+        sender.send(sample(false, 40)).unwrap(); // Resolving a window cannot hold this sender.
+        resume.send(()).unwrap();
+        assert_eq!(
+            worker.join().unwrap(),
+            Some(Gesture::Completed(point(40, 10)))
+        );
     }
 }

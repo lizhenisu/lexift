@@ -958,7 +958,11 @@ fn run(shared: Arc<(Mutex<Mailbox>, Condvar)>) {
                         super::screen_capture::capture::Apartment::new().map_err(native_error)?,
                     );
                 }
+                let creation_started = Instant::now();
                 let mut created = Renderer::new().map_err(native_error)?;
+                tracing::debug!(target: "lexift_platform::annotation_drag_timing",
+                    session = scene.stamp.session, create_ms = creation_started.elapsed().as_secs_f64() * 1000.,
+                    "Annotation renderer resources created on worker");
                 let source_signal = signal.clone();
                 let mailbox = Arc::downgrade(&shared);
                 created

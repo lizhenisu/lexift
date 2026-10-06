@@ -34,6 +34,8 @@ use canvas::{Bootstrap as CanvasBootstrap, Layer as CanvasLayer};
 mod color;
 #[path = "annotation_cursor.rs"]
 mod cursor;
+#[path = "annotation_drag_timing.rs"]
+mod drag_timing;
 #[path = "annotation_drawing.rs"]
 mod drawing;
 #[cfg(test)]
@@ -857,6 +859,7 @@ impl Registry {
         self.focus.cancel();
     }
     fn close(&mut self) {
+        drag_timing::clear();
         // Invalidate queued input before native teardown can emit callbacks.
         // No parameter replay or editor restoration belongs to a dying session.
         self.generation = self.generation.wrapping_add(1);
@@ -3013,6 +3016,8 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
         let layer = r.canvases.get(index)?;
         let scale = layer.window.window().scale_factor().max(0.1);
         let point = cursor::screen_point(layer.bounds, (x, y), scale);
+        let _input_timing =
+            drag_timing::pointer(event, r.generation, index, r.session.objects.len());
         if event == 4 {
             r.canvases[index].last_pointer = None;
             let preview_changed = r.pending_drawing.pointer_left();
@@ -3596,6 +3601,7 @@ fn edited_document_object(r: &Registry) -> Option<(Option<usize>, Object)> {
 }
 
 fn render_canvases(generation: u64) {
+    let _render_timing = drag_timing::Span::new(drag_timing::Phase::Render);
     let deferred_revision = REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
         let r = slot.as_mut().filter(|r| r.generation == generation)?;
@@ -3688,6 +3694,7 @@ fn render_canvases(generation: u64) {
                 })
                 .collect();
             surfaces.and_then(|surfaces| {
+                let _compile_timing = drag_timing::Span::new(drag_timing::Phase::Compile);
                 r.scene_revision = r.scene_revision.wrapping_add(1);
                 r.scene_compiler
                     .compile(crate::annotation_scene::SceneInput {
@@ -3728,6 +3735,7 @@ fn render_canvases(generation: u64) {
             r.mosaic
                 .stop_software(r.lifecycle.annotation_screen_capture.as_ref());
             let port = r.lifecycle.annotation_renderer.as_ref().unwrap();
+            let _submit_timing = drag_timing::Span::new(drag_timing::Phase::Submit);
             match r
                 .native_presenter
                 .submit(port.as_ref(), std::sync::Arc::new(scene.clone()))
@@ -3895,6 +3903,7 @@ fn render_canvases(generation: u64) {
             }
             layer.signature = Some(signature);
             let raster_start = Instant::now();
+            let raster_timing = drag_timing::Span::new(drag_timing::Phase::Raster);
             let frame = if has_effects {
                 crate::annotation_render::render_document_with_effects(
                     display_document,
@@ -3920,6 +3929,7 @@ fn render_canvases(generation: u64) {
                         editor: editor_overlay.as_ref(),
                     })
             };
+            drop(raster_timing);
             if let Some(mut frame) = frame {
                 if has_effects && let Some(editor) = &editor_overlay {
                     editor.draw(
@@ -3941,6 +3951,7 @@ fn render_canvases(generation: u64) {
                     );
                 }
                 let present_start = Instant::now();
+                let submit_timing = drag_timing::Span::new(drag_timing::Phase::Submit);
                 if !layer.presented.submit(frame, |frame| {
                     (r.lifecycle.annotation_frame_presenter)(
                         layer.window.window(),
@@ -3954,6 +3965,7 @@ fn render_canvases(generation: u64) {
                     layer.signature = None;
                     software_presented = false;
                 }
+                drop(submit_timing);
                 if measure_first_frame && let Some(timing) = r.first_magnifier_timing.as_mut() {
                     timing.present += present_start.elapsed();
                 }
@@ -4012,6 +4024,7 @@ fn retry_software_handoff(generation: u64) {
 }
 
 fn poll_native_renderer(generation: u64) {
+    let _confirm_timing = drag_timing::Span::new(drag_timing::Phase::Confirm);
     let changed = REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let Some(r) = slot.as_mut().filter(|r| r.generation == generation) else {
@@ -4389,6 +4402,14 @@ fn show_main(generation: u64, revision: u64, attempt: u8) {
                 );
                 r.annotation_ready = true;
                 r.pending_displays.clear();
+                // Build the empty native scene while the canvases are ready,
+                // before the first drag has to pay for software/native handoff.
+                // Submission remains asynchronous; no capture or UI wait is added.
+                if r.native_presenter
+                    .available(r.lifecycle.annotation_renderer.as_ref())
+                {
+                    r.queue_render();
+                }
                 if let Some(mut timing) = r.cold_open_timing.take() {
                     let elapsed = finish_start.elapsed();
                     timing.toolbar_finish += elapsed;
@@ -9004,6 +9025,123 @@ mod tests {
             );
             slot.take();
         });
+    }
+
+    #[test]
+    fn ready_canvas_prepares_empty_native_scene_before_drawing_and_retires_it() {
+        use lexift_core::ports::annotation_render::{
+            AnnotationRenderPort, AnnotationScene, RenderBackend, RenderCapabilities,
+            RenderCompletion,
+        };
+        use slint::platform::{
+            Platform, WindowAdapter,
+            software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+        };
+        use std::sync::{Arc, Mutex};
+        struct TestPlatform;
+        impl Platform for TestPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer))
+            }
+        }
+        #[derive(Default)]
+        struct Port(Mutex<Option<Arc<AnnotationScene>>>);
+        impl AnnotationRenderPort for Port {
+            fn capabilities(&self) -> RenderCapabilities {
+                RenderCapabilities {
+                    backend: RenderBackend::Gpu,
+                    max_refresh_hz: 60,
+                }
+            }
+            fn submit(&self, scene: Arc<AnnotationScene>) -> lexift_core::Result<()> {
+                *self.0.lock().unwrap() = Some(scene);
+                Ok(())
+            }
+            fn latest(&self) -> lexift_core::Result<Option<RenderCompletion>> {
+                Ok(self
+                    .0
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|scene| RenderCompletion {
+                        stamp: scene.stamp,
+                        sampled_regions: Arc::from([]),
+                        presented: true,
+                        wait: None,
+                    }))
+            }
+            fn clear(&self) {
+                *self.0.lock().unwrap() = None;
+            }
+        }
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        let port = Arc::new(Port::default());
+        init(
+            |_| PassiveWindowPreparation::Ready,
+            WindowLifecycleCallbacks::new(
+                |_, _| true,
+                |_| true,
+                |_| false,
+                |_, _, _| false,
+                |_, _| true,
+                |_, _| true,
+                || false,
+            )
+            .with_annotation_canvas(Vec::new, |_, _| true, |_, _, _, _| true)
+            .with_annotation_window_token(|_| Some(lexift_core::ports::magnifier::WindowToken(1)))
+            .with_annotation_renderer(Some(port.clone())),
+        );
+        let (generation, revision) = REGISTRY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            r.main.open(AnnotationToolbar::new().unwrap());
+            let mut canvas = CanvasLayer::new(
+                AnnotationCanvas::new().unwrap(),
+                Rect {
+                    left: -200,
+                    top: -100,
+                    right: 200,
+                    bottom: 100,
+                },
+            );
+            canvas.bootstrap = CanvasBootstrap::Ready;
+            r.canvases.push(canvas);
+            (r.generation, r.main.revision())
+        });
+        show_main(generation, revision, 0);
+        REGISTRY.with(|slot| {
+            let slot = slot.borrow();
+            let r = slot.as_ref().unwrap();
+            assert!(r.annotation_ready && r.frame_tasks.render_pending());
+            assert!(r.session.objects.is_empty() && !r.session.can_undo());
+            assert!(r.mosaic.is_idle());
+        });
+        render_canvases(generation);
+        assert!(port.0.lock().unwrap().as_ref().unwrap().layers.is_empty());
+        poll_native_renderer(generation);
+        render_canvases(generation);
+        REGISTRY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            assert!(r.native_presenter.active && r.canvases[0].gpu_input_cleared);
+            assert!(r.set_mode(InteractionMode::Tool(0)));
+        });
+        canvas_pointer(0, 0, 50., 50.);
+        canvas_pointer(0, 1, 100., 100.);
+        render_canvases(generation);
+        assert!(!port.0.lock().unwrap().as_ref().unwrap().layers.is_empty());
+        canvas_pointer(0, 3, 100., 100.);
+        REGISTRY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            assert!(r.session.objects.is_empty() && !r.session.can_undo());
+            r.close();
+            assert!(!r.frame_tasks.render_pending());
+        });
+        assert!(port.0.lock().unwrap().is_none());
+        render_canvases(generation); // An old warmup cannot rebuild a closed session.
+        assert!(port.0.lock().unwrap().is_none());
+        shutdown();
     }
 
     #[test]

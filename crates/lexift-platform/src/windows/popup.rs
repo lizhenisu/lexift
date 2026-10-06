@@ -207,6 +207,9 @@ impl PopupDismissMonitor {
     }
 }
 
+#[path = "popup_input_timing.rs"]
+mod input_timing;
+
 struct PopupDismissHandle {
     sender: mpsc::Sender<DismissalEvent>,
     hook_thread: HookMessageThread,
@@ -794,6 +797,7 @@ unsafe extern "system" fn popup_input_subclass(
     if reference_data == 0 {
         return unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
     }
+    let _input_timing = input_timing::begin(hwnd, message);
 
     if message == WM_NCHITTEST {
         let popup = unsafe { GetPropW(hwnd, w!("Lexift.TranslationPopup")) };
