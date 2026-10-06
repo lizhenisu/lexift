@@ -1466,6 +1466,7 @@ mod tests {
             },
             layers: vec![RenderLayer::Mosaic(MosaicLayer {
                 object: Arc::new(Object {
+                    erased: Vec::new(),
                     id: Default::default(),
                     kind: Kind::MosaicArea,
                     bounds: Bounds::from_corners((-4., 0.), (0., 4.)),
@@ -1582,6 +1583,7 @@ mod tests {
             .into(),
             layers: vec![RenderLayer::Mosaic(MosaicLayer {
                 object: Arc::new(Object {
+                    erased: Vec::new(),
                     id: Default::default(),
                     kind: Kind::MosaicArea,
                     bounds: Bounds::from_corners((400., 400.), (404., 404.)),
@@ -2392,6 +2394,7 @@ mod tests {
                     }),
                     RenderLayer::Mosaic(MosaicLayer {
                         object: Arc::new(Object {
+                            erased: Vec::new(),
                             id: Default::default(),
                             bounds: Bounds::from_corners((410., 410.), (480., 460.)),
                             kind: Kind::MosaicArea,
@@ -2555,6 +2558,7 @@ mod tests {
             .collect();
         layers.push(RenderLayer::Magnifier(MagnifierLayer {
             object: Arc::new(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Magnifier,
                 bounds: Bounds::from_corners((512., 384.), (544., 416.)),

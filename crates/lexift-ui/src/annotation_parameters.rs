@@ -38,6 +38,7 @@ impl Patch {
             zoom,
             fill,
             erase,
+            include_annotations,
             antialias,
             shadow,
             text,
@@ -426,6 +427,7 @@ impl TextStyleTarget {
 /// A popup returns only the parameters it owns, never a stale whole toolbar
 /// snapshot. Apply against the latest values so ongoing text edits survive.
 pub(super) enum Edit {
+    BrushSize(i32),
     Choice(ChoiceTarget, i32),
     Color(ColorTarget, [u8; 3]),
     Outline {
@@ -448,6 +450,7 @@ impl Edit {
     }
     pub fn apply(&self, values: &mut AnnotationValues) {
         match self {
+            Self::BrushSize(size) => values.size = (*size).clamp(1, 100),
             Self::Choice(target, index) => {
                 let value = match target {
                     ChoiceTarget::Shape => &mut values.shape,
@@ -778,6 +781,7 @@ pub(super) fn defaults(tool: i32) -> AnnotationValues {
         line_end: if matches!(tool, 5 | 10) { 3 } else { 0 },
         mode: 0,
         erase: tool != 2,
+        include_annotations: tool == 7,
         antialias: true,
         color_index: if tool == 4 {
             6
@@ -883,7 +887,7 @@ pub(super) fn refill_object(
             values.shape = i32::from(*ellipse);
             values.zoom = (zoom * 100.).round() as i32;
             values.connector_style = connector_index(*connector);
-            values.erase = *erase_annotations;
+            values.include_annotations = !*erase_annotations;
             values.antialias = *antialias;
             values.shadow = *shadow;
         }
@@ -1020,6 +1024,7 @@ mod tests {
         use lexift_core::domain::annotation::{Bounds, MosaicAnnotation, MosaicEffect, Session};
         let mut session = Session::new();
         session.add(Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
             bounds: Bounds::from_corners((-100., 20.), (100., 100.)),
@@ -1065,6 +1070,7 @@ mod tests {
         let mut session = Session::new();
         for color in [[1, 2, 3], [4, 5, 6]] {
             session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Rectangle,
                 bounds: Bounds::from_corners((0., 0.), (20., 20.)),
@@ -1147,6 +1153,7 @@ mod tests {
             linked_arrow_control: None,
         };
         let mut object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Text,
             bounds: Bounds::from_corners((0., 0.), (40., 40.)),

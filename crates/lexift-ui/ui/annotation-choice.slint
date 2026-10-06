@@ -35,7 +35,7 @@ export component AnnotationChoiceWindow inherits Window {
     in property <float> content-width: 320;
     callback parameter-input-finished();
     in-out property <int> selected;
-    out property <length> menu-height: root.text-style-mode == 1 ? 80px : root.text-style-mode == 2 ? 160px : root.color-mode ? 300px : root.font-mode ? 320px : root.options.length * MenuMetrics.row-height + 8px;
+    out property <length> menu-height: root.text-style-mode == 3 ? 104px : root.text-style-mode == 1 ? 80px : root.text-style-mode == 2 ? 160px : root.color-mode ? 300px : root.font-mode ? 320px : root.options.length * MenuMetrics.row-height + 8px;
     in-out property <length> font-scroll-y: 0px;
     callback center-selection();
     center-selection => { root.reveal-selection(true); }
@@ -85,6 +85,17 @@ export component AnnotationChoiceWindow inherits Window {
         if root.text-style-mode != 0: ScrollView {
             width: 100%; height: 100%; content-width: max(self.visible-width, root.content-width * 1px);
             content-height: root.menu-height;
+            if root.text-style-mode == 3: Rectangle {
+                width: 100%; height: root.menu-height;
+                Text { x: 12px; y: 9px; text: @tr("Brush size"); color: Colors.foreground; }
+                Slider { x: 12px; y: 40px; width: 190px; minimum: 1; maximum: 100; wheel-step: 1;
+                    value: root.style-values.size; changed value => { root.style-values.size = round(self.value); }
+                    dragging(active) => { root.color-dragging(active); } }
+                SpinBox { x: 212px; y: 28px; width: 74px; height: 30px; minimum: 1; maximum: 100; value <=> root.style-values.size;
+                    input-editing(active) => { root.parameter-input-active = active; }
+                    input-confirmed => { root.parameter-input-finished(); } input-finished => { root.parameter-input-finished(); } }
+                Text { x: 12px; y: 75px; text: @tr("You can also adjust with the mouse wheel."); font-size: 12px; color: Colors.secondary-foreground; }
+            }
             if root.text-style-mode == 1: Rectangle {
                 width: 100%; height: root.menu-height;
                 Text { x: 10px; y: 9px; text: @tr("Outline width"); color: Colors.foreground; }

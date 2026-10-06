@@ -685,12 +685,67 @@ fn draw_magnified_marks(
     );
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MagnifierDrawPart {
+    Source,
+    Shadow,
+    Connector,
+    Border,
+}
+impl MagnifierDrawPart {
+    fn coverage(self) -> lexift_core::domain::annotation_erase::ErasePart {
+        use lexift_core::domain::annotation_erase::ErasePart;
+        match self {
+            Self::Source => ErasePart::MagnifierSource,
+            Self::Shadow | Self::Border => ErasePart::MagnifierOutput,
+            Self::Connector => ErasePart::MagnifierConnector,
+        }
+    }
+}
+
+/// Clip independently moving components in the original decoration paint order.
 pub(crate) fn draw_magnifier_overlay(
     pixmap: &mut Pixmap,
     object: &Object,
     monitor: Rect,
     scale: f32,
 ) {
+    if object.erased.is_empty() {
+        draw_magnifier_component(pixmap, object, monitor, scale, None);
+        return;
+    }
+    // Reuse one buffer across components; unchanged decorations are cached by the scene.
+    let Some(mut layer) = Pixmap::new(pixmap.width(), pixmap.height()) else {
+        return;
+    };
+    for part in [
+        MagnifierDrawPart::Source,
+        MagnifierDrawPart::Shadow,
+        MagnifierDrawPart::Connector,
+        MagnifierDrawPart::Border,
+    ] {
+        layer.fill(tiny_skia::Color::TRANSPARENT);
+        draw_magnifier_component(&mut layer, object, monitor, scale, Some(part));
+        erase_part(&mut layer, monitor, &object.erased, part.coverage());
+        pixmap.draw_pixmap(
+            0,
+            0,
+            layer.as_ref(),
+            &PixmapPaint::default(),
+            Transform::identity(),
+            None,
+        );
+    }
+}
+
+fn draw_magnifier_component(
+    pixmap: &mut Pixmap,
+    object: &Object,
+    monitor: Rect,
+    scale: f32,
+    part: Option<MagnifierDrawPart>,
+) {
+    let enabled = |component| part.is_none_or(|part| part == component);
     let Extra::Magnifier {
         output,
         ellipse,
@@ -723,7 +778,9 @@ pub(crate) fn draw_magnifier_overlay(
         0.,
         monitor,
     );
-    if let Some(source) = source {
+    if enabled(MagnifierDrawPart::Source)
+        && let Some(source) = source
+    {
         if connector == MagnifierConnector::Frame {
             pixmap.stroke_path(
                 &source,
@@ -765,11 +822,12 @@ pub(crate) fn draw_magnifier_overlay(
             );
         }
     }
-    if shadow {
+    if enabled(MagnifierDrawPart::Shadow) && shadow {
         draw_magnifier_shadow(pixmap, output, ellipse, monitor, scale);
     }
-    if let Some((start, end)) =
-        magnifier_connector_segment(object.bounds, output, ellipse, connector)
+    if enabled(MagnifierDrawPart::Connector)
+        && let Some((start, end)) =
+            magnifier_connector_segment(object.bounds, output, ellipse, connector)
         && let Some(line) = {
             let mut b = PathBuilder::new();
             let (x, y) = annotate_point(start, monitor);
@@ -799,7 +857,9 @@ pub(crate) fn draw_magnifier_overlay(
             pixmap.fill_path(&dot, &paint, FillRule::Winding, Transform::identity(), None);
         }
     }
-    if let Some(destination) = destination {
+    if enabled(MagnifierDrawPart::Border)
+        && let Some(destination) = destination
+    {
         pixmap.stroke_path(
             &destination,
             &paint,
@@ -855,6 +915,12 @@ pub(crate) fn draw_magnifier_mask(pixmap: &mut Pixmap, object: &Object, monitor:
             },
         );
     }
+    erase_part(
+        pixmap,
+        monitor,
+        &object.erased,
+        lexift_core::domain::annotation_erase::ErasePart::MagnifierOutput,
+    );
 }
 
 /// Blurs a local shape mask rather than a widened stroke, so the shadow is
@@ -1113,6 +1179,10 @@ fn render_effect_layers(
         }) {
             continue;
         }
+        let mut erased_layer = (!object.erased.is_empty())
+            .then(|| Pixmap::new(width, height))
+            .flatten();
+        let target = erased_layer.as_mut().unwrap_or(&mut pixmap);
         if matches!(object.kind, Kind::MosaicArea | Kind::MosaicBrush) {
             if matches!(&object.extra, Extra::Mosaic(m) if m.strength > 0)
                 && let Some(view) = effects
@@ -1132,35 +1202,30 @@ fn render_effect_layers(
                         .preview
                         .is_some_and(|(i, original)| i == index && original == &tile.object)
                 {
-                    mosaic::blit_current_mask(&mut pixmap, monitor, tile, object);
+                    mosaic::blit_current_mask(target, monitor, tile, object);
                 } else if tile.object.bounds == object.bounds && tile.object.points == object.points
                 {
-                    mosaic::blit(&mut pixmap, monitor, tile);
+                    mosaic::blit(target, monitor, tile);
                 } else if view
                     .preview
                     .is_some_and(|(i, original)| i == index && original == &tile.object)
                 {
                     if view.remask {
-                        mosaic::blit_current_mask(&mut pixmap, monitor, tile, object);
+                        mosaic::blit_current_mask(target, monitor, tile, object);
                     } else {
-                        mosaic::blit_transformed(&mut pixmap, monitor, tile, object.bounds);
+                        mosaic::blit_transformed(target, monitor, tile, object.bounds);
                     }
                 }
                 }
             }
         } else if object.kind == Kind::Magnifier {
             if let Some(capture) = capture {
-                mosaic_lens::draw(&mut pixmap, object, monitor, capture)?;
+                mosaic_lens::draw(target, object, monitor, capture)?;
             } else {
-                mosaic_lens::reveal_native(
-                    &mut pixmap,
-                    object,
-                    scope.objects().take(index),
-                    monitor,
-                );
+                mosaic_lens::reveal_native(target, object, scope.objects().take(index), monitor);
             }
             draw_magnified_marks(
-                &mut pixmap,
+                target,
                 session,
                 LayerScope {
                     interaction: false,
@@ -1172,23 +1237,38 @@ fn render_effect_layers(
                 monitor,
                 effects,
             );
-            draw_magnifier_overlay(&mut pixmap, object, monitor, scale);
+            erase_part(
+                target,
+                monitor,
+                &object.erased,
+                lexift_core::domain::annotation_erase::ErasePart::MagnifierOutput,
+            );
+            draw_magnifier_overlay(target, object, monitor, scale);
         } else if object.kind == Kind::Text
             && scope.document.selected() == Some(index)
             && reference.is_some()
         {
             crate::annotation_text::draw_text_with_reference(
-                &mut pixmap,
-                object,
-                monitor,
-                scale,
-                reference,
+                target, object, monitor, scale, reference,
             );
             if let Some(arrow) = object.text_link_arrow() {
-                draw_line_annotation(&mut pixmap, &arrow, monitor, scale);
+                draw_line_annotation(target, &arrow, monitor, scale);
             }
         } else {
-            draw_object(&mut pixmap, object, monitor, scale);
+            draw_object(target, object, monitor, scale);
+        }
+        if let Some(mut layer) = erased_layer {
+            if object.kind != Kind::Magnifier {
+                erase_coverage(&mut layer, monitor, &object.erased);
+            }
+            pixmap.draw_pixmap(
+                0,
+                0,
+                layer.as_ref(),
+                &PixmapPaint::default(),
+                Transform::identity(),
+                None,
+            );
         }
     }
     if scope.interaction {
@@ -1264,12 +1344,21 @@ fn draw_backdrop_objects<'a>(
                 );
             }
         }
+        erase_coverage(&mut mask, monitor, &session.spotlight_erased);
         pixmap.data_mut().copy_from_slice(mask.data());
     }
     // Watermarks remain visible over both the dimmed backdrop and its clear holes.
     if let Some(watermark) = &session.watermark {
+        let mut watermark_frame = Pixmap::new(width, height)?;
+        let watermark_target = &mut watermark_frame;
         if session.displays.is_empty() {
-            crate::annotation_text::draw_watermark(pixmap, watermark, monitor, monitor, scale);
+            crate::annotation_text::draw_watermark(
+                watermark_target,
+                watermark,
+                monitor,
+                monitor,
+                scale,
+            );
         } else {
             for display in &session.displays {
                 if display.left < monitor.right
@@ -1278,11 +1367,24 @@ fn draw_backdrop_objects<'a>(
                     && display.bottom > monitor.top
                 {
                     crate::annotation_text::draw_watermark(
-                        pixmap, watermark, monitor, *display, scale,
+                        watermark_target,
+                        watermark,
+                        monitor,
+                        *display,
+                        scale,
                     );
                 }
             }
         }
+        erase_coverage(&mut watermark_frame, monitor, &session.watermark_erased);
+        pixmap.draw_pixmap(
+            0,
+            0,
+            watermark_frame.as_ref(),
+            &PixmapPaint::default(),
+            Transform::identity(),
+            None,
+        );
     }
     Some(())
 }
@@ -1613,9 +1715,193 @@ pub(crate) fn notice_path(bounds: Bounds, rounding: f32) -> Option<tiny_skia::Pa
     )
 }
 
+/// Subtract target-local coverage before compositing, preserving lower document layers.
+pub(crate) fn erase_coverage(
+    frame: &mut Pixmap,
+    origin: Rect,
+    cuts: &[lexift_core::domain::annotation_erase::ErasedCoverage],
+) {
+    erase_cuts(frame, origin, cuts.iter());
+}
+
+pub(crate) fn erase_part(
+    frame: &mut Pixmap,
+    origin: Rect,
+    cuts: &[lexift_core::domain::annotation_erase::ErasedCoverage],
+    part: lexift_core::domain::annotation_erase::ErasePart,
+) {
+    erase_cuts(
+        frame,
+        origin,
+        cuts.iter().filter(|cut| cut.applies_to(part)),
+    );
+}
+
+fn erase_cuts<'a>(
+    frame: &mut Pixmap,
+    origin: Rect,
+    cuts: impl Iterator<Item = &'a lexift_core::domain::annotation_erase::ErasedCoverage>,
+) {
+    use lexift_core::domain::annotation_erase::EraseRegion;
+    let paint = Paint {
+        blend_mode: BlendMode::Clear,
+        anti_alias: true,
+        ..Paint::default()
+    };
+    for cut in cuts {
+        let [a, b, c, d, x, y] = cut.transform;
+        let transform =
+            Transform::from_row(a, b, c, d, x - origin.left as f32, y - origin.top as f32);
+        match &cut.region {
+            EraseRegion::Rectangle(bounds) => {
+                if let Some(rect) =
+                    SkRect::from_ltrb(bounds.left, bounds.top, bounds.right, bounds.bottom)
+                {
+                    frame.fill_path(
+                        &PathBuilder::from_rect(rect),
+                        &paint,
+                        FillRule::Winding,
+                        transform,
+                        None,
+                    );
+                }
+            }
+            EraseRegion::Brush { points, diameter } => {
+                let Some(&first) = points.first() else {
+                    continue;
+                };
+                if points.len() == 1 {
+                    if let Some(path) = PathBuilder::from_circle(first.0, first.1, diameter / 2.) {
+                        frame.fill_path(&path, &paint, FillRule::Winding, transform, None);
+                    }
+                } else {
+                    let mut path = PathBuilder::new();
+                    path.move_to(first.0, first.1);
+                    for &(x, y) in &points[1..] {
+                        path.line_to(x, y);
+                    }
+                    if let Some(path) = path.finish() {
+                        frame.stroke_path(
+                            &path,
+                            &paint,
+                            &Stroke {
+                                width: *diameter,
+                                line_cap: tiny_skia::LineCap::Round,
+                                line_join: tiny_skia::LineJoin::Round,
+                                ..Stroke::default()
+                            },
+                            transform,
+                            None,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn lens_component_pixels_follow_output_holes_without_erasing_source_frame() {
+        use lexift_core::domain::annotation::{Hit, Style};
+        use lexift_core::domain::annotation_erase::{ErasePart, EraseRegion, EraseTarget};
+        for scale in [1., 1.25] {
+            for ellipse in [false, true] {
+                let monitor = Rect {
+                    left: -100,
+                    top: -100,
+                    right: 250,
+                    bottom: 160,
+                };
+                let mut session = Session::new();
+                session.add(Object {
+                    id: Default::default(),
+                    kind: Kind::Magnifier,
+                    bounds: Bounds::from_corners((-60., -40.), (-20., 0.)),
+                    points: vec![],
+                    style: Style {
+                        color: [230, 40, 20],
+                        width: 4.,
+                        ..Default::default()
+                    },
+                    erased: Vec::new(),
+                    extra: Extra::Magnifier {
+                        output: Bounds::from_corners((40., -40.), (120., 40.)),
+                        zoom: 2.,
+                        ellipse,
+                        connector: MagnifierConnector::Frame,
+                        erase_annotations: true,
+                        antialias: true,
+                        shadow: true,
+                    },
+                });
+                let id = session.objects[0].id;
+                // Cut the source top edge and the output's right-center edge.
+                for b in [
+                    Bounds::from_corners((-47., -45.), (-33., -30.)),
+                    Bounds::from_corners((108., -8.), (128., 8.)),
+                ] {
+                    session.erase(EraseRegion::Rectangle(b), &[EraseTarget::Object(id)]);
+                }
+                let original = session.objects[0].clone();
+                session.selected = None;
+                let pixel = |frame: &Pixmap, x: i32, y: i32| {
+                    frame
+                        .pixel((x - monitor.left) as u32, (y - monitor.top) as u32)
+                        .unwrap()
+                        .alpha()
+                };
+                for dx in [10., 20., 30., 20., 10., 0.] {
+                    let mut lens = original.clone();
+                    lens.move_from((80., 20.), dx, 0.);
+                    session.objects[0] = lens;
+                    let frame = render(&session, monitor, scale, None, None).unwrap();
+                    assert_eq!(
+                        pixel(&frame, -40, -40),
+                        0,
+                        "sampling frame cut must stay fixed"
+                    );
+                    assert_eq!(
+                        pixel(&frame, (120. + dx) as i32, 0),
+                        0,
+                        "output frame and shadow cut must follow output"
+                    );
+                    assert!(
+                        pixel(&frame, (40. + dx) as i32, 0) > 100,
+                        "opposite frame remains visible"
+                    );
+                    let mut mask = Pixmap::new(350, 260).unwrap();
+                    draw_magnifier_mask(&mut mask, &session.objects[0], monitor);
+                    assert_eq!(pixel(&mask, (115. + dx) as i32, 0), 0);
+                    assert_eq!(pixel(&mask, (80. + dx) as i32, 0), 255);
+                    assert!(
+                        session.objects[0]
+                            .erased
+                            .iter()
+                            .any(|c| c.part == ErasePart::MagnifierSource
+                                && c.contains((-40., -40.)))
+                    );
+                    assert_eq!(session.hit((115. + dx, 0.), scale), None);
+                    assert!(matches!(
+                        session.hit((80. + dx, 0.), scale),
+                        Some(Hit::Object(0))
+                    ));
+                }
+                session.objects[0] = original.clone();
+                session.selected = Some(0);
+                session.begin_drag();
+                let mut lens = original.clone();
+                lens.move_from((80., 20.), 30., 0.);
+                session.replace_selected_geometry(lens);
+                session.finish_drag();
+                assert!(session.undo());
+                assert_eq!(session.objects[0], original);
+            }
+        }
+    }
+
     #[test]
     fn enlarged_text_and_curved_connector_render_together() {
         use lexift_core::domain::annotation::{Style, TextAnnotation};
@@ -1635,6 +1921,7 @@ mod tests {
         };
         let b = crate::annotation_text::text_bounds((60., 100.), &text, dpi);
         let mut object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Text,
             bounds: b,
@@ -1700,6 +1987,7 @@ mod tests {
             };
             let mut session = Session::new();
             session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 bounds: crate::annotation_text::text_bounds((70., 50.), &text, scale),
                 kind: Kind::Text,
@@ -1746,6 +2034,7 @@ mod tests {
         for kind in [Kind::Rectangle, Kind::Ellipse] {
             let mut session = Session::new();
             session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind,
                 points: Vec::new(),
@@ -1788,6 +2077,7 @@ mod tests {
         };
         let mut session = Session::new();
         session.add(Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::HighlightRectangle,
             points: Vec::new(),
@@ -1816,6 +2106,7 @@ mod tests {
             bottom: 100,
         };
         let mut object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Pencil,
             points: vec![(0., 0.), (200., 0.)],
@@ -1890,6 +2181,7 @@ mod tests {
                     ] {
                         session.objects.clear();
                         session.add(Object {
+                            erased: Vec::new(),
                             id: Default::default(),
                             points: Vec::new(),
                             bounds,
@@ -1924,6 +2216,7 @@ mod tests {
         let mut session = Session::new();
         for left in [-80., 20.] {
             session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 points: Vec::new(),
                 bounds: Bounds::from_corners((left, -40.), (left + 30., 0.)),
@@ -1954,6 +2247,7 @@ mod tests {
         };
         let mut session = Session::new();
         session.add(Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((-80., -70.), (40., -70.)),
             kind: Kind::Arrow,
@@ -1971,6 +2265,7 @@ mod tests {
             },
         });
         session.add(Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((-50., -20.), (50., 60.)),
             kind: Kind::Polyline,
@@ -2013,6 +2308,7 @@ mod tests {
         ] {
             let mut session = Session::new();
             session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 bounds: Bounds::from_corners(points[0], points[1]),
                 kind: Kind::Arrow,
@@ -2102,6 +2398,7 @@ mod tests {
         let output = Bounds::from_corners((50., 10.), (90., 50.));
         let mut session = Session::new();
         session.add(Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Rectangle,
             bounds: Bounds::from_corners((15., 15.), (25., 25.)),
@@ -2114,6 +2411,7 @@ mod tests {
             extra: Extra::None,
         });
         session.add(Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Magnifier,
             bounds: source,
@@ -2166,6 +2464,7 @@ mod tests {
         for ellipse in [false, true] {
             let mut session = Session::new();
             session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Magnifier,
                 bounds: Bounds::from_corners((10., 20.), (50., 60.)),

@@ -1351,6 +1351,7 @@ mod tests {
             linked_arrow_control: None,
         };
         Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: text_bounds((-300., -40.), &text, dpi),
             kind: Kind::Text,
@@ -1595,6 +1596,7 @@ mod tests {
             assert!((after.height() / before.height() - 100.).abs() < 0.01);
             assert!((text_padding(&text, dpi) / pad - 100.).abs() < 0.01);
             let object = Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 bounds: after,
                 kind: Kind::Text,
@@ -1683,6 +1685,7 @@ mod tests {
                 bottom: 160,
             };
             let make_object = |text: TextAnnotation| Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 bounds: text_bounds((10., 10.), &text, scale),
                 kind: Kind::Text,
@@ -1741,6 +1744,7 @@ mod tests {
         for scale in [1., 1.25] {
             let bounds = text_bounds((0., 0.), &text, scale);
             let object = Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 bounds,
                 kind: Kind::Text,
@@ -2021,6 +2025,7 @@ mod tests {
             linked_arrow: Some((-40., 100.)),
         };
         session.add(Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: text_bounds((-190., -60.), &text, 1.),
             kind: lexift_core::domain::annotation::Kind::Text,

@@ -33,6 +33,7 @@ impl Geometry {
     /// do not change the white mask; exhaustive patterns keep new fields visible.
     pub fn matches(&self, source: &Object) -> bool {
         let Object {
+            erased,
             id,
             kind,
             bounds,
@@ -61,7 +62,8 @@ impl Geometry {
         let Extra::Mosaic(cached) = &self.object.extra else {
             return false;
         };
-        self.object.id == *id
+        self.object.erased == *erased
+            && self.object.id == *id
             && self.object.kind == *kind
             && self.object.bounds == *bounds
             && self.object.points == *points

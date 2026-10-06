@@ -121,6 +121,7 @@ impl Object {
             return None;
         };
         Some(Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Text,
             bounds: s.caption_bounds,
@@ -139,6 +140,7 @@ impl Object {
         let mut text = s.caption.clone();
         text.rotation = 0.;
         Some(Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Text,
             extra: Extra::Text(text),
@@ -167,6 +169,7 @@ mod tests {
     use super::*;
     fn object(scale: f32) -> Object {
         Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Sequence,
             bounds: Bounds::from_corners((-100., -100.), (-60., -60.)),

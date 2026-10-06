@@ -843,6 +843,7 @@ fn scene(bounds: Rect, input: HWND, mode: usize) -> AnnotationScene {
         .map(|index| {
             RenderLayer::Mosaic(MosaicLayer {
                 object: Arc::new(Object {
+                    erased: Vec::new(),
                     id: Default::default(),
                     kind: if mode == 1 {
                         Kind::MosaicBrush

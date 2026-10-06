@@ -418,6 +418,7 @@ mod tests {
         };
         let mut session = Session::new();
         session.objects.push(Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((-8., -8.), (8., 8.)),
             kind: Kind::Rectangle,
@@ -432,6 +433,7 @@ mod tests {
             extra: Extra::None,
         });
         session.objects.push(Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((-4., -4.), (4., 4.)),
             kind: Kind::MosaicArea,
@@ -613,6 +615,7 @@ mod tests {
         assert_eq!(signature(&changed, &job.session), 0);
         let original = job.session.objects[1].clone();
         job.session_mut().objects.push(Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Magnifier,
             bounds: original.bounds,
@@ -751,6 +754,7 @@ mod tests {
                 bottom: -92,
             };
             let lens = Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Magnifier,
                 bounds: Bounds::from_corners((-100., -100.), (-92., -92.)),
@@ -905,6 +909,7 @@ mod tests {
             (MosaicEffect::Blur, 20, 1.25),
         ] {
             let mut object = Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::MosaicBrush,
                 bounds: Bounds::from_corners((-450., -450.), (450., 450.)),

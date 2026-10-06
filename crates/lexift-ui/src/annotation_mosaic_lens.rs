@@ -252,6 +252,7 @@ mod tests {
         };
         for ellipse in [false, true] {
             let object = Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Magnifier,
                 bounds: Bounds::from_corners((-20., -10.), (-12., -2.)),

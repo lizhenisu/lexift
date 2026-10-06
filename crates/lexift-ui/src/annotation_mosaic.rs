@@ -1047,6 +1047,7 @@ mod tests {
             regions: vec![source],
         };
         let object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
             bounds: Bounds::from_corners((-1., -1.), (1., 1.)),
@@ -1093,6 +1094,7 @@ mod tests {
         for effect in [MosaicEffect::Pixelate, MosaicEffect::Blur] {
             for scale in [1., 1.25] {
                 let object = Object {
+                    erased: Vec::new(),
                     id: Default::default(),
                     kind: Kind::MosaicArea,
                     bounds: Bounds::from_corners((-12.5, -9.5), (8.5, 7.5)),
@@ -1161,6 +1163,7 @@ mod tests {
             }],
         };
         let mut object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
             bounds: Bounds::from_corners((-1., -1.), (1., 1.)),
@@ -1227,6 +1230,7 @@ mod tests {
         white.set_color_rgba8(255, 255, 255, 255);
         for scale in [1., 1.25] {
             let mut object = Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::MosaicBrush,
                 bounds: Bounds::from_corners((-10., -10.), (12., 8.)),
@@ -1307,6 +1311,7 @@ mod tests {
             bottom: 6,
         };
         let object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
             bounds: Bounds::from_corners((-6., -2.), (12., 12.)),
@@ -1348,6 +1353,7 @@ mod tests {
         let mut paint = Paint::default();
         paint.set_color_rgba8(255, 255, 255, 255);
         let mut object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
             bounds: Bounds::from_corners((-10., -10.), (12., 12.)),
@@ -1446,6 +1452,7 @@ mod tests {
         let settings = MosaicAnnotation::new(MosaicEffect::Blur, 100, 12., 1.25);
         let padding = settings.sample_padding();
         let mut object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicArea,
             bounds: Bounds::from_corners((-100000., -100000.), (100000., 100000.)),

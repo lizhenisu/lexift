@@ -43,6 +43,10 @@ use drawing::polyline_preview;
 use drawing::{ArrowPending, PendingState, Polyline};
 #[path = "annotation_editor.rs"]
 mod editor;
+#[path = "annotation_erase.rs"]
+mod eraser;
+#[path = "annotation_tools.rs"]
+mod tools;
 #[cfg(test)]
 use editor::CaretBlink;
 #[cfg(test)]
@@ -646,18 +650,7 @@ impl Registry {
         let scope = if self.mode.is_mouse() {
             EditScope::None
         } else {
-            match self.selected[self.mode.selected_group() as usize] {
-                0 | 1 => EditScope::Geometry,
-                2 => EditScope::Spotlight,
-                4 => EditScope::Highlight,
-                5 => EditScope::Arrow,
-                6 => EditScope::Polyline,
-                7 => EditScope::Magnifier,
-                8 => EditScope::Text,
-                10 => EditScope::Sequence,
-                11 => EditScope::Mosaic,
-                _ => EditScope::None,
-            }
+            tools::scope(self.selected[self.mode.selected_group() as usize] as usize)
         };
         let previous = self.session.selected;
         let hovered = self.hovered.take();
@@ -787,6 +780,9 @@ impl Registry {
             && let Some(main) = self.main.get()
         {
             main.set_can_undo(self.session.can_undo());
+            if let Some(panel) = self.panel.get() {
+                panel.set_can_clear(self.session.has_content());
+            }
         }
     }
 
@@ -935,6 +931,9 @@ fn finish_text_edit_registry(r: &mut Registry, commit: bool) {
             });
             if let Some(main) = r.main.get() {
                 main.set_can_undo(r.session.can_undo());
+                if let Some(panel) = r.panel.get() {
+                    panel.set_can_clear(r.session.has_content());
+                }
             }
             return;
         }
@@ -1464,9 +1463,7 @@ fn finish_polyline() {
         if matches!(r.gesture(), Some(Gesture::PlacePoint)) {
             r.gesture = None;
         }
-        if let Some(main) = r.main.get() {
-            main.set_can_undo(r.session.can_undo());
-        }
+        sync_history_controls(r);
         cursor::refresh(r);
         Some(r.generation)
     });
@@ -2111,53 +2108,17 @@ fn magnifier_connector(index: i32) -> MagnifierConnector {
 }
 
 fn active_kind(r: &Registry) -> Option<Kind> {
-    if r.mode == InteractionMode::Tool(5) {
-        return r
-            .lifecycle
-            .annotation_screen_capture
-            .as_ref()
-            .filter(|p| p.is_available())
-            .map(|_| {
-                if r.values(11).shape == 1 {
-                    Kind::MosaicBrush
-                } else {
-                    Kind::MosaicArea
-                }
-            });
+    if r.mode.is_mouse() {
+        return None;
     }
-    if r.mode == InteractionMode::Tool(4) {
-        return Some(Kind::Sequence);
-    }
-    if r.mode == InteractionMode::Tool(3) {
-        return (r.selected[3] == 8).then_some(Kind::Text);
-    }
-    if r.mode == InteractionMode::Tool(1) {
-        return Some(if r.selected[1] == 3 {
-            Kind::Pencil
-        } else if r.values(4).shape == 0 {
-            Kind::HighlightLine
-        } else {
-            Kind::HighlightRectangle
-        });
-    }
-    if r.mode == InteractionMode::Tool(2) {
-        return Some(match r.selected[2] {
-            5 => Kind::Arrow,
-            6 => Kind::Polyline,
-            _ => Kind::Magnifier,
-        });
-    }
-    match r.selected[0] {
-        0 | 1 => Some(if r.values(r.selected[0] as usize).shape == 0 {
-            Kind::Rectangle
-        } else {
-            Kind::Ellipse
-        }),
-        2 => Some(if r.values(2).shape == 0 {
-            Kind::SpotlightRectangle
-        } else {
-            Kind::SpotlightEllipse
-        }),
+    let tool = r.selected[r.mode.selected_group() as usize] as usize;
+    let capture = r
+        .lifecycle
+        .annotation_screen_capture
+        .as_ref()
+        .is_some_and(|p| p.is_available());
+    match tools::drawing(tool, r.values(tool).shape, capture) {
+        tools::Drawing::Object(kind) => Some(kind),
         _ => None,
     }
 }
@@ -2193,6 +2154,7 @@ fn sequence_from_values(r: &Registry, at: (f32, f32), scale: f32) -> Object {
     caption.italic = false;
     let b = Bounds::from_corners(at, at);
     let mut object = Object {
+        erased: Vec::new(),
         id: Default::default(),
         kind: Kind::Sequence,
         bounds: b,
@@ -2245,7 +2207,8 @@ fn cancel_object_gesture(r: &mut Registry) -> bool {
     matches!(
         r.gesture(),
         Some(
-            Gesture::PlaceSequence
+            Gesture::Erase
+                | Gesture::PlaceSequence
                 | Gesture::Move
                 | Gesture::Resize { .. }
                 | Gesture::TextHandle { .. }
@@ -2481,7 +2444,7 @@ fn apply_parameter_values(
                         {
                             *ellipse = edited.shape == 1;
                             *connector = magnifier_connector(edited.connector_style);
-                            *erase_annotations = edited.erase;
+                            *erase_annotations = !edited.include_annotations;
                             *antialias = edited.antialias;
                             *shadow = edited.shadow;
                         }
@@ -2578,6 +2541,7 @@ fn magnifier_from_source(
     }
     let output = magnifier_output_for_source(source, zoom);
     Some(Object {
+        erased: Vec::new(),
         id: Default::default(),
         bounds: source,
         kind: Kind::Magnifier,
@@ -2588,7 +2552,7 @@ fn magnifier_from_source(
             zoom,
             ellipse: values.shape == 1,
             connector: magnifier_connector(values.connector_style),
-            erase_annotations: values.erase,
+            erase_annotations: !values.include_annotations,
             antialias: values.antialias,
             shadow: values.shadow,
         },
@@ -2904,6 +2868,34 @@ fn finish_text_handle(r: &mut Registry, point: (f32, f32)) {
     cursor::refresh(r);
 }
 
+/// Eraser wheel input changes only the next gesture, never the document or capture.
+fn scroll_eraser_size(r: &mut Registry, delta: f32) {
+    if !delta.is_finite()
+        || delta == 0.
+        || r.gesture().is_some()
+        || r.mode != InteractionMode::Tool(6)
+        || r.values(13).shape != 1
+    {
+        return;
+    }
+    let mut values = r.values(13).clone();
+    let size = (values.size + if delta > 0. { 1 } else { -1 }).clamp(1, 100);
+    if size == values.size {
+        return;
+    }
+    values.size = size;
+    r.replace_values(13, values.clone());
+    if let Some(panel) = r
+        .panel
+        .get()
+        .filter(|panel| !panel.get_menu() && panel.get_tool() == 13)
+    {
+        panel.set_values(values);
+    }
+    choice::sync_brush_size(r, size);
+    cursor::refresh(r);
+}
+
 fn brush_size_scrolled(index: usize, delta: f32) {
     let generation = REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
@@ -2911,9 +2903,14 @@ fn brush_size_scrolled(index: usize, delta: f32) {
         if !delta.is_finite()
             || delta == 0.
             || r.gesture().is_some()
-            || active_kind(r) != Some(Kind::MosaicBrush)
+            || (active_kind(r) != Some(Kind::MosaicBrush)
+                && !(r.mode == InteractionMode::Tool(6) && r.values(13).shape == 1))
             || index >= r.canvases.len()
         {
+            return None;
+        }
+        if r.mode == InteractionMode::Tool(6) {
+            scroll_eraser_size(r, delta);
             return None;
         }
         let mut values = r.values(11).clone();
@@ -3001,6 +2998,25 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                         r.gesture = None;
                         return Some((r.generation, false));
                     }
+                }
+                if r.mode == InteractionMode::Tool(6) {
+                    let values = r.values(13).clone();
+                    let views = r
+                        .canvases
+                        .iter()
+                        .map(|c| (c.bounds, c.window.window().scale_factor()))
+                        .collect::<Vec<_>>();
+                    r.begin_document_gesture();
+                    deselect_object(r);
+                    r.gesture = Some(Active::Erasing(eraser::Press::begin(
+                        &mut r.session,
+                        point,
+                        values.shape == 1,
+                        values.size.clamp(1, 100) as f32 * scale,
+                        &views,
+                    )));
+                    cursor::refresh(r);
+                    return Some((r.generation, false));
                 }
                 r.hovered = None;
                 r.finish_style_edit();
@@ -3120,6 +3136,16 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 }
             }
             1 => match r.gesture() {
+                Some(Gesture::Erase) => {
+                    let views = r
+                        .canvases
+                        .iter()
+                        .map(|c| (c.bounds, c.window.window().scale_factor()))
+                        .collect::<Vec<_>>();
+                    if let Some(Active::Erasing(press)) = &mut r.gesture {
+                        press.update(&mut r.session, point, &views);
+                    }
+                }
                 Some(Gesture::PlaceSequence) => update_sequence_placement(r, point),
                 Some(Gesture::SequenceControl { .. }) => {}
                 Some(Gesture::DeleteText | Gesture::ToggleTextArrow { .. }) => {}
@@ -3173,6 +3199,21 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 // Native release can arrive after the gesture retired or from another control.
                 // It cannot finish a snapshot owned by a continuous parameter operation.
                 r.gesture()?;
+                if matches!(r.gesture(), Some(Gesture::Erase)) {
+                    let views = r
+                        .canvases
+                        .iter()
+                        .map(|c| (c.bounds, c.window.window().scale_factor()))
+                        .collect::<Vec<_>>();
+                    if let Some(Active::Erasing(mut press)) = r.gesture.take() {
+                        press.update(&mut r.session, point, &views);
+                    }
+                    r.session.finish_drag();
+                    r.flush_deferred_parameters();
+                    sync_history_controls(r);
+                    cursor::refresh(r);
+                    return Some((r.generation, false));
+                }
                 if matches!(r.gesture(), Some(Gesture::PlaceSequence)) {
                     let placement = Active::take_sequence(&mut r.gesture)?;
                     let target = placement.finish(&mut r.session, point);
@@ -3181,6 +3222,9 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                     r.session.selected = r.session.object_index(target);
                     if let Some(main) = r.main.get() {
                         main.set_can_undo(r.session.can_undo());
+                        if let Some(panel) = r.panel.get() {
+                            panel.set_can_clear(r.session.has_content());
+                        }
                     }
                     cursor::refresh(r);
                     return Some((r.generation, false));
@@ -3215,6 +3259,9 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                     }
                     if let Some(main) = r.main.get() {
                         main.set_can_undo(r.session.can_undo());
+                        if let Some(panel) = r.panel.get() {
+                            panel.set_can_clear(r.session.has_content());
+                        }
                     }
                     cursor::refresh(r);
                     return Some((r.generation, false));
@@ -3343,9 +3390,7 @@ fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
             }
             _ => return None,
         }
-        if let Some(main) = r.main.get() {
-            main.set_can_undo(r.session.can_undo());
-        }
+        sync_history_controls(r);
         refresh_parameter_target(r);
         cursor::refresh(r);
         Some((r.generation, open_geometry_panel))
@@ -3456,6 +3501,7 @@ fn editing_text_object(r: &Registry) -> Option<Object> {
         .and_then(|index| r.session.objects.get(index))
         .cloned()
         .unwrap_or_else(|| Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: edit.bounds,
             kind: Kind::Text,
@@ -4135,16 +4181,25 @@ fn undo() {
             finish_text_edit_registry(r, true);
         }
         r.finish_style_edit();
+        let erased = eraser::has_coverage(&r.session);
         if !r.session.undo() {
             return None;
+        }
+        if erased || eraser::has_coverage(&r.session) {
+            // Restoring alpha coverage must retire the accepted native candidate,
+            // not leave a pre-undo presentation eligible for composition reuse.
+            r.native_presenter
+                .suspend(r.lifecycle.annotation_renderer.as_ref());
+            for layer in &mut r.canvases {
+                layer.gpu_input_cleared = false;
+                layer.signature = None;
+            }
         }
         restore_parameter_projection(r);
         sync_sequence_counter(r);
         adopt_watermark_style(r);
         refresh_hovered(r);
-        if let Some(main) = r.main.get() {
-            main.set_can_undo(r.session.can_undo());
-        }
+        sync_history_controls(r);
         cursor::refresh(r);
         Some(r.generation)
     });
@@ -4167,9 +4222,7 @@ fn delete_selected() {
         r.session.delete_selected();
         refresh_parameter_target(r);
         refresh_hovered(r);
-        if let Some(main) = r.main.get() {
-            main.set_can_undo(r.session.can_undo());
-        }
+        sync_history_controls(r);
         cursor::refresh(r);
         Some(r.generation)
     });
@@ -4409,6 +4462,7 @@ fn open_panel(group: usize, menu: bool) {
                 .map(Into::into)
                 .collect::<Vec<_>>(),
         )));
+        panel.set_can_clear(r.session.has_content());
         panel.set_tool(tool);
         panel.set_menu(menu);
         panel.set_heading(crate::i18n::tr(NAMES[tool as usize]).into());
@@ -4436,7 +4490,19 @@ fn open_panel(group: usize, menu: bool) {
         });
         r.parameter_values.bind(r.parameter_object(tool as usize));
         let panel = r.panel.get().unwrap();
-        if !menu && group <= 5 {
+        if !menu && group <= 6 {
+            panel.on_brush_size_scrolled(move |delta| {
+                REGISTRY.with(|slot| {
+                    let mut slot = slot.borrow_mut();
+                    if let Some(r) = slot.as_mut().filter(|r| {
+                        r.generation == generation
+                            && r.panel.revision() == panel_revision
+                            && r.parameter_entry_active(13)
+                    }) {
+                        scroll_eraser_size(r, delta);
+                    }
+                });
+            });
             let input = r.panel.input();
             let observed = parameters::Notifications::new(panel.get_values());
             panel.on_values_changed(move |values| {
@@ -4542,12 +4608,39 @@ fn apply_panel_input(generation: u64, revision: u64, group: usize, event: panel:
                 escape_from(origin);
             }
         }
+        panel::Input::ClearAll => {
+            if panel_current(generation, revision) {
+                REGISTRY.with(|slot| {
+                    let mut slot = slot.borrow_mut();
+                    let Some(r) = slot.as_mut() else { return };
+                    if r.mode != InteractionMode::Tool(6) {
+                        return;
+                    }
+                    cancel_active_gesture(r);
+                    r.finish_style_edit();
+                    if r.session.clear_all() {
+                        deselect_object(r);
+                        r.hovered = None;
+                        sync_sequence_counter(r);
+                        r.queue_render();
+                    }
+                    if let Some(panel) = r.panel.get() {
+                        panel.set_can_clear(r.session.has_content());
+                    }
+                    if let Some(main) = r.main.get() {
+                        main.set_can_undo(r.session.can_undo());
+                    }
+                });
+            }
+        }
         panel::Input::Undo => {
             let current = REGISTRY.with(|slot| {
                 slot.borrow().as_ref().is_some_and(|r| {
                     r.generation == generation
                         && r.panel.revision() == revision
-                        && r.panel.get().is_some_and(|p| p.get_tool() == 11)
+                        && r.panel
+                            .get()
+                            .is_some_and(|p| matches!(p.get_tool(), 11 | 13))
                 })
             });
             if current {
@@ -4795,9 +4888,7 @@ fn apply_watermark(generation: u64, revision: u64, template: String) {
             (!content.trim().is_empty()).then(|| watermark_from_values(r, template, content));
         r.session.set_watermark(watermark);
         adopt_watermark_style(r);
-        if let Some(main) = r.main.get() {
-            main.set_can_undo(r.session.can_undo());
-        }
+        sync_history_controls(r);
         Some(r.generation)
     });
     if let Some(generation) = changed {
@@ -4956,7 +5047,7 @@ fn position_panel(r: &Registry) -> bool {
     } else if panel.get_tool() == 4 {
         810f32.min(available)
     } else if panel.get_tool() == 7 {
-        1120f32.min(available)
+        (1120. + panel.get_magnifier_extra_width()).min(available)
     } else if panel.get_tool() == 8 {
         780f32.min(available)
     } else if panel.get_tool() == 9 {
@@ -4972,6 +5063,8 @@ fn position_panel(r: &Registry) -> bool {
         1030f32.min(available)
     } else if panel.get_tool() == 5 {
         856f32.min(available)
+    } else if panel.get_tool() == 13 {
+        panel.get_eraser_content_width().min(available)
     } else if panel.get_tool() == 11 {
         620f32.min(available)
     } else if panel.get_tool() <= 2 || panel.get_tool() <= 6 {
@@ -4990,11 +5083,22 @@ fn position_panel(r: &Registry) -> bool {
             68.
         }
     } else if panel.get_tool() <= 7 {
-        if width < 354. {
+        let extra = if panel.get_tool() == 7 {
+            panel.get_magnifier_extra_width()
+        } else {
+            0.
+        };
+        if width < 354. + extra {
             if panel.get_tool() == 7 { 252. } else { 180. }
-        } else if width < 644. {
+        } else if width < 644. + extra {
             if panel.get_tool() == 7 { 138. } else { 148. }
-        } else if width < if panel.get_tool() == 5 { 856. } else { 890. } {
+        } else if width
+            < if panel.get_tool() == 5 {
+                856.
+            } else {
+                890. + extra
+            }
+        {
             if panel.get_tool() == 7 { 138. } else { 98. }
         } else {
             58.
@@ -5016,7 +5120,7 @@ fn position_panel(r: &Registry) -> bool {
             62.
         }
     } else {
-        if panel.get_tool() == 11 {
+        if matches!(panel.get_tool(), 11 | 13) {
             58.
         } else {
             80. + ((fields(panel.get_tool()).len() as f32 / columns as f32).ceil()) * 62.
@@ -5288,6 +5392,15 @@ pub(crate) fn apply_theme() {
             }
         }
     });
+}
+
+fn sync_history_controls(r: &Registry) {
+    if let Some(main) = r.main.get() {
+        main.set_can_undo(r.session.can_undo());
+    }
+    if let Some(panel) = r.panel.get() {
+        panel.set_can_clear(r.session.has_content());
+    }
 }
 
 #[cfg(test)]
@@ -5705,6 +5818,7 @@ mod tests {
                     r.selected[group] = tool;
                     r.set_mode(InteractionMode::Tool(group));
                     let object = Object {
+                        erased: Vec::new(),
                         id: Default::default(),
                         kind,
                         bounds: Bounds::from_corners((-450., -250.), (-400., -200.)),
@@ -5819,6 +5933,7 @@ mod tests {
                         Kind::HighlightRectangle
                     };
                     r.session.add(Object {
+                        erased: Vec::new(),
                         id: Default::default(),
                         kind,
                         bounds: Bounds::from_corners((-400., -250.), (-350., -200.)),
@@ -6250,6 +6365,7 @@ mod tests {
             r.panel.open(AnnotationPanel::new().unwrap());
             r.watermark.open(AnnotationWatermarkInput::new().unwrap());
             r.session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::MosaicArea,
                 bounds: Bounds::from_corners((-80., -80.), (80., 80.)),
@@ -6432,6 +6548,7 @@ mod tests {
                         },
                     ));
                     assert!(r.session.add(Object {
+                        erased: Vec::new(),
                         id: Default::default(),
                         kind: Kind::Rectangle,
                         bounds: Bounds::from_corners((-40., -30.), (40., 30.)),
@@ -6539,6 +6656,7 @@ mod tests {
             let mut session = Session::new();
             assert!(
                 session.add(Object {
+                    erased: Vec::new(),
                     id: Default::default(),
                     kind: Kind::Pencil,
                     bounds: Bounds::from_corners((-40., -30.), (40., 30.)),
@@ -6636,6 +6754,7 @@ mod tests {
         for points in [1_000, 20_000, 100_000] {
             let mut session = Session::new();
             session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::MosaicBrush,
                 bounds: Bounds::from_corners((-400., -20.), (400., 20.)),
@@ -6757,6 +6876,7 @@ mod tests {
                             },
                         ));
                         assert!(r.session.add(Object {
+                            erased: Vec::new(),
                             id: Default::default(),
                             kind: Kind::Rectangle,
                             bounds: Bounds::from_corners((-40., -30.), (40., 30.)),
@@ -6884,6 +7004,7 @@ mod tests {
                         },
                     ));
                     assert!(r.session.add(Object {
+                        erased: Vec::new(),
                         id: Default::default(),
                         kind: Kind::Rectangle,
                         bounds: Bounds::from_corners((-40., -30.), (40., 30.)),
@@ -7226,6 +7347,7 @@ mod tests {
                     ));
                     if selected {
                         let mut object = Object {
+                            erased: Vec::new(),
                             id: Default::default(),
                             kind: Kind::MosaicBrush,
                             bounds: Bounds::from_corners((-200., -100.), (-180., -80.)),
@@ -7275,7 +7397,96 @@ mod tests {
                 });
             }
         }
+        REGISTRY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            r.close_panel();
+            r.session = Session::new();
+            r.parameter_values = parameters::State::new();
+            r.mode = InteractionMode::Tool(6);
+            r.sync_edit_scope();
+            r.edit_values(13).shape = 1;
+        });
+        open_panel(6, false);
+        let (panel, generation, revision) = REGISTRY.with(|slot| {
+            let slot = slot.borrow();
+            let r = slot.as_ref().unwrap();
+            (
+                r.panel.get().unwrap().clone_strong(),
+                r.generation,
+                r.panel.revision(),
+            )
+        });
+        panel.window().set_size(slint::LogicalSize::new(329., 58.));
+        panel.show().unwrap();
+        let wheel = |x, delta| {
+            panel.window().dispatch_event(WindowEvent::PointerScrolled {
+                position: slint::LogicalPosition::new(x, 29.),
+                delta_x: 0.,
+                delta_y: delta,
+            });
+        };
+        wheel(120., 120.); // Icon hit area.
+        assert_eq!(panel.get_values().size, 13);
+        choice::open(
+            generation,
+            revision,
+            crate::AnnotationChoiceRequest {
+                field: -9,
+                ..Default::default()
+            },
+        );
+        wheel(162., 120.); // Numeric chip, with the popup open.
+        assert_eq!(panel.get_values().size, 14);
+        REGISTRY.with(|slot| {
+            let slot = slot.borrow();
+            let r = slot.as_ref().unwrap();
+            assert_eq!(r.values(13).size, 14);
+            assert_eq!(
+                r.menus
+                    .current
+                    .as_ref()
+                    .unwrap()
+                    .window
+                    .get_style_values()
+                    .size,
+                14
+            );
+            assert!(!r.session.can_undo());
+        });
+        for _ in 0..110 {
+            wheel(120., 120.);
+        }
+        assert_eq!(panel.get_values().size, 100);
+        for _ in 0..110 {
+            wheel(162., -120.);
+        }
+        assert_eq!(panel.get_values().size, 1);
+        REGISTRY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            let press = eraser::Press::begin(&mut r.session, (0., 0.), true, 1., &[]);
+            r.gesture = Some(Active::Erasing(press));
+        });
+        wheel(120., 120.);
+        assert_eq!(
+            panel.get_values().size,
+            1,
+            "active capture freezes diameter"
+        );
+        REGISTRY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            r.gesture = None;
+            r.session.cancel_drag();
+            r.edit_values(13).shape = 0;
+            panel.set_values(r.values(13).clone());
+        });
+        wheel(162., 120.);
+        assert_eq!(panel.get_values().size, 1, "rectangle mode disables wheel");
+        REGISTRY.with(|slot| assert!(!slot.borrow().as_ref().unwrap().session.can_undo()));
         shutdown();
+        panel.invoke_brush_size_scrolled(120.); // A retired panel must be harmless.
     }
 
     #[test]
@@ -7309,6 +7520,7 @@ mod tests {
             r.main.open(AnnotationToolbar::new().unwrap());
             r.annotation_ready = true;
             assert!(r.session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Rectangle,
                 bounds: Bounds::from_corners((-40., -30.), (40., 30.)),
@@ -7389,6 +7601,7 @@ mod tests {
             bottom: 100,
         };
         let object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Rectangle,
             bounds: Bounds::from_corners((-30., -30.), (30., 30.)),
@@ -8015,6 +8228,7 @@ mod tests {
             let r = slot.as_mut().unwrap();
             r.main.open(AnnotationToolbar::new().unwrap());
             assert!(r.session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Rectangle,
                 bounds: Bounds::from_corners((-100., 50.), (100., 150.)),
@@ -8726,6 +8940,7 @@ mod tests {
                 },
             ));
             r.session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Rectangle,
                 bounds: Bounds::from_corners((-20., -20.), (80., 20.)),
@@ -8818,6 +9033,7 @@ mod tests {
             r.mosaic.stage(
                 &mut r.session,
                 Object {
+                    erased: Vec::new(),
                     id: Default::default(),
                     kind: Kind::MosaicArea,
                     bounds: Bounds::from_corners((-16., -16.), (16., 16.)),
@@ -8832,6 +9048,7 @@ mod tests {
                 },
             );
             r.session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Magnifier,
                 bounds: Bounds::from_corners((-16., -16.), (16., 16.)),
@@ -8913,6 +9130,24 @@ mod tests {
             let r = slot.as_mut().unwrap();
             assert!(r.native_presenter.active && r.canvases[0].gpu_input_cleared);
             assert!(r.mosaic.pending.is_empty());
+            r.session.erase(
+                lexift_core::domain::annotation_erase::EraseRegion::Rectangle(
+                    Bounds::from_corners((10., 10.), (20., 20.)),
+                ),
+                &[lexift_core::domain::annotation_erase::EraseTarget::Object(
+                    r.session.objects[0].id,
+                )],
+            );
+        });
+        let clears = port.cleared.load(Ordering::Relaxed);
+        undo();
+        assert_eq!(port.cleared.load(Ordering::Relaxed), clears + 1);
+        REGISTRY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            assert!(!eraser::has_coverage(&r.session));
+            assert!(!r.native_presenter.active);
+            assert!(r.canvases.iter().all(|layer| !layer.gpu_input_cleared));
             r.close();
             slot.take();
         });
@@ -9000,6 +9235,7 @@ mod tests {
                 render_initial_canvas(r, index);
             }
             r.session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::MosaicArea,
                 bounds: Bounds::from_corners((8., 8.), (24., 24.)),
@@ -9337,6 +9573,7 @@ mod tests {
                 });
                 // A destroyed panel's queued callback cannot undo a new session.
                 let replacement = Object {
+                    erased: Vec::new(),
                     id: Default::default(),
                     kind: Kind::Rectangle,
                     bounds: Bounds::from_corners((0., 0.), (50., 50.)),
@@ -9411,6 +9648,7 @@ mod tests {
             r.main.open(AnnotationToolbar::new().unwrap());
             assert!(r.set_mode(InteractionMode::Tool(5)));
             assert!(r.session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::MosaicArea,
                 bounds: Bounds::from_corners((-100., 20.), (100., 100.)),
@@ -10504,6 +10742,7 @@ mod tests {
                     r.selected[0] = 2;
                     r.sync_edit_scope();
                     assert!(r.session.add(Object {
+                        erased: Vec::new(),
                         id: ObjectId::DRAFT,
                         kind: Kind::Rectangle,
                         bounds: Bounds::from_corners((-120., 30.), (-40., 90.)),
@@ -10527,6 +10766,7 @@ mod tests {
                     r.mosaic.stage(
                         &mut r.session,
                         Object {
+                            erased: Vec::new(),
                             id: ObjectId::DRAFT,
                             kind: Kind::MosaicArea,
                             extra: Extra::Mosaic(
@@ -10635,6 +10875,7 @@ mod tests {
                     r.sync_edit_scope();
                     let text = text_from_values(r, "文字".into());
                     assert!(r.session.add(Object {
+                        erased: Vec::new(),
                         id: ObjectId::DRAFT,
                         kind: Kind::Text,
                         bounds: crate::annotation_text::text_bounds((-120., 60.), &text, dpi),
@@ -10942,6 +11183,7 @@ mod tests {
                     let mut slot = slot.borrow_mut();
                     let r = slot.as_mut().unwrap();
                     assert!(r.session.add(Object {
+                        erased: Vec::new(),
                         id: ObjectId::DRAFT,
                         kind: Kind::Rectangle,
                         bounds: Bounds::from_corners((10., 20.), (90., 80.)),
@@ -11261,6 +11503,7 @@ mod tests {
                         } else {
                             let text = text_from_values(r, format!("Text {i}"));
                             Object {
+                                erased: Vec::new(),
                                 id: Default::default(),
                                 kind: Kind::Text,
                                 bounds: crate::annotation_text::text_bounds(
@@ -11431,6 +11674,7 @@ mod tests {
         let endpoint = (50., 0.);
         for curved in [false, true] {
             let mut polyline = Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 bounds: Bounds::from_corners((-80., -80.), endpoint),
                 kind: Kind::Polyline,
@@ -11491,6 +11735,7 @@ mod tests {
             let mut session = Session::new();
             let bounds = Bounds::from_corners((20., 20.), (80., 70.));
             assert!(session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind,
                 bounds,
@@ -11514,6 +11759,7 @@ mod tests {
     #[test]
     fn magnifier_frame_draft_never_creates_a_native_view() {
         let object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((120., 80.), (220., 160.)),
             kind: Kind::Magnifier,
@@ -11533,6 +11779,7 @@ mod tests {
         assert!(session.add(object.clone()));
         let output = Bounds::from_corners((260., 80.), (410., 200.));
         let draft = Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: output,
             kind: Kind::Rectangle,
@@ -11564,6 +11811,50 @@ mod tests {
         };
         let source = Bounds::from_corners((-180., -120.), (-30., -30.));
         let object = magnifier_from_source(source, Style::default(), &values).unwrap();
+        assert!(
+            values.include_annotations,
+            "new sessions include annotations by default"
+        );
+        assert!(matches!(
+            object.extra,
+            Extra::Magnifier {
+                erase_annotations: false,
+                ..
+            }
+        ));
+        let mut state = parameters::State::new();
+        let mut session = Session::new();
+        session.add(object.clone());
+        let id = session.objects[0].id;
+        for include in [false, true] {
+            let mut edited = values.clone();
+            edited.include_annotations = include;
+            state.replace(7, Some(id), edited.clone());
+            state.deselect();
+            let next =
+                magnifier_from_source(source, Style::default(), state.values(7, None)).unwrap();
+            assert!(
+                matches!(next.extra, Extra::Magnifier { erase_annotations, .. } if erase_annotations == !include)
+            );
+            // Re-editing an existing object must project its own value, not the default.
+            state.project(&next, 0, 1, 0.5);
+            assert_eq!(state.values(7, Some(next.id)).include_annotations, include);
+            let before = AnnotationValues {
+                include_annotations: !include,
+                ..values.clone()
+            };
+            let mut applied = before.clone();
+            parameters::Patch::between(before, edited)
+                .unwrap()
+                .apply(&mut applied);
+            assert_eq!(applied.include_annotations, include);
+            assert_eq!(
+                session.objects[0].extra, object.extra,
+                "default changes must not mutate existing objects"
+            );
+        }
+        assert!(!parameters::defaults(2).erase);
+        assert!(parameters::defaults(9).erase);
         assert_eq!(object.bounds, source);
         assert_eq!(object.bounds.handles()[7], (-30., -30.));
         assert!(

@@ -51,6 +51,7 @@ mod tests {
                 linked_arrow_control: None,
             };
             let object = Object {
+                erased: Vec::new(),
                 id: ObjectId::DRAFT,
                 kind: Kind::Text,
                 bounds: annotation_text::text_bounds((-500., -100.), &text, 1.25),
@@ -170,6 +171,7 @@ mod tests {
                 linked_arrow_control: None,
             };
             let object = Object {
+                erased: Vec::new(),
                 id: ObjectId::DRAFT,
                 kind: Kind::Text,
                 bounds: annotation_text::text_bounds((-100., -60.), &text, scale),
@@ -333,6 +335,7 @@ mod tests {
                 linked_arrow_control: None,
             };
             let mut object = Object {
+                erased: Vec::new(),
                 id: ObjectId::DRAFT,
                 kind: Kind::Text,
                 bounds: annotation_text::text_bounds((-100., -60.), &text, scale),

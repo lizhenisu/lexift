@@ -188,6 +188,7 @@ impl ObjectId {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Object {
+    pub erased: Vec<super::annotation_erase::ErasedCoverage>,
     pub id: ObjectId,
     pub bounds: Bounds,
     pub kind: Kind,
@@ -395,6 +396,7 @@ impl Object {
             points.push(control);
         }
         Some(Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Arrow,
             bounds: Bounds::from_corners(anchor, tip),
@@ -618,6 +620,9 @@ impl Object {
         if !self.is_editable() {
             return;
         }
+        for cut in &mut self.erased {
+            cut.move_by(dx, dy);
+        }
         self.bounds = self.bounds.moved(dx, dy);
         if let Extra::Sequence(s) = &mut self.extra {
             s.caption_bounds = s.caption_bounds.moved(dx, dy);
@@ -637,7 +642,17 @@ impl Object {
             if inside(self.bounds, origin, 0.) {
                 self.move_by(dx, dy);
             } else if inside(*output, origin, 0.) {
+                use super::annotation_erase::ErasePart;
                 *output = output.moved(dx, dy);
+                if dx != 0. || dy != 0. {
+                    self.erased
+                        .retain(|cut| cut.part != ErasePart::MagnifierConnector);
+                }
+                for cut in &mut self.erased {
+                    if cut.applies_to(ErasePart::MagnifierOutput) {
+                        cut.move_by(dx, dy);
+                    }
+                }
             } else {
                 self.move_by(dx, dy);
             }
@@ -650,6 +665,9 @@ impl Object {
             return;
         }
         let b = self.bounds;
+        for cut in &mut self.erased {
+            cut.resize(b, target);
+        }
         if self.kind == Kind::MosaicBrush
             && let Extra::Mosaic(mosaic) = &mut self.extra
         {
@@ -710,7 +728,11 @@ impl Object {
             match handle {
                 0 => {
                     let initial = (self.bounds.top - center.1).atan2(self.bounds.left - center.0);
+                    let previous = text.rotation;
                     text.rotation = (point.1 - center.1).atan2(point.0 - center.0) - initial;
+                    for cut in &mut self.erased {
+                        cut.rotate(center, text.rotation - previous);
+                    }
                 }
                 4 => text.linked_arrow = Some(point),
                 5 => {
@@ -760,6 +782,11 @@ impl Object {
                         .all(f32::is_finite)
                     {
                         return;
+                    }
+                    for cut in &mut self.erased {
+                        cut.rotate(self.bounds.center(), -text.rotation);
+                        cut.resize(self.bounds, next);
+                        cut.rotate(next.center(), text.rotation);
                     }
                     self.bounds = next;
                     text.font_size *= factor;
@@ -906,6 +933,8 @@ struct Snapshot {
     selected: Option<usize>,
     opacity: f32,
     watermark: Option<Watermark>,
+    watermark_erased: Vec<super::annotation_erase::ErasedCoverage>,
+    spotlight_erased: Vec<super::annotation_erase::ErasedCoverage>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -922,6 +951,8 @@ pub struct Session {
     pub selected: Option<usize>,
     pub spotlight_opacity: f32,
     pub watermark: Option<Watermark>,
+    pub watermark_erased: Vec<super::annotation_erase::ErasedCoverage>,
+    pub spotlight_erased: Vec<super::annotation_erase::ErasedCoverage>,
     /// Current monitor layout for drawing one watermark consistently across magnified samples.
     pub displays: Vec<Rect>,
     undo: Vec<Snapshot>,
@@ -945,6 +976,8 @@ impl Session {
             selected: self.editable_selected(),
             opacity: self.spotlight_opacity,
             watermark: self.watermark.clone(),
+            watermark_erased: self.watermark_erased.clone(),
+            spotlight_erased: self.spotlight_erased.clone(),
         }
     }
     /// Change interaction permissions without recording a document edit.
@@ -969,14 +1002,16 @@ impl Session {
                 self.undo.push(self.snapshot());
             }
             self.spotlight_opacity = opacity;
+            self.spotlight_erased.clear();
         }
     }
     pub fn set_watermark(&mut self, watermark: Option<Watermark>) {
-        if self.watermark != watermark {
+        if self.watermark != watermark || !self.watermark_erased.is_empty() {
             if self.drag_before.is_none() {
                 self.undo.push(self.snapshot());
             }
             self.watermark = watermark;
+            self.watermark_erased.clear();
         }
     }
     pub fn can_undo(&self) -> bool {
@@ -1014,6 +1049,10 @@ impl Session {
         if let Extra::Mosaic(mosaic) = &mut object.extra {
             mosaic.id = object.id.value();
         }
+        if object.kind.is_spotlight() {
+            self.spotlight_erased.clear();
+        }
+        object.erased.clear();
         self.objects.push(object);
         self.selected = self
             .can_edit(self.objects.last().unwrap())
@@ -1032,6 +1071,12 @@ impl Session {
             self.undo.push(before);
         }
     }
+    /// Restore the baseline of a rectangular erase preview without ending its transaction.
+    pub fn reset_drag_preview(&mut self) {
+        if let Some(before) = self.drag_before.clone() {
+            self.restore_snapshot(before);
+        }
+    }
     pub fn cancel_drag(&mut self) {
         if let Some(before) = self.drag_before.take() {
             self.restore_snapshot(before);
@@ -1045,8 +1090,24 @@ impl Session {
         self.selected = self.editable_selected();
         self.spotlight_opacity = before.opacity;
         self.watermark = before.watermark;
+        self.watermark_erased = before.watermark_erased;
+        self.spotlight_erased = before.spotlight_erased;
+    }
+    /// Replace geometry already normalized against the gesture's press snapshot.
+    /// Its coverage is authoritative, independent of the preceding preview frame.
+    pub fn replace_selected_geometry(&mut self, object: Object) {
+        let Some(index) = self.editable_selected() else {
+            return;
+        };
+        if self.objects[index].id != object.id || self.objects[index].kind != object.kind {
+            return;
+        }
+        self.update_selected_with_coverage(|current| *current = object, true);
     }
     pub fn update_selected(&mut self, change: impl FnOnce(&mut Object)) {
+        self.update_selected_with_coverage(change, false);
+    }
+    fn update_selected_with_coverage(&mut self, change: impl FnOnce(&mut Object), preserve: bool) {
         let Some(index) = self.editable_selected() else {
             return;
         };
@@ -1054,7 +1115,20 @@ impl Session {
         // document on every slider tick or pointer update inside that transaction.
         let before = self.drag_before.is_none().then(|| self.snapshot());
         let id = self.objects[index].id;
+        let old = ((!preserve && !self.objects[index].erased.is_empty())
+            || self.objects[index].kind.is_spotlight())
+        .then(|| self.objects[index].clone());
         change(&mut self.objects[index]);
+        if let Some(old) = old
+            && self.objects[index] != old
+        {
+            if self.objects[index].kind.is_spotlight() {
+                self.spotlight_erased.clear();
+            }
+            if !preserve && self.objects[index].erased == old.erased {
+                self.objects[index].erased.clear();
+            }
+        }
         self.objects[index].id = id;
         if let Extra::Mosaic(mosaic) = &mut self.objects[index].extra {
             mosaic.id = id.value();
@@ -1071,6 +1145,9 @@ impl Session {
                 self.undo.push(self.snapshot());
             }
             self.selected = None;
+            if self.objects[index].kind.is_spotlight() {
+                self.spotlight_erased.clear();
+            }
             self.objects.remove(index);
         }
     }
@@ -1082,6 +1159,103 @@ impl Session {
         self.restore_snapshot(before);
         true
     }
+    /// Undoable document clear, distinct from session teardown.
+    pub fn clear_all(&mut self) -> bool {
+        if !self.has_content() {
+            return false;
+        }
+        if self.drag_before.is_none() {
+            self.undo.push(self.snapshot());
+        }
+        self.objects.clear();
+        self.watermark = None;
+        self.selected = None;
+        self.next_sequence = 1;
+        self.watermark_erased.clear();
+        self.spotlight_erased.clear();
+        true
+    }
+    pub fn has_content(&self) -> bool {
+        !self.objects.is_empty() || self.watermark.is_some()
+    }
+    /// Apply only targets with visible coverage, as resolved by the shared raster adapter.
+    pub fn erase(
+        &mut self,
+        region: super::annotation_erase::EraseRegion,
+        targets: &[super::annotation_erase::EraseTarget],
+    ) {
+        use super::annotation_erase::{ErasePart, EraseTarget, ErasedCoverage};
+        let cut = ErasedCoverage::new(region);
+        let targets: Vec<_> = targets
+            .iter()
+            .copied()
+            .filter(|target| {
+                let cuts = match *target {
+                    EraseTarget::Object(id) => {
+                        let Some(i) = self.object_index(id) else {
+                            return false;
+                        };
+                        &self.objects[i].erased
+                    }
+                    EraseTarget::Watermark => &self.watermark_erased,
+                    EraseTarget::Spotlight => &self.spotlight_erased,
+                };
+                if let EraseTarget::Object(id) = *target
+                    && self.objects[self.object_index(id).unwrap()].kind == Kind::Magnifier
+                {
+                    return [
+                        ErasePart::MagnifierOutput,
+                        ErasePart::MagnifierSource,
+                        ErasePart::MagnifierConnector,
+                    ]
+                    .into_iter()
+                    .any(|part| {
+                        let mut candidate = cut.clone();
+                        candidate.part = part;
+                        !cuts.contains(&candidate)
+                    });
+                }
+                !cuts.contains(&cut)
+            })
+            .collect();
+        if targets.is_empty() {
+            return;
+        }
+        if self.drag_before.is_none() {
+            self.undo.push(self.snapshot());
+        }
+        for target in targets {
+            if let EraseTarget::Object(id) = target {
+                let i = self.object_index(id).unwrap();
+                if self.objects[i].kind == Kind::Magnifier {
+                    for part in [
+                        ErasePart::MagnifierOutput,
+                        ErasePart::MagnifierSource,
+                        ErasePart::MagnifierConnector,
+                    ] {
+                        let mut component = cut.clone();
+                        component.part = part;
+                        if !self.objects[i].erased.contains(&component) {
+                            self.objects[i].erased.push(component);
+                        }
+                    }
+                    continue;
+                }
+            }
+            let cuts = match target {
+                EraseTarget::Object(id) => {
+                    let i = self.object_index(id).unwrap();
+                    &mut self.objects[i].erased
+                }
+                EraseTarget::Watermark => &mut self.watermark_erased,
+                EraseTarget::Spotlight => &mut self.spotlight_erased,
+            };
+            if !cuts.contains(&cut) {
+                cuts.push(cut.clone());
+            }
+        }
+    }
+
     pub fn clear(&mut self) {
         let next_object_id = self.next_object_id;
         let edit_scope = self.edit_scope;
@@ -1115,6 +1289,8 @@ impl Session {
                 && a.next_sequence == b.next_sequence
                 && a.opacity == b.opacity
                 && a.watermark == b.watermark
+                && a.watermark_erased == b.watermark_erased
+                && a.spotlight_erased == b.spotlight_erased
         }
         if ids.is_empty() {
             return;
@@ -1181,7 +1357,10 @@ impl Session {
             .enumerate()
             .rev()
             .find_map(|(index, object)| {
-                if !self.can_edit(object) {
+                if !self.can_edit(object)
+                    || (object.kind != Kind::Magnifier
+                        && object.erased.iter().any(|cut| cut.contains(point)))
+                {
                     return None;
                 }
                 if let Extra::Sequence(s) = &object.extra {
@@ -1217,8 +1396,17 @@ impl Session {
                     return object.hit_path(point, scale).then_some(Hit::Object(index));
                 }
                 if let Extra::Magnifier { output, .. } = object.extra {
-                    return (inside(output, point, 6. * scale)
-                        || inside(object.bounds, point, 6. * scale))
+                    use super::annotation_erase::ErasePart;
+                    let visible = |part| {
+                        !object
+                            .erased
+                            .iter()
+                            .any(|cut| cut.applies_to(part) && cut.contains(point))
+                    };
+                    return ((inside(output, point, 6. * scale)
+                        && visible(ErasePart::MagnifierOutput))
+                        || (inside(object.bounds, point, 6. * scale)
+                            && visible(ErasePart::MagnifierSource)))
                     .then_some(Hit::Object(index));
                 }
                 let b = object.bounds;
@@ -1410,6 +1598,7 @@ mod tests {
 
     fn text_object() -> Object {
         Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((-100., 20.), (20., 70.)),
             kind: Kind::Text,
@@ -1590,6 +1779,7 @@ mod tests {
     }
     fn brush(kind: Kind, points: Vec<(f32, f32)>) -> Object {
         let mut o = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind,
             points,
@@ -1673,6 +1863,7 @@ mod tests {
         s.cancel_drag();
         assert_eq!(s.objects[0], line);
         let mut rect = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::HighlightRectangle,
             points: vec![],
@@ -1690,6 +1881,7 @@ mod tests {
     fn drawing_selection_and_undo() {
         let mut s = Session::new();
         let obj = Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((120., 80.), (-30., -20.)),
             kind: Kind::Rectangle,
@@ -1715,6 +1907,7 @@ mod tests {
     fn continuous_style_adjustment_is_one_undo_step() {
         let mut s = Session::new();
         s.add(Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((0., 0.), (100., 100.)),
             kind: Kind::SpotlightRectangle,
@@ -1738,6 +1931,7 @@ mod tests {
     fn curved_arrow_uses_its_visible_midpoint_for_hit_and_edit() {
         let mut session = Session::new();
         let mut arrow = Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((0., 0.), (100., 0.)),
             kind: Kind::Arrow,
@@ -1768,6 +1962,7 @@ mod tests {
     #[test]
     fn straight_arrow_midpoint_bends_and_snaps_back_to_straight() {
         let mut arrow = Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((-100., -50.), (0., -50.)),
             kind: Kind::Arrow,
@@ -1793,6 +1988,7 @@ mod tests {
     #[test]
     fn smooth_filled_polyline_hits_interior_and_keeps_editable_nodes() {
         let mut shape = Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((0., 0.), (0., 0.)),
             kind: Kind::Polyline,
@@ -1817,11 +2013,52 @@ mod tests {
     }
 
     #[test]
+    fn magnifier_repeated_erasure_restores_missing_component_coverage_only_once() {
+        use super::super::annotation_erase::{ErasePart, EraseRegion, EraseTarget};
+        let mut session = Session::new();
+        session.add(Object {
+            erased: Vec::new(),
+            id: Default::default(),
+            kind: Kind::Magnifier,
+            bounds: Bounds::from_corners((-100., -40.), (-60., 0.)),
+            points: vec![],
+            style: Style::default(),
+            extra: Extra::Magnifier {
+                output: Bounds::from_corners((20., -40.), (100., 40.)),
+                zoom: 2.,
+                ellipse: false,
+                connector: MagnifierConnector::Plain,
+                erase_annotations: true,
+                antialias: true,
+                shadow: true,
+            },
+        });
+        let target = EraseTarget::Object(session.objects[0].id);
+        let region = EraseRegion::Rectangle(Bounds::from_corners((20., -10.), (40., 10.)));
+        session.erase(region.clone(), &[target]);
+        assert_eq!(session.objects[0].erased.len(), 3);
+        session.objects[0]
+            .erased
+            .retain(|c| c.part != ErasePart::MagnifierConnector);
+        let before = session.objects[0].clone();
+        session.erase(region.clone(), &[target]);
+        assert_eq!(session.objects[0].erased.len(), 3);
+        session.erase(region, &[target]);
+        assert_eq!(session.objects[0].erased.len(), 3);
+        assert!(session.undo());
+        assert_eq!(
+            session.objects[0], before,
+            "duplicate coverage must not create history"
+        );
+    }
+
+    #[test]
     fn magnifier_source_and_output_edit_independently_with_undo() {
         let source = Bounds::from_corners((-200., 50.), (-100., 100.));
         let output = Bounds::from_corners((0., 50.), (150., 125.));
         let mut session = Session::new();
         session.add(Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: source,
             kind: Kind::Magnifier,
@@ -1872,6 +2109,7 @@ mod tests {
         let source = Bounds::from_corners((0., 0.), (100., 60.));
         let output = Bounds::from_corners((200., 10.), (350., 100.));
         let object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: source,
             kind: Kind::Magnifier,
@@ -1931,6 +2169,7 @@ mod tests {
         assert_eq!(magnifier_output_for_source(source, 1.), source);
         assert_eq!(magnifier_output_for_source(source, 8.).width(), 1200.);
         let mut object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: source,
             kind: Kind::Magnifier,
@@ -1958,6 +2197,7 @@ mod tests {
         let source = Bounds::from_corners((-180., -120.), (-80., -60.));
         let output = Bounds::from_corners((200., 100.), (350., 190.));
         let object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: source,
             kind: Kind::Magnifier,
@@ -1996,5 +2236,93 @@ mod tests {
         let unchanged = session.objects[0].clone();
         session.update_selected(|selected| selected.set_magnifier_zoom_centered(1.));
         assert_eq!(session.objects[0], unchanged);
+    }
+    #[test]
+    fn erasing_locked_objects_is_one_cancellable_operation_and_new_objects_do_not_inherit_it() {
+        use super::super::annotation_erase::{EraseRegion, EraseTarget};
+        let mut s = Session::new();
+        let mut object = text_object();
+        object.kind = Kind::Pencil;
+        object.extra = Extra::None;
+        assert!(s.add(object));
+        let id = s.objects[0].id;
+        s.set_edit_scope(EditScope::None);
+        let region = EraseRegion::Rectangle(Bounds::from_corners((-90., 30.), (-50., 50.)));
+        s.begin_drag();
+        s.erase(region.clone(), &[EraseTarget::Object(id)]);
+        s.cancel_drag();
+        assert!(s.objects[0].erased.is_empty());
+        s.begin_drag();
+        s.erase(region.clone(), &[EraseTarget::Object(id)]);
+        s.erase(region, &[EraseTarget::Object(id)]);
+        s.finish_drag();
+        assert_eq!(s.objects[0].erased.len(), 1);
+        assert!(!s.can_edit(&s.objects[0]));
+        let clone = s.objects[0].clone();
+        assert!(s.add(clone));
+        assert!(s.objects[1].erased.is_empty());
+        s.undo();
+        s.undo();
+        assert_eq!(s.objects.len(), 1);
+        assert!(s.objects[0].erased.is_empty());
+        s.undo();
+        assert!(!s.has_content());
+    }
+    #[test]
+    fn erased_body_hits_and_affine_holes_follow_object_and_parameter_restore_is_undoable() {
+        use super::super::annotation_erase::{EraseRegion, EraseTarget};
+        let mut s = Session::new();
+        s.add(text_object());
+        let id = s.objects[0].id;
+        let region = EraseRegion::Rectangle(Bounds::from_corners((-80., 30.), (-40., 60.)));
+        s.erase(region, &[EraseTarget::Object(id)]);
+        s.selected = None;
+        assert_eq!(s.hit((-60., 45.), 1.), None);
+        assert_eq!(s.hit((-10., 45.), 1.), Some(Hit::Object(0)));
+        s.selected = Some(0);
+        s.update_selected(|o| o.move_by(20., 40.));
+        assert!(s.objects[0].erased[0].contains((-40., 85.)));
+        let bounds = s.objects[0].bounds;
+        s.update_selected(|o| {
+            o.resize_to(Bounds {
+                right: bounds.left + bounds.width() * 2.,
+                ..bounds
+            })
+        });
+        assert!(s.objects[0].erased[0].contains((0., 85.)));
+        s.update_selected(|o| o.style.color = [12, 34, 56]);
+        assert!(s.objects[0].erased.is_empty());
+        s.undo();
+        assert_eq!(s.objects[0].erased.len(), 1);
+        assert_ne!(s.objects[0].style.color, [12, 34, 56]);
+    }
+    #[test]
+    fn clear_all_restores_entire_document_numbering_and_global_cuts_but_teardown_does_not() {
+        use super::super::annotation_erase::{EraseRegion, EraseTarget};
+        let mut s = Session::new();
+        s.add(text_object());
+        s.next_sequence = 19;
+        let cut = EraseRegion::Brush {
+            points: vec![(-70., 40.)],
+            diameter: 12.,
+        };
+        s.erase(
+            cut,
+            &[
+                EraseTarget::Object(s.objects[0].id),
+                EraseTarget::Watermark,
+                EraseTarget::Spotlight,
+            ],
+        );
+        let before = s.snapshot();
+        assert!(s.clear_all());
+        assert!(!s.has_content());
+        assert_eq!(s.next_sequence, 1);
+        assert!(!s.clear_all());
+        assert!(s.undo());
+        assert_eq!(s.snapshot(), before);
+        s.clear();
+        assert!(!s.can_undo());
+        assert!(s.watermark_erased.is_empty() && s.spotlight_erased.is_empty());
     }
 }

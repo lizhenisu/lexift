@@ -807,6 +807,7 @@ mod tests {
                 .map(|&(asset, effect, strength)| {
                     RenderLayer::Mosaic(MosaicLayer {
                         object: Arc::new(Object {
+                            erased: Vec::new(),
                             id: Default::default(),
                             bounds: Bounds::from_corners((-4., -4.), (4., 4.)),
                             kind: Kind::MosaicArea,
@@ -1014,6 +1015,7 @@ mod tests {
         let mosaic = |asset, body: Rect| {
             RenderLayer::Mosaic(MosaicLayer {
                 object: Arc::new(Object {
+                    erased: Vec::new(),
                     id: Default::default(),
                     bounds: bounds(body),
                     kind: Kind::MosaicArea,
@@ -1027,6 +1029,7 @@ mod tests {
         let lens = |asset, source: Rect, output: Rect, decorations| {
             RenderLayer::Magnifier(MagnifierLayer {
                 object: Arc::new(Object {
+                    erased: Vec::new(),
                     id: Default::default(),
                     bounds: bounds(source),
                     kind: Kind::Magnifier,
@@ -1283,6 +1286,7 @@ mod tests {
                 RenderLayer::Raster(lower.clone()),
                 RenderLayer::Mosaic(MosaicLayer {
                     object: Arc::new(Object {
+                        erased: Vec::new(),
                         id: Default::default(),
                         bounds: Bounds::from_corners((0., 0.), (8., 8.)),
                         kind: Kind::MosaicArea,

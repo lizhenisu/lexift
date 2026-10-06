@@ -184,8 +184,8 @@ msgstr "Enabled"
 msgid "Enter text"
 msgstr "Enter text"
 
-msgid "Erase annotations"
-msgstr "Erase annotations"
+msgid "Include annotations"
+msgstr "Include annotations"
 
 msgid "Eraser"
 msgstr "Eraser"
@@ -798,3 +798,12 @@ msgstr "Screen capture unavailable. Try again."
 
 msgid "Mosaic is unavailable on this platform."
 msgstr "Mosaic is unavailable on this platform."
+
+msgid "Brush size"
+msgstr "Brush size"
+
+msgid "Clear all"
+msgstr "Clear all"
+
+msgid "You can also adjust with the mouse wheel."
+msgstr "You can also adjust with the mouse wheel."

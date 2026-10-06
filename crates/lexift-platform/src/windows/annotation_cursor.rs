@@ -83,6 +83,17 @@ fn make_brush_cursor(size: i32) -> lexift_core::Result<HCURSOR> {
         for x in 0..size {
             let distance = (x as f32 + 0.5 - center).hypot(y as f32 + 0.5 - center);
             let alpha = ((1.5 - (distance - radius).abs()).clamp(0., 1.) * 255.).round() as u8;
+            let dx = (x as f32 + 0.5 - center).abs();
+            let dy = (y as f32 + 0.5 - center).abs();
+            let tick = (dx <= 0.75 && (dy - radius).abs() <= 2.)
+                || (dy <= 0.75 && (dx - radius).abs() <= 2.);
+            let alpha = if tick {
+                255
+            } else if distance < radius - 1. {
+                42
+            } else {
+                alpha
+            };
             let color = if distance < radius { alpha } else { 0 };
             let index = ((y * size + x) * 4) as usize;
             rgba[index..index + 4].copy_from_slice(&[color, color, color, alpha]);

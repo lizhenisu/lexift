@@ -68,6 +68,7 @@ mod tests {
 
     fn brush(points: Vec<(f32, f32)>, scale: f32) -> Object {
         let mut object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((0., 0.), (0., 0.)),
             kind: Kind::MosaicBrush,
@@ -153,6 +154,7 @@ mod tests {
     fn rejecting_first_capture_preserves_later_edits_and_prunes_mask_history() {
         let mut session = Session::new();
         let shape = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Rectangle,
             bounds: Bounds::from_corners((0., 0.), (40., 40.)),

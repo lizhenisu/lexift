@@ -135,6 +135,7 @@ mod tests {
 
     fn object(antialias: bool) -> Object {
         Object {
+            erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((-4., -4.), (0., 0.)),
             kind: Kind::Magnifier,

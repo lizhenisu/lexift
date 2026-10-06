@@ -184,8 +184,8 @@ msgstr "已啟用"
 msgid "Enter text"
 msgstr "輸入文字"
 
-msgid "Erase annotations"
-msgstr "擦除標註"
+msgid "Include annotations"
+msgstr "包含標註"
 
 msgid "Eraser"
 msgstr "橡皮擦"
@@ -798,3 +798,12 @@ msgstr "無法擷取螢幕，請重試。"
 
 msgid "Mosaic is unavailable on this platform."
 msgstr "此平台暫不支援馬賽克。"
+
+msgid "Brush size"
+msgstr "畫筆大小"
+
+msgid "Clear all"
+msgstr "全部清除"
+
+msgid "You can also adjust with the mouse wheel."
+msgstr "也可以用滾輪調整。"

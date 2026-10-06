@@ -26,6 +26,7 @@ pub(super) enum Input {
     },
     Escape(Origin),
     Undo,
+    ClearAll,
 }
 
 /// Bind controls without a session reference. Delivery is FIFO and ends with
@@ -77,6 +78,8 @@ pub(super) fn bind_input(
     let escape = queue.clone();
     let at = origin.clone();
     panel.on_escape_requested(move || escape(Input::Escape(at())));
+    let clear = queue.clone();
+    panel.on_clear_all_requested(move || clear(Input::ClearAll));
     let undo = queue.clone();
     panel.on_undo_requested(move || undo(Input::Undo));
     panel.window().on_close_requested(move || {

@@ -77,6 +77,7 @@ impl ClosedEdit {
                 bounds,
             },
             None => EditChange::New(Box::new(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 bounds,
                 kind: Kind::Text,
@@ -794,6 +795,7 @@ mod tests {
                         object.clone()
                     } else {
                         Object {
+                            erased: Vec::new(),
                             id: Default::default(),
                             kind: Kind::Text,
                             bounds: owner.edit().unwrap().bounds,

@@ -15,11 +15,13 @@ pub(crate) struct Content<'a> {
     pub bounds: Bounds,
     pub points: &'a [(f32, f32)],
     pub style: &'a Style,
+    pub erased: &'a [lexift_core::domain::annotation_erase::ErasedCoverage],
     pub extra: &'a Extra,
 }
 impl<'a> From<&'a Object> for Content<'a> {
     fn from(object: &'a Object) -> Self {
         let Object {
+            erased,
             id: _,
             kind,
             bounds,
@@ -33,12 +35,14 @@ impl<'a> From<&'a Object> for Content<'a> {
             points,
             style,
             extra,
+            erased,
         }
     }
 }
 impl Content<'_> {
     fn key(self) -> u64 {
         let mut hash = std::collections::hash_map::DefaultHasher::new();
+        hash_erased(self.erased, &mut hash);
         self.kind.hash(&mut hash);
         for value in [
             self.bounds.left,
@@ -100,6 +104,8 @@ impl<'a> Frame<'a> {
     pub fn new(document: impl Into<Document<'a>>, draft: Option<&'a Object>) -> Self {
         let document = document.into();
         let mut hash = std::collections::hash_map::DefaultHasher::new();
+        hash_erased(&document.session.watermark_erased, &mut hash);
+        hash_erased(&document.session.spotlight_erased, &mut hash);
         document.session.spotlight_opacity.to_bits().hash(&mut hash);
         annotation_fingerprint::watermark(document.session.watermark.as_ref(), &mut hash);
         document
@@ -185,6 +191,37 @@ impl<'a> Frame<'a> {
     }
 }
 
+fn hash_erased(
+    cuts: &[lexift_core::domain::annotation_erase::ErasedCoverage],
+    hash: &mut impl Hasher,
+) {
+    use lexift_core::domain::annotation_erase::EraseRegion;
+    cuts.len().hash(hash);
+    for cut in cuts {
+        cut.part.hash(hash);
+        for v in cut.transform {
+            v.to_bits().hash(hash);
+        }
+        match &cut.region {
+            EraseRegion::Rectangle(b) => {
+                0u8.hash(hash);
+                for v in [b.left, b.top, b.right, b.bottom] {
+                    v.to_bits().hash(hash);
+                }
+            }
+            EraseRegion::Brush { points, diameter } => {
+                1u8.hash(hash);
+                diameter.to_bits().hash(hash);
+                points.len().hash(hash);
+                for (x, y) in points {
+                    x.to_bits().hash(hash);
+                    y.to_bits().hash(hash);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,6 +229,7 @@ mod tests {
     fn document() -> Session {
         let mut session = Session::new();
         session.add(Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
             bounds: Bounds::from_corners((-80., -40.), (80., 40.)),

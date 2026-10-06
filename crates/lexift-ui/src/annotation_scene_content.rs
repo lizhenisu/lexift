@@ -100,6 +100,7 @@ mod tests {
             pixels: Arc::from([0u8; 16]),
         };
         let object = Arc::new(Object {
+            erased: Vec::new(),
             id: ObjectId::DRAFT,
             kind: Kind::MosaicArea,
             bounds: Bounds::from_corners((-8., -4.), (-6., -2.)),

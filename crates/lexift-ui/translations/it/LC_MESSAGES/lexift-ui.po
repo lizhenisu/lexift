@@ -184,8 +184,8 @@ msgstr "Attivo"
 msgid "Enter text"
 msgstr "Inserisci testo"
 
-msgid "Erase annotations"
-msgstr "Cancella annotazioni"
+msgid "Include annotations"
+msgstr "Includi annotazioni"
 
 msgid "Eraser"
 msgstr "Gomma"
@@ -798,3 +798,12 @@ msgstr "Acquisizione non disponibile. Riprova."
 
 msgid "Mosaic is unavailable on this platform."
 msgstr "Il mosaico non è disponibile su questa piattaforma."
+
+msgid "Brush size"
+msgstr "Dimensione pennello"
+
+msgid "Clear all"
+msgstr "Cancella tutto"
+
+msgid "You can also adjust with the mouse wheel."
+msgstr "Puoi regolare anche con la rotella del mouse."

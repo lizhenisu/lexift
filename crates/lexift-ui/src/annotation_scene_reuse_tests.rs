@@ -463,3 +463,86 @@ fn assembled_scene_does_not_copy_trajectories_and_releases_on_fallback_or_failur
         "uncached offscreen objects conservatively bypass reuse"
     );
 }
+
+#[test]
+fn magnifier_component_coverage_invalidates_masks_and_decorations_without_reusing_old_holes() {
+    use lexift_core::domain::annotation::MagnifierConnector;
+    use lexift_core::domain::annotation_erase::{ErasePart, EraseRegion, EraseTarget};
+    let surfaces = surfaces();
+    let mut session = Session::new();
+    let mut lens = object(Kind::Magnifier);
+    lens.bounds = Bounds::from_corners((-100., -80.), (-60., -40.));
+    lens.extra = Extra::Magnifier {
+        output: Bounds::from_corners((20., -80.), (100., 0.)),
+        zoom: 2.,
+        ellipse: false,
+        connector: MagnifierConnector::Frame,
+        erase_annotations: true,
+        antialias: true,
+        shadow: true,
+    };
+    session.add(lens);
+    let id = session.objects[0].id;
+    session.erase(
+        EraseRegion::Rectangle(Bounds::from_corners((85., -50.), (105., -30.))),
+        &[EraseTarget::Object(id)],
+    );
+    session.selected = None;
+    let original = session.objects[0].clone();
+    let mut compiler = SceneCompiler::default();
+    let mut previous = None;
+    for (i, dx) in [0., 10., 20., 30., 20., 10., 0.].into_iter().enumerate() {
+        let mut lens = original.clone();
+        lens.move_from((50., -20.), dx, 0.);
+        session.objects[0] = lens;
+        let scene = compiler
+            .compile(input(&session, &surfaces, i as u64))
+            .unwrap();
+        let lens = scene
+            .layers
+            .iter()
+            .find_map(|l| match l {
+                RenderLayer::Magnifier(l) => Some(l),
+                _ => None,
+            })
+            .unwrap();
+        let mask = &lens.masks[0];
+        let at = |x: f32, y: f32| {
+            let x = x as i32 - mask.bounds.left;
+            let y = y as i32 - mask.bounds.top;
+            mask.pixels[((y * (mask.bounds.right - mask.bounds.left) + x) * 4 + 3) as usize]
+        };
+        assert_eq!(at(90. + dx, -40.), 0, "compiled GPU mask lost its hole");
+        assert_eq!(at(50. + dx, -40.), 255);
+        let repeated = compiler
+            .compile(input(&session, &surfaces, 100 + i as u64))
+            .unwrap();
+        assert!(Arc::ptr_eq(&scene.layers, &repeated.layers));
+        if let Some((key, old)) = previous {
+            assert_ne!(key, mask.key);
+            assert!(!Arc::ptr_eq(&old, &scene.layers));
+        }
+        previous = Some((mask.key, scene.layers.clone()));
+    }
+    // Component association itself must be in the signature, not just region/affine data.
+    let before = compiler.compile(input(&session, &surfaces, 300)).unwrap();
+    session.objects[0]
+        .erased
+        .retain(|c| c.part != ErasePart::MagnifierOutput);
+    let after = compiler.compile(input(&session, &surfaces, 301)).unwrap();
+    assert!(!Arc::ptr_eq(&before.layers, &after.layers));
+    let lens = after
+        .layers
+        .iter()
+        .find_map(|l| match l {
+            RenderLayer::Magnifier(l) => Some(l),
+            _ => None,
+        })
+        .unwrap();
+    let mask = &lens.masks[0];
+    let offset = (((-40 - mask.bounds.top) * (mask.bounds.right - mask.bounds.left) + 90
+        - mask.bounds.left)
+        * 4
+        + 3) as usize;
+    assert_eq!(mask.pixels[offset], 255);
+}

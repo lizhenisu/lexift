@@ -50,6 +50,7 @@ pub(crate) fn badge_text(object: &Object) -> Option<Object> {
         c
     };
     Some(Object {
+        erased: Vec::new(),
         id: Default::default(),
         kind: Kind::Text,
         bounds,
@@ -189,6 +190,7 @@ pub(crate) mod tests {
 
     pub(crate) fn badge(scale: f32) -> Object {
         Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Sequence,
             bounds: Bounds::from_corners((-100., 80.), (-100., 80.)),

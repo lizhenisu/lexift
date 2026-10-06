@@ -1,4 +1,5 @@
 pub mod annotation;
+pub mod annotation_erase;
 pub mod geometry;
 pub mod language;
 pub mod message;

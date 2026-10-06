@@ -21,6 +21,7 @@ const TEXT_BACKGROUND: i32 = -4;
 const OUTLINE_COLOR: i32 = -5;
 const BACKGROUND_COLOR: i32 = -6;
 const WATERMARK_PRESET: i32 = -7;
+const BRUSH_SIZE: i32 = -9;
 
 fn is_color(field: i32) -> bool {
     parameters::ColorTarget::from_field(field).is_some()
@@ -33,6 +34,9 @@ fn target_color(values: &AnnotationValues, palette: [[u8; 3]; 8], field: i32) ->
 }
 
 fn text_style_mode(field: i32) -> i32 {
+    if field == BRUSH_SIZE {
+        return 3;
+    }
     parameters::TextStyleTarget::from_field(field).map_or(0, |target| target.mode())
 }
 
@@ -130,6 +134,22 @@ pub(super) struct Menu {
 fn target_matches(r: &Registry, menu: &Menu) -> bool {
     menu.target
         .is_none_or(|target| r.parameter_target(target.tool) == target)
+}
+
+/// Keep an existing brush popup in sync without reopening it or changing focus.
+pub(super) fn sync_brush_size(r: &Registry, size: i32) {
+    if let Some(menu) = r.menus.current.as_ref().filter(|menu| {
+        menu.request.field == BRUSH_SIZE
+            && menu.target.is_some_and(|target| target.tool == 13)
+            && target_matches(r, menu)
+            && owner(r, menu).is_some()
+    }) {
+        let mut values = menu.window.get_style_values();
+        if values.size != size {
+            values.size = size;
+            menu.window.set_style_values(values);
+        }
+    }
 }
 
 // Cleanup also runs when the containing session is dropped without a normal close.
@@ -511,7 +531,9 @@ fn bind_parameter_input(
     let style_target = parameters::TextStyleTarget::from_field(field);
     let style = queue.clone();
     window.on_text_style_edited(move |values| {
-        if let Some(target) = style_target {
+        if field == BRUSH_SIZE {
+            style(MenuInput::Style(parameters::Edit::BrushSize(values.size)));
+        } else if let Some(target) = style_target {
             style(MenuInput::Style(target.edit(&values)));
         }
     });
@@ -545,7 +567,7 @@ fn build_window(
     values: &AnnotationValues,
 ) -> Option<AnnotationChoiceWindow> {
     let mode = text_style_mode(request.field);
-    if mode != 0
+    if matches!(mode, 1 | 2)
         && (!matches!(tool, 8 | 10)
             || (mode == 1 && !values.text_outline)
             || (mode == 2 && !values.text_background))
@@ -1170,7 +1192,9 @@ impl Menu {
             return false;
         };
         let menu_scale = menu.window.window().scale_factor().max(0.1);
-        let minimum_width = if is_color(q.field) {
+        let minimum_width = if q.field == BRUSH_SIZE {
+            300.
+        } else if is_color(q.field) {
             320.
         } else if q.field == TEXT_OUTLINE {
             330.
@@ -1616,6 +1640,182 @@ mod tests {
             assert_eq!(editor.get_anchor_offset(), 3);
         });
         super::super::shutdown();
+    }
+
+    #[test]
+    fn brush_slider_wheel_and_spin_outline_survive_incremental_repaints() {
+        use slint::platform::{
+            Platform, WindowAdapter, WindowEvent,
+            software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+        };
+        use std::cell::{Cell, RefCell};
+        struct TestPlatform(Rc<RefCell<Option<Rc<MinimalSoftwareWindow>>>>);
+        impl Platform for TestPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+                *self.0.borrow_mut() = Some(window.clone());
+                Ok(window)
+            }
+        }
+        let adapter = Rc::new(RefCell::new(None));
+        slint::platform::set_platform(Box::new(TestPlatform(adapter.clone()))).unwrap();
+        for dpi in [1., 1.25] {
+            let window = AnnotationChoiceWindow::new().unwrap();
+            window.set_text_style_mode(3);
+            window.set_content_width(300.);
+            let mut values = parameters::defaults(13);
+            values.size = 37;
+            window.set_style_values(values);
+            window
+                .window()
+                .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
+            window
+                .window()
+                .set_size(slint::LogicalSize::new(300., 104.));
+            window.show().unwrap();
+            let size = window.window().size();
+            let width = size.width as usize;
+            let mut pixels = vec![slint::Rgb8Pixel::default(); width * size.height as usize];
+            let render = |pixels: &mut [slint::Rgb8Pixel]| {
+                slint::platform::update_timers_and_animations();
+                adapter
+                    .borrow()
+                    .as_ref()
+                    .unwrap()
+                    .draw_if_needed(|renderer| {
+                        renderer.render(pixels, width);
+                    });
+            };
+            render(&mut pixels);
+            let wheel = |x, dx, dy| {
+                window
+                    .window()
+                    .dispatch_event(WindowEvent::PointerScrolled {
+                        position: slint::LogicalPosition::new(x, 52.),
+                        delta_x: dx,
+                        delta_y: dy,
+                    })
+            };
+            let drag_events = Rc::new(Cell::new(0));
+            let events = drag_events.clone();
+            window.on_color_dragging(move |_| events.set(events.get() + 1));
+            wheel(120., 0., 120.);
+            assert_eq!(window.get_style_values().size, 38, "track wheel");
+            // Thumb center at size 38: 12 + 8 + 174 * 37 / 99.
+            wheel(85., 0., -120.);
+            assert_eq!(window.get_style_values().size, 37, "thumb wheel");
+            wheel(120., 120., 0.);
+            assert_eq!(window.get_style_values().size, 37, "horizontal wheel");
+            for _ in 0..110 {
+                wheel(120., 0., 120.);
+            }
+            assert_eq!(window.get_style_values().size, 100);
+            for _ in 0..110 {
+                wheel(120., 0., -120.);
+            }
+            assert_eq!(window.get_style_values().size, 1);
+            assert_eq!(
+                drag_events.get(),
+                0,
+                "wheel must not start a drag transaction"
+            );
+            let mut values = window.get_style_values();
+            values.size = 37;
+            window.set_style_values(values);
+            render(&mut pixels);
+            if let Some(directory) = std::env::var_os("LEXIFT_ANNOTATION_RENDER_DIR") {
+                let mut image = format!("P6\n{} {}\n255\n", size.width, size.height).into_bytes();
+                image.extend(pixels.iter().flat_map(|pixel| [pixel.r, pixel.g, pixel.b]));
+                std::fs::write(
+                    std::path::PathBuf::from(directory).join(format!("brush-spin-{dpi}.ppm")),
+                    image,
+                )
+                .unwrap();
+            }
+            let right = (286. * dpi).ceil() as usize;
+            let top = (28. * dpi) as usize;
+            let bottom = (58. * dpi).ceil() as usize;
+            let edge = |pixels: &[slint::Rgb8Pixel]| {
+                (top..bottom)
+                    .flat_map(|y| {
+                        (right - 2..right + 1).map(move |x| {
+                            let p = pixels[y * width + x];
+                            [p.r, p.g, p.b]
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let baseline = edge(&pixels);
+            let divider_left = (258. * dpi).floor() as usize;
+            let divider_right = (259. * dpi).ceil() as usize;
+            let divider = |pixels: &[slint::Rgb8Pixel]| {
+                (top + 2..bottom - 2)
+                    .flat_map(|row| {
+                        (divider_left..divider_right).map(move |x| {
+                            let p = pixels[row * width + x];
+                            [p.r, p.g, p.b]
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let assert_divider = |pixels: &[slint::Rgb8Pixel], state| {
+                for row in top + 2..bottom - 2 {
+                    assert!(
+                        (divider_left..divider_right).any(|x| pixels[row * width + x].g <= 240),
+                        "vertical divider missing at dpi {dpi}, row {row}, state {state}"
+                    );
+                }
+            };
+            assert_divider(&pixels, "normal");
+            let baseline_divider = divider(&pixels);
+            let baseline_pixels = pixels.clone();
+            for y in [35., 50., 35., 50.] {
+                window.window().dispatch_event(WindowEvent::PointerMoved {
+                    position: slint::LogicalPosition::new(272., y),
+                });
+                render(&mut pixels);
+                assert_divider(&pixels, "hover");
+                for row in top + 7..bottom - 7 {
+                    assert!(
+                        (right - 2..right).any(|x| pixels[row * width + x].g < 245),
+                        "right outline missing at dpi {dpi}, row {row}, initial {:?}, hovered {:?}",
+                        (right - 5..right + 3)
+                            .map(|x| baseline_pixels[row * width + x].g)
+                            .collect::<Vec<_>>(),
+                        (right - 5..right + 3)
+                            .map(|x| pixels[row * width + x].g)
+                            .collect::<Vec<_>>()
+                    );
+                }
+                window.window().dispatch_event(WindowEvent::PointerPressed {
+                    position: slint::LogicalPosition::new(272., y),
+                    button: slint::platform::PointerEventButton::Left,
+                });
+                render(&mut pixels);
+                assert_divider(&pixels, "pressed");
+                window
+                    .window()
+                    .dispatch_event(WindowEvent::PointerReleased {
+                        position: slint::LogicalPosition::new(272., y),
+                        button: slint::platform::PointerEventButton::Left,
+                    });
+                window.window().dispatch_event(WindowEvent::PointerMoved {
+                    position: slint::LogicalPosition::new(20., 80.),
+                });
+                render(&mut pixels);
+                assert_divider(&pixels, "leave");
+                assert_eq!(
+                    divider(&pixels),
+                    baseline_divider,
+                    "divider did not recover at dpi {dpi}"
+                );
+                assert_eq!(
+                    edge(&pixels),
+                    baseline,
+                    "outline did not recover at dpi {dpi}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -2324,6 +2524,7 @@ mod tests {
             r.panel.get().unwrap().set_values(defaults(0));
             use lexift_core::domain::annotation::{Bounds, Extra, Kind, Object, Style};
             assert!(r.session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Rectangle,
                 bounds: Bounds::from_corners((0., 0.), (40., 40.)),

@@ -586,6 +586,7 @@ fn gesture_context_with(
     let replacement = Replacement::new(
         index,
         Content {
+            erased: &current.erased,
             kind: current.kind,
             bounds,
             points,
@@ -763,6 +764,7 @@ pub(super) fn draw_notice(
         monitor.top as f32 + top + (height - initial.height()) / 2.,
     );
     let object = Object {
+        erased: Vec::new(),
         id: Default::default(),
         kind: Kind::Text,
         bounds: crate::annotation_text::text_bounds(at, &text, scale),
@@ -790,6 +792,7 @@ mod tests {
     fn borrowed_effect_signature_matches_owned_job_and_ignores_selection() {
         let mut document = Session::new();
         let object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
             bounds: Bounds::from_corners((-20., -10.), (30., 40.)),
@@ -856,6 +859,7 @@ mod tests {
             bottom: 520,
         };
         let mut brush = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
             bounds: Bounds::from_corners((-450., -450.), (450., 450.)),
@@ -891,6 +895,7 @@ mod tests {
     #[test]
     fn draft_preview_adopts_only_its_own_released_identity() {
         let object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
             bounds: Bounds::from_corners((0., 0.), (20., 20.)),
@@ -1036,6 +1041,7 @@ mod tests {
             1.25,
         )];
         let start = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
             bounds: Bounds::from_corners((-100., -50.), (100., 50.)),
@@ -1072,6 +1078,7 @@ mod tests {
         let changed = gesture_context(&snapshot, None, &monitors, 1, 0, &start, true);
         assert_ne!(changed, original, "parameter edits cancel old filter work");
         snapshot.objects.push(Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Rectangle,
             extra: Extra::None,
@@ -1138,6 +1145,7 @@ mod tests {
             canvas.last_pointer = Some((10., 10.));
             r.canvases.push(canvas);
             let draft = Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::MosaicArea,
                 bounds: Bounds::from_corners((-900., -400.), (-800., -300.)),
@@ -1220,6 +1228,7 @@ mod tests {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
             let original = Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::MosaicArea,
                 bounds: Bounds::from_corners((-900., -400.), (-800., -300.)),
@@ -1296,6 +1305,7 @@ mod tests {
         let mut session = Session::new();
         for (x, scale) in [(-100., 1.), (100., 1.25)] {
             let mut object = Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::MosaicBrush,
                 bounds: Bounds::from_corners((x, 20.), (x, 20.)),

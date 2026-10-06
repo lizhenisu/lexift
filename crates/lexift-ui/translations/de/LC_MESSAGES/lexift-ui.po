@@ -184,8 +184,8 @@ msgstr "Aktiviert"
 msgid "Enter text"
 msgstr "Text eingeben"
 
-msgid "Erase annotations"
-msgstr "Anmerkungen löschen"
+msgid "Include annotations"
+msgstr "Anmerkungen einbeziehen"
 
 msgid "Eraser"
 msgstr "Radierer"
@@ -798,3 +798,12 @@ msgstr "Bildschirmaufnahme nicht verfügbar. Erneut versuchen."
 
 msgid "Mosaic is unavailable on this platform."
 msgstr "Mosaik ist auf dieser Plattform nicht verfügbar."
+
+msgid "Brush size"
+msgstr "Pinselgröße"
+
+msgid "Clear all"
+msgstr "Alles löschen"
+
+msgid "You can also adjust with the mouse wheel."
+msgstr "Auch mit dem Mausrad einstellbar."

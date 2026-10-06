@@ -36,7 +36,7 @@ fn resolve(mode: InteractionMode, gesture: Option<Gesture>, hit: Option<Hit>) ->
             Gesture::DeleteText | Gesture::ToggleTextArrow { .. } | Gesture::SequenceControl { .. },
         ) => AnnotationCursor::Idle,
         Some(Gesture::CreateText { .. }) => AnnotationCursor::Drawing,
-        Some(Gesture::Draw { .. }) => AnnotationCursor::Drawing,
+        Some(Gesture::Erase | Gesture::Draw { .. }) => AnnotationCursor::Drawing,
         Some(Gesture::Move) => AnnotationCursor::Moving,
         Some(Gesture::TextSelection { .. }) => AnnotationCursor::Text,
         Some(Gesture::Resize { handle, .. }) => handle_cursor(handle),
@@ -177,22 +177,32 @@ pub(super) fn refresh(r: &Registry) {
         };
         let was_custom = layer.window.get_cursor() == AnnotationCursor::CornerRadius;
         let brush = desired == AnnotationCursor::Drawing
-            && super::active_kind(r) == Some(Kind::MosaicBrush)
+            && (super::active_kind(r) == Some(Kind::MosaicBrush)
+                || (r.mode == InteractionMode::Tool(6) && r.values(13).shape == 1))
             && layer.last_pointer.is_some();
         if !brush && layer.window.get_cursor() == AnnotationCursor::Brush {
             (r.lifecycle.annotation_brush_cursor)(layer.window.window(), 0.);
         }
         let cursor = if brush {
-            let diameter = super::gestures::display_draft(&r.gesture, &r.pending_drawing)
-                .and_then(|object| match &object.extra {
-                    Extra::Mosaic(value) if object.kind == Kind::MosaicBrush => {
-                        Some(value.diameter)
-                    }
-                    _ => None,
-                })
-                .unwrap_or(
-                    r.values(11).size.clamp(1, 100) as f32 * layer.window.window().scale_factor(),
-                );
+            let diameter = if r.mode == InteractionMode::Tool(6) {
+                if let Some(super::gestures::Active::Erasing(press)) = &r.gesture {
+                    press.diameter
+                } else {
+                    r.values(13).size.clamp(1, 100) as f32 * layer.window.window().scale_factor()
+                }
+            } else {
+                super::gestures::display_draft(&r.gesture, &r.pending_drawing)
+                    .and_then(|object| match &object.extra {
+                        Extra::Mosaic(value) if object.kind == Kind::MosaicBrush => {
+                            Some(value.diameter)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(
+                        r.values(11).size.clamp(1, 100) as f32
+                            * layer.window.window().scale_factor(),
+                    )
+            };
             if (r.lifecycle.annotation_brush_cursor)(layer.window.window(), diameter) {
                 AnnotationCursor::Brush
             } else {
@@ -301,6 +311,7 @@ mod tests {
             for rotation in [0., 0.6] {
                 let bounds = Bounds::from_corners((-240., -100.), (-208., -72.));
                 let object = Object {
+                    erased: Vec::new(),
                     id: Default::default(),
                     kind: Kind::Text,
                     bounds,
@@ -379,6 +390,7 @@ mod tests {
         for scale in [1., 1.25] {
             let mut session = Session::new();
             session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Rectangle,
                 bounds: Bounds::from_corners((-200., -100.), (-40., 20.)),
@@ -417,6 +429,7 @@ mod tests {
                 Vec::new()
             };
             session.add(Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 kind,
                 bounds,
@@ -532,6 +545,7 @@ mod tests {
             let mut session = Session::new();
             let curved = points.len() == 3;
             let mut arrow = Object {
+                erased: Vec::new(),
                 id: Default::default(),
                 bounds: Bounds::from_corners(points[0], points[1]),
                 points,
@@ -596,6 +610,7 @@ mod tests {
                     screen_point(display, (300., 200.), scale),
                 );
                 session.add(Object {
+                    erased: Vec::new(),
                     id: Default::default(),
                     points: Vec::new(),
                     bounds,

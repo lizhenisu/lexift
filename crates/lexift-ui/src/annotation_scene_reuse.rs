@@ -20,6 +20,8 @@ pub(super) struct Compiled {
     reference: Option<String>,
     editor: Option<EditorOverlay>,
     watermark: Option<Watermark>,
+    watermark_erased: Vec<lexift_core::domain::annotation_erase::ErasedCoverage>,
+    spotlight_erased: Vec<lexift_core::domain::annotation_erase::ErasedCoverage>,
     displays: Vec<Rect>,
     spotlight_opacity: f32,
 }
@@ -49,6 +51,8 @@ impl Compiled {
             reference: input.reference.map(str::to_owned),
             editor: input.editor.cloned(),
             watermark: input.session.watermark.clone(),
+            watermark_erased: input.session.watermark_erased.clone(),
+            spotlight_erased: input.session.spotlight_erased.clone(),
             displays: input.session.displays.clone(),
             spotlight_opacity: input.session.spotlight_opacity,
         })
@@ -87,6 +91,8 @@ impl Compiled {
             && self.hovered == *hovered
             && self.reference.as_deref() == *reference
             && self.editor.as_ref() == *editor
+            && self.watermark_erased == session.watermark_erased
+            && self.spotlight_erased == session.spotlight_erased
             && self.watermark == session.watermark
             && self.displays == session.displays
             && self.spotlight_opacity == session.spotlight_opacity

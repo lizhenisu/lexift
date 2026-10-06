@@ -184,8 +184,8 @@ msgstr "有効"
 msgid "Enter text"
 msgstr "テキストを入力"
 
-msgid "Erase annotations"
-msgstr "注釈を消去"
+msgid "Include annotations"
+msgstr "注釈を含める"
 
 msgid "Eraser"
 msgstr "消しゴム"
@@ -798,3 +798,12 @@ msgstr "画面を取得できません。再試行してください。"
 
 msgid "Mosaic is unavailable on this platform."
 msgstr "このプラットフォームではモザイクを利用できません。"
+
+msgid "Brush size"
+msgstr "ブラシサイズ"
+
+msgid "Clear all"
+msgstr "すべて消去"
+
+msgid "You can also adjust with the mouse wheel."
+msgstr "マウスホイールでも調整できます。"

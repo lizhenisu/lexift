@@ -151,6 +151,8 @@ struct EffectRaster {
 
 #[derive(PartialEq)]
 struct Backdrop {
+    watermark_erased: Vec<lexift_core::domain::annotation_erase::ErasedCoverage>,
+    spotlight_erased: Vec<lexift_core::domain::annotation_erase::ErasedCoverage>,
     watermark: Option<Watermark>,
     displays: Vec<Rect>,
     spotlights: Vec<Object>,
@@ -420,6 +422,8 @@ impl SceneCompiler {
         let view = rectangle_key(viewport);
         let mut result = Vec::new();
         let backdrop = Backdrop {
+            watermark_erased: document.session.watermark_erased.clone(),
+            spotlight_erased: document.session.spotlight_erased.clone(),
             watermark: document.session.watermark.clone(),
             displays: document.session.displays.clone(),
             spotlights: document
@@ -508,6 +512,9 @@ impl SceneCompiler {
                 annotation_render::draw_content_object(
                     &mut frame, object, bounds, scale, reference,
                 );
+            }
+            if object.kind != Kind::Magnifier {
+                annotation_render::erase_coverage(&mut frame, bounds, &object.erased);
             }
             let raster = self.raster(frame, bounds, old);
             self.objects.insert(
@@ -739,6 +746,9 @@ impl SceneCompiler {
                 };
                 white.set_color_rgba8(255, 255, 255, 255);
                 annotation_render::mosaic::paint_mask(&mut frame, &object, bounds, &white);
+            }
+            if object.kind != Kind::Magnifier {
+                annotation_render::erase_coverage(&mut frame, bounds, &object.erased);
             }
             let raster = self.raster(frame, bounds, old);
             self.effects.insert(
@@ -1120,6 +1130,7 @@ mod tests {
 
     pub(super) fn object(kind: Kind) -> Object {
         Object {
+            erased: Vec::new(),
             id: ObjectId::DRAFT,
             kind,
             bounds: Bounds::from_corners((-92.5, -80.25), (30.5, 24.75)),

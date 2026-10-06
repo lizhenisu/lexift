@@ -449,6 +449,7 @@ mod tests {
         canvas.on_pointer(move |kind, _, _| recorded.borrow_mut().push(kind));
         let mut document = lexift_core::domain::annotation::Session::new();
         document.add(lexift_core::domain::annotation::Object {
+            erased: Vec::new(),
             id: Default::default(),
             points: Vec::new(),
             bounds: lexift_core::domain::annotation::Bounds::from_corners((20., 20.), (140., 90.)),

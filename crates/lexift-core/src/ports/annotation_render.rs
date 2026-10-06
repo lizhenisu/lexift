@@ -262,6 +262,7 @@ mod tests {
             pixels: vec![255; 4].into(),
         };
         let mut object = Object {
+            erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Magnifier,
             bounds: Bounds::from_corners((-4., -4.), (-3., -3.)),

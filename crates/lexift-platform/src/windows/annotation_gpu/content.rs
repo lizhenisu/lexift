@@ -333,6 +333,7 @@ mod tests {
                 }),
                 RenderLayer::Mosaic(MosaicLayer {
                     object: Arc::new(Object {
+                        erased: Vec::new(),
                         id: Default::default(),
                         kind: Kind::MosaicArea,
                         bounds: Bounds::from_corners((-4., 0.), (0., 4.)),

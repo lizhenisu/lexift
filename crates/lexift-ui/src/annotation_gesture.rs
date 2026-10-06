@@ -4,6 +4,7 @@ use lexift_core::domain::annotation::{Object, ObjectId, Session};
 
 #[derive(Clone, Copy)]
 pub(super) enum Gesture {
+    Erase,
     PlaceSequence,
     SequenceControl {
         target: ObjectId,
@@ -74,6 +75,7 @@ impl Action {
 
 /// One pointer capture has exactly one owner. Routing is always derived from that owner.
 pub(super) enum Active {
+    Erasing(super::eraser::Press),
     Sequence(SequencePlacement),
     Geometry(GeometryDrag),
     Text(TextHandle),
@@ -93,6 +95,7 @@ pub(super) fn display_draft<'a>(
 impl Active {
     pub fn route(&self) -> Gesture {
         match self {
+            Self::Erasing(_) => Gesture::Erase,
             Self::Sequence(_) => Gesture::PlaceSequence,
             Self::Geometry(drag) => drag.gesture(),
             Self::Text(handle) => handle.gesture(),
@@ -153,6 +156,7 @@ impl Active {
     /// Retire the owner before returning editor geometry to restore or replaying parameters.
     pub fn cancel(self, session: &mut Session) -> Option<Object> {
         match self {
+            Self::Erasing(_) => session.cancel_drag(),
             Self::Sequence(value) => value.cancel(session),
             Self::Geometry(value) => value.cancel(session),
             Self::Text(value) => return value.cancel(session),
@@ -210,7 +214,8 @@ impl Gesture {
     pub fn owns_document_transaction(self) -> bool {
         matches!(
             self,
-            Self::PlaceSequence
+            Self::Erase
+                | Self::PlaceSequence
                 | Self::Move
                 | Self::Resize { .. }
                 | Self::TextHandle {
@@ -323,7 +328,10 @@ impl GeometryDrag {
             GeometryOperation::Move { start } => {
                 object.move_from(start, point.0 - start.0, point.1 - start.1);
             }
-            GeometryOperation::Resize { handle } => object.edit_handle(handle, point, scale),
+            GeometryOperation::Resize { handle } => {
+                object.edit_handle(handle, point, scale);
+                restore_complex_coverage(&self.original, &mut object);
+            }
         }
         write(session, self.target(), object)
     }
@@ -413,6 +421,7 @@ impl TextHandle {
     pub fn object_at(&self, position: (f32, f32)) -> Object {
         let mut object = self.original.clone();
         object.edit_handle(self.info.handle, position, self.info.scale);
+        restore_complex_coverage(&self.original, &mut object);
         object
     }
 
@@ -442,6 +451,13 @@ pub(super) fn text_drag_target(
         .then_some((point.0 - grab.0, point.1 - grab.1))
 }
 
+/// Decide complex-edit restoration from the press snapshot, never the previous frame.
+fn restore_complex_coverage(original: &Object, object: &mut Object) {
+    if object != original && object.erased == original.erased {
+        object.erased.clear();
+    }
+}
+
 /// Update inside the caller's active drag transaction; Core preserves object identity.
 pub(super) fn write(session: &mut Session, target: ObjectId, object: Object) -> bool {
     let Some(index) = session.object_index(target) else {
@@ -453,7 +469,7 @@ pub(super) fn write(session: &mut Session, target: ObjectId, object: Object) -> 
     }
     let selected = session.selected;
     session.selected = Some(index);
-    session.update_selected(|current| *current = object);
+    session.replace_selected_geometry(object);
     session.selected = selected;
     true
 }
@@ -465,6 +481,7 @@ mod tests {
 
     fn rectangle() -> Object {
         Object {
+            erased: Vec::new(),
             id: ObjectId::DRAFT,
             bounds: Bounds::from_corners((10., 20.), (90., 80.)),
             kind: Kind::Rectangle,
@@ -472,6 +489,102 @@ mod tests {
             points: Vec::new(),
             extra: Extra::None,
         }
+    }
+
+    #[test]
+    fn erased_magnifier_output_drag_keeps_hole_on_every_update() {
+        use lexift_core::domain::annotation::MagnifierConnector;
+        use lexift_core::domain::annotation_erase::{ErasePart, EraseRegion, EraseTarget};
+        let mut lens = rectangle();
+        lens.kind = Kind::Magnifier;
+        lens.bounds = Bounds::from_corners((-100., 20.), (-60., 60.));
+        lens.extra = Extra::Magnifier {
+            output: Bounds::from_corners((10., 20.), (90., 100.)),
+            zoom: 2.,
+            ellipse: false,
+            connector: MagnifierConnector::Plain,
+            erase_annotations: true,
+            antialias: true,
+            shadow: false,
+        };
+        let mut session = Session::new();
+        session.add(lens);
+        let id = session.objects[0].id;
+        session.erase(
+            EraseRegion::Rectangle(Bounds::from_corners((10., 20.), (30., 40.))),
+            &[EraseTarget::Object(id)],
+        );
+        session.begin_drag();
+        let drag = GeometryDrag::moving(&session, id, (70., 80.)).unwrap();
+        for dx in [10., 20., 30., 20., 10., 0.] {
+            assert!(drag.update(&mut session, (70. + dx, 80.), 1.));
+            assert!(
+                session.objects[0]
+                    .erased
+                    .iter()
+                    .any(|cut| cut.part == ErasePart::MagnifierOutput
+                        && cut.contains((20. + dx, 30.))),
+                "hole missing at delta {dx}"
+            );
+            assert!(
+                session.objects[0]
+                    .erased
+                    .iter()
+                    .any(|cut| cut.part == ErasePart::MagnifierSource && cut.contains((20., 30.)))
+            );
+            assert_eq!(session.objects[0].bounds, drag.original().bounds);
+            if dx != 0. {
+                assert!(
+                    !session.objects[0]
+                        .erased
+                        .iter()
+                        .any(|cut| cut.part == ErasePart::MagnifierConnector)
+                );
+            }
+        }
+        drag.finish(&mut session);
+        // Returning to the press geometry adds no history, including connector cuts.
+        assert!(session.undo());
+        assert!(session.objects[0].erased.is_empty());
+    }
+
+    #[test]
+    fn complex_magnifier_resize_restores_coverage_consistently_and_cancels() {
+        use lexift_core::domain::annotation::MagnifierConnector;
+        use lexift_core::domain::annotation_erase::{EraseRegion, EraseTarget};
+        let mut lens = rectangle();
+        lens.kind = Kind::Magnifier;
+        lens.extra = Extra::Magnifier {
+            output: Bounds::from_corners((110., 20.), (270., 140.)),
+            zoom: 2.,
+            ellipse: false,
+            connector: MagnifierConnector::Plain,
+            erase_annotations: true,
+            antialias: true,
+            shadow: true,
+        };
+        let mut session = Session::new();
+        session.add(lens);
+        let id = session.objects[0].id;
+        session.erase(
+            EraseRegion::Rectangle(Bounds::from_corners((110., 20.), (130., 40.))),
+            &[EraseTarget::Object(id)],
+        );
+        let before = session.objects[0].clone();
+        session.begin_drag();
+        let drag = GeometryDrag::resizing(&session, id, 15).unwrap();
+        for x in [280., 290., 300., 280.] {
+            assert!(drag.update(&mut session, (x, 160.), 1.25));
+            assert!(session.objects[0].erased.is_empty());
+        }
+        drag.cancel(&mut session);
+        assert_eq!(session.objects[0], before);
+        session.begin_drag();
+        let drag = GeometryDrag::resizing(&session, id, 15).unwrap();
+        drag.update(&mut session, (300., 160.), 1.25);
+        drag.finish(&mut session);
+        assert!(session.undo());
+        assert_eq!(session.objects[0], before);
     }
 
     #[test]
