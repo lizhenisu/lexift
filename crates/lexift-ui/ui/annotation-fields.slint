@@ -21,18 +21,29 @@ export component SpinBox inherits Rectangle {
     in property <bool> enabled: true;
     in property <int> minimum: 1;
     in property <int> maximum: 100;
+    in property <float> display-divisor: 1;
+    in property <bool> caption-steps: false;
+    in property <bool> live-update: true;
     height: 30px; background: Colors.background; border-radius: 5px; opacity: root.enabled ? 1 : 0.45;
     forward-focus: input;
     TouchArea { enabled: root.enabled;
-        scroll-event(event) => { root.value = clamp(root.value + (event.delta-y > 0px ? 1 : -1),root.minimum,root.maximum); return accept; }
+        scroll-event(event) => {
+            if event.delta-y == 0px { return reject; }
+            root.commit();
+            root.value = clamp(root.value + (event.delta-y > 0px ? 1 : -1),root.minimum,root.maximum);
+            input.text = root.display-value();
+            return accept;
+        }
     }
-    function commit() { root.value = input.text.is-float() ? clamp(round(input.text.to-float()), root.minimum, root.maximum) : root.value; input.text = root.value; }
-    changed value => { if !input.has-focus { input.text = root.value; } }
-    input := TextInput { x: 9px; width: parent.width - 44px; height: parent.height;
+    pure function display-value() -> float { return root.caption-steps ? (root.value == 0 ? 60 : root.value == 1 ? 80 : root.value == 2 ? 100 : root.value == 3 ? 125 : 150) : root.value / root.display-divisor; }
+    pure function parsed-value(v:float) -> int { return root.caption-steps ? (v <= 70 ? 0 : v <= 90 ? 1 : v <= 112.5 ? 2 : v <= 137.5 ? 3 : 4) : round(v * root.display-divisor); }
+    function commit() { root.value = input.text.is-float() ? clamp(root.parsed-value(input.text.to-float()), root.minimum, root.maximum) : root.value; input.text = root.display-value(); }
+    changed value => { if !input.has-focus || !root.live-update { input.text = root.display-value(); } }
+    input := TextInput { x: 9px; width: parent.width - 45px; height: parent.height;
         enabled: root.enabled; single-line: true;
-        text: root.value; font-size: 13px; color: Colors.foreground; vertical-alignment: center;
+        text: root.display-value(); font-size: 13px; color: Colors.foreground; horizontal-alignment:center; vertical-alignment: center;
         selection-background-color: Colors.primary-container; selection-foreground-color: Colors.foreground;
-        edited => { if self.text.is-float() { root.value = clamp(round(self.text.to-float()),root.minimum,root.maximum); } }
+        edited => { if root.live-update && self.text.is-float() && !root.caption-steps { root.value = clamp(root.parsed-value(self.text.to-float()),root.minimum,root.maximum); } }
         accepted => { root.commit(); root.input-editing(false); root.input-confirmed(); }
         changed has-focus => { root.input-editing(self.has-focus); if !self.has-focus { root.commit(); root.input-finished(); } }
     }
@@ -46,7 +57,7 @@ export component SpinBox inherits Rectangle {
         Path { x: 8px; y: (parent.height - 5px) / 2; width: 10px; height: 5px; viewbox-width: 10; viewbox-height: 5;
             commands: i == 0 ? "M1 4L5 1L9 4" : "M1 1L5 4L9 1";
             fill: transparent; stroke: Colors.secondary-foreground; stroke-width: 1.5px; }
-        hit := TouchArea { enabled: root.enabled; clicked => { root.commit(); root.value = clamp(root.value + direction,root.minimum,root.maximum); input.text = root.value; root.input-editing(false); root.input-confirmed(); } }
+        hit := TouchArea { enabled: root.enabled; clicked => { root.commit(); root.value = clamp(root.value + direction,root.minimum,root.maximum); input.text = root.display-value(); root.input-editing(false); root.input-confirmed(); } }
     }
     // Fractional DPI lets a button repaint touch the adjacent separator pixel.
     Rectangle { x: parent.width - 28px; y: 0px; width: 1px; height: parent.height; background: Colors.outline; }

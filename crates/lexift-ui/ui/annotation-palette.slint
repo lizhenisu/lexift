@@ -1,5 +1,28 @@
 import { Colors } from "design/colors.slint";
 
+// Shared frame and states for preset-row and standalone custom color entries.
+export component CustomColorButton inherits Rectangle {
+    in property <bool> selected:false;
+    in property <bool> active:false;
+    in property <length> frame-size:28px;
+    in property <length> inset:4px;
+    in property <length> radius:8px;
+    callback clicked();
+    width:28px; height:28px; border-radius:6px;
+    accessible-role:button; accessible-label:@tr("Custom color");
+    background:hit.pressed ? Colors.icon-button-pressed : hit.has-hover ? Colors.icon-button-hover : transparent;
+    Rectangle {
+        x:(parent.width - root.frame-size)/2; y:(parent.height - root.frame-size)/2;
+        width:root.frame-size; height:root.frame-size; border-radius:root.radius;
+        background:hit.pressed ? Colors.icon-button-pressed : hit.has-hover ? Colors.icon-button-hover : Colors.surface;
+        Image { x:root.inset; y:root.inset; width:parent.width - 2*root.inset; height:parent.height - 2*root.inset;
+            source:@image-url("icons/custom-color.svg"); image-fit:contain; }
+        Rectangle { width:parent.width; height:parent.height; border-radius:root.radius; background:transparent;
+            border-width:root.selected ? 2px : 1px; border-color:root.selected || root.active ? Colors.primary : Colors.outline; }
+    }
+    hit := TouchArea { clicked=>{root.clicked();} }
+}
+
 // Shared preset/custom row. The caller owns the color target and popup lifetime.
 export component AnnotationPalette inherits Rectangle {
     in-out property <int> selected;
@@ -19,13 +42,10 @@ export component AnnotationPalette inherits Rectangle {
             border-radius: root.radius - 3px; background: ink; }
         TouchArea { clicked => { root.selected = i; root.preset-selected(); } }
     }
-    custom := Rectangle {
-        x: 8 * 32px; width: root.button-size; height: root.button-size; border-radius: root.radius;
-        border-width: root.selected == 8 ? 2px : 1px;
-        border-color: root.selected == 8 || root.custom-active ? Colors.primary : Colors.outline;
-        Image { x: root.inset; y: root.inset; width: parent.width - 2 * root.inset; height: parent.height - 2 * root.inset;
-            source: @image-url("icons/custom-color.svg"); }
-        TouchArea { clicked => { root.custom-requested(custom.absolute-position.x / 1px, custom.absolute-position.y / 1px,
-            custom.width / 1px, custom.height / 1px); } }
+    custom := CustomColorButton {
+        x:8*32px; width:root.button-size; height:root.button-size;
+        frame-size:root.button-size; inset:root.inset; radius:root.radius;
+        selected:root.selected == 8; active:root.custom-active;
+        clicked=>{root.custom-requested(self.absolute-position.x/1px,self.absolute-position.y/1px,self.width/1px,self.height/1px);}
     }
 }

@@ -807,3 +807,6 @@ msgstr "すべて消去"
 
 msgid "You can also adjust with the mouse wheel."
 msgstr "マウスホイールでも調整できます。"
+
+msgid "Caption size"
+msgstr "説明のサイズ"

@@ -408,18 +408,16 @@ impl TextStyleTarget {
     }
     pub fn edit(self, source: &AnnotationValues) -> Edit {
         match self {
-            Self::Outline => Edit::Outline {
-                width: source.text_outline_width,
-                color_index: source.text_outline_color_index,
-                custom_color: source.text_outline_custom_color.clone(),
-            },
-            Self::Background => Edit::Background {
-                opacity: source.text_bg_opacity,
-                rounding: source.text_bg_rounding,
-                padding: source.text_bg_padding,
-                color_index: source.text_bg_color_index,
-                custom_color: source.text_bg_custom_color.clone(),
-            },
+            Self::Outline => Edit::StylePalette(
+                self,
+                source.text_outline_color_index,
+                source.text_outline_custom_color.clone(),
+            ),
+            Self::Background => Edit::StylePalette(
+                self,
+                source.text_bg_color_index,
+                source.text_bg_custom_color.clone(),
+            ),
         }
     }
 }
@@ -427,21 +425,10 @@ impl TextStyleTarget {
 /// A popup returns only the parameters it owns, never a stale whole toolbar
 /// snapshot. Apply against the latest values so ongoing text edits survive.
 pub(super) enum Edit {
-    BrushSize(i32),
+    Numeric(super::numeric::Parameter, i32),
     Choice(ChoiceTarget, i32),
     Color(ColorTarget, [u8; 3]),
-    Outline {
-        width: i32,
-        color_index: i32,
-        custom_color: slint::SharedString,
-    },
-    Background {
-        opacity: i32,
-        rounding: i32,
-        padding: i32,
-        color_index: i32,
-        custom_color: slint::SharedString,
-    },
+    StylePalette(TextStyleTarget, i32, slint::SharedString),
 }
 
 impl Edit {
@@ -450,7 +437,7 @@ impl Edit {
     }
     pub fn apply(&self, values: &mut AnnotationValues) {
         match self {
-            Self::BrushSize(size) => values.size = (*size).clamp(1, 100),
+            Self::Numeric(parameter, value) => parameter.write(values, *value),
             Self::Choice(target, index) => {
                 let value = match target {
                     ChoiceTarget::Shape => &mut values.shape,
@@ -467,28 +454,16 @@ impl Edit {
                 *value = *index;
             }
             Self::Color(target, rgb) => target.set(values, *rgb),
-            Self::Outline {
-                width,
-                color_index,
-                custom_color,
-            } => {
-                values.text_outline_width = *width;
-                values.text_outline_color_index = *color_index;
-                values.text_outline_custom_color = custom_color.clone();
-            }
-            Self::Background {
-                opacity,
-                rounding,
-                padding,
-                color_index,
-                custom_color,
-            } => {
-                values.text_bg_opacity = *opacity;
-                values.text_bg_rounding = *rounding;
-                values.text_bg_padding = *padding;
-                values.text_bg_color_index = *color_index;
-                values.text_bg_custom_color = custom_color.clone();
-            }
+            Self::StylePalette(target, index, color) => match target {
+                TextStyleTarget::Outline => {
+                    values.text_outline_color_index = *index;
+                    values.text_outline_custom_color = color.clone();
+                }
+                TextStyleTarget::Background => {
+                    values.text_bg_color_index = *index;
+                    values.text_bg_custom_color = color.clone();
+                }
+            },
         }
     }
 }
@@ -1262,12 +1237,7 @@ mod tests {
             current.text_background = true;
             current.text_outline_width = 15;
             current.text_bg_opacity = 20;
-            let mut expected = current.clone();
-            if field == -3 {
-                expected.text_outline_width = 7;
-            } else {
-                expected.text_bg_opacity = 80;
-            }
+            let expected = current.clone();
             edit.apply(&mut current);
             assert_eq!(current, expected);
         }

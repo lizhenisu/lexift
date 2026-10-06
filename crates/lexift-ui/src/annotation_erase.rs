@@ -449,7 +449,8 @@ mod tests {
         assert!(super::super::parameters::ColorTarget::from_field(request.field).is_none());
         assert!(super::super::parameters::ColorTarget::from_field(-8).is_some());
         let mut values = super::super::parameters::defaults(13);
-        super::super::parameters::Edit::BrushSize(65).apply(&mut values);
+        super::super::parameters::Edit::Numeric(super::super::numeric::Parameter::Size, 65)
+            .apply(&mut values);
         assert_eq!(values.size, 65);
         assert_eq!(values.shape, 0);
         assert!(matches!(

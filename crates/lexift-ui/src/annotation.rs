@@ -67,6 +67,8 @@ mod fonts;
 mod frame;
 #[path = "annotation_mosaic_session.rs"]
 mod mosaic;
+#[path = "annotation_numeric.rs"]
+mod numeric;
 #[path = "annotation_panel.rs"]
 mod panel;
 #[path = "annotation_parameter_transaction.rs"]
@@ -450,6 +452,21 @@ pub(crate) fn is_open() -> bool {
 }
 
 impl Registry {
+    fn scroll_numeric(
+        &mut self,
+        target: parameter_edit::Target,
+        parameter: numeric::Parameter,
+        delta: f32,
+    ) {
+        let values = self.pending_parameter_values(target);
+        if self.parameter_target(target.tool) != target || !parameter.enabled(target.tool, values) {
+            return;
+        }
+        if let Some(value) = parameter.step(parameter.read(values), target.tool, delta) {
+            self.apply_menu_edit(target, parameters::Edit::Numeric(parameter, value));
+            choice::sync_numeric(self);
+        }
+    }
     /// Child teardown can synchronously forward native input to any session window.
     /// Keep those callbacks outside the coordinator borrow without retiring owners.
     fn pause_native_pointer_inputs(&self) -> Vec<window::PointerPause> {
@@ -2879,7 +2896,9 @@ fn scroll_eraser_size(r: &mut Registry, delta: f32) {
         return;
     }
     let mut values = r.values(13).clone();
-    let size = (values.size + if delta > 0. { 1 } else { -1 }).clamp(1, 100);
+    let Some(size) = numeric::Parameter::Size.step(values.size, 13, delta) else {
+        return;
+    };
     if size == values.size {
         return;
     }
@@ -2892,7 +2911,7 @@ fn scroll_eraser_size(r: &mut Registry, delta: f32) {
     {
         panel.set_values(values);
     }
-    choice::sync_brush_size(r, size);
+    choice::sync_numeric(r);
     cursor::refresh(r);
 }
 
@@ -4491,19 +4510,33 @@ fn open_panel(group: usize, menu: bool) {
         r.parameter_values.bind(r.parameter_object(tool as usize));
         let panel = r.panel.get().unwrap();
         if !menu && group <= 6 {
-            panel.on_brush_size_scrolled(move |delta| {
+            panel.on_numeric_scrolled(move |field, delta| {
                 REGISTRY.with(|slot| {
                     let mut slot = slot.borrow_mut();
                     if let Some(r) = slot.as_mut().filter(|r| {
                         r.generation == generation
                             && r.panel.revision() == panel_revision
-                            && r.parameter_entry_active(13)
-                    }) {
-                        scroll_eraser_size(r, delta);
+                            && r.parameter_entry_active(tool)
+                    }) && let Some(parameter) = numeric::Parameter::from_field(field)
+                    {
+                        let target = r.parameter_target(tool);
+                        r.scroll_numeric(target, parameter, delta);
                     }
                 });
             });
             let input = r.panel.input();
+            let layout_input = input.clone();
+            panel.on_numeric_layout_changed(move || {
+                layout_input.post(move || {
+                    REGISTRY.with(|slot| {
+                        if let Some(r) = slot.borrow().as_ref().filter(|r| {
+                            r.generation == generation && r.panel.revision() == panel_revision
+                        }) {
+                            position_panel(r);
+                        }
+                    })
+                });
+            });
             let observed = parameters::Notifications::new(panel.get_values());
             panel.on_values_changed(move |values| {
                 let target = REGISTRY.with(|slot| {
@@ -5041,90 +5074,30 @@ fn position_panel(r: &Registry) -> bool {
     let scale = panel.window().scale_factor().max(0.1);
     let available = ((area.right - area.left) as f32 / scale).max(1.);
     let width = if panel.get_menu() {
-        240f32.min(available)
-    } else if panel.get_tool() == 3 {
-        650f32.min(available)
-    } else if panel.get_tool() == 4 {
-        810f32.min(available)
-    } else if panel.get_tool() == 7 {
-        (1120. + panel.get_magnifier_extra_width()).min(available)
-    } else if panel.get_tool() == 8 {
-        780f32.min(available)
-    } else if panel.get_tool() == 9 {
-        1000f32.min(available)
-    } else if panel.get_tool() == 10 {
-        (if panel.get_values().sequence_expanded {
-            1320f32
-        } else {
-            710f32
-        })
-        .min(available)
-    } else if panel.get_tool() == 6 {
-        1030f32.min(available)
-    } else if panel.get_tool() == 5 {
-        856f32.min(available)
-    } else if panel.get_tool() == 13 {
-        panel.get_eraser_content_width().min(available)
-    } else if panel.get_tool() == 11 {
-        620f32.min(available)
-    } else if panel.get_tool() <= 2 || panel.get_tool() <= 6 {
-        960f32.min(available)
-    } else {
+        220f32.min(available)
+    } else if panel.get_tool() == 12 {
         720f32.min(available)
+    } else {
+        // Wrapped preferred widths are clamped by Slint; measure the same row without wrapping.
+        panel.set_numeric_measuring(true);
+        let width = ((panel.get_numeric_content_width() * scale).ceil() / scale).min(available);
+        panel.set_numeric_measuring(false);
+        width
     };
+    if !panel.get_menu() && panel.get_tool() != 12 {
+        let current = panel.window().size().to_logical(scale);
+        panel
+            .window()
+            .set_size(slint::LogicalSize::new(width, current.height));
+    }
     let columns = ((width - 24.) / 165.).floor().max(1.) as i32;
     panel.set_columns(columns);
     let height = if panel.get_menu() {
         46. + GROUPS[r.group.unwrap_or(0)].len() as f32 * 42.
-    } else if panel.get_tool() <= 4 {
-        if width < if panel.get_tool() == 3 { 644. } else { 780. } {
-            158.
-        } else {
-            68.
-        }
-    } else if panel.get_tool() <= 7 {
-        let extra = if panel.get_tool() == 7 {
-            panel.get_magnifier_extra_width()
-        } else {
-            0.
-        };
-        if width < 354. + extra {
-            if panel.get_tool() == 7 { 252. } else { 180. }
-        } else if width < 644. + extra {
-            if panel.get_tool() == 7 { 138. } else { 148. }
-        } else if width
-            < if panel.get_tool() == 5 {
-                856.
-            } else {
-                890. + extra
-            }
-        {
-            if panel.get_tool() == 7 { 138. } else { 98. }
-        } else {
-            58.
-        }
-    } else if panel.get_tool() == 8 {
-        if width < 774. { 106. } else { 58. }
-    } else if panel.get_tool() == 9 {
-        if width < 988. { 154. } else { 58. }
-    } else if panel.get_tool() == 10 {
-        if width < 708. {
-            if panel.get_values().sequence_expanded {
-                if width < 614. { 214. } else { 166. }
-            } else {
-                116.
-            }
-        } else if panel.get_values().sequence_expanded && width < 1302. {
-            116.
-        } else {
-            62.
-        }
+    } else if panel.get_tool() == 12 {
+        80. + ((fields(panel.get_tool()).len() as f32 / columns as f32).ceil()) * 62.
     } else {
-        if matches!(panel.get_tool(), 11 | 13) {
-            58.
-        } else {
-            80. + ((fields(panel.get_tool()).len() as f32 / columns as f32).ceil()) * 62.
-        }
+        panel.get_numeric_content_height()
     };
     if panel.get_menu() {
         let main_rect = Rect {
@@ -7443,13 +7416,7 @@ mod tests {
             let r = slot.as_ref().unwrap();
             assert_eq!(r.values(13).size, 14);
             assert_eq!(
-                r.menus
-                    .current
-                    .as_ref()
-                    .unwrap()
-                    .window
-                    .get_style_values()
-                    .size,
+                r.menus.current.as_ref().unwrap().window.get_numeric_value(),
                 14
             );
             assert!(!r.session.can_undo());
@@ -7471,12 +7438,16 @@ mod tests {
         wheel(120., 120.);
         assert_eq!(
             panel.get_values().size,
-            1,
-            "active capture freezes diameter"
+            2,
+            "wheel updates the next gesture only"
         );
         REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
+            let Some(Active::Erasing(press)) = &r.gesture else {
+                panic!()
+            };
+            assert_eq!(press.diameter, 1., "current stroke diameter remains frozen");
             r.gesture = None;
             r.session.cancel_drag();
             r.edit_values(13).shape = 0;
@@ -7486,7 +7457,7 @@ mod tests {
         assert_eq!(panel.get_values().size, 1, "rectangle mode disables wheel");
         REGISTRY.with(|slot| assert!(!slot.borrow().as_ref().unwrap().session.can_undo()));
         shutdown();
-        panel.invoke_brush_size_scrolled(120.); // A retired panel must be harmless.
+        panel.invoke_numeric_scrolled(-9, 120.); // A retired panel must be harmless.
     }
 
     #[test]
@@ -9965,52 +9936,62 @@ mod tests {
             std::fs::create_dir_all(&directory).unwrap();
             std::fs::write(directory.join(format!("{name}.ppm")), ppm).unwrap();
         };
-        let click_size = || {
-            for event in [
-                WindowEvent::PointerPressed {
-                    position: slint::LogicalPosition::new(410., 29.),
-                    button: slint::platform::PointerEventButton::Left,
-                },
-                WindowEvent::PointerReleased {
-                    position: slint::LogicalPosition::new(410., 29.),
-                    button: slint::platform::PointerEventButton::Left,
-                },
-            ] {
-                parameter_panel.window().dispatch_event(event);
-            }
-            advance();
-            assert!(
-                parameter_panel.get_parameter_input_active(),
-                "the numeric input owns the keyboard"
-            );
-        };
-        click_size();
-        parameter_panel
-            .window()
-            .dispatch_event(WindowEvent::KeyPressed {
-                text: slint::platform::Key::Return.into(),
-            });
-        parameter_panel
-            .window()
-            .dispatch_event(WindowEvent::KeyReleased {
-                text: slint::platform::Key::Return.into(),
-            });
-        advance();
-        advance();
-        assert_eq!(
-            ACTIVATIONS.with(Cell::get),
-            2,
-            "Enter confirms and restores native input exactly once"
+        let (generation, panel_revision) = REGISTRY.with(|slot| {
+            let slot = slot.borrow();
+            let r = slot.as_ref().unwrap();
+            (r.generation, r.panel.revision())
+        });
+        choice::open(
+            generation,
+            panel_revision,
+            crate::AnnotationChoiceRequest {
+                field: -102,
+                ..Default::default()
+            },
         );
-        click_size();
-        parameter_panel.invoke_release_parameter_input();
+        advance();
+        let numeric = REGISTRY.with(|slot| {
+            slot.borrow()
+                .as_ref()
+                .unwrap()
+                .menus
+                .current
+                .as_ref()
+                .unwrap()
+                .window
+                .clone_strong()
+        });
+        for event in [
+            WindowEvent::PointerPressed {
+                position: slint::LogicalPosition::new(226., 43.),
+                button: slint::platform::PointerEventButton::Left,
+            },
+            WindowEvent::PointerReleased {
+                position: slint::LogicalPosition::new(226., 43.),
+                button: slint::platform::PointerEventButton::Left,
+            },
+        ] {
+            numeric.window().dispatch_event(event);
+        }
+        advance();
+        assert!(
+            numeric.get_parameter_input_active(),
+            "numeric popup input owns the keyboard"
+        );
+        let before = ACTIVATIONS.with(Cell::get);
+        numeric.window().dispatch_event(WindowEvent::KeyPressed {
+            text: slint::platform::Key::Return.into(),
+        });
+        numeric.window().dispatch_event(WindowEvent::KeyReleased {
+            text: slint::platform::Key::Return.into(),
+        });
         advance();
         advance();
-        assert!(!parameter_panel.get_parameter_input_active());
+        assert!(!numeric.get_parameter_input_active());
         assert_eq!(
             ACTIVATIONS.with(Cell::get),
-            2,
-            "blur commits locally without raising the editor"
+            before + 1,
+            "Enter restores input exactly once"
         );
         save_panel_render("numeric-input-blur");
 

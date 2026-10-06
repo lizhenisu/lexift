@@ -807,3 +807,6 @@ msgstr "全部清除"
 
 msgid "You can also adjust with the mouse wheel."
 msgstr "也可以用滾輪調整。"
+
+msgid "Caption size"
+msgstr "說明大小"

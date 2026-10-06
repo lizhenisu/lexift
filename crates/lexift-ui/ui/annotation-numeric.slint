@@ -1,0 +1,129 @@
+import { Colors } from "design/colors.slint";
+import { AnnotationChoiceRequest, Slider, SpinBox } from "annotation-fields.slint";
+
+export global NumericPresentation {
+    public pure function name(field:int, tool:int) -> string {
+        return field == -9 ? (tool == 3 || tool == 11 || tool == 13 ? @tr("Brush size") : @tr("Width")) : field == -100 || field == -106 ? @tr("Corner radius")
+            : field == -101 ? (tool == 9 ? @tr("Opacity") : @tr("Intensity")) : field == -102 ? @tr("Text size")
+            : field == -103 ? @tr("Magnification") : field == -104 ? @tr("Outline width")
+            : field == -105 ? @tr("Opacity") : field == -107 ? @tr("Padding") : @tr("Caption size");
+    }
+    public pure function unit(field:int) -> string { return field == -101 || field == -105 || field == -108 ? "%" : field == -103 ? "×" : ""; }
+    public pure function display(field:int, value:float) -> string {
+        return (field == -103 ? round(value) / 100 : field == -108 ? (value == 0 ? 60 : value == 1 ? 80 : value == 2 ? 100 : value == 3 ? 125 : 150) : round(value)) + NumericPresentation.unit(field);
+    }
+    public pure function icon(field:int) -> image {
+        return field == -9 || field == -104 ? @image-url("icons/brush-size.svg")
+            : field == -100 || field == -106 ? @image-url("icons/numeric-radius.svg")
+            : field == -102 || field == -108 ? @image-url("icons/numeric-font.svg")
+            : field == -103 ? @image-url("icons/numeric-zoom.svg")
+            : field == -107 ? @image-url("icons/numeric-padding.svg") : @image-url("icons/numeric-opacity.svg");
+    }
+}
+
+export component NumericButton inherits Rectangle {
+    in property <int> field: -9;
+    in property <int> tool: 13;
+    in property <float> value;
+    in property <bool> enabled: true;
+    in property <int> active-field: -1;
+    callback requested(AnnotationChoiceRequest);
+    callback scrolled(int,float);
+    height: 38px; width: max(86px, value-metrics.preferred-width + 56px);
+    border-radius: 6px; opacity: root.enabled ? 1 : 0.45;
+    accessible-role: button; accessible-label: NumericPresentation.name(root.field,root.tool) + " " + NumericPresentation.display(root.field,root.value);
+    Tooltip { text:@markdown("\{NumericPresentation.name(root.field,root.tool)}"); }
+    background: area.pressed ? Colors.icon-button-pressed : root.active-field == root.field ? Colors.primary-container : area.has-hover && root.enabled ? Colors.icon-button-hover : transparent;
+    value-metrics := Text { visible:false; text:NumericPresentation.display(root.field,root.value); font-size:13px; }
+    Image { x:8px; y:(parent.height - 24px)/2; width:24px; height:24px; source:NumericPresentation.icon(root.field); colorize:Colors.foreground; }
+    Rectangle { x:40px; y:(parent.height - 28px)/2; width:parent.width - 48px; height:28px; border-radius:5px; background:Colors.background;
+        Text { width:100%; height:100%; text:NumericPresentation.display(root.field,root.value); font-size:13px; color:Colors.foreground; horizontal-alignment:center; vertical-alignment:center; }
+    }
+    area := TouchArea { enabled:root.enabled;
+        scroll-event(event) => { if event.delta-y == 0px { return reject; } root.scrolled(root.field,event.delta-y/1px); return accept; }
+        clicked => { root.requested({field:root.field,options:[],selected:0,lines:false,connectors:false,x:root.absolute-position.x/1px,y:root.absolute-position.y/1px,width:root.width/1px,height:root.height/1px}); }
+    }
+}
+
+// Equal-height cells give controls of different heights one explicit center line.
+export component NumericAdjustmentRow inherits Rectangle {
+    in property <int> value;
+    in property <int> minimum:0;
+    in property <int> maximum:100;
+    in property <int> slider-maximum:100;
+    in property <float> display-divisor:1;
+    in property <bool> caption-steps:false;
+    in property <string> unit;
+    in property <length> input-width:74px;
+    in property <length> track-width:0px;
+    in property <length> gap:8px;
+    in property <length> unit-gap:2px;
+    in property <length> unit-width:root.unit == "" ? 0px : unit-metrics.preferred-width;
+    unit-metrics := Text { visible:false; text:root.unit; font-size:13px; }
+    callback edited(int);
+    callback dragging(bool);
+    callback input-editing(bool);
+    callback input-finished();
+    private property <int> current-value:root.value;
+    changed value=>{root.current-value=root.value;}
+    changed current-value=>{slider.value=root.current-value; if root.current-value != root.value {root.edited(root.current-value);}}
+    height:38px;
+    HorizontalLayout {
+        alignment:root.track-width > 0px ? start : stretch; spacing:0px;
+        Rectangle {
+            height:root.height; min-width:120px;
+            preferred-width:root.track-width > 0px ? root.track-width : 120px;
+            // A large ceiling leaves the flexible track constrained only by its row layout.
+            max-width:root.track-width > 0px ? root.track-width : 100000px;
+            horizontal-stretch:root.track-width > 0px ? 0 : 1;
+            slider := Slider { x:0px; y:(parent.height - self.height)/2; width:parent.width; height:24px;
+                value:root.current-value; minimum:root.minimum; maximum:root.slider-maximum; wheel-step:1;
+                changed value=>{root.current-value=round(self.value);}
+                dragging(active)=>{root.dragging(active);}
+            }
+        }
+        Rectangle { width:root.gap; height:root.height; }
+        Rectangle { width:root.input-width; height:root.height;
+            SpinBox { x:0px; y:(parent.height - self.height)/2; width:parent.width; height:30px;
+                value <=> root.current-value; minimum:root.minimum; maximum:root.maximum; live-update:false;
+                display-divisor:root.display-divisor; caption-steps:root.caption-steps;
+                input-editing(active)=>{root.input-editing(active);}
+                input-confirmed=>{root.input-finished();} input-finished=>{root.input-finished();}
+            }
+        }
+        Rectangle { width:root.unit-width == 0px ? 0px : root.unit-gap; height:root.height; }
+        Text { width:root.unit-width; height:root.height; font-size:13px;
+            text:root.unit; color:Colors.secondary-foreground; vertical-alignment:center; }
+    }
+}
+
+// Inline style controls keep their editor and popup alive; only user changes emit edits.
+export component NumericRow inherits Rectangle {
+    in property <int> field;
+    in property <int> tool: 8;
+    in property <int> value;
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    in property <length> label-width: 110px;
+    callback edited(int,int);
+    callback scrolled(int,float);
+    callback dragging(bool);
+    callback input-editing(bool);
+    callback input-finished();
+    height: 38px;
+    HorizontalLayout {
+        spacing: 8px;
+        Text { height:root.height; width: root.label-width; text: NumericPresentation.name(root.field,root.tool); color: Colors.foreground; vertical-alignment: center; }
+        Rectangle { height:root.height; width: 24px;
+            Image { x:0px; y:(parent.height - 24px)/2; width:24px; height:24px; source:NumericPresentation.icon(root.field); colorize:Colors.foreground; }
+            TouchArea { scroll-event(event) => { if event.delta-y == 0px { return reject; } root.scrolled(root.field,event.delta-y/1px); return accept; } }
+        }
+        NumericAdjustmentRow {
+            height:root.height; value:root.value; minimum:root.minimum; maximum:root.maximum;
+            slider-maximum:root.maximum; unit:NumericPresentation.unit(root.field); unit-width:10px; unit-gap:8px;
+            edited(v)=>{root.edited(root.field,v);} dragging(active)=>{root.dragging(active);}
+            input-editing(active)=>{root.input-editing(active);} input-finished=>{root.input-finished();}
+        }
+    }
+}
+

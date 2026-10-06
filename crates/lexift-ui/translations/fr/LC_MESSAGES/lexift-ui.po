@@ -807,3 +807,6 @@ msgstr "Tout effacer"
 
 msgid "You can also adjust with the mouse wheel."
 msgstr "Vous pouvez aussi régler avec la molette."
+
+msgid "Caption size"
+msgstr "Taille de la légende"

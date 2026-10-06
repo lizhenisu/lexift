@@ -807,3 +807,6 @@ msgstr "Cancella tutto"
 
 msgid "You can also adjust with the mouse wheel."
 msgstr "Puoi regolare anche con la rotella del mouse."
+
+msgid "Caption size"
+msgstr "Dimensione descrizione"

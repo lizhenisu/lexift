@@ -21,7 +21,6 @@ const TEXT_BACKGROUND: i32 = -4;
 const OUTLINE_COLOR: i32 = -5;
 const BACKGROUND_COLOR: i32 = -6;
 const WATERMARK_PRESET: i32 = -7;
-const BRUSH_SIZE: i32 = -9;
 
 fn is_color(field: i32) -> bool {
     parameters::ColorTarget::from_field(field).is_some()
@@ -34,7 +33,7 @@ fn target_color(values: &AnnotationValues, palette: [[u8; 3]; 8], field: i32) ->
 }
 
 fn text_style_mode(field: i32) -> i32 {
-    if field == BRUSH_SIZE {
+    if super::numeric::Parameter::from_field(field).is_some() {
         return 3;
     }
     parameters::TextStyleTarget::from_field(field).map_or(0, |target| target.mode())
@@ -136,18 +135,28 @@ fn target_matches(r: &Registry, menu: &Menu) -> bool {
         .is_none_or(|target| r.parameter_target(target.tool) == target)
 }
 
-/// Keep an existing brush popup in sync without reopening it or changing focus.
-pub(super) fn sync_brush_size(r: &Registry, size: i32) {
-    if let Some(menu) = r.menus.current.as_ref().filter(|menu| {
-        menu.request.field == BRUSH_SIZE
-            && menu.target.is_some_and(|target| target.tool == 13)
-            && target_matches(r, menu)
-            && owner(r, menu).is_some()
-    }) {
-        let mut values = menu.window.get_style_values();
-        if values.size != size {
-            values.size = size;
-            menu.window.set_style_values(values);
+/// Refresh only the active numeric menu; assignments do not recreate its window.
+pub(super) fn sync_numeric(r: &Registry) {
+    if let Some(menu) = r
+        .menus
+        .current
+        .as_ref()
+        .filter(|m| target_matches(r, m) && owner(r, m).is_some())
+        && let Some(target) = menu.target
+    {
+        if matches!(text_style_mode(menu.request.field), 1 | 2) {
+            let values = r.pending_parameter_values(target).clone();
+            if menu.window.get_style_values() != values {
+                menu.window.set_style_values(values);
+            }
+            return;
+        }
+        let Some(parameter) = super::numeric::Parameter::from_field(menu.request.field) else {
+            return;
+        };
+        let value = parameter.read(r.pending_parameter_values(target));
+        if menu.window.get_numeric_value() != value {
+            menu.window.set_numeric_value(value);
         }
     }
 }
@@ -500,6 +509,8 @@ enum MenuInput {
         height: f32,
     },
     Style(parameters::Edit),
+    NumericWheel(super::numeric::Parameter, i32),
+    NumericLayout,
     Selection(Option<i32>, super::focus::Origin),
     InputFinished(super::focus::Origin),
     Color(ColorEdit),
@@ -528,12 +539,45 @@ fn bind_parameter_input(
             height,
         });
     });
+    let numeric = queue.clone();
+    window.on_numeric_edited(move |value| {
+        if let Some(parameter) = super::numeric::Parameter::from_field(field) {
+            numeric(MenuInput::Style(parameters::Edit::Numeric(
+                parameter, value,
+            )));
+        }
+    });
+    let inline = queue.clone();
+    window.on_style_numeric_edited(move |edited_field, value| {
+        let allowed = match field {
+            TEXT_OUTLINE => edited_field == -104,
+            TEXT_BACKGROUND => matches!(edited_field, -107..=-105),
+            _ => false,
+        };
+        if allowed && let Some(parameter) = super::numeric::Parameter::from_field(edited_field) {
+            inline(MenuInput::Style(parameters::Edit::Numeric(
+                parameter, value,
+            )));
+        }
+    });
+    let layout = queue.clone();
+    window.on_numeric_layout_changed(move || layout(MenuInput::NumericLayout));
+    let wheel = queue.clone();
+    window.on_numeric_scrolled(move |field, delta| {
+        if delta.is_finite()
+            && delta != 0.
+            && let Some(parameter) = super::numeric::Parameter::from_field(field)
+        {
+            wheel(MenuInput::NumericWheel(
+                parameter,
+                if delta > 0. { 1 } else { -1 },
+            ));
+        }
+    });
     let style_target = parameters::TextStyleTarget::from_field(field);
     let style = queue.clone();
     window.on_text_style_edited(move |values| {
-        if field == BRUSH_SIZE {
-            style(MenuInput::Style(parameters::Edit::BrushSize(values.size)));
-        } else if let Some(target) = style_target {
+        if let Some(target) = style_target {
             style(MenuInput::Style(target.edit(&values)));
         }
     });
@@ -566,6 +610,11 @@ fn build_window(
     tool: i32,
     values: &AnnotationValues,
 ) -> Option<AnnotationChoiceWindow> {
+    if let Some(parameter) = super::numeric::Parameter::from_field(request.field)
+        && !parameter.enabled(tool, values)
+    {
+        return None;
+    }
     let mode = text_style_mode(request.field);
     if matches!(mode, 1 | 2)
         && (!matches!(tool, 8 | 10)
@@ -585,6 +634,20 @@ fn build_window(
     window.set_font_mode(request.field == 12);
     window.set_style_values(values.clone());
     window.set_text_style_mode(mode);
+    window.set_numeric_tool(tool);
+    if let Some(parameter) = super::numeric::Parameter::from_field(request.field) {
+        let (min, max) = parameter.bounds(tool);
+        let value = parameter.read(values).clamp(min, max);
+        window.set_numeric_field(request.field);
+        window.set_numeric_minimum(min);
+        window.set_numeric_maximum(max);
+        window.set_numeric_slider_maximum(if parameter == super::numeric::Parameter::FontSize {
+            value.max(144)
+        } else {
+            max
+        });
+        window.set_numeric_value(value);
+    }
     if is_color(request.field) {
         set_color_controls(
             &window,
@@ -671,6 +734,42 @@ fn open_menu(
                     width,
                     height,
                 } => open_style_color(generation, panel_revision, revision, x, y, width, height),
+                MenuInput::NumericLayout => {
+                    REGISTRY.with(|slot| {
+                        let mut slot = slot.borrow_mut();
+                        if let Some(r) = slot
+                            .as_mut()
+                            .filter(|r| valid(r, generation, panel_revision, revision))
+                        {
+                            let menu = r.menus.current.as_ref().unwrap();
+                            if let Some(parent) = owner(r, menu)
+                                && !menu.place(
+                                    parent,
+                                    &*r.lifecycle.popup_work_area,
+                                    &toolbar_rects(r),
+                                )
+                            {
+                                close(r, CloseReason::PresentationFailed);
+                            }
+                        }
+                    });
+                }
+                MenuInput::NumericWheel(parameter, step) => {
+                    REGISTRY.with(|slot| {
+                        let mut slot = slot.borrow_mut();
+                        if let Some(r) = slot
+                            .as_mut()
+                            .filter(|r| valid(r, generation, panel_revision, revision))
+                            && let Some(target) = r.menus.current.as_ref().and_then(|m| m.target)
+                        {
+                            r.scroll_numeric(target, parameter, step as f32);
+                            let values = r.pending_parameter_values(target).clone();
+                            if let Some(menu) = &r.menus.current {
+                                menu.window.set_style_values(values);
+                            }
+                        }
+                    });
+                }
                 MenuInput::Style(edit) => {
                     edit_text_style(generation, panel_revision, revision, edit)
                 }
@@ -759,6 +858,7 @@ fn edit_text_style(generation: u64, panel_revision: u64, revision: u64, edit: pa
         };
         if let Some(target) = r.menus.current.as_ref().and_then(|menu| menu.target) {
             r.apply_menu_edit(target, edit);
+            sync_numeric(r);
         }
     });
     return_style_focus(generation, panel_revision, revision, current_focus_origin());
@@ -1192,14 +1292,12 @@ impl Menu {
             return false;
         };
         let menu_scale = menu.window.window().scale_factor().max(0.1);
-        let minimum_width = if q.field == BRUSH_SIZE {
-            300.
+        let minimum_width = if super::numeric::Parameter::from_field(q.field).is_some() {
+            menu.window.get_numeric_content_width()
         } else if is_color(q.field) {
             320.
-        } else if q.field == TEXT_OUTLINE {
-            330.
-        } else if q.field == TEXT_BACKGROUND {
-            360.
+        } else if matches!(q.field, TEXT_OUTLINE | TEXT_BACKGROUND) {
+            menu.window.get_style_content_width()
         } else if q.field == 12 {
             300.
         } else if q.field == 23 {
@@ -1415,6 +1513,134 @@ pub(super) fn panel_pointer(input: PopupPointerInput) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn numeric_popup_keeps_font_extent_and_caption_stops_and_zoom_precision() {
+        use slint::platform::{
+            Platform, PointerEventButton, WindowAdapter, WindowEvent,
+            software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+        };
+        struct TestPlatform;
+        impl Platform for TestPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer))
+            }
+        }
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        let request = |field| AnnotationChoiceRequest {
+            field,
+            ..Default::default()
+        };
+        let mut values = parameters::defaults(8);
+        values.text_size = 800;
+        let window = build_window(&request(-102), 8, &values).unwrap();
+        assert_eq!(window.get_numeric_slider_maximum(), 800);
+        window.set_numeric_value(22);
+        assert_eq!(
+            window.get_numeric_slider_maximum(),
+            800,
+            "decreasing never shrinks an open slider"
+        );
+        window.set_numeric_value(1024);
+        slint::platform::update_timers_and_animations();
+        assert_eq!(window.get_numeric_slider_maximum(), 1024);
+        let watermark = build_window(&request(-102), 9, &parameters::defaults(9)).unwrap();
+        assert_eq!(watermark.get_numeric_maximum(), 144);
+        let mut values = parameters::defaults(10);
+        values.sequence_expanded = true;
+        let caption = build_window(&request(-108), 10, &values).unwrap();
+        caption
+            .window()
+            .set_size(slint::LogicalSize::new(330., 104.));
+        caption.show().unwrap();
+        let type_number = |window: &AnnotationChoiceWindow, text: &str| {
+            for event in [
+                WindowEvent::PointerPressed {
+                    position: slint::LogicalPosition::new(225., 43.),
+                    button: PointerEventButton::Left,
+                },
+                WindowEvent::PointerReleased {
+                    position: slint::LogicalPosition::new(225., 43.),
+                    button: PointerEventButton::Left,
+                },
+            ] {
+                window.window().dispatch_event(event);
+            }
+            for text in [slint::platform::Key::Control.into(), "a".into()] {
+                window
+                    .window()
+                    .dispatch_event(WindowEvent::KeyPressed { text });
+            }
+            window.window().dispatch_event(WindowEvent::KeyReleased {
+                text: slint::platform::Key::Control.into(),
+            });
+            window
+                .window()
+                .dispatch_event(WindowEvent::KeyPressed { text: text.into() });
+            window.window().dispatch_event(WindowEvent::KeyPressed {
+                text: slint::platform::Key::Return.into(),
+            });
+            window.window().dispatch_event(WindowEvent::KeyReleased {
+                text: slint::platform::Key::Return.into(),
+            });
+        };
+        for (input, index) in [
+            ("70", 0),
+            ("90", 1),
+            ("112.5", 2),
+            ("137.5", 3),
+            ("1000", 4),
+            ("-1", 0),
+        ] {
+            type_number(&caption, input);
+            assert_eq!(
+                caption.get_numeric_value(),
+                index,
+                "caption input {input} chooses nearest stop; ties round down"
+            );
+        }
+        let lens = build_window(&request(-103), 7, &parameters::defaults(7)).unwrap();
+        lens.window().set_size(slint::LogicalSize::new(330., 104.));
+        lens.show().unwrap();
+        type_number(&lens, "1.51");
+        assert_eq!(
+            lens.get_numeric_value(),
+            151,
+            "decimal display keeps existing 0.01× precision"
+        );
+        lens.window().dispatch_event(WindowEvent::PointerScrolled {
+            position: slint::LogicalPosition::new(120., 52.),
+            delta_x: 0.,
+            delta_y: 120.,
+        });
+        assert_eq!(lens.get_numeric_value(), 152);
+        lens.window().dispatch_event(WindowEvent::PointerScrolled {
+            position: slint::LogicalPosition::new(120., 52.),
+            delta_x: 120.,
+            delta_y: 0.,
+        });
+        assert_eq!(lens.get_numeric_value(), 152, "horizontal wheel is ignored");
+        lens.window().dispatch_event(WindowEvent::KeyPressed {
+            text: slint::platform::Key::Return.into(),
+        });
+        assert_eq!(
+            lens.get_numeric_value(),
+            152,
+            "focused input follows slider wheel instead of committing stale text"
+        );
+        lens.window().dispatch_event(WindowEvent::PointerScrolled {
+            position: slint::LogicalPosition::new(225., 43.),
+            delta_x: 0.,
+            delta_y: 120.,
+        });
+        lens.window().dispatch_event(WindowEvent::KeyPressed {
+            text: slint::platform::Key::Return.into(),
+        });
+        assert_eq!(
+            lens.get_numeric_value(),
+            153,
+            "input wheel and confirmation stay synchronized"
+        );
+    }
     use super::super::parameters::{color_to_values, palette, palette_color};
     use super::*;
     use crate::{
@@ -1424,6 +1650,163 @@ mod tests {
     };
     use slint::{ModelRc, VecModel};
     use std::cell::{Cell, RefCell};
+
+    #[test]
+    fn inline_style_rows_edit_one_field_and_share_wheel_and_input() {
+        use slint::platform::{
+            Platform, WindowAdapter, WindowEvent,
+            software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+        };
+        struct TestPlatform(Rc<RefCell<Option<Rc<MinimalSoftwareWindow>>>>);
+        impl Platform for TestPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+                *self.0.borrow_mut() = Some(window.clone());
+                Ok(window)
+            }
+        }
+        let adapter = Rc::new(RefCell::new(None));
+        slint::platform::set_platform(Box::new(TestPlatform(adapter.clone()))).unwrap();
+        for dpi in [1., 1.25] {
+            for (tool, mode, fields) in [
+                (8, 1, vec![(-104, 23.)]),
+                (10, 1, vec![(-104, 23.)]),
+                (8, 2, vec![(-105, 23.), (-106, 67.), (-107, 111.)]),
+            ] {
+                let window = AnnotationChoiceWindow::new().unwrap();
+                let mut initial = defaults(tool);
+                initial.text_outline = true;
+                initial.text_background = true;
+                initial.text_outline_width = 4;
+                initial.text_bg_opacity = 50;
+                initial.text_bg_rounding = 21;
+                initial.text_bg_padding = 4;
+                window.set_numeric_tool(tool);
+                window.set_text_style_mode(mode);
+                window.set_style_values(initial.clone());
+                window.set_content_width(420.);
+                window
+                    .window()
+                    .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
+                window
+                    .window()
+                    .set_size(slint::LogicalSize::new(420., 176.));
+                window.show().unwrap();
+                let weak = window.as_weak();
+                window.on_style_numeric_edited(move |field, value| {
+                    let window = weak.upgrade().unwrap();
+                    let mut values = window.get_style_values();
+                    super::super::numeric::Parameter::from_field(field)
+                        .unwrap()
+                        .write(&mut values, value);
+                    window.set_style_values(values);
+                });
+                let weak = window.as_weak();
+                window.on_numeric_scrolled(move |field, delta| {
+                    let window = weak.upgrade().unwrap();
+                    let mut values = window.get_style_values();
+                    let parameter = super::super::numeric::Parameter::from_field(field).unwrap();
+                    let value = parameter
+                        .step(parameter.read(&values), tool, delta)
+                        .unwrap();
+                    parameter.write(&mut values, value);
+                    window.set_style_values(values);
+                });
+                for (field, y) in fields {
+                    let size = window.window().size();
+                    let width = size.width as usize;
+                    let mut pixels =
+                        vec![slint::Rgb8Pixel::default(); width * size.height as usize];
+                    adapter
+                        .borrow()
+                        .as_ref()
+                        .unwrap()
+                        .draw_if_needed(|renderer| {
+                            renderer.render(&mut pixels, width);
+                        });
+                    let rows: Vec<_> = (((y - 15.) * dpi) as usize..((y + 15.) * dpi) as usize)
+                        .filter(|&row| {
+                            ((160. * dpi) as usize..(313. * dpi) as usize).any(|x| {
+                                let p = pixels[row * width + x];
+                                p.b > 150 && p.r < 90 && p.g < 160
+                            })
+                        })
+                        .collect();
+                    let center = (rows.first().unwrap() + rows.last().unwrap() + 1) as f32 / 2.;
+                    assert!(
+                        (center - y * dpi).abs() <= 1.,
+                        "inline slider center field {field}, DPI {dpi}: {center}"
+                    );
+                    let parameter = super::super::numeric::Parameter::from_field(field).unwrap();
+                    for x in [145., 230., 345.] {
+                        // icon, track, numeric input
+                        window.set_style_values(initial.clone());
+                        window
+                            .window()
+                            .dispatch_event(WindowEvent::PointerScrolled {
+                                position: slint::LogicalPosition::new(x, y),
+                                delta_x: 0.,
+                                delta_y: 120.,
+                            });
+                        let mut expected = initial.clone();
+                        parameter.write(&mut expected, parameter.read(&initial) + 1);
+                        assert_eq!(
+                            window.get_style_values(),
+                            expected,
+                            "field {field} wheel at {x}, DPI {dpi}"
+                        );
+                        window
+                            .window()
+                            .dispatch_event(WindowEvent::PointerScrolled {
+                                position: slint::LogicalPosition::new(x, y),
+                                delta_x: 120.,
+                                delta_y: 0.,
+                            });
+                        assert_eq!(window.get_style_values(), expected);
+                    }
+                    for event in [
+                        WindowEvent::PointerPressed {
+                            position: slint::LogicalPosition::new(345., y),
+                            button: slint::platform::PointerEventButton::Left,
+                        },
+                        WindowEvent::PointerReleased {
+                            position: slint::LogicalPosition::new(345., y),
+                            button: slint::platform::PointerEventButton::Left,
+                        },
+                    ] {
+                        window.window().dispatch_event(event);
+                    }
+                    window.window().dispatch_event(WindowEvent::KeyPressed {
+                        text: slint::platform::Key::Control.into(),
+                    });
+                    window
+                        .window()
+                        .dispatch_event(WindowEvent::KeyPressed { text: "a".into() });
+                    window.window().dispatch_event(WindowEvent::KeyReleased {
+                        text: slint::platform::Key::Control.into(),
+                    });
+                    window
+                        .window()
+                        .dispatch_event(WindowEvent::KeyPressed { text: "7".into() });
+                    assert_eq!(
+                        parameter.read(&window.get_style_values()),
+                        parameter.read(&initial) + 1,
+                        "typing waits for confirmation"
+                    );
+                    window.window().dispatch_event(WindowEvent::KeyPressed {
+                        text: slint::platform::Key::Return.into(),
+                    });
+                    assert_eq!(parameter.read(&window.get_style_values()), 7);
+                    assert_eq!(
+                        window.get_text_style_mode(),
+                        mode,
+                        "inline editing leaves parent open"
+                    );
+                }
+                window.hide().unwrap();
+            }
+        }
+    }
 
     #[test]
     fn background_toggle_is_atomic_and_style_popup_allows_only_current_editor_focus() {
@@ -1665,6 +2048,7 @@ mod tests {
             window.set_content_width(300.);
             let mut values = parameters::defaults(13);
             values.size = 37;
+            window.set_numeric_value(values.size);
             window.set_style_values(values);
             window
                 .window()
@@ -1687,6 +2071,37 @@ mod tests {
                     });
             };
             render(&mut pixels);
+            let blue = |p: slint::Rgb8Pixel| p.b > 150 && p.r < 90 && p.g < 160;
+            for value in [1, 37, 100] {
+                window.set_numeric_value(value);
+                render(&mut pixels);
+                let rows: Vec<_> = ((25. * dpi) as usize..(61. * dpi) as usize)
+                    .filter(|&y| {
+                        ((12. * dpi) as usize..(202. * dpi) as usize)
+                            .any(|x| blue(pixels[y * width + x]))
+                    })
+                    .collect();
+                let center = (rows.first().unwrap() + rows.last().unwrap() + 1) as f32 / 2.;
+                assert!(
+                    (center - 43. * dpi).abs() <= 1.,
+                    "slider and input share center at dpi {dpi}, value {value}: {center}"
+                );
+                let columns: Vec<_> = ((214. * dpi) as usize..(256. * dpi) as usize)
+                    .filter(|&x| {
+                        ((31. * dpi) as usize..(55. * dpi) as usize).any(|y| {
+                            let p = pixels[y * width + x];
+                            p.r < 100 && p.g < 100 && p.b < 100
+                        })
+                    })
+                    .collect();
+                let center = (columns.first().unwrap() + columns.last().unwrap() + 1) as f32 / 2.;
+                assert!(
+                    (center - 235.5 * dpi).abs() <= 1.,
+                    "input digits centered in editable region at dpi {dpi}, value {value}: {center}"
+                );
+            }
+            window.set_numeric_value(37);
+            render(&mut pixels);
             let wheel = |x, dx, dy| {
                 window
                     .window()
@@ -1700,20 +2115,20 @@ mod tests {
             let events = drag_events.clone();
             window.on_color_dragging(move |_| events.set(events.get() + 1));
             wheel(120., 0., 120.);
-            assert_eq!(window.get_style_values().size, 38, "track wheel");
+            assert_eq!(window.get_numeric_value(), 38, "track wheel");
             // Thumb center at size 38: 12 + 8 + 174 * 37 / 99.
             wheel(85., 0., -120.);
-            assert_eq!(window.get_style_values().size, 37, "thumb wheel");
+            assert_eq!(window.get_numeric_value(), 37, "thumb wheel");
             wheel(120., 120., 0.);
-            assert_eq!(window.get_style_values().size, 37, "horizontal wheel");
+            assert_eq!(window.get_numeric_value(), 37, "horizontal wheel");
             for _ in 0..110 {
                 wheel(120., 0., 120.);
             }
-            assert_eq!(window.get_style_values().size, 100);
+            assert_eq!(window.get_numeric_value(), 100);
             for _ in 0..110 {
                 wheel(120., 0., -120.);
             }
-            assert_eq!(window.get_style_values().size, 1);
+            assert_eq!(window.get_numeric_value(), 1);
             assert_eq!(
                 drag_events.get(),
                 0,
@@ -1721,6 +2136,7 @@ mod tests {
             );
             let mut values = window.get_style_values();
             values.size = 37;
+            window.set_numeric_value(37);
             window.set_style_values(values);
             render(&mut pixels);
             if let Some(directory) = std::env::var_os("LEXIFT_ANNOTATION_RENDER_DIR") {
@@ -1869,8 +2285,8 @@ mod tests {
                         assert_eq!((x, y, width, height), (1., 2., 3., 4.));
                         "custom"
                     }
-                    MenuInput::Style(parameters::Edit::Outline { width, .. }) => {
-                        assert_eq!(width, 9);
+                    MenuInput::Style(parameters::Edit::StylePalette(_, index, _)) => {
+                        assert_eq!(index, 0);
                         "style"
                     }
                     MenuInput::Color(ColorEdit::Hsv(hsv)) => {
@@ -2121,6 +2537,16 @@ mod tests {
         values.text_outline = true;
         values.text_background = true;
         for field in [
+            -9,
+            -100,
+            -101,
+            -102,
+            -103,
+            -104,
+            -105,
+            -106,
+            -107,
+            -108,
             -2,
             -3,
             -4,
@@ -2149,7 +2575,12 @@ mod tests {
                 options: ModelRc::new(VecModel::from(vec!["choice".into(); 11])),
                 ..Default::default()
             };
-            let window = build_window(&request, 10, &values).unwrap();
+            let tool = if super::super::numeric::Parameter::from_field(field).is_some() {
+                12
+            } else {
+                10
+            };
+            let window = build_window(&request, tool, &values).unwrap();
             let popup = Menu {
                 input: InputWork::new(),
                 window,
@@ -2801,10 +3232,10 @@ mod tests {
                 );
             };
             for (tool, width, height, x, y) in [
-                (8, 780., 58., 748., 29.),
-                (8, 640., 106., 282., 72.),
-                (9, 1000., 58., 962., 29.),
-                (9, 640., 154., 282., 120.),
+                (8, 780., 106., 294., 74.),
+                (8, 640., 106., 294., 74.),
+                (9, 1000., 106., 938., 29.),
+                (9, 640., 154., 420., 74.),
             ] {
                 let panel = AnnotationPanel::new().unwrap();
                 panel.set_tool(tool);
@@ -2822,7 +3253,7 @@ mod tests {
                 click(panel.window(), x, y);
                 assert_eq!(requested.get(), -2, "tool {tool}, width {width}");
             }
-            for (mode, width, height, y) in [(1, 330., 80., 57.5), (2, 360., 160., 135.5)] {
+            for (mode, width, height, y) in [(1, 330., 90., 63.5), (2, 360., 176., 153.5)] {
                 let window = AnnotationChoiceWindow::new().unwrap();
                 window.set_text_style_mode(mode);
                 window.set_style_values(defaults(8));
@@ -2943,13 +3374,9 @@ mod tests {
             let mut values = original.clone();
             let mut expected = original.clone();
             if mode == 1 {
-                expected.text_outline_width = 9;
                 expected.text_outline_color_index = 3;
                 expected.text_outline_custom_color = "#256395".into();
             } else if mode == 2 {
-                expected.text_bg_opacity = 25;
-                expected.text_bg_padding = 13;
-                expected.text_bg_rounding = 19;
                 expected.text_bg_color_index = 5;
                 expected.text_bg_custom_color = "#731458".into();
             }
