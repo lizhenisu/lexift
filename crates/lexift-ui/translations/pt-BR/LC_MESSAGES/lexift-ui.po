@@ -828,3 +828,84 @@ msgstr "Salvar captura com anotações"
 
 msgid "Could not save screenshot. Try again."
 msgstr "Não foi possível salvar a captura. Tente novamente."
+
+msgid "Service address"
+msgstr "Endereço do serviço"
+
+msgid "Model"
+msgstr "Modelo"
+
+msgid "Select a model"
+msgstr "Selecionar um modelo"
+
+msgid "Models and the service are managed by Ollama."
+msgstr "Os modelos e o serviço são gerenciados pelo Ollama."
+
+msgid "Test connection / Refresh models"
+msgstr "Testar conexão / Atualizar modelos"
+
+msgid "Connected"
+msgstr "Conectado"
+
+msgid "Connected; select a local model"
+msgstr "Conectado; selecione um modelo local"
+
+msgid "Connected; no compatible local text generation models found"
+msgstr "Conectado; nenhum modelo local de texto compatível"
+
+msgid "Saved Ollama model is unavailable; choose another model"
+msgstr "O modelo Ollama salvo está indisponível; escolha outro"
+
+msgid "Cloud Ollama models are not supported"
+msgstr "Modelos Ollama na nuvem não são suportados"
+
+msgid "Embedding-only models cannot translate text"
+msgstr "Modelos apenas de embeddings não podem traduzir"
+
+msgid "Ollama model does not report text generation capability"
+msgstr "O modelo Ollama não informa capacidade de gerar texto"
+
+msgid "Select an Ollama model in settings first"
+msgstr "Selecione primeiro um modelo Ollama nas configurações"
+
+msgid "Use an HTTP loopback address with a valid port and no path"
+msgstr "Use um endereço HTTP de loopback com porta válida e sem caminho"
+
+msgid "Invalid Ollama model name"
+msgstr "Nome de modelo Ollama inválido"
+
+msgid "Ollama service discovery is unavailable"
+msgstr "A busca do serviço Ollama está indisponível"
+
+msgid "Ollama request timed out"
+msgstr "A solicitação ao Ollama excedeu o tempo limite"
+
+msgid "Cannot connect to Ollama; start the local service"
+msgstr "Não foi possível conectar ao Ollama; inicie o serviço local"
+
+msgid "Invalid Ollama response"
+msgstr "Resposta Ollama inválida"
+
+msgid "Ollama model or API was not found"
+msgstr "Modelo ou API Ollama não encontrado"
+
+msgid "Ollama redirects are not allowed"
+msgstr "Redirecionamentos Ollama não são permitidos"
+
+msgid "Ollama service rejected the request"
+msgstr "O serviço Ollama rejeitou a solicitação"
+
+msgid "Ollama translation was incomplete"
+msgstr "A tradução Ollama ficou incompleta"
+
+msgid "Ollama returned a tool call instead of a translation"
+msgstr "Ollama retornou uma chamada de ferramenta em vez da tradução"
+
+msgid "Ollama returned an empty translation"
+msgstr "Ollama retornou uma tradução vazia"
+
+msgid "Ollama returned too many models"
+msgstr "Ollama retornou modelos demais"
+
+msgid "Ollama client initialization failed"
+msgstr "Falha ao inicializar o cliente Ollama"

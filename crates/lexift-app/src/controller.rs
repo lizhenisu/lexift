@@ -336,7 +336,7 @@ impl AppController {
                 previous_settings,
                 config,
                 change,
-            } => self.apply_runtime_config(settings, previous_settings, config, change),
+            } => self.apply_runtime_config(settings, *previous_settings, config, change),
             AppCommand::PersistCredential {
                 credential_id,
                 secret,
@@ -708,7 +708,10 @@ impl AppController {
         tracing::debug!(?task_id, "translation request started");
         self.dispatch(AppEvent::TranslationStarted { task_id });
         let controller = Arc::clone(self);
-        let translator = Arc::clone(&self.translator);
+        let translator = self.runtime_manager.as_ref().map_or_else(
+            || Arc::clone(&self.translator),
+            |manager| manager.translation_snapshot(),
+        );
         self.runtime.spawn(async move {
             match lexift_core::usecases::translate_input::execute(translator.as_ref(), request)
                 .await
@@ -738,7 +741,10 @@ impl AppController {
             task_id,
         });
         let controller = Arc::clone(self);
-        let translator = Arc::clone(&self.translator);
+        let translator = self.runtime_manager.as_ref().map_or_else(
+            || Arc::clone(&self.translator),
+            |manager| manager.translation_snapshot(),
+        );
         self.runtime.spawn(async move {
             match lexift_core::usecases::translate_input::execute(translator.as_ref(), request)
                 .await

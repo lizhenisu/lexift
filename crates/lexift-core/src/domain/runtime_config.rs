@@ -194,12 +194,14 @@ impl FromStr for HotkeyConfig {
 pub enum ProviderConfig {
     #[default]
     DeepL,
+    Ollama,
 }
 
 impl ProviderConfig {
     pub const fn id(self) -> &'static str {
         match self {
             Self::DeepL => "deepl",
+            Self::Ollama => "ollama",
         }
     }
 }
@@ -208,6 +210,7 @@ impl fmt::Display for ProviderConfig {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::DeepL => "DeepL",
+            Self::Ollama => "Ollama",
         })
     }
 }
@@ -218,6 +221,7 @@ impl FromStr for ProviderConfig {
     fn from_str(value: &str) -> Result<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "deepl" => Ok(Self::DeepL),
+            "ollama" => Ok(Self::Ollama),
             _ => Err(Error::new("Translation provider is not available")),
         }
     }
@@ -228,6 +232,7 @@ pub struct RuntimeConfig {
     pub hotkey: HotkeyConfig,
     pub annotation_hotkey: HotkeyConfig,
     pub provider: ProviderConfig,
+    pub ollama: super::ollama::OllamaConfig,
     pub launch_at_login: bool,
 }
 
@@ -237,6 +242,7 @@ impl Default for RuntimeConfig {
             hotkey: HotkeyConfig::default(),
             annotation_hotkey: HotkeyConfig::annotation_default(),
             provider: ProviderConfig::default(),
+            ollama: super::ollama::OllamaConfig::default(),
             launch_at_login: false,
         }
     }

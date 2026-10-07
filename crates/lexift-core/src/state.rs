@@ -465,7 +465,7 @@ impl AppState {
                 change,
             } => {
                 vec![AppCommand::ApplyRuntimeConfig {
-                    previous_settings: self.settings.clone(),
+                    previous_settings: Box::new(self.settings.clone()),
                     settings,
                     config,
                     change,
@@ -644,6 +644,15 @@ impl AppState {
     }
 
     fn request_settings_change(&mut self, change: SettingsChange) -> Vec<AppCommand> {
+        if let SettingsChange::Ollama(config) = &change
+            && let Err(error) = config.validate()
+        {
+            self.settings_error_field = Some(SettingsField::Ollama);
+            self.set_settings_field_error(SettingsField::Ollama, error.to_string());
+            return vec![AppCommand::ShowSettingsFeedback {
+                feedback: SettingsFeedback::SettingsSaveFailed(SettingsField::Ollama),
+            }];
+        }
         change.apply_to(&mut self.desired_settings);
         if self.settings_saving || self.credential_busy {
             self.queued_settings_changes
@@ -680,7 +689,7 @@ impl AppState {
             SettingsField::TargetLanguage => self.target_language_settings_error.clear(),
             SettingsField::Hotkey => self.hotkey_settings_error.clear(),
             SettingsField::AnnotationHotkey => self.annotation_hotkey_settings_error.clear(),
-            SettingsField::Provider => self.provider_settings_error.clear(),
+            SettingsField::Provider | SettingsField::Ollama => self.provider_settings_error.clear(),
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error.clear(),
             SettingsField::SelectionToolbar | SettingsField::Theme | SettingsField::UiLanguage => {}
         }
@@ -691,7 +700,7 @@ impl AppState {
             SettingsField::TargetLanguage => self.target_language_settings_error = error,
             SettingsField::Hotkey => self.hotkey_settings_error = error,
             SettingsField::AnnotationHotkey => self.annotation_hotkey_settings_error = error,
-            SettingsField::Provider => self.provider_settings_error = error,
+            SettingsField::Provider | SettingsField::Ollama => self.provider_settings_error = error,
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error = error,
             SettingsField::SelectionToolbar | SettingsField::Theme | SettingsField::UiLanguage => {
                 self.settings_error_message = error;
@@ -720,6 +729,7 @@ impl AppState {
                 self.desired_settings.annotation_hotkey = self.settings.annotation_hotkey
             }
             SettingsField::Provider => self.desired_settings.provider = self.settings.provider,
+            SettingsField::Ollama => self.desired_settings.ollama = self.settings.ollama.clone(),
             SettingsField::LaunchAtLogin => {
                 self.desired_settings.launch_at_login = self.settings.launch_at_login;
             }
@@ -2200,7 +2210,7 @@ mod tests {
             }),
             vec![AppCommand::ApplyRuntimeConfig {
                 settings: requested.clone(),
-                previous_settings: Settings::default(),
+                previous_settings: Box::default(),
                 config: config.clone(),
                 change: change.clone(),
             }]

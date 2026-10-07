@@ -62,7 +62,8 @@ pub enum AppCommand {
     },
     ApplyRuntimeConfig {
         settings: Settings,
-        previous_settings: Settings,
+        // Keep the rollback snapshot off the command queue's inline storage.
+        previous_settings: Box<Settings>,
         config: RuntimeConfig,
         change: SettingsChange,
     },

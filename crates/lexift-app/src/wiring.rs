@@ -347,6 +347,7 @@ mod tests {
         let reference = Arc::new(RwLock::new(Some("deepl-primary".into())));
         let translator = crate::runtime::TranslatorRuntime::credential_backed(
             lexift_core::domain::runtime_config::ProviderConfig::DeepL,
+            lexift_core::domain::ollama::OllamaConfig::default(),
             store,
             reference,
         )

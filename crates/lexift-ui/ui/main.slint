@@ -1,4 +1,6 @@
 import { Colors } from "design/colors.slint";
+import { ScrollView } from "std-widgets.slint";
+import { AppVerticalScrollBar } from "design/scrollbar.slint";
 export { Colors }
 import { Spacing } from "design/spacing.slint";
 import { Typography } from "design/typography.slint";
@@ -47,6 +49,11 @@ export component AppWindow inherits Window {
     in property <bool> translation-busy: false;
     in property <string> target-language: "";
     in property <string> translated-text: "";
+    out property <length> translation-content-height: translation-scroll.content-height;
+    out property <length> translation-viewport-height: translation-scroll.visible-height;
+    in-out property <length> translation-scroll-y: 0px;
+    changed translated-text => { root.translation-scroll-y = 0px; }
+    changed error-text => { root.translation-scroll-y = 0px; }
     in property <string> error-text: "";
     in property <bool> show-selection-demo: false;
     callback selection-translation-requested();
@@ -153,18 +160,40 @@ export component AppWindow inherits Window {
                     font-weight: 700;
                 }
 
-                Text {
-                    text: root.error-text != ""
-                        ? root.error-text
-                        : root.translation-busy
-                            ? @tr("Translating…")
-                            : root.translated-text == ""
-                                ? @tr("Translation will appear here")
-                                : root.translated-text;
-                    color: root.error-text != "" ? Colors.error : Colors.foreground;
-                    font-size: Typography.body-size;
-                    wrap: word-wrap;
+                Rectangle {
                     vertical-stretch: 1;
+                    translation-scroll := ScrollView {
+                        width: parent.width - 10px;
+                        height: parent.height;
+                        content-width: self.visible-width;
+                        content-height: max(self.visible-height, translation-text.preferred-height);
+                        content-y <=> root.translation-scroll-y;
+                        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                        translation-text := Text {
+                            x: 0px; y: 0px;
+                            width: translation-scroll.visible-width;
+                            height: max(translation-scroll.visible-height, self.preferred-height);
+                            vertical-alignment: TextVerticalAlignment.top;
+                            text: root.error-text != ""
+                                ? root.error-text
+                                : root.translation-busy
+                                    ? @tr("Translating…")
+                                    : root.translated-text == ""
+                                        ? @tr("Translation will appear here")
+                                        : root.translated-text;
+                            color: root.error-text != "" ? Colors.error : Colors.foreground;
+                            font-size: Typography.body-size;
+                            wrap: word-wrap;
+                        }
+                    }
+                    AppVerticalScrollBar {
+                        x: parent.width - 10px;
+                        height: parent.height;
+                        viewport-height: translation-scroll.visible-height;
+                        content-height: translation-scroll.content-height;
+                        content-y <=> translation-scroll.content-y;
+                    }
                 }
 
                 Text {

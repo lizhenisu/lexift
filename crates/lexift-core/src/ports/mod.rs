@@ -6,6 +6,7 @@ pub mod credential;
 pub mod hotkey;
 pub mod instance;
 pub mod magnifier;
+pub mod ollama;
 pub mod screen;
 pub mod screen_capture;
 pub mod selection;

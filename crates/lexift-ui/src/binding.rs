@@ -9,6 +9,7 @@ pub(crate) fn apply_main(main: &AppWindow, state: &UiState) {
 }
 
 pub(crate) fn apply_settings(settings: &SettingsWindow, state: &UiState) {
+    crate::ollama_settings::refresh_localized_status(settings);
     settings.set_appearance_language_index(state.ui_language.index());
     settings.set_annotation_hotkey_status(crate::annotation::status().into());
     settings.set_appearance_theme_index(crate::theme::index(state.theme));
@@ -58,14 +59,6 @@ pub(crate) fn apply_settings(settings: &SettingsWindow, state: &UiState) {
     if settings.get_credential_error_text().as_str() != state.credential_error {
         settings.set_credential_error_text(state.credential_error.clone().into());
     }
-}
-
-pub(crate) fn apply_popup(popup: &TranslationPopup, state: &crate::mapper::PopupUiState) {
-    apply_popup_content(popup, state);
-    popup.set_popup_width(420.0);
-    popup.set_popup_height(state.height);
-    popup.set_source_card_height(state.source_height);
-    popup.set_resize_min_height(336.0);
 }
 
 pub(crate) fn apply_popup_content(popup: &TranslationPopup, state: &crate::mapper::PopupUiState) {

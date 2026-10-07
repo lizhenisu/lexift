@@ -716,6 +716,18 @@ export component SettingsWindow inherits Window {
     in-out property <bool> hotkey-capturing: false;
     in-out property <bool> annotation-hotkey-capturing: false;
     in-out property <string> draft-provider-id: "deepl";
+    in-out property <string> ollama-address: "http://127.0.0.1:11434";
+    in-out property <string> ollama-model;
+    in property <[string]> ollama-models;
+    in property <bool> ollama-checking;
+    in property <string> ollama-status;
+    in-out property <string> ollama-status-source;
+    in-out property <int> ollama-model-index: -1;
+    in property <bool> ollama-status-error;
+    in-out property <bool> settings-menu-model-mode: false;
+    callback ollama-address-edited();
+    callback ollama-refresh-requested();
+    callback ollama-apply-requested();
     in property <bool> credential-configured: false;
     in property <bool> credential-busy: false;
     in property <string> credential-error-text: "";
@@ -823,10 +835,10 @@ export component SettingsWindow inherits Window {
             : root.preview-menu-kind == 2 ? app-language-preview.height
                 : root.preview-menu-kind == 3 ? tray-click-preview.height
                     : root.preview-menu-kind == 4 ? filter-mode-preview.height : root.preview-menu-kind == 5 ? screenshot-format-preview.height : fallback-language-preview.height;
-    private property <length> settings-menu-anchor-x: root.settings-menu-provider-mode ? provider-selector.absolute-position.x : language-selector.absolute-position.x;
-    private property <length> settings-menu-anchor-y: root.settings-menu-provider-mode ? provider-selector.absolute-position.y : language-selector.absolute-position.y;
-    private property <length> settings-menu-anchor-height: root.settings-menu-provider-mode ? provider-selector.height : language-selector.height;
-    private property <length> settings-menu-anchor-width: root.settings-menu-provider-mode ? provider-selector.width : language-selector.width;
+    private property <length> settings-menu-anchor-x: root.settings-menu-model-mode ? ollama-selector.absolute-position.x : root.settings-menu-provider-mode ? provider-selector.absolute-position.x : language-selector.absolute-position.x;
+    private property <length> settings-menu-anchor-y: root.settings-menu-model-mode ? ollama-selector.absolute-position.y : root.settings-menu-provider-mode ? provider-selector.absolute-position.y : language-selector.absolute-position.y;
+    private property <length> settings-menu-anchor-height: root.settings-menu-model-mode ? ollama-selector.height : root.settings-menu-provider-mode ? provider-selector.height : language-selector.height;
+    private property <length> settings-menu-anchor-width: root.settings-menu-model-mode ? ollama-selector.width : root.settings-menu-provider-mode ? provider-selector.width : language-selector.width;
 
     callback hotkey-key-pressed(string, bool, bool, bool, bool) -> string;
     callback hotkey-change-requested(string);
@@ -1630,7 +1642,7 @@ export component SettingsWindow inherits Window {
         visible: root.active-category == 5;
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
         content-width: self.visible-width;
-        content-height: max(self.visible-height, llm-provider-card.y + llm-provider-card.height + Metrics.settings-page-padding);
+        content-height: max(self.visible-height, provider-card.y + provider-card.height + Metrics.settings-page-padding);
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
         scrolled => { root.close-settings-menu(); root.close-preview-menu(); }
         provider-card := SettingsCard {
@@ -1643,7 +1655,7 @@ export component SettingsWindow inherits Window {
                 SettingsFieldLabel { label: @tr("Translation provider"); description: ""; error-text: root.provider-error-text; }
                 provider-selector := Rectangle {
                     height: 40px; border-radius: 6px; border-width: 1px; border-color: Colors.outline; background: Colors.background;
-                    Text { x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 24px; text: "DeepL"; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
+                    Text { x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 24px; text: root.draft-provider-id == "ollama" ? "Ollama" : "DeepL"; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
                     Path {
                         x: parent.width - Spacing.medium - 16px; y: (parent.height - 8px) / 2; width: 16px; height: 8px; viewbox-width: 16; viewbox-height: 8; stroke: Colors.secondary-foreground; stroke-width: 1.5px;
                         MoveTo { x: 1; y: root.settings-menu-open && root.settings-menu-provider-mode ? 7 : 1; } LineTo { x: 8; y: root.settings-menu-open && root.settings-menu-provider-mode ? 1 : 7; } LineTo { x: 15; y: root.settings-menu-open && root.settings-menu-provider-mode ? 7 : 1; }
@@ -1653,6 +1665,12 @@ export component SettingsWindow inherits Window {
 
                 Rectangle { height: 1px; background: Colors.outline; }
 
+                Rectangle {
+                    visible: root.draft-provider-id == "deepl";
+                    height: self.visible ? credential-layout.preferred-height : 0px;
+                    clip: true;
+                    credential-layout := VerticalLayout {
+                        width: parent.width; height: self.preferred-height; spacing: Spacing.small;
                 HorizontalLayout {
                     width: 100%; height: 24px;
                     Text { text: @tr("DeepL API Key"); color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; vertical-alignment: center; }
@@ -1721,14 +1739,54 @@ export component SettingsWindow inherits Window {
                         primary: true; label: root.credential-busy ? @tr("Working…") : @tr("Save key"); enabled: root.credential-draft != "" && !root.credential-busy;
                         clicked => { root.credential-save-requested(root.credential-draft); }
                     }
+                }                    }
                 }
+                Rectangle {
+                    visible: root.draft-provider-id == "ollama";
+                    height: self.visible ? ollama-fields.preferred-height : 0px;
+                    clip: true;
+                    ollama-fields := VerticalLayout {
+                        width: parent.width; height: self.preferred-height; spacing: Spacing.small;
+                    SettingsFieldLabel { label: @tr("Service address"); }
+                    Rectangle {
+                        height: 40px; border-radius: 6px; border-width: 1px;
+                        border-color: address-input.has-focus ? Colors.primary : Colors.outline; background: Colors.background;
+                        address-input := TextInput {
+                            x: Spacing.medium; width: parent.width - 2 * Spacing.medium; height: parent.height;
+                            text <=> root.ollama-address; color: Colors.foreground; font-size: Typography.body-size;
+                            vertical-alignment: center; selection-background-color: Colors.primary-container;
+                            edited => { root.close-settings-menu(); root.ollama-address-edited(); }
+                        }
+                    }
+                    SettingsFieldLabel { label: @tr("Model"); }
+                    ollama-selector := Rectangle {
+                        height: 40px; border-radius: 6px; border-width: 1px; border-color: Colors.outline; background: Colors.background;
+                        Text { x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 24px; height: parent.height;
+                            text: root.ollama-model == "" ? @tr("Select a model") : root.ollama-model;
+                            color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; overflow: elide; }
+                        Image { x: parent.width - Spacing.medium - 16px; y: (parent.height - self.height) / 2;
+                            width: 24px; height: 24px; source: @image-url("icons/chevron-down.svg"); colorize: Colors.secondary-foreground; }
+                        TouchArea { enabled: !root.ollama-checking && root.ollama-models.length > 0;
+                            clicked => { root.toggle-model-menu(); } }
+                    }
+                    Text { text: root.ollama-status; color: root.ollama-status-error ? Colors.error : Colors.secondary-foreground;
+                        font-size: Typography.body-size; wrap: word-wrap; }
+                    Text { text: @tr("Models and the service are managed by Ollama."); color: Colors.secondary-foreground;
+                        font-size: Typography.body-size; wrap: word-wrap; }
+                    FlexboxLayout {
+                        flex-wrap: wrap; cross-axis-alignment: center;
+                        spacing: Spacing.small;
+                        SettingsButton { label: root.ollama-checking ? @tr("Loading…") : @tr("Test connection / Refresh models"); enabled: !root.ollama-checking;
+                            clicked => { root.ollama-refresh-requested(); } }
+                        SettingsButton { label: @tr("Apply"); primary: true;
+                            clicked => { root.ollama-apply-requested(); } }
+                    }
+                    }
+                }
+
             }
         }
-        llm-provider-card := SettingsCard {
-            x: Metrics.settings-page-padding; y: provider-card.y + provider-card.height + Metrics.settings-card-gap;
-            width: provider-card.width; title: @tr("Large language model providers");
-            Text { height: 56px; text: @tr("Not available yet"); color: Colors.secondary-foreground; font-size: Typography.body-size; wrap: word-wrap; vertical-alignment: center; }
-        }
+
     }
 
     AppVerticalScrollBar {
@@ -1743,6 +1801,7 @@ export component SettingsWindow inherits Window {
     }
     }
     function toggle-language-menu() {
+        root.settings-menu-model-mode = false;
         root.close-preview-menu();
         if root.settings-menu-open && !root.settings-menu-provider-mode { root.close-settings-menu(); }
         else {
@@ -1752,10 +1811,20 @@ export component SettingsWindow inherits Window {
         }
     }
     function toggle-provider-menu() {
+        root.settings-menu-model-mode = false;
         root.close-preview-menu();
         if root.settings-menu-open && root.settings-menu-provider-mode { root.close-settings-menu(); }
         else {
             root.settings-menu-provider-mode = true; root.settings-menu-scroll-y = 0px;
+            root.settings-menu-open = true; root.settings-menu-dismiss-armed = true; root.focus-settings-menu();
+        }
+    }
+    function toggle-model-menu() {
+        root.close-preview-menu();
+        if root.settings-menu-open && root.settings-menu-model-mode { root.close-settings-menu(); }
+        else {
+            root.settings-menu-provider-mode = false; root.settings-menu-model-mode = true;
+            root.settings-menu-scroll-y = 0px;
             root.settings-menu-open = true; root.settings-menu-dismiss-armed = true; root.focus-settings-menu();
         }
     }
@@ -1783,9 +1852,9 @@ export component SettingsWindow inherits Window {
         x: round(root.settings-menu-anchor-x / 1px) * 1px;
         y: round((root.settings-menu-anchor-y + root.settings-menu-anchor-height + 2px) / 1px) * 1px;
         width: round(root.settings-menu-anchor-width / 1px) * 1px;
-        height: round(min((root.settings-menu-provider-mode ? 1 : root.language-labels.length) * 40px, max(0px, root.height - self.y - Metrics.settings-page-padding)) / 1px) * 1px;
-        options: root.settings-menu-provider-mode ? ["DeepL"] : root.language-labels;
-        selected-index: root.settings-menu-provider-mode ? 0 : root.draft-target-index;
+        height: round(min((root.settings-menu-model-mode ? root.ollama-models.length : root.settings-menu-provider-mode ? 2 : root.language-labels.length) * 40px, max(0px, root.height - self.y - Metrics.settings-page-padding)) / 1px) * 1px;
+        options: root.settings-menu-model-mode ? root.ollama-models : root.settings-menu-provider-mode ? ["DeepL", "Ollama"] : root.language-labels;
+        selected-index: root.settings-menu-model-mode ? root.ollama-model-index : root.settings-menu-provider-mode ? (root.draft-provider-id == "ollama" ? 1 : 0) : root.draft-target-index;
         scroll-y <=> root.settings-menu-scroll-y;
         selected(index) => { root.settings-menu-selected(index); root.close-settings-menu(); }
     }

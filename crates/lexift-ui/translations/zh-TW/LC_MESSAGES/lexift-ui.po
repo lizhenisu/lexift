@@ -828,3 +828,84 @@ msgstr "儲存標註截圖"
 
 msgid "Could not save screenshot. Try again."
 msgstr "無法儲存截圖，請重試。"
+
+msgid "Service address"
+msgstr "服務位址"
+
+msgid "Model"
+msgstr "模型"
+
+msgid "Select a model"
+msgstr "選擇模型"
+
+msgid "Models and the service are managed by Ollama."
+msgstr "模型與服務由 Ollama 管理。"
+
+msgid "Test connection / Refresh models"
+msgstr "測試連線／重新整理模型"
+
+msgid "Connected"
+msgstr "已連線"
+
+msgid "Connected; select a local model"
+msgstr "已連線，請選擇本機模型"
+
+msgid "Connected; no compatible local text generation models found"
+msgstr "已連線，找不到相容的本機文字生成模型"
+
+msgid "Saved Ollama model is unavailable; choose another model"
+msgstr "已儲存的 Ollama 模型無法使用，請選擇其他模型"
+
+msgid "Cloud Ollama models are not supported"
+msgstr "不支援 Ollama 雲端模型"
+
+msgid "Embedding-only models cannot translate text"
+msgstr "僅嵌入模型無法翻譯文字"
+
+msgid "Ollama model does not report text generation capability"
+msgstr "Ollama 模型未回報文字生成能力，請檢查相容性"
+
+msgid "Select an Ollama model in settings first"
+msgstr "請先在設定中選擇 Ollama 模型"
+
+msgid "Use an HTTP loopback address with a valid port and no path"
+msgstr "請使用含有效連接埠且無路徑的 HTTP 回環位址"
+
+msgid "Invalid Ollama model name"
+msgstr "Ollama 模型名稱無效"
+
+msgid "Ollama service discovery is unavailable"
+msgstr "Ollama 服務查詢無法使用"
+
+msgid "Ollama request timed out"
+msgstr "Ollama 請求逾時"
+
+msgid "Cannot connect to Ollama; start the local service"
+msgstr "無法連線 Ollama，請啟動本機服務"
+
+msgid "Invalid Ollama response"
+msgstr "Ollama 回應異常"
+
+msgid "Ollama model or API was not found"
+msgstr "找不到 Ollama 模型或介面"
+
+msgid "Ollama redirects are not allowed"
+msgstr "不允許 Ollama 請求重新導向"
+
+msgid "Ollama service rejected the request"
+msgstr "Ollama 服務拒絕了請求"
+
+msgid "Ollama translation was incomplete"
+msgstr "Ollama 譯文未完整產生"
+
+msgid "Ollama returned a tool call instead of a translation"
+msgstr "Ollama 回傳工具呼叫，未回傳譯文"
+
+msgid "Ollama returned an empty translation"
+msgstr "Ollama 回傳空白譯文"
+
+msgid "Ollama returned too many models"
+msgstr "Ollama 回傳的模型數量過多"
+
+msgid "Ollama client initialization failed"
+msgstr "Ollama 用戶端初始化失敗"

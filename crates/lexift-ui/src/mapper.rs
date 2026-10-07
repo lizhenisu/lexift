@@ -42,8 +42,6 @@ pub(crate) struct PopupUiState {
     pub speaking_translation: bool,
     pub feedback: String,
     pub feedback_error: bool,
-    pub height: f32,
-    pub source_height: f32,
 }
 
 pub(crate) fn view_state(state: &AppState) -> UiState {
@@ -113,12 +111,6 @@ fn popup_state(session: &PopupSessionState) -> PopupUiState {
         speaking_translation: session.speaking_translation,
         feedback: crate::i18n::error(&session.feedback_message),
         feedback_error: session.feedback_error,
-        height: popup_height(
-            &session.source_text,
-            &session.translated_text,
-            &session.error_message,
-        ),
-        source_height: source_height(&session.source_text),
     }
 }
 
@@ -202,49 +194,11 @@ pub(crate) fn language_label(language: &str) -> &'static str {
     }
 }
 
-fn popup_height(source: &str, translated: &str, error: &str) -> f32 {
-    popup_metrics_for_width(source, translated, error, 420.0).0
-}
-
-fn source_height(source: &str) -> f32 {
-    popup_metrics_for_width(source, "", "", 420.0).1
-}
-
-pub(crate) fn popup_metrics_for_width(
-    source: &str,
-    translated: &str,
-    error: &str,
-    popup_width: f32,
-) -> (f32, f32) {
-    let chars_per_line = ((popup_width.max(340.0) / 420.0 * 44.0).round() as usize).clamp(28, 96);
-    let source_lines = (source.chars().count().div_ceil(chars_per_line)).clamp(1, 5);
-    let result_chars = if error.is_empty() {
-        translated.chars().count()
-    } else {
-        error.chars().count()
-    };
-    let result_lines = result_chars.div_ceil(chars_per_line).clamp(1, 10);
-    let popup_height = (288 + source_lines * 18 + result_lines * 20).clamp(336, 556) as f32;
-    let source_height = (86 + source_lines.clamp(1, 4) * 14).min(140) as f32;
-    (popup_height, source_height)
-}
-
 #[cfg(test)]
 mod tests {
     use lexift_core::domain::{language::Language, settings::Settings};
 
     use super::*;
-
-    #[test]
-    fn narrower_manual_popup_uses_more_wrapped_lines_for_auto_growth() {
-        let source = "a".repeat(180);
-        let translated = "b".repeat(300);
-        let wide = popup_metrics_for_width(&source, &translated, "", 640.0);
-        let narrow = popup_metrics_for_width(&source, &translated, "", 340.0);
-
-        assert!(narrow.0 >= wide.0);
-        assert!(narrow.1 >= wide.1);
-    }
 
     #[test]
     fn maps_target_language_from_core_settings() {

@@ -114,6 +114,34 @@ export component TranslationPopup inherits Window {
     in property <int> source-index: 0;
     in property <string> detected-language: "";
     in property <bool> busy: false;
+    // Measure against the requested width, including while the native window is hidden.
+    out property <length> measured-source-height: source-measure.preferred-height;
+    out property <length> measured-result-height: result-measure.preferred-height;
+    out property <length> result-content-height: result-scroll.content-height;
+    out property <length> result-viewport-height: result-scroll.visible-height;
+    in-out property <length> result-scroll-y: 0px;
+    in-out property <int> cached-surface-width: 0;
+    in-out property <int> cached-surface-height: 0;
+    in-out property <float> cached-surface-scale: 0;
+    callback layout-requested();
+    changed measured-source-height => { root.layout-requested(); }
+    changed measured-result-height => { root.layout-requested(); }
+    changed popup-width => { root.layout-requested(); }
+    changed max-popup-height => { root.layout-requested(); }
+    source-measure := Text {
+        visible: false;
+        width: max(1px, root.popup-width - 68px);
+        text: root.source-text;
+        font-size: Typography.body-size;
+        wrap: word-wrap;
+    }
+    result-measure := Text {
+        visible: false;
+        width: max(1px, root.popup-width - 68px);
+        text: root.error-text != "" ? root.error-text : root.translated-text == "" ? @tr("Translation will appear here") : root.translated-text;
+        font-size: Typography.body-size;
+        wrap: word-wrap;
+    }
     in property <bool> pinned: false;
     in property <bool> speaking-source: false;
     in property <bool> speaking-translation: false;
@@ -376,10 +404,15 @@ export component TranslationPopup inherits Window {
                 result-scroll := ScrollView {
                     x: 14px; y: 32px; width: parent.width - 28px; height: parent.height - 74px;
                     content-width: self.visible-width;
+                    content-height: max(self.visible-height, result-text.preferred-height);
+                    content-y <=> root.result-scroll-y;
                     horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
                     vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-                    Text {
+                    result-text := Text {
+                        x: 0px; y: 0px;
                         width: result-scroll.visible-width;
+                        height: max(result-scroll.visible-height, self.preferred-height);
+                        vertical-alignment: TextVerticalAlignment.top;
                         text: root.error-text != "" ? root.error-text : root.translated-text == "" ? @tr("Translation will appear here") : root.translated-text;
                         color: root.error-text != "" ? Colors.error : root.translated-text == "" ? Colors.secondary-foreground : Colors.foreground;
                         font-size: Typography.body-size;

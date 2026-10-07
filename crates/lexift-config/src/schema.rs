@@ -25,6 +25,8 @@ pub(crate) struct SettingsFile {
     #[serde(default = "default_provider")]
     provider: String,
     #[serde(default)]
+    ollama: OllamaFile,
+    #[serde(default)]
     launch_at_login: bool,
     #[serde(default = "default_selection_toolbar")]
     selection_toolbar: bool,
@@ -41,6 +43,32 @@ pub(crate) struct HotkeyFile {
     shift: bool,
     meta: bool,
     key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct OllamaFile {
+    address: String,
+    #[serde(default)]
+    model: String,
+}
+impl Default for OllamaFile {
+    fn default() -> Self {
+        let c = lexift_core::domain::ollama::OllamaConfig::default();
+        Self {
+            address: c.address,
+            model: c.model,
+        }
+    }
+}
+impl OllamaFile {
+    fn into_config(self) -> lexift_core::Result<lexift_core::domain::ollama::OllamaConfig> {
+        let c = lexift_core::domain::ollama::OllamaConfig {
+            address: self.address,
+            model: self.model,
+        };
+        c.validate()?;
+        Ok(c)
+    }
 }
 
 impl Default for HotkeyFile {
@@ -97,6 +125,10 @@ impl ConfigFile {
                 hotkey: settings.hotkey.into(),
                 annotation_hotkey: settings.annotation_hotkey.into(),
                 provider: settings.provider.id().into(),
+                ollama: OllamaFile {
+                    address: settings.ollama.address.clone(),
+                    model: settings.ollama.model.clone(),
+                },
                 launch_at_login: settings.launch_at_login,
                 selection_toolbar: settings.selection_toolbar,
                 theme: match settings.theme {
@@ -139,6 +171,7 @@ impl ConfigFile {
             hotkey,
             annotation_hotkey,
             provider: self.settings.provider.parse()?,
+            ollama: self.settings.ollama.into_config()?,
             launch_at_login: self.settings.launch_at_login,
             selection_toolbar: self.settings.selection_toolbar,
             theme: match self.settings.theme.as_str() {

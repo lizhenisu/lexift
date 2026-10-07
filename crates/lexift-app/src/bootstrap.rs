@@ -205,6 +205,16 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         .with_tray_menu_cancelled(move || {
             if let Some(tray) = &tray_for_cancel { tray.menu_cancelled(); }
         })
+        .with_ollama_query({
+            let executor = services.runtime.handle().clone();
+            let service: Arc<dyn lexift_core::ports::ollama::OllamaServicePort> = Arc::new(lexift_translate::providers::ollama::OllamaService::new()?);
+            move |address, complete| {
+                let service = service.clone();
+                let task = executor.spawn(async move { complete(service.models(address).await); });
+                let abort = task.abort_handle();
+                Box::new(move || abort.abort())
+            }
+        })
         .with_popup_work_area(move |point| {
             screen_for_popup
                 .as_ref()?

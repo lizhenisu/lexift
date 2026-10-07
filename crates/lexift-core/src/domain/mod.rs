@@ -3,6 +3,7 @@ pub mod annotation_erase;
 pub mod geometry;
 pub mod language;
 pub mod message;
+pub mod ollama;
 pub mod runtime_config;
 pub mod selection;
 pub mod settings;

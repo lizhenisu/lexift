@@ -7,39 +7,55 @@ use lexift_core::{
 };
 use lexift_core::{
     Result,
-    domain::{runtime_config::ProviderConfig, translation::TranslateRequest},
+    domain::{ollama::OllamaConfig, runtime_config::ProviderConfig, translation::TranslateRequest},
     ports::translator::{TranslationFuture, TranslatorPort},
 };
 
+#[derive(Clone)]
 enum TranslatorBackend {
     #[cfg(not(feature = "m1-demo"))]
     CredentialBacked {
         store: Arc<dyn CredentialStore>,
         credential_reference: Arc<RwLock<Option<String>>>,
         factory: lexift_translate::DeepLTranslatorFactory,
+        ollama: lexift_translate::providers::ollama::OllamaService,
     },
     #[cfg(any(feature = "m1-demo", test))]
     Fixed(Arc<dyn TranslatorPort>),
 }
 
 pub(crate) struct TranslatorRuntime {
-    provider: RwLock<ProviderConfig>,
+    config: RwLock<(ProviderConfig, OllamaConfig)>,
     backend: TranslatorBackend,
 }
 
 impl TranslatorRuntime {
+    /// Freeze configuration before the task is scheduled, without reading credentials on the UI thread.
+    pub(crate) fn snapshot(&self) -> Arc<dyn TranslatorPort> {
+        Arc::new(Self {
+            config: RwLock::new(
+                self.config
+                    .read()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .clone(),
+            ),
+            backend: self.backend.clone(),
+        })
+    }
     #[cfg(not(feature = "m1-demo"))]
     pub(crate) fn credential_backed(
         provider: ProviderConfig,
+        ollama_config: OllamaConfig,
         store: Arc<dyn CredentialStore>,
         credential_reference: Arc<RwLock<Option<String>>>,
     ) -> Result<Self> {
         Ok(Self {
-            provider: RwLock::new(provider),
+            config: RwLock::new((provider, ollama_config)),
             backend: TranslatorBackend::CredentialBacked {
                 store,
                 credential_reference,
                 factory: lexift_translate::DeepLTranslatorFactory::new()?,
+                ollama: lexift_translate::providers::ollama::OllamaService::new()?,
             },
         })
     }
@@ -47,13 +63,15 @@ impl TranslatorRuntime {
     #[cfg(any(feature = "m1-demo", test))]
     pub(crate) fn fixed(provider: ProviderConfig, translator: Arc<dyn TranslatorPort>) -> Self {
         Self {
-            provider: RwLock::new(provider),
+            config: RwLock::new((provider, OllamaConfig::default())),
             backend: TranslatorBackend::Fixed(translator),
         }
     }
 
     pub(crate) fn validate(&self, provider: ProviderConfig) -> Result<()> {
         match (&self.backend, provider) {
+            #[cfg(not(feature = "m1-demo"))]
+            (TranslatorBackend::CredentialBacked { .. }, ProviderConfig::Ollama) => Ok(()),
             #[cfg(any(feature = "m1-demo", test))]
             (TranslatorBackend::Fixed(_), _) => Ok(()),
             #[cfg(not(feature = "m1-demo"))]
@@ -79,20 +97,28 @@ impl TranslatorRuntime {
     }
 
     pub(crate) fn commit(&self, provider: ProviderConfig) {
-        *self
-            .provider
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = provider;
+        self.config.write().unwrap_or_else(|p| p.into_inner()).0 = provider;
+    }
+
+    pub(crate) fn configure_ollama(&self, config: OllamaConfig) -> Result<()> {
+        config.validate()?;
+        self.config.write().unwrap_or_else(|p| p.into_inner()).1 = config;
+        Ok(())
     }
 }
 
 impl TranslatorPort for TranslatorRuntime {
     fn translate(&self, request: TranslateRequest) -> TranslationFuture<'_> {
-        let provider = *self
-            .provider
+        let (provider, ollama_config) = self
+            .config
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         let translator = match (&self.backend, provider) {
+            #[cfg(not(feature = "m1-demo"))]
+            (TranslatorBackend::CredentialBacked { ollama, .. }, ProviderConfig::Ollama) => {
+                Ok(ollama.translator(ollama_config))
+            }
             #[cfg(any(feature = "m1-demo", test))]
             (TranslatorBackend::Fixed(translator), _) => Ok(Arc::clone(translator)),
             #[cfg(not(feature = "m1-demo"))]
@@ -101,6 +127,7 @@ impl TranslatorPort for TranslatorRuntime {
                     store,
                     credential_reference,
                     factory,
+                    ..
                 },
                 ProviderConfig::DeepL,
             ) => credential_reference
@@ -146,6 +173,64 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn ollama_needs_no_key_and_translation_keeps_its_original_configuration() {
+        let runtime = TranslatorRuntime::credential_backed(
+            ProviderConfig::Ollama,
+            OllamaConfig::default(),
+            Arc::new(FakeCredentialStore::default()),
+            Arc::new(RwLock::new(None)),
+        )
+        .unwrap();
+        runtime.validate(ProviderConfig::Ollama).unwrap();
+        let request = TranslateRequest {
+            text: "test".into(),
+            source_language: None,
+            target_language: lexift_core::domain::language::Language("en-US".into()),
+        };
+        let frozen = runtime.translate(request.clone());
+        let scheduled = runtime.snapshot();
+        runtime
+            .configure_ollama(OllamaConfig {
+                model: "now configured".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        runtime.commit(ProviderConfig::DeepL);
+        let executor = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        assert_eq!(
+            executor.block_on(frozen).unwrap_err().to_string(),
+            "Select an Ollama model in settings first"
+        );
+        assert_eq!(
+            executor
+                .block_on(scheduled.translate(request.clone()))
+                .unwrap_err()
+                .to_string(),
+            "Select an Ollama model in settings first"
+        );
+        assert_eq!(
+            executor
+                .block_on(runtime.translate(request))
+                .unwrap_err()
+                .to_string(),
+            "Translation provider is not configured"
+        );
+        assert_eq!(runtime.config.read().unwrap().1.model, "now configured");
+        assert!(
+            runtime
+                .configure_ollama(OllamaConfig {
+                    address: "http://remote:11434".into(),
+                    ..Default::default()
+                })
+                .is_err()
+        );
+        assert_eq!(runtime.config.read().unwrap().1.model, "now configured");
+    }
+
     #[derive(Default)]
     struct FakeCredentialStore(Mutex<HashMap<String, String>>);
 
@@ -169,9 +254,13 @@ mod tests {
     fn provider_reload_requires_the_referenced_credential() {
         let store = Arc::new(FakeCredentialStore::default());
         let reference = Arc::new(RwLock::new(Some("deepl-primary".into())));
-        let runtime =
-            TranslatorRuntime::credential_backed(ProviderConfig::DeepL, store.clone(), reference)
-                .unwrap();
+        let runtime = TranslatorRuntime::credential_backed(
+            ProviderConfig::DeepL,
+            OllamaConfig::default(),
+            store.clone(),
+            reference,
+        )
+        .unwrap();
 
         assert_eq!(
             runtime

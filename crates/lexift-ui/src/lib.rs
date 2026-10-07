@@ -11,8 +11,12 @@ mod binding;
 mod bridge;
 mod i18n;
 mod mapper;
+mod ollama_settings;
+pub use ollama_settings::{OllamaQueryCancellation, OllamaQueryCompletion};
 mod placement;
 mod theme;
+#[cfg(test)]
+mod translation_layout_tests;
 mod tray_menu;
 
 slint::include_modules!();

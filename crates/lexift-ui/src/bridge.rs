@@ -137,6 +137,7 @@ pub enum PassiveWindowPreparation {
 
 #[derive(Clone)]
 pub struct WindowLifecycleCallbacks {
+    ollama_query: Option<crate::ollama_settings::OllamaQuery>,
     pub(crate) complete_passive_window_show: CompletePassiveWindowShow,
     complete_toolbar_show: CompletePassiveWindowShow,
     toolbar_target_current: Rc<dyn Fn(lexift_core::domain::selection::SelectionTarget) -> bool>,
@@ -174,6 +175,14 @@ pub struct WindowLifecycleCallbacks {
 }
 
 impl WindowLifecycleCallbacks {
+    pub fn with_ollama_query(
+        mut self,
+        query: impl Fn(String, crate::OllamaQueryCompletion) -> crate::OllamaQueryCancellation + 'static,
+    ) -> Self {
+        self.ollama_query = Some(Rc::new(query));
+        self
+    }
+
     pub fn new(
         complete_passive_window_show: impl Fn(&slint::Window, PopupPointerSink) -> bool + 'static,
         activate_user_requested_window: fn(&slint::Window) -> bool,
@@ -184,6 +193,7 @@ impl WindowLifecycleCallbacks {
         trim_process_working_set: fn() -> bool,
     ) -> Self {
         Self {
+            ollama_query: None,
             complete_passive_window_show: Rc::new(complete_passive_window_show),
             complete_toolbar_show: Rc::new(|_, _| true),
             toolbar_target_current: Rc::new(|_| false),
@@ -758,6 +768,7 @@ impl PopupRegistry {
         }
         let window = TranslationPopup::new().ok()?;
         crate::theme::apply(&window);
+        wire_popup_layout(&window, session_id);
         let weak = window.as_weak();
         let configure = self.configure_resize_background.clone();
         window.on_theme_background_changed(move || {
@@ -1049,13 +1060,15 @@ impl PopupRegistry {
         for (id, window) in &self.windows {
             if let Some(state) = self.states.get(id) {
                 let geometry_locked = self.active_resizes.contains_key(id)
-                    || self.pending_window_size_syncs.contains(id);
+                    || self.pending_window_size_syncs.contains(id)
+                    || self.pending_shows.contains_key(id);
                 apply_popup_preserving_draft(
                     window,
                     state,
                     previous_states.get(id),
                     self.manual_sizes.get(id).copied(),
                     geometry_locked,
+                    self.work_areas.get(id).copied(),
                 );
                 if !geometry_locked && let Some(work_area) = self.work_areas.get(id) {
                     apply_popup_resize_bounds(window, *work_area);
@@ -1109,13 +1122,9 @@ impl PopupRegistry {
         }
         reset_popup_transient_ui(&window);
         if let Some(state) = self.states.get(&session_id) {
-            apply_popup_preserving_draft(
-                &window,
-                state,
-                None,
-                self.manual_sizes.get(&session_id).copied(),
-                false,
-            );
+            // A hidden HWND must establish its actual DPI before long content can
+            // request a large native surface. Finish sizing in finish_show().
+            binding::apply_popup_content(&window, state);
             // A new hotkey capture replaces any unsubmitted text in a reused popup.
             window.set_source_text(state.source.clone().into());
         } else {
@@ -1204,6 +1213,16 @@ impl PopupRegistry {
         if let (Some(anchor), Some(work_area)) = (anchor, work_area) {
             self.work_areas.insert(session_id, work_area);
             apply_popup_resize_bounds(&window, work_area);
+            if let Some(state) = self.states.get(&session_id) {
+                apply_popup_preserving_draft(
+                    &window,
+                    state,
+                    Some(state),
+                    self.manual_sizes.get(&session_id).copied(),
+                    false,
+                    Some(work_area),
+                );
+            }
             let size = window.window().size();
             let placement = placement::place_popup(
                 anchor,
@@ -1349,13 +1368,8 @@ impl PopupRegistry {
             min_source_height,
             window.get_max_popup_height(),
         ));
-        if let Some(state) = self.states.get(&session_id) {
-            let (auto_height, auto_source_height) = mapper::popup_metrics_for_width(
-                &state.source,
-                &state.translated,
-                &state.error,
-                width,
-            );
+        if self.states.contains_key(&session_id) {
+            let (auto_height, auto_source_height) = measured_popup_metrics(window);
             self.manual_sizes.insert(
                 session_id,
                 ManualPopupSize {
@@ -1411,6 +1425,7 @@ impl PopupRegistry {
         if self.active_resizes.contains_key(&session_id) {
             return;
         }
+        self.refresh_popup_work_area(session_id, window);
 
         let physical_size = window.window().size();
         if !has_valid_native_client_size(physical_size.width as f32, physical_size.height as f32) {
@@ -1418,17 +1433,36 @@ impl PopupRegistry {
         }
         let scale = window.window().scale_factor().max(f32::EPSILON);
         let width = physical_size.width as f32 / scale;
-        let height = physical_size.height as f32 / scale;
+        let height = (physical_size.height as f32 / scale).min(window.get_max_popup_height());
+        // A delayed native notification for our own resize must not turn an automatic
+        // popup into a manually sized one, or a later short translation cannot shrink it.
+        if (width - window.get_popup_width()).abs() < 1.
+            && (height - window.get_popup_height().min(window.get_max_popup_height())).abs() < 1.
+        {
+            if window.get_popup_height() > window.get_max_popup_height()
+                && let Some(state) = self.states.get(&session_id)
+            {
+                apply_popup_preserving_draft(
+                    window,
+                    state,
+                    Some(state),
+                    self.manual_sizes.get(&session_id).copied(),
+                    false,
+                    self.work_areas.get(&session_id).copied(),
+                );
+            }
+            if let Some(area) = self.work_areas.get(&session_id) {
+                clamp_popup_to_work_area(window, *area);
+            }
+            invalidate_popup_surface_cache(window);
+            return;
+        }
         let minimum_source_height = window.get_resize_min_source_height();
         let reserved_height = window.get_resize_layout_reserve_height();
         let (baseline_source_height, baseline_remainder_height) =
-            if let Some(state) = self.states.get(&session_id) {
-                let (auto_height, auto_source_height) = mapper::popup_metrics_for_width(
-                    &state.source,
-                    &state.translated,
-                    &state.error,
-                    width,
-                );
+            if self.states.contains_key(&session_id) {
+                window.set_popup_width(width);
+                let (auto_height, auto_source_height) = measured_popup_metrics(window);
                 (auto_source_height, auto_height - auto_source_height)
             } else if let Some(previous) = self.manual_sizes.get(&session_id) {
                 (
@@ -1461,6 +1495,10 @@ impl PopupRegistry {
         ));
 
         self.manual_sizes.insert(session_id, manual);
+        if let Some(area) = self.work_areas.get(&session_id) {
+            clamp_popup_to_work_area(window, *area);
+        }
+        invalidate_popup_surface_cache(window);
     }
 
     fn cancel_resize(&mut self, session_id: u64, window: &TranslationPopup) {
@@ -1581,41 +1619,139 @@ fn schedule_language_menu_show_retry(generation: u64, work_area: Rect, delay: Du
     });
 }
 
+pub(crate) fn measured_popup_metrics(popup: &TranslationPopup) -> (f32, f32) {
+    let source = (popup.get_measured_source_height().ceil() + 58.).clamp(86., 140.);
+    // The reserve includes the result minimum; replace that minimum with the measured text card.
+    let reserve = popup.get_resize_layout_reserve_height();
+    let result = (popup.get_measured_result_height().ceil() + 74.).max(104.);
+    let height = (reserve - 104. + source + result).max(336.);
+    (height.min(popup.get_max_popup_height()), source)
+}
+
+/// Drop geometry-dependent graphics caches once the native surface/DPI changes.
+/// Merely marking damage leaves stale opaque bounds in reused software buffers.
+pub(crate) fn invalidate_popup_surface_cache(popup: &TranslationPopup) {
+    let size = popup.window().size();
+    let scale = popup.window().scale_factor();
+    if size.width == 0
+        || size.height == 0
+        || (popup.get_cached_surface_width() == size.width as i32
+            && popup.get_cached_surface_height() == size.height as i32
+            && popup.get_cached_surface_scale() == scale)
+    {
+        return;
+    }
+    let adapter = i_slint_core::window::WindowInner::from_pub(popup.window()).window_adapter();
+    let component = i_slint_core::window::WindowInner::from_pub(popup.window()).component();
+    let root = i_slint_core::item_tree::ItemRc::new_root(component.clone());
+    let mut items = vec![root.clone()];
+    root.visit_descendants(|item| {
+        items.push(item.clone());
+        std::ops::ControlFlow::<()>::Continue(())
+    });
+    if let Err(error) = adapter.renderer().free_graphics_resources(
+        i_slint_core::item_tree::ItemTreeRc::borrow(&component),
+        &mut items.iter().map(|item| item.borrow()),
+    ) {
+        tracing::debug!(%error, "translation surface graphics cache could not be released");
+    }
+    popup.set_cached_surface_width(size.width as i32);
+    popup.set_cached_surface_height(size.height as i32);
+    popup.set_cached_surface_scale(scale);
+    repair_window_paint(popup.window());
+}
+
+/// The component owns the timer; callbacks read current state, never a delayed text snapshot.
+fn wire_popup_layout(popup: &TranslationPopup, session_id: u64) {
+    let timer = Rc::new(slint::Timer::default());
+    let weak = popup.as_weak();
+    popup.on_layout_requested(move || {
+        let weak = weak.clone();
+        timer.start(slint::TimerMode::SingleShot, Duration::ZERO, move || {
+            let Some(popup) = weak.upgrade() else {
+                return;
+            };
+            POPUP_REGISTRY.with(|registry| {
+                let Ok(mut registry) = registry.try_borrow_mut() else {
+                    return;
+                };
+                let Some(registry) = registry.as_mut() else {
+                    return;
+                };
+                if registry.active_resizes.contains_key(&session_id)
+                    || registry.pending_window_size_syncs.contains(&session_id)
+                    || registry.pending_shows.contains_key(&session_id)
+                {
+                    return;
+                }
+                let Some(state) = registry.states.get(&session_id).cloned() else {
+                    return;
+                };
+                registry.refresh_popup_work_area(session_id, &popup);
+                apply_popup_preserving_draft(
+                    &popup,
+                    &state,
+                    Some(&state),
+                    registry.manual_sizes.get(&session_id).copied(),
+                    false,
+                    registry.work_areas.get(&session_id).copied(),
+                );
+                if let Some(area) = registry.work_areas.get(&session_id) {
+                    clamp_popup_to_work_area(&popup, *area);
+                }
+                invalidate_popup_surface_cache(&popup);
+            });
+        });
+    });
+}
+
 fn apply_popup_preserving_draft(
     popup: &TranslationPopup,
     state: &mapper::PopupUiState,
     previous: Option<&mapper::PopupUiState>,
     manual_size: Option<ManualPopupSize>,
     geometry_locked: bool,
+    work_area: Option<Rect>,
 ) {
     let draft = popup.get_source_text();
+    let result_changed = popup.get_translated_text().as_str() != state.translated
+        || popup.get_error_text().as_str() != state.error;
     let preserve_draft = previous.is_some_and(|previous| {
         previous.source == state.source && draft.as_str() != previous.source
     });
+    // Avoid invalidating measured height twice when the user has an unsubmitted draft.
+    let mut effective_state;
+    let state = if preserve_draft {
+        effective_state = state.clone();
+        effective_state.source = draft.to_string();
+        &effective_state
+    } else {
+        state
+    };
     if geometry_locked {
         // Core snapshots may arrive before Winit has consumed a native resize.
         // Refresh content, but leave geometry untouched until it is reconciled.
         binding::apply_popup_content(popup, state);
     } else if let Some(manual) = manual_size {
         binding::apply_popup_content(popup, state);
-        let (auto_height, auto_source_height) = mapper::popup_metrics_for_width(
-            &state.source,
-            &state.translated,
-            &state.error,
-            manual.width,
-        );
+        popup.set_popup_width(manual.width);
+        let (auto_height, auto_source_height) = measured_popup_metrics(popup);
         let (width, height, source_height) =
             effective_manual_layout(manual, auto_height, auto_source_height);
         popup.set_popup_width(width);
         popup.set_source_card_height(source_height);
-        popup.set_popup_height(height);
+        popup.set_popup_height(height.min(popup.get_max_popup_height()));
         popup.set_resize_min_height(popup_min_window_height(
             popup.get_resize_layout_reserve_height(),
             popup.get_resize_min_source_height(),
             popup.get_max_popup_height(),
         ));
     } else {
-        binding::apply_popup(popup, state);
+        binding::apply_popup_content(popup, state);
+        popup.set_popup_width(420.);
+        let (height, source) = measured_popup_metrics(popup);
+        popup.set_source_card_height(source);
+        popup.set_popup_height(height);
     }
     if !geometry_locked {
         let min_source_height = popup.get_resize_min_source_height();
@@ -1634,14 +1770,39 @@ fn apply_popup_preserving_draft(
             popup.get_max_popup_height(),
         ));
     }
-    if preserve_draft {
-        popup.set_source_text(draft);
-    }
+    let scroll = if result_changed {
+        0.
+    } else {
+        popup.get_result_scroll_y()
+    };
+    popup.set_result_scroll_y(scroll.clamp(
+        -(popup.get_result_content_height() - popup.get_result_viewport_height()).max(0.),
+        0.,
+    ));
     if !geometry_locked {
-        popup.window().set_size(slint::LogicalSize::new(
-            popup.get_popup_width(),
-            popup.get_popup_height(),
-        ));
+        let size = popup
+            .window()
+            .size()
+            .to_logical(popup.window().scale_factor());
+        if (size.width - popup.get_popup_width()).abs() >= 0.5
+            || (size.height - popup.get_popup_height()).abs() >= 0.5
+        {
+            if let Some(area) = work_area {
+                let scale = popup.window().scale_factor();
+                clamp_popup_position(
+                    popup,
+                    area,
+                    slint::PhysicalSize::new(
+                        (popup.get_popup_width() * scale).ceil() as u32,
+                        (popup.get_popup_height() * scale).ceil() as u32,
+                    ),
+                );
+            }
+            popup.window().set_size(slint::LogicalSize::new(
+                popup.get_popup_width(),
+                popup.get_popup_height(),
+            ));
+        }
     }
 }
 
@@ -1870,8 +2031,11 @@ fn schedule_popup_dismissal(session_id: u64) {
 }
 
 fn clamp_popup_to_work_area(popup: &TranslationPopup, work_area: Rect) {
+    clamp_popup_position(popup, work_area, popup.window().size());
+}
+
+fn clamp_popup_position(popup: &TranslationPopup, work_area: Rect, size: slint::PhysicalSize) {
     let position = popup.window().position();
-    let size = popup.window().size();
     let min_x = work_area.left;
     let min_y = work_area.top;
     let max_x = (work_area.right - size.width as i32).max(min_x);
@@ -1911,6 +2075,7 @@ pub struct Ui {
 }
 
 struct AppWindowRegistry {
+    ollama_query: Option<crate::ollama_settings::OllamaQuery>,
     main: Option<AppWindow>,
     settings: Option<SettingsWindow>,
     configure_resize_background: ConfigureResizeBackground,
@@ -2091,6 +2256,9 @@ fn ensure_settings_window(
             Arc::clone(&registry.credential_generation),
             Arc::clone(&registry.toast_records),
         );
+    }
+    if let Some(handler) = registry.handler.clone() {
+        crate::ollama_settings::wire(&settings, registry.ollama_query.clone(), handler);
     }
     registry.settings = Some(settings.clone_strong());
     Ok(settings)
@@ -2295,8 +2463,14 @@ fn wire_settings_callbacks(
     let settings_weak = settings.as_weak();
     settings.on_settings_menu_selected(move |index| {
         if let Some(settings) = settings_weak.upgrade() {
-            if settings.get_settings_menu_provider_mode() {
-                let provider = ProviderConfig::DeepL;
+            if settings.get_settings_menu_model_mode() {
+                crate::ollama_settings::select_model(&settings, index);
+            } else if settings.get_settings_menu_provider_mode() {
+                let provider = if index == 1 {
+                    ProviderConfig::Ollama
+                } else {
+                    ProviderConfig::DeepL
+                };
                 if settings.get_draft_provider_id().as_str() != provider.id() {
                     settings.set_draft_provider_id(provider.id().into());
                     handler(AppEvent::SettingsChangeRequested {
@@ -2351,6 +2525,7 @@ impl Ui {
         let background_mode = Rc::new(Cell::new(false));
         APP_WINDOW_REGISTRY.with(|registry| {
             *registry.borrow_mut() = Some(AppWindowRegistry {
+                ollama_query: window_lifecycle.ollama_query.clone(),
                 main: None,
                 settings: None,
                 configure_resize_background: Rc::clone(
@@ -2964,7 +3139,9 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
         SettingsFeedback::SettingsSaved(SettingsField::AnnotationHotkey) => {
             ("Shortcut saved", false)
         }
-        SettingsFeedback::SettingsSaved(SettingsField::Provider) => ("Provider saved", false),
+        SettingsFeedback::SettingsSaved(SettingsField::Provider | SettingsField::Ollama) => {
+            ("Provider saved", false)
+        }
         SettingsFeedback::SettingsSaved(SettingsField::LaunchAtLogin) => {
             ("Startup preference saved", false)
         }
@@ -2980,7 +3157,7 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
         SettingsFeedback::SettingsSaveFailed(SettingsField::AnnotationHotkey) => {
             ("Shortcut wasn't saved", true)
         }
-        SettingsFeedback::SettingsSaveFailed(SettingsField::Provider) => {
+        SettingsFeedback::SettingsSaveFailed(SettingsField::Provider | SettingsField::Ollama) => {
             ("Provider wasn't saved", true)
         }
         SettingsFeedback::SettingsSaveFailed(SettingsField::LaunchAtLogin) => {
@@ -3158,6 +3335,8 @@ impl UiHandle {
                     settings.annotation_hotkey.to_string().into(),
                 );
                 window.set_draft_provider_id(settings.provider.id().into());
+                window.set_ollama_address(settings.ollama.address.into());
+                window.set_ollama_model(settings.ollama.model.into());
                 window.set_launch_at_login(settings.launch_at_login);
                 window.set_selection_toolbar(settings.selection_toolbar);
                 window.set_hotkey_capturing(false);

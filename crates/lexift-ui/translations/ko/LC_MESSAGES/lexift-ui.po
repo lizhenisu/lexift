@@ -828,3 +828,84 @@ msgstr "주석 스크린샷 저장"
 
 msgid "Could not save screenshot. Try again."
 msgstr "스크린샷을 저장할 수 없습니다. 다시 시도하세요."
+
+msgid "Service address"
+msgstr "서비스 주소"
+
+msgid "Model"
+msgstr "모델"
+
+msgid "Select a model"
+msgstr "모델 선택"
+
+msgid "Models and the service are managed by Ollama."
+msgstr "모델과 서비스는 Ollama에서 관리합니다."
+
+msgid "Test connection / Refresh models"
+msgstr "연결 테스트 / 모델 새로 고침"
+
+msgid "Connected"
+msgstr "연결됨"
+
+msgid "Connected; select a local model"
+msgstr "연결되었습니다. 로컬 모델을 선택하세요"
+
+msgid "Connected; no compatible local text generation models found"
+msgstr "연결되었으나 호환되는 로컬 텍스트 생성 모델이 없습니다"
+
+msgid "Saved Ollama model is unavailable; choose another model"
+msgstr "저장된 Ollama 모델을 사용할 수 없습니다. 다른 모델을 선택하세요"
+
+msgid "Cloud Ollama models are not supported"
+msgstr "Ollama 클라우드 모델은 지원하지 않습니다"
+
+msgid "Embedding-only models cannot translate text"
+msgstr "임베딩 전용 모델은 텍스트를 번역할 수 없습니다"
+
+msgid "Ollama model does not report text generation capability"
+msgstr "Ollama 모델의 텍스트 생성 기능을 확인할 수 없습니다"
+
+msgid "Select an Ollama model in settings first"
+msgstr "먼저 설정에서 Ollama 모델을 선택하세요"
+
+msgid "Use an HTTP loopback address with a valid port and no path"
+msgstr "유효한 포트가 있고 경로가 없는 HTTP 루프백 주소를 사용하세요"
+
+msgid "Invalid Ollama model name"
+msgstr "Ollama 모델 이름이 잘못되었습니다"
+
+msgid "Ollama service discovery is unavailable"
+msgstr "Ollama 서비스 검색을 사용할 수 없습니다"
+
+msgid "Ollama request timed out"
+msgstr "Ollama 요청 시간이 초과되었습니다"
+
+msgid "Cannot connect to Ollama; start the local service"
+msgstr "Ollama에 연결할 수 없습니다. 로컬 서비스를 시작하세요"
+
+msgid "Invalid Ollama response"
+msgstr "Ollama 응답이 잘못되었습니다"
+
+msgid "Ollama model or API was not found"
+msgstr "Ollama 모델 또는 API를 찾을 수 없습니다"
+
+msgid "Ollama redirects are not allowed"
+msgstr "Ollama 리디렉션은 허용되지 않습니다"
+
+msgid "Ollama service rejected the request"
+msgstr "Ollama 서비스가 요청을 거부했습니다"
+
+msgid "Ollama translation was incomplete"
+msgstr "Ollama 번역이 완료되지 않았습니다"
+
+msgid "Ollama returned a tool call instead of a translation"
+msgstr "Ollama가 번역 대신 도구 호출을 반환했습니다"
+
+msgid "Ollama returned an empty translation"
+msgstr "Ollama가 빈 번역을 반환했습니다"
+
+msgid "Ollama returned too many models"
+msgstr "Ollama가 너무 많은 모델을 반환했습니다"
+
+msgid "Ollama client initialization failed"
+msgstr "Ollama 클라이언트 초기화에 실패했습니다"

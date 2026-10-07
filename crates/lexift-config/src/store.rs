@@ -136,11 +136,11 @@ mod tests {
     }
 
     #[test]
-    fn save_creates_parent_and_v5_file() {
+    fn save_creates_parent_and_v6_file() {
         let (_directory, store) = fixture();
         store.save(&settings("ja")).unwrap();
         let contents = fs::read_to_string(store.path()).unwrap();
-        assert!(contents.contains("schema_version = 5"));
+        assert!(contents.contains("schema_version = 6"));
         assert!(contents.contains("target_language = \"ja\""));
         assert!(contents.contains("provider = \"deepl\""));
         assert!(contents.contains("key = \"X\""));
@@ -166,6 +166,37 @@ mod tests {
         };
         store.save(&settings).unwrap();
         assert_eq!(store.load().unwrap(), settings);
+    }
+
+    #[test]
+    fn ollama_round_trips_without_credentials_and_v5_keeps_deepl() {
+        use lexift_core::domain::{ollama::OllamaConfig, runtime_config::ProviderConfig};
+        let (_directory, store) = fixture();
+        let configured = Settings {
+            provider: ProviderConfig::Ollama,
+            ollama: OllamaConfig {
+                address: "http://[::1]:11434".into(),
+                model: "local:small".into(),
+            },
+            ..Settings::default()
+        };
+        store.save(&configured).unwrap();
+        assert_eq!(store.load().unwrap(), configured);
+        assert_eq!(store.load().unwrap().deepl_credential_id, None);
+        fs::write(
+            store.path(),
+            "schema_version = 5\n[settings]\ntarget_language = \"zh-CN\"\nprovider = \"deepl\"\n",
+        )
+        .unwrap();
+        let legacy = store.load().unwrap();
+        assert_eq!(legacy.provider, ProviderConfig::DeepL);
+        assert_eq!(legacy.ollama, OllamaConfig::default());
+        store.save(&legacy).unwrap();
+        assert!(
+            fs::read_to_string(store.path())
+                .unwrap()
+                .contains("schema_version = 6")
+        );
     }
 
     #[test]
@@ -240,7 +271,7 @@ mod tests {
         };
         store.save(&settings).unwrap();
         let contents = fs::read_to_string(store.path()).unwrap();
-        assert!(contents.contains("schema_version = 5"));
+        assert!(contents.contains("schema_version = 6"));
         assert!(contents.contains("[credentials]"));
         assert!(contents.contains("deepl = \"deepl-primary\""));
         assert!(!contents.contains("api_key"));

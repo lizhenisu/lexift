@@ -47,6 +47,7 @@ impl RuntimeManager {
     ) -> Result<Self> {
         let translator = Arc::new(TranslatorRuntime::credential_backed(
             config.provider,
+            config.ollama.clone(),
             store,
             credential_reference,
         )?);
@@ -86,6 +87,10 @@ impl RuntimeManager {
         self.translator.clone()
     }
 
+    pub(crate) fn translation_snapshot(&self) -> Arc<dyn TranslatorPort> {
+        self.translator.snapshot()
+    }
+
     pub(crate) fn start_hotkey(
         &self,
         handler: lexift_core::ports::hotkey::HotkeyHandler,
@@ -117,6 +122,7 @@ impl RuntimeManager {
             SettingsField::AnnotationHotkey => {
                 self.hotkey.apply_annotation(config.annotation_hotkey)?
             }
+            SettingsField::Ollama => self.translator.configure_ollama(config.ollama.clone())?,
             SettingsField::Provider => {
                 self.translator.validate(config.provider)?;
                 self.translator.commit(config.provider);
@@ -139,6 +145,7 @@ impl RuntimeManager {
             SettingsField::Hotkey => current.hotkey = config.hotkey,
             SettingsField::AnnotationHotkey => current.annotation_hotkey = config.annotation_hotkey,
             SettingsField::Provider => current.provider = config.provider,
+            SettingsField::Ollama => current.ollama = config.ollama,
             SettingsField::LaunchAtLogin => {
                 current.launch_at_login = config.launch_at_login;
             }
