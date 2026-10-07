@@ -909,3 +909,378 @@ msgstr "Ollama 返回的模型数量过多"
 
 msgid "Ollama client initialization failed"
 msgstr "Ollama 客户端初始化失败"
+
+msgid "Translation provider and model"
+msgstr "翻译服务与模型"
+
+msgid "Model parameters"
+msgstr "模型参数"
+
+msgid "Thinking effort"
+msgstr "思考强度"
+
+msgid "Model temperature"
+msgstr "模型温度"
+
+msgid "Custom"
+msgstr "自定义"
+
+msgid "Model default"
+msgstr "模型默认"
+
+msgid "Translation prompt"
+msgstr "翻译提示词"
+
+msgid "Use {{target_language}} for the target language."
+msgstr "使用 {{target_language}} 表示目标语言。"
+
+msgid "Restore default prompt"
+msgstr "恢复默认提示词"
+
+msgid "API key configured"
+msgstr "已配置 API 密钥"
+
+msgid "API key not configured"
+msgstr "未配置 API 密钥"
+
+msgid "Remove key"
+msgstr "移除密钥"
+
+msgid "Model downloads and service lifecycle are managed outside Lexift."
+msgstr "模型下载和服务启停由外部管理。"
+
+msgid "Off"
+msgstr "关闭"
+
+msgid "On"
+msgstr "开启"
+
+msgid "Low"
+msgstr "低"
+
+msgid "High"
+msgstr "高"
+
+msgid "Maximum"
+msgstr "最高"
+
+msgid "Thinking capability is unavailable or unknown"
+msgstr "思考能力不可用或未知"
+
+msgid "This model requires thinking"
+msgstr "此模型要求开启思考"
+
+msgid "Sampling controls depend on the selected thinking mode"
+msgstr "采样参数受当前思考模式限制"
+
+msgid "Model service discovery is unavailable"
+msgstr "模型服务发现不可用"
+
+msgid "Connected; no compatible text generation models found"
+msgstr "连接成功，未找到兼容的文本生成模型"
+
+msgid "Saved model is unavailable; choose another model"
+msgstr "已保存模型不可用，请选择其他模型"
+
+msgid "Translation prompt must contain {target_language}"
+msgstr "翻译提示词必须包含 {target_language}"
+
+msgid "Use an HTTP or HTTPS service address without a path"
+msgstr "请输入不含路径的 HTTP 或 HTTPS 服务地址"
+
+msgid "Unknown model provider"
+msgstr "未知模型服务商"
+
+msgid "Use the official DeepSeek service address"
+msgstr "请使用 DeepSeek 官方服务地址"
+
+msgid "Invalid model parameters"
+msgstr "模型参数无效"
+
+msgid "Model client initialization failed"
+msgstr "模型客户端初始化失败"
+
+msgid "DeepSeek API key is not configured"
+msgstr "尚未配置 DeepSeek API 密钥"
+
+msgid "Model request timed out"
+msgstr "模型请求超时"
+
+msgid "Cannot connect to model service"
+msgstr "无法连接模型服务"
+
+msgid "Invalid model service response"
+msgstr "模型服务响应无效"
+
+msgid "Model service authentication failed"
+msgstr "模型服务身份验证失败"
+
+msgid "Model or API not found; check service version"
+msgstr "模型或接口不存在，请检查服务版本"
+
+msgid "Model service rate limit exceeded"
+msgstr "模型服务请求频率超限"
+
+msgid "Model service redirects are not allowed"
+msgstr "不允许模型服务重定向"
+
+msgid "Model service rejected the request"
+msgstr "模型服务拒绝了请求"
+
+msgid "Invalid model list"
+msgstr "模型列表无效"
+
+msgid "Model service returned too many models"
+msgstr "模型服务返回的模型数量过多"
+
+msgid "Invalid model identifier"
+msgstr "模型标识无效"
+
+msgid "Model does not report text generation capability"
+msgstr "模型未声明文本生成能力"
+
+msgid "Model discovery timed out"
+msgstr "模型发现超时"
+
+msgid "Select a model in translation settings first"
+msgstr "请先在翻译设置中选择模型"
+
+msgid "Selected model is unavailable"
+msgstr "所选模型不可用"
+
+msgid "Model does not support the selected thinking setting"
+msgstr "模型不支持所选思考设置"
+
+msgid "Model thinking capability is unknown"
+msgstr "模型思考能力未知"
+
+msgid "Invalid sampling parameters"
+msgstr "采样参数无效"
+
+msgid "Sampling parameters are incompatible with the thinking mode"
+msgstr "采样参数与思考模式不兼容"
+
+msgid "Model returned an incomplete translation"
+msgstr "模型返回的译文不完整"
+
+msgid "Model returned an empty translation"
+msgstr "模型返回了空译文"
+
+msgid "API key"
+msgstr "API 密钥"
+
+msgid "Advanced request settings"
+msgstr "高级请求设置"
+
+msgid "All models"
+msgstr "全部模型"
+
+msgid "Apply connection settings before saving headers"
+msgstr "请先应用连接设置，再保存请求头"
+
+msgid "Apply connection settings before syncing models"
+msgstr "请先应用连接设置，再同步模型"
+
+msgid "Authentication"
+msgstr "身份验证"
+
+msgid "Automatic API key"
+msgstr "自动 API 密钥认证"
+
+msgid "Connection changed; sync models to confirm"
+msgstr "连接已变更，请同步模型重新确认"
+
+msgid "Credential source: environment; manage it outside Lexift"
+msgstr "凭证来源：环境变量，请在 Lexift 外管理"
+
+msgid "Credential source: system storage"
+msgstr "凭证来源：系统安全存储"
+
+msgid "Custom request headers"
+msgstr "自定义请求头"
+
+msgid "Header name"
+msgstr "请求头名称"
+
+msgid "Header value"
+msgstr "请求头值"
+
+msgid "Header values are stored securely when you apply. Cancel discards changes."
+msgstr "应用时将请求头值存入系统安全存储，取消会放弃修改。"
+
+msgid "Invalid API base URL"
+msgstr "API 基础地址无效"
+
+msgid "Invalid request header value"
+msgstr "请求头值无效"
+
+msgid "Manage models"
+msgstr "管理模型"
+
+msgid "Model capability is unknown; verify using the native model catalog"
+msgstr "模型能力未知，请通过原生模型目录验证"
+
+msgid "Models"
+msgstr "模型"
+
+msgid "Native"
+msgstr "原生协议"
+
+msgid "Not enabled"
+msgstr "未启用"
+
+msgid "Protocol"
+msgstr "协议"
+
+msgid "Provider is disabled"
+msgstr "服务提供商已停用"
+
+msgid "Request header credential is missing"
+msgstr "请求头凭证不存在，请重新保存"
+
+msgid "Save header"
+msgstr "保存请求头"
+
+msgid "Search models"
+msgstr "搜索模型"
+
+msgid "Selected model is not enabled or needs confirmation in Provider settings"
+msgstr "所选模型未启用或需要在服务提供商设置中重新确认"
+
+msgid "Sync models"
+msgstr "同步模型"
+
+msgid "Test connection"
+msgstr "测试连接"
+
+msgid "Test selected translation model"
+msgstr "测试选用的翻译模型"
+
+msgid "Text generation"
+msgstr "文本生成"
+
+msgid "Thinking settings require verified protocol capabilities"
+msgstr "思考设置需要已验证的协议能力"
+
+msgid "Embedding models"
+msgstr "嵌入模型"
+
+msgid "Unknown capability"
+msgstr "未知能力"
+
+msgid "Invalid or reserved request header"
+msgstr "请求头名称无效或属于保留字段"
+
+msgid "Duplicate or invalid request header"
+msgstr "请求头重复或无效"
+
+msgid "Custom authorization and automatic API key are mutually exclusive"
+msgstr "自定义认证请求头与自动 API 密钥认证不能同时使用"
+
+msgid "Select custom-header authentication first"
+msgstr "请先选择自定义请求头认证"
+
+msgid "API key is not configured"
+msgstr "尚未配置 API 密钥"
+
+msgid "Could not copy API key"
+msgstr "无法复制 API 密钥"
+
+msgid "More actions"
+msgstr "更多操作"
+
+msgid "Disable model"
+msgstr "停用模型"
+
+msgid "Enable model"
+msgstr "启用模型"
+
+msgid "API address"
+msgstr "API 地址"
+
+msgid "Request configuration"
+msgstr "请求配置"
+
+msgid "Filter models"
+msgstr "筛选模型"
+
+msgid "No enabled models"
+msgstr "尚未启用模型"
+
+msgid "No matching models"
+msgstr "没有匹配的模型"
+
+msgid "Use Sync models to choose models for translation."
+msgstr "点击“同步模型”选择用于翻译的模型。"
+
+msgid "Add header"
+msgstr "添加请求头"
+
+msgid "OK"
+msgstr "确定"
+
+msgid "Test model"
+msgstr "测试模型"
+
+msgid "Remove from catalog"
+msgstr "从目录移除"
+
+msgid "Save or cancel the header before confirming"
+msgstr "请先保存或取消请求头编辑，再确认"
+
+msgid "Close"
+msgstr "关闭"
+
+msgid "View key"
+msgstr "查看密钥"
+
+msgid "Edit key"
+msgstr "编辑密钥"
+
+msgid "Delete key"
+msgstr "删除密钥"
+
+msgid "Hide key"
+msgstr "隐藏密钥"
+
+msgid "Test all enabled models"
+msgstr "检测所有已启用模型"
+
+msgid "Select a model to test"
+msgstr "请选择要检测的模型"
+
+msgid "No authentication configured"
+msgstr "未配置认证"
+
+msgid "Testing sends a short fixed message. It may load local models or incur API charges."
+msgstr "检测会发送固定短文本，可能加载本地模型或产生 API 费用。"
+
+msgid "Enabled models"
+msgstr "已启用模型"
+
+msgid "Test all models"
+msgstr "检测所有模型"
+
+msgid "Testing…"
+msgstr "检测中…"
+
+msgid "Start"
+msgstr "开始"
+
+msgid "Save or cancel credential editing before testing"
+msgstr "请先保存或取消凭证编辑，再进行检测"
+
+msgid "Skipped"
+msgstr "已跳过"
+
+msgid "Passed"
+msgstr "检测成功"
+
+msgid "Failed"
+msgstr "检测失败"
+
+msgid "Model returned no complete text"
+msgstr "模型未返回完整文本"
+
+msgid "Model test failed; check connection and model compatibility"
+msgstr "模型检测失败，请检查连接和模型兼容性"

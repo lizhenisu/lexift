@@ -10,9 +10,9 @@ mod annotation_text;
 mod binding;
 mod bridge;
 mod i18n;
+mod llm_settings;
 mod mapper;
-mod ollama_settings;
-pub use ollama_settings::{OllamaQueryCancellation, OllamaQueryCompletion};
+pub use llm_settings::{LlmQueryCancellation, LlmQueryCompletion};
 mod placement;
 mod theme;
 #[cfg(test)]

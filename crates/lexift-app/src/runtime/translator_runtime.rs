@@ -18,14 +18,18 @@ enum TranslatorBackend {
         store: Arc<dyn CredentialStore>,
         credential_reference: Arc<RwLock<Option<String>>>,
         factory: lexift_translate::DeepLTranslatorFactory,
-        ollama: lexift_translate::providers::ollama::OllamaService,
+        llm: lexift_translate::providers::llm::LlmService,
     },
     #[cfg(any(feature = "m1-demo", test))]
     Fixed(Arc<dyn TranslatorPort>),
 }
 
 pub(crate) struct TranslatorRuntime {
-    config: RwLock<(ProviderConfig, OllamaConfig)>,
+    config: RwLock<(
+        ProviderConfig,
+        OllamaConfig,
+        lexift_core::domain::llm::LlmSettings,
+    )>,
     backend: TranslatorBackend,
 }
 
@@ -50,12 +54,12 @@ impl TranslatorRuntime {
         credential_reference: Arc<RwLock<Option<String>>>,
     ) -> Result<Self> {
         Ok(Self {
-            config: RwLock::new((provider, ollama_config)),
+            config: RwLock::new((provider, ollama_config, Default::default())),
             backend: TranslatorBackend::CredentialBacked {
                 store,
                 credential_reference,
                 factory: lexift_translate::DeepLTranslatorFactory::new()?,
-                ollama: lexift_translate::providers::ollama::OllamaService::new()?,
+                llm: lexift_translate::providers::llm::LlmService::new()?,
             },
         })
     }
@@ -63,7 +67,7 @@ impl TranslatorRuntime {
     #[cfg(any(feature = "m1-demo", test))]
     pub(crate) fn fixed(provider: ProviderConfig, translator: Arc<dyn TranslatorPort>) -> Self {
         Self {
-            config: RwLock::new((provider, OllamaConfig::default())),
+            config: RwLock::new((provider, OllamaConfig::default(), Default::default())),
             backend: TranslatorBackend::Fixed(translator),
         }
     }
@@ -71,7 +75,10 @@ impl TranslatorRuntime {
     pub(crate) fn validate(&self, provider: ProviderConfig) -> Result<()> {
         match (&self.backend, provider) {
             #[cfg(not(feature = "m1-demo"))]
-            (TranslatorBackend::CredentialBacked { .. }, ProviderConfig::Ollama) => Ok(()),
+            (
+                TranslatorBackend::CredentialBacked { .. },
+                ProviderConfig::Ollama | ProviderConfig::LmStudio | ProviderConfig::DeepSeek,
+            ) => Ok(()),
             #[cfg(any(feature = "m1-demo", test))]
             (TranslatorBackend::Fixed(_), _) => Ok(()),
             #[cfg(not(feature = "m1-demo"))]
@@ -100,6 +107,15 @@ impl TranslatorRuntime {
         self.config.write().unwrap_or_else(|p| p.into_inner()).0 = provider;
     }
 
+    pub(crate) fn configure_llm(
+        &self,
+        config: lexift_core::domain::llm::LlmSettings,
+    ) -> Result<()> {
+        config.validate()?;
+        self.config.write().unwrap_or_else(|p| p.into_inner()).2 = config;
+        Ok(())
+    }
+
     pub(crate) fn configure_ollama(&self, config: OllamaConfig) -> Result<()> {
         config.validate()?;
         self.config.write().unwrap_or_else(|p| p.into_inner()).1 = config;
@@ -109,15 +125,52 @@ impl TranslatorRuntime {
 
 impl TranslatorPort for TranslatorRuntime {
     fn translate(&self, request: TranslateRequest) -> TranslationFuture<'_> {
-        let (provider, ollama_config) = self
+        let (provider, _ollama_config, llm_config) = self
             .config
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
+        if (provider == ProviderConfig::DeepL && !llm_config.deepl_enabled)
+            || lexift_core::domain::llm::LlmProvider::parse(provider.id())
+                .ok()
+                .is_some_and(|p| !llm_config.connection(p).enabled)
+        {
+            return Box::pin(async { Err(lexift_core::Error::new("Provider is disabled")) });
+        }
         let translator = match (&self.backend, provider) {
             #[cfg(not(feature = "m1-demo"))]
-            (TranslatorBackend::CredentialBacked { ollama, .. }, ProviderConfig::Ollama) => {
-                Ok(ollama.translator(ollama_config))
+            (
+                TranslatorBackend::CredentialBacked { llm, store, .. },
+                ProviderConfig::Ollama | ProviderConfig::LmStudio | ProviderConfig::DeepSeek,
+            ) => {
+                use lexift_core::domain::llm::LlmProvider;
+                let kind = match provider {
+                    ProviderConfig::Ollama => LlmProvider::Ollama,
+                    ProviderConfig::LmStudio => LlmProvider::LmStudio,
+                    _ => LlmProvider::DeepSeek,
+                };
+                if let Some(model) = llm_config.selected(kind) {
+                    let connection = llm_config.connection(kind);
+                    if !llm_config.model_enabled(kind, &model.model) {
+                        return Box::pin(async {
+                            Err(Error::new(
+                                "Selected model is not enabled or needs confirmation in Provider settings",
+                            ))
+                        });
+                    }
+                    let secret =
+                        crate::llm_credentials::resolve_authorization(store.as_ref(), &connection);
+                    secret.map(|secret| {
+                        llm.translator_authenticated(
+                            connection,
+                            secret,
+                            model.clone(),
+                            llm_config.prompt.clone(),
+                        )
+                    })
+                } else {
+                    Err(Error::new("Select a model in translation settings first"))
+                }
             }
             #[cfg(any(feature = "m1-demo", test))]
             (TranslatorBackend::Fixed(translator), _) => Ok(Arc::clone(translator)),
@@ -203,14 +256,14 @@ mod tests {
             .unwrap();
         assert_eq!(
             executor.block_on(frozen).unwrap_err().to_string(),
-            "Select an Ollama model in settings first"
+            "Select a model in translation settings first"
         );
         assert_eq!(
             executor
                 .block_on(scheduled.translate(request.clone()))
                 .unwrap_err()
                 .to_string(),
-            "Select an Ollama model in settings first"
+            "Select a model in translation settings first"
         );
         assert_eq!(
             executor
@@ -223,12 +276,50 @@ mod tests {
         assert!(
             runtime
                 .configure_ollama(OllamaConfig {
-                    address: "http://remote:11434".into(),
+                    address: "http://remote:0".into(),
                     ..Default::default()
                 })
                 .is_err()
         );
         assert_eq!(runtime.config.read().unwrap().1.model, "now configured");
+    }
+
+    #[test]
+    fn disabling_provider_blocks_new_requests_and_preserves_existing_snapshots() {
+        let runtime = TranslatorRuntime::credential_backed(
+            ProviderConfig::Ollama,
+            OllamaConfig::default(),
+            Arc::new(FakeCredentialStore::default()),
+            Arc::new(RwLock::new(None)),
+        )
+        .unwrap();
+        let frozen = runtime.snapshot();
+        let mut config = lexift_core::domain::llm::LlmSettings::default();
+        config.connections[0].enabled = false;
+        runtime.configure_llm(config).unwrap();
+        let executor = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let request = TranslateRequest {
+            text: "test".into(),
+            source_language: None,
+            target_language: lexift_core::domain::language::Language("en-US".into()),
+        };
+        assert_eq!(
+            executor
+                .block_on(runtime.translate(request.clone()))
+                .unwrap_err()
+                .to_string(),
+            "Provider is disabled"
+        );
+        assert_eq!(
+            executor
+                .block_on(frozen.translate(request))
+                .unwrap_err()
+                .to_string(),
+            "Select a model in translation settings first"
+        );
     }
 
     #[derive(Default)]

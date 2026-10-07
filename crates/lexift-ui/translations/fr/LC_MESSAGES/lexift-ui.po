@@ -909,3 +909,378 @@ msgstr "Ollama a renvoyé trop de modèles"
 
 msgid "Ollama client initialization failed"
 msgstr "Échec de l’initialisation du client Ollama"
+
+msgid "Translation provider and model"
+msgstr "Service de traduction et modèle"
+
+msgid "Model parameters"
+msgstr "Paramètres du modèle"
+
+msgid "Thinking effort"
+msgstr "Effort de raisonnement"
+
+msgid "Model temperature"
+msgstr "Température du modèle"
+
+msgid "Custom"
+msgstr "Personnalisé"
+
+msgid "Model default"
+msgstr "Valeur du modèle"
+
+msgid "Translation prompt"
+msgstr "Consigne de traduction"
+
+msgid "Use {{target_language}} for the target language."
+msgstr "Utilisez {{target_language}} pour la langue cible."
+
+msgid "Restore default prompt"
+msgstr "Rétablir la consigne par défaut"
+
+msgid "API key configured"
+msgstr "Clé API configurée"
+
+msgid "API key not configured"
+msgstr "Clé API non configurée"
+
+msgid "Remove key"
+msgstr "Supprimer la clé"
+
+msgid "Model downloads and service lifecycle are managed outside Lexift."
+msgstr "Les modèles et les services sont gérés en dehors de Lexift."
+
+msgid "Off"
+msgstr "Désactivé"
+
+msgid "On"
+msgstr "Activé"
+
+msgid "Low"
+msgstr "Faible"
+
+msgid "High"
+msgstr "Élevé"
+
+msgid "Maximum"
+msgstr "Maximum"
+
+msgid "Thinking capability is unavailable or unknown"
+msgstr "Capacité de raisonnement indisponible ou inconnue"
+
+msgid "This model requires thinking"
+msgstr "Ce modèle exige le raisonnement"
+
+msgid "Sampling controls depend on the selected thinking mode"
+msgstr "Les paramètres dépendent du mode de raisonnement"
+
+msgid "Model service discovery is unavailable"
+msgstr "Recherche de modèles indisponible"
+
+msgid "Connected; no compatible text generation models found"
+msgstr "Connecté ; aucun modèle de texte compatible"
+
+msgid "Saved model is unavailable; choose another model"
+msgstr "Modèle enregistré indisponible ; choisissez-en un autre"
+
+msgid "Translation prompt must contain {target_language}"
+msgstr "La consigne doit contenir {target_language}"
+
+msgid "Use an HTTP or HTTPS service address without a path"
+msgstr "Saisissez une adresse HTTP ou HTTPS sans chemin"
+
+msgid "Unknown model provider"
+msgstr "Fournisseur de modèles inconnu"
+
+msgid "Use the official DeepSeek service address"
+msgstr "Utilisez l’adresse officielle de DeepSeek"
+
+msgid "Invalid model parameters"
+msgstr "Paramètres du modèle invalides"
+
+msgid "Model client initialization failed"
+msgstr "Échec de l’initialisation du client"
+
+msgid "DeepSeek API key is not configured"
+msgstr "Clé API DeepSeek non configurée"
+
+msgid "Model request timed out"
+msgstr "Délai de la requête dépassé"
+
+msgid "Cannot connect to model service"
+msgstr "Connexion au service de modèles impossible"
+
+msgid "Invalid model service response"
+msgstr "Réponse du service de modèles invalide"
+
+msgid "Model service authentication failed"
+msgstr "Échec de l’authentification du service"
+
+msgid "Model or API not found; check service version"
+msgstr "Modèle ou API introuvable ; vérifiez la version"
+
+msgid "Model service rate limit exceeded"
+msgstr "Limite de requêtes du service dépassée"
+
+msgid "Model service redirects are not allowed"
+msgstr "Redirections du service non autorisées"
+
+msgid "Model service rejected the request"
+msgstr "Le service a refusé la requête"
+
+msgid "Invalid model list"
+msgstr "Liste de modèles invalide"
+
+msgid "Model service returned too many models"
+msgstr "Le service a renvoyé trop de modèles"
+
+msgid "Invalid model identifier"
+msgstr "Identifiant de modèle invalide"
+
+msgid "Model does not report text generation capability"
+msgstr "Le modèle ne déclare pas de génération de texte"
+
+msgid "Model discovery timed out"
+msgstr "Délai de découverte des modèles dépassé"
+
+msgid "Select a model in translation settings first"
+msgstr "Choisissez d’abord un modèle dans les paramètres de traduction"
+
+msgid "Selected model is unavailable"
+msgstr "Le modèle sélectionné est indisponible"
+
+msgid "Model does not support the selected thinking setting"
+msgstr "Le modèle ne prend pas en charge ce réglage de raisonnement"
+
+msgid "Model thinking capability is unknown"
+msgstr "Capacité de raisonnement du modèle inconnue"
+
+msgid "Invalid sampling parameters"
+msgstr "Paramètres d’échantillonnage invalides"
+
+msgid "Sampling parameters are incompatible with the thinking mode"
+msgstr "Paramètres d’échantillonnage incompatibles avec le raisonnement"
+
+msgid "Model returned an incomplete translation"
+msgstr "Le modèle a renvoyé une traduction incomplète"
+
+msgid "Model returned an empty translation"
+msgstr "Le modèle a renvoyé une traduction vide"
+
+msgid "API key"
+msgstr "Clé API"
+
+msgid "Advanced request settings"
+msgstr "Paramètres avancés des requêtes"
+
+msgid "All models"
+msgstr "Tous les modèles"
+
+msgid "Apply connection settings before saving headers"
+msgstr "Appliquez la connexion avant d’enregistrer les en-têtes"
+
+msgid "Apply connection settings before syncing models"
+msgstr "Appliquez la connexion avant de synchroniser les modèles"
+
+msgid "Authentication"
+msgstr "Authentification"
+
+msgid "Automatic API key"
+msgstr "Clé API automatique"
+
+msgid "Connection changed; sync models to confirm"
+msgstr "Connexion modifiée ; synchronisez les modèles pour confirmer"
+
+msgid "Credential source: environment; manage it outside Lexift"
+msgstr "Identifiants : environnement ; à gérer hors de Lexift"
+
+msgid "Credential source: system storage"
+msgstr "Identifiants : stockage système"
+
+msgid "Custom request headers"
+msgstr "En-têtes personnalisés"
+
+msgid "Header name"
+msgstr "Nom de l’en-tête"
+
+msgid "Header value"
+msgstr "Valeur de l’en-tête"
+
+msgid "Header values are stored securely when you apply. Cancel discards changes."
+msgstr "Les valeurs sont stockées en sécurité à l’application. Annuler abandonne les modifications."
+
+msgid "Invalid API base URL"
+msgstr "URL de base API invalide"
+
+msgid "Invalid request header value"
+msgstr "Valeur d’en-tête invalide"
+
+msgid "Manage models"
+msgstr "Gérer les modèles"
+
+msgid "Model capability is unknown; verify using the native model catalog"
+msgstr "Capacité inconnue ; vérifiez avec le catalogue natif"
+
+msgid "Models"
+msgstr "Modèles"
+
+msgid "Native"
+msgstr "Natif"
+
+msgid "Not enabled"
+msgstr "Non activé"
+
+msgid "Protocol"
+msgstr "Protocole"
+
+msgid "Provider is disabled"
+msgstr "Le fournisseur est désactivé"
+
+msgid "Request header credential is missing"
+msgstr "Identifiant d’en-tête manquant"
+
+msgid "Save header"
+msgstr "Enregistrer l’en-tête"
+
+msgid "Search models"
+msgstr "Rechercher des modèles"
+
+msgid "Selected model is not enabled or needs confirmation in Provider settings"
+msgstr "Le modèle choisi est désactivé ou doit être confirmé dans les paramètres du fournisseur"
+
+msgid "Sync models"
+msgstr "Synchroniser les modèles"
+
+msgid "Test connection"
+msgstr "Tester la connexion"
+
+msgid "Test selected translation model"
+msgstr "Tester le modèle de traduction choisi"
+
+msgid "Text generation"
+msgstr "Génération de texte"
+
+msgid "Thinking settings require verified protocol capabilities"
+msgstr "Les réglages de réflexion nécessitent des capacités de protocole vérifiées"
+
+msgid "Embedding models"
+msgstr "Modèles de plongement"
+
+msgid "Unknown capability"
+msgstr "Capacité inconnue"
+
+msgid "Invalid or reserved request header"
+msgstr "En-tête invalide ou réservé"
+
+msgid "Duplicate or invalid request header"
+msgstr "En-tête en double ou invalide"
+
+msgid "Custom authorization and automatic API key are mutually exclusive"
+msgstr "L’autorisation personnalisée et la clé API automatique sont incompatibles"
+
+msgid "Select custom-header authentication first"
+msgstr "Choisissez d’abord l’authentification par en-têtes personnalisés"
+
+msgid "API key is not configured"
+msgstr "La clé API n’est pas configurée"
+
+msgid "Could not copy API key"
+msgstr "Impossible de copier la clé API"
+
+msgid "More actions"
+msgstr "Autres actions"
+
+msgid "Disable model"
+msgstr "Désactiver le modèle"
+
+msgid "Enable model"
+msgstr "Activer le modèle"
+
+msgid "API address"
+msgstr "Adresse API"
+
+msgid "Request configuration"
+msgstr "Configuration des requêtes"
+
+msgid "Filter models"
+msgstr "Filtrer les modèles"
+
+msgid "No enabled models"
+msgstr "Aucun modèle activé"
+
+msgid "No matching models"
+msgstr "Aucun modèle correspondant"
+
+msgid "Use Sync models to choose models for translation."
+msgstr "Utilisez Synchroniser les modèles pour choisir les modèles de traduction."
+
+msgid "Add header"
+msgstr "Ajouter un en-tête"
+
+msgid "OK"
+msgstr "OK"
+
+msgid "Test model"
+msgstr "Tester le modèle"
+
+msgid "Remove from catalog"
+msgstr "Retirer du catalogue"
+
+msgid "Save or cancel the header before confirming"
+msgstr "Enregistrez ou annulez la modification de l’en-tête avant de confirmer"
+
+msgid "Close"
+msgstr "Fermer"
+
+msgid "View key"
+msgstr "Afficher la clé"
+
+msgid "Edit key"
+msgstr "Modifier la clé"
+
+msgid "Delete key"
+msgstr "Supprimer la clé"
+
+msgid "Hide key"
+msgstr "Masquer la clé"
+
+msgid "Test all enabled models"
+msgstr "Tester tous les modèles activés"
+
+msgid "Select a model to test"
+msgstr "Sélectionner un modèle à tester"
+
+msgid "No authentication configured"
+msgstr "Aucune authentification configurée"
+
+msgid "Testing sends a short fixed message. It may load local models or incur API charges."
+msgstr "Le test envoie un court message fixe. Il peut charger des modèles locaux ou entraîner des frais API."
+
+msgid "Enabled models"
+msgstr "Modèles activés"
+
+msgid "Test all models"
+msgstr "Tester tous les modèles"
+
+msgid "Testing…"
+msgstr "Test en cours…"
+
+msgid "Start"
+msgstr "Démarrer"
+
+msgid "Save or cancel credential editing before testing"
+msgstr "Enregistrez ou annulez la modification des identifiants avant le test"
+
+msgid "Skipped"
+msgstr "Ignoré"
+
+msgid "Passed"
+msgstr "Réussi"
+
+msgid "Failed"
+msgstr "Échec"
+
+msgid "Model returned no complete text"
+msgstr "Le modèle n’a pas renvoyé de texte complet"
+
+msgid "Model test failed; check connection and model compatibility"
+msgstr "Échec du test ; vérifiez la connexion et la compatibilité du modèle"

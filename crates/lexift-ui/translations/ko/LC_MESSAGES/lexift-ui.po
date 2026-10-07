@@ -909,3 +909,378 @@ msgstr "Ollama가 너무 많은 모델을 반환했습니다"
 
 msgid "Ollama client initialization failed"
 msgstr "Ollama 클라이언트 초기화에 실패했습니다"
+
+msgid "Translation provider and model"
+msgstr "번역 서비스 및 모델"
+
+msgid "Model parameters"
+msgstr "모델 매개변수"
+
+msgid "Thinking effort"
+msgstr "추론 강도"
+
+msgid "Model temperature"
+msgstr "모델 온도"
+
+msgid "Custom"
+msgstr "사용자 지정"
+
+msgid "Model default"
+msgstr "모델 기본값"
+
+msgid "Translation prompt"
+msgstr "번역 프롬프트"
+
+msgid "Use {{target_language}} for the target language."
+msgstr "대상 언어에는 {{target_language}}를 사용하세요."
+
+msgid "Restore default prompt"
+msgstr "기본 프롬프트 복원"
+
+msgid "API key configured"
+msgstr "API 키 구성됨"
+
+msgid "API key not configured"
+msgstr "API 키 미구성"
+
+msgid "Remove key"
+msgstr "키 제거"
+
+msgid "Model downloads and service lifecycle are managed outside Lexift."
+msgstr "모델 다운로드 및 서비스 관리는 Lexift 외부에서 수행합니다."
+
+msgid "Off"
+msgstr "끄기"
+
+msgid "On"
+msgstr "켜기"
+
+msgid "Low"
+msgstr "낮음"
+
+msgid "High"
+msgstr "높음"
+
+msgid "Maximum"
+msgstr "최대"
+
+msgid "Thinking capability is unavailable or unknown"
+msgstr "추론 기능을 사용할 수 없거나 알 수 없습니다"
+
+msgid "This model requires thinking"
+msgstr "이 모델에는 추론이 필요합니다"
+
+msgid "Sampling controls depend on the selected thinking mode"
+msgstr "샘플링 설정은 추론 모드에 따라 제한됩니다"
+
+msgid "Model service discovery is unavailable"
+msgstr "모델 검색을 사용할 수 없습니다"
+
+msgid "Connected; no compatible text generation models found"
+msgstr "연결됨: 호환되는 텍스트 생성 모델이 없습니다"
+
+msgid "Saved model is unavailable; choose another model"
+msgstr "저장된 모델을 사용할 수 없습니다. 다른 모델을 선택하세요"
+
+msgid "Translation prompt must contain {target_language}"
+msgstr "프롬프트에 {target_language}가 필요합니다"
+
+msgid "Use an HTTP or HTTPS service address without a path"
+msgstr "경로 없는 HTTP 또는 HTTPS 주소를 입력하세요"
+
+msgid "Unknown model provider"
+msgstr "알 수 없는 모델 제공자"
+
+msgid "Use the official DeepSeek service address"
+msgstr "DeepSeek 공식 서비스 주소를 사용하세요"
+
+msgid "Invalid model parameters"
+msgstr "잘못된 모델 매개변수"
+
+msgid "Model client initialization failed"
+msgstr "모델 클라이언트 초기화 실패"
+
+msgid "DeepSeek API key is not configured"
+msgstr "DeepSeek API 키가 설정되지 않았습니다"
+
+msgid "Model request timed out"
+msgstr "모델 요청 시간 초과"
+
+msgid "Cannot connect to model service"
+msgstr "모델 서비스에 연결할 수 없습니다"
+
+msgid "Invalid model service response"
+msgstr "잘못된 모델 서비스 응답"
+
+msgid "Model service authentication failed"
+msgstr "모델 서비스 인증 실패"
+
+msgid "Model or API not found; check service version"
+msgstr "모델 또는 API가 없습니다. 버전을 확인하세요"
+
+msgid "Model service rate limit exceeded"
+msgstr "모델 서비스 요청 한도 초과"
+
+msgid "Model service redirects are not allowed"
+msgstr "모델 서비스 리디렉션은 허용되지 않습니다"
+
+msgid "Model service rejected the request"
+msgstr "모델 서비스가 요청을 거부했습니다"
+
+msgid "Invalid model list"
+msgstr "잘못된 모델 목록"
+
+msgid "Model service returned too many models"
+msgstr "모델 서비스가 너무 많은 모델을 반환했습니다"
+
+msgid "Invalid model identifier"
+msgstr "잘못된 모델 식별자"
+
+msgid "Model does not report text generation capability"
+msgstr "모델이 텍스트 생성 기능을 제공하지 않습니다"
+
+msgid "Model discovery timed out"
+msgstr "모델 검색 시간 초과"
+
+msgid "Select a model in translation settings first"
+msgstr "먼저 번역 설정에서 모델을 선택하세요"
+
+msgid "Selected model is unavailable"
+msgstr "선택한 모델을 사용할 수 없습니다"
+
+msgid "Model does not support the selected thinking setting"
+msgstr "모델이 선택한 추론 설정을 지원하지 않습니다"
+
+msgid "Model thinking capability is unknown"
+msgstr "모델의 추론 기능을 알 수 없습니다"
+
+msgid "Invalid sampling parameters"
+msgstr "잘못된 샘플링 매개변수"
+
+msgid "Sampling parameters are incompatible with the thinking mode"
+msgstr "샘플링 매개변수가 추론 모드와 호환되지 않습니다"
+
+msgid "Model returned an incomplete translation"
+msgstr "모델이 불완전한 번역을 반환했습니다"
+
+msgid "Model returned an empty translation"
+msgstr "모델이 빈 번역을 반환했습니다"
+
+msgid "API key"
+msgstr "API 키"
+
+msgid "Advanced request settings"
+msgstr "고급 요청 설정"
+
+msgid "All models"
+msgstr "모든 모델"
+
+msgid "Apply connection settings before saving headers"
+msgstr "헤더를 저장하기 전에 연결 설정을 적용하세요"
+
+msgid "Apply connection settings before syncing models"
+msgstr "모델 동기화 전에 연결 설정을 적용하세요"
+
+msgid "Authentication"
+msgstr "인증"
+
+msgid "Automatic API key"
+msgstr "자동 API 키 인증"
+
+msgid "Connection changed; sync models to confirm"
+msgstr "연결이 변경되었습니다. 모델을 동기화하여 확인하세요"
+
+msgid "Credential source: environment; manage it outside Lexift"
+msgstr "자격 증명 출처: 환경 변수. Lexift 외부에서 관리하세요"
+
+msgid "Credential source: system storage"
+msgstr "자격 증명 출처: 시스템 저장소"
+
+msgid "Custom request headers"
+msgstr "사용자 지정 요청 헤더"
+
+msgid "Header name"
+msgstr "헤더 이름"
+
+msgid "Header value"
+msgstr "헤더 값"
+
+msgid "Header values are stored securely when you apply. Cancel discards changes."
+msgstr "적용하면 헤더 값이 안전하게 저장됩니다. 취소하면 변경 사항을 버립니다."
+
+msgid "Invalid API base URL"
+msgstr "API 기본 URL이 잘못되었습니다"
+
+msgid "Invalid request header value"
+msgstr "요청 헤더 값이 잘못되었습니다"
+
+msgid "Manage models"
+msgstr "모델 관리"
+
+msgid "Model capability is unknown; verify using the native model catalog"
+msgstr "모델 기능을 알 수 없습니다. 네이티브 모델 목록으로 확인하세요"
+
+msgid "Models"
+msgstr "모델"
+
+msgid "Native"
+msgstr "네이티브"
+
+msgid "Not enabled"
+msgstr "사용 안 함"
+
+msgid "Protocol"
+msgstr "프로토콜"
+
+msgid "Provider is disabled"
+msgstr "공급자가 비활성화되었습니다"
+
+msgid "Request header credential is missing"
+msgstr "요청 헤더 자격 증명이 없습니다"
+
+msgid "Save header"
+msgstr "헤더 저장"
+
+msgid "Search models"
+msgstr "모델 검색"
+
+msgid "Selected model is not enabled or needs confirmation in Provider settings"
+msgstr "선택한 모델이 비활성화되었거나 공급자 설정에서 확인이 필요합니다"
+
+msgid "Sync models"
+msgstr "모델 동기화"
+
+msgid "Test connection"
+msgstr "연결 테스트"
+
+msgid "Test selected translation model"
+msgstr "선택한 번역 모델 테스트"
+
+msgid "Text generation"
+msgstr "텍스트 생성"
+
+msgid "Thinking settings require verified protocol capabilities"
+msgstr "사고 설정에는 검증된 프로토콜 기능이 필요합니다"
+
+msgid "Embedding models"
+msgstr "임베딩 모델"
+
+msgid "Unknown capability"
+msgstr "알 수 없는 기능"
+
+msgid "Invalid or reserved request header"
+msgstr "잘못되었거나 예약된 요청 헤더입니다"
+
+msgid "Duplicate or invalid request header"
+msgstr "중복되었거나 잘못된 요청 헤더입니다"
+
+msgid "Custom authorization and automatic API key are mutually exclusive"
+msgstr "사용자 지정 인증과 자동 API 키 인증은 함께 사용할 수 없습니다"
+
+msgid "Select custom-header authentication first"
+msgstr "먼저 사용자 지정 헤더 인증을 선택하세요"
+
+msgid "API key is not configured"
+msgstr "API 키가 설정되지 않았습니다"
+
+msgid "Could not copy API key"
+msgstr "API 키를 복사할 수 없습니다"
+
+msgid "More actions"
+msgstr "추가 작업"
+
+msgid "Disable model"
+msgstr "모델 비활성화"
+
+msgid "Enable model"
+msgstr "모델 활성화"
+
+msgid "API address"
+msgstr "API 주소"
+
+msgid "Request configuration"
+msgstr "요청 설정"
+
+msgid "Filter models"
+msgstr "모델 필터"
+
+msgid "No enabled models"
+msgstr "활성화된 모델 없음"
+
+msgid "No matching models"
+msgstr "일치하는 모델 없음"
+
+msgid "Use Sync models to choose models for translation."
+msgstr "모델 동기화에서 번역에 사용할 모델을 선택하세요."
+
+msgid "Add header"
+msgstr "헤더 추가"
+
+msgid "OK"
+msgstr "확인"
+
+msgid "Test model"
+msgstr "모델 테스트"
+
+msgid "Remove from catalog"
+msgstr "목록에서 제거"
+
+msgid "Save or cancel the header before confirming"
+msgstr "확인하기 전에 헤더 편집을 저장하거나 취소하세요"
+
+msgid "Close"
+msgstr "닫기"
+
+msgid "View key"
+msgstr "키 보기"
+
+msgid "Edit key"
+msgstr "키 편집"
+
+msgid "Delete key"
+msgstr "키 삭제"
+
+msgid "Hide key"
+msgstr "키 숨기기"
+
+msgid "Test all enabled models"
+msgstr "활성화된 모든 모델 테스트"
+
+msgid "Select a model to test"
+msgstr "테스트할 모델 선택"
+
+msgid "No authentication configured"
+msgstr "인증이 구성되지 않음"
+
+msgid "Testing sends a short fixed message. It may load local models or incur API charges."
+msgstr "테스트는 짧은 고정 메시지를 보냅니다. 로컬 모델이 로드되거나 API 요금이 발생할 수 있습니다."
+
+msgid "Enabled models"
+msgstr "활성화된 모델"
+
+msgid "Test all models"
+msgstr "모든 모델 테스트"
+
+msgid "Testing…"
+msgstr "테스트 중…"
+
+msgid "Start"
+msgstr "시작"
+
+msgid "Save or cancel credential editing before testing"
+msgstr "테스트 전에 자격 증명 편집을 저장하거나 취소하세요"
+
+msgid "Skipped"
+msgstr "건너뜀"
+
+msgid "Passed"
+msgstr "성공"
+
+msgid "Failed"
+msgstr "실패"
+
+msgid "Model returned no complete text"
+msgstr "모델이 완전한 텍스트를 반환하지 않았습니다"
+
+msgid "Model test failed; check connection and model compatibility"
+msgstr "모델 테스트 실패: 연결과 모델 호환성을 확인하세요"

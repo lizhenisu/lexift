@@ -909,3 +909,378 @@ msgstr "Ollama のモデル数が上限を超えています"
 
 msgid "Ollama client initialization failed"
 msgstr "Ollama クライアントの初期化に失敗しました"
+
+msgid "Translation provider and model"
+msgstr "翻訳サービスとモデル"
+
+msgid "Model parameters"
+msgstr "モデルパラメーター"
+
+msgid "Thinking effort"
+msgstr "思考の強度"
+
+msgid "Model temperature"
+msgstr "モデルの温度"
+
+msgid "Custom"
+msgstr "カスタム"
+
+msgid "Model default"
+msgstr "モデルの既定値"
+
+msgid "Translation prompt"
+msgstr "翻訳プロンプト"
+
+msgid "Use {{target_language}} for the target language."
+msgstr "翻訳先の言語には {{target_language}} を使用します。"
+
+msgid "Restore default prompt"
+msgstr "既定のプロンプトに戻す"
+
+msgid "API key configured"
+msgstr "API キー設定済み"
+
+msgid "API key not configured"
+msgstr "API キー未設定"
+
+msgid "Remove key"
+msgstr "キーを削除"
+
+msgid "Model downloads and service lifecycle are managed outside Lexift."
+msgstr "モデルのダウンロードとサービスの管理は Lexift の外部で行います。"
+
+msgid "Off"
+msgstr "オフ"
+
+msgid "On"
+msgstr "オン"
+
+msgid "Low"
+msgstr "低"
+
+msgid "High"
+msgstr "高"
+
+msgid "Maximum"
+msgstr "最大"
+
+msgid "Thinking capability is unavailable or unknown"
+msgstr "思考機能が利用できないか不明です"
+
+msgid "This model requires thinking"
+msgstr "このモデルは思考が必須です"
+
+msgid "Sampling controls depend on the selected thinking mode"
+msgstr "サンプリング設定は思考モードによって制限されます"
+
+msgid "Model service discovery is unavailable"
+msgstr "モデルの検出が利用できません"
+
+msgid "Connected; no compatible text generation models found"
+msgstr "接続済み。対応するテキスト生成モデルがありません"
+
+msgid "Saved model is unavailable; choose another model"
+msgstr "保存したモデルは利用できません。別のモデルを選択してください"
+
+msgid "Translation prompt must contain {target_language}"
+msgstr "プロンプトに {target_language} が必要です"
+
+msgid "Use an HTTP or HTTPS service address without a path"
+msgstr "パスを含まない HTTP または HTTPS アドレスを入力してください"
+
+msgid "Unknown model provider"
+msgstr "不明なモデルプロバイダー"
+
+msgid "Use the official DeepSeek service address"
+msgstr "DeepSeek の公式サービスアドレスを使用してください"
+
+msgid "Invalid model parameters"
+msgstr "モデルパラメーターが無効です"
+
+msgid "Model client initialization failed"
+msgstr "モデルクライアントの初期化に失敗しました"
+
+msgid "DeepSeek API key is not configured"
+msgstr "DeepSeek API キーが未設定です"
+
+msgid "Model request timed out"
+msgstr "モデルリクエストがタイムアウトしました"
+
+msgid "Cannot connect to model service"
+msgstr "モデルサービスに接続できません"
+
+msgid "Invalid model service response"
+msgstr "モデルサービスの応答が無効です"
+
+msgid "Model service authentication failed"
+msgstr "モデルサービスの認証に失敗しました"
+
+msgid "Model or API not found; check service version"
+msgstr "モデルまたは API がありません。バージョンを確認してください"
+
+msgid "Model service rate limit exceeded"
+msgstr "モデルサービスのリクエスト上限を超えました"
+
+msgid "Model service redirects are not allowed"
+msgstr "モデルサービスのリダイレクトは許可されていません"
+
+msgid "Model service rejected the request"
+msgstr "モデルサービスがリクエストを拒否しました"
+
+msgid "Invalid model list"
+msgstr "モデル一覧が無効です"
+
+msgid "Model service returned too many models"
+msgstr "返されたモデル数が多すぎます"
+
+msgid "Invalid model identifier"
+msgstr "モデル識別子が無効です"
+
+msgid "Model does not report text generation capability"
+msgstr "モデルがテキスト生成能力を提供していません"
+
+msgid "Model discovery timed out"
+msgstr "モデル検出がタイムアウトしました"
+
+msgid "Select a model in translation settings first"
+msgstr "翻訳設定で先にモデルを選択してください"
+
+msgid "Selected model is unavailable"
+msgstr "選択したモデルは利用できません"
+
+msgid "Model does not support the selected thinking setting"
+msgstr "モデルは選択した思考設定に対応していません"
+
+msgid "Model thinking capability is unknown"
+msgstr "モデルの思考能力は不明です"
+
+msgid "Invalid sampling parameters"
+msgstr "サンプリングパラメーターが無効です"
+
+msgid "Sampling parameters are incompatible with the thinking mode"
+msgstr "サンプリング設定が思考モードに対応していません"
+
+msgid "Model returned an incomplete translation"
+msgstr "モデルが不完全な翻訳を返しました"
+
+msgid "Model returned an empty translation"
+msgstr "モデルが空の翻訳を返しました"
+
+msgid "API key"
+msgstr "API キー"
+
+msgid "Advanced request settings"
+msgstr "詳細なリクエスト設定"
+
+msgid "All models"
+msgstr "すべてのモデル"
+
+msgid "Apply connection settings before saving headers"
+msgstr "接続設定を適用してからヘッダーを保存してください"
+
+msgid "Apply connection settings before syncing models"
+msgstr "接続設定を適用してからモデルを同期してください"
+
+msgid "Authentication"
+msgstr "認証"
+
+msgid "Automatic API key"
+msgstr "API キーで自動認証"
+
+msgid "Connection changed; sync models to confirm"
+msgstr "接続が変更されました。モデルを同期して確認してください"
+
+msgid "Credential source: environment; manage it outside Lexift"
+msgstr "認証情報：環境変数。Lexift の外で管理してください"
+
+msgid "Credential source: system storage"
+msgstr "認証情報：システムストレージ"
+
+msgid "Custom request headers"
+msgstr "カスタムリクエストヘッダー"
+
+msgid "Header name"
+msgstr "ヘッダー名"
+
+msgid "Header value"
+msgstr "ヘッダー値"
+
+msgid "Header values are stored securely when you apply. Cancel discards changes."
+msgstr "適用時にヘッダー値を安全に保存します。キャンセルで変更を破棄します。"
+
+msgid "Invalid API base URL"
+msgstr "API ベース URL が無効です"
+
+msgid "Invalid request header value"
+msgstr "ヘッダー値が無効です"
+
+msgid "Manage models"
+msgstr "モデルを管理"
+
+msgid "Model capability is unknown; verify using the native model catalog"
+msgstr "モデルの機能は不明です。ネイティブの一覧で確認してください"
+
+msgid "Models"
+msgstr "モデル"
+
+msgid "Native"
+msgstr "ネイティブ"
+
+msgid "Not enabled"
+msgstr "無効"
+
+msgid "Protocol"
+msgstr "プロトコル"
+
+msgid "Provider is disabled"
+msgstr "プロバイダーは無効です"
+
+msgid "Request header credential is missing"
+msgstr "ヘッダーの認証情報がありません"
+
+msgid "Save header"
+msgstr "ヘッダーを保存"
+
+msgid "Search models"
+msgstr "モデルを検索"
+
+msgid "Selected model is not enabled or needs confirmation in Provider settings"
+msgstr "選択したモデルは無効か、プロバイダー設定での確認が必要です"
+
+msgid "Sync models"
+msgstr "モデルを同期"
+
+msgid "Test connection"
+msgstr "接続をテスト"
+
+msgid "Test selected translation model"
+msgstr "選択した翻訳モデルをテスト"
+
+msgid "Text generation"
+msgstr "テキスト生成"
+
+msgid "Thinking settings require verified protocol capabilities"
+msgstr "思考設定にはプロトコル機能の確認が必要です"
+
+msgid "Embedding models"
+msgstr "埋め込みモデル"
+
+msgid "Unknown capability"
+msgstr "不明な機能"
+
+msgid "Invalid or reserved request header"
+msgstr "無効または予約済みのヘッダーです"
+
+msgid "Duplicate or invalid request header"
+msgstr "ヘッダーが重複しているか無効です"
+
+msgid "Custom authorization and automatic API key are mutually exclusive"
+msgstr "カスタム認証と自動 API キー認証は併用できません"
+
+msgid "Select custom-header authentication first"
+msgstr "先にカスタムヘッダー認証を選択してください"
+
+msgid "API key is not configured"
+msgstr "API キーが設定されていません"
+
+msgid "Could not copy API key"
+msgstr "API キーをコピーできませんでした"
+
+msgid "More actions"
+msgstr "その他の操作"
+
+msgid "Disable model"
+msgstr "モデルを無効化"
+
+msgid "Enable model"
+msgstr "モデルを有効化"
+
+msgid "API address"
+msgstr "API アドレス"
+
+msgid "Request configuration"
+msgstr "リクエスト設定"
+
+msgid "Filter models"
+msgstr "モデルを絞り込む"
+
+msgid "No enabled models"
+msgstr "有効なモデルがありません"
+
+msgid "No matching models"
+msgstr "一致するモデルがありません"
+
+msgid "Use Sync models to choose models for translation."
+msgstr "「モデルを同期」から翻訳に使うモデルを選択してください。"
+
+msgid "Add header"
+msgstr "ヘッダーを追加"
+
+msgid "OK"
+msgstr "確定"
+
+msgid "Test model"
+msgstr "モデルをテスト"
+
+msgid "Remove from catalog"
+msgstr "一覧から削除"
+
+msgid "Save or cancel the header before confirming"
+msgstr "確定する前にヘッダーの編集を保存またはキャンセルしてください"
+
+msgid "Close"
+msgstr "閉じる"
+
+msgid "View key"
+msgstr "キーを表示"
+
+msgid "Edit key"
+msgstr "キーを編集"
+
+msgid "Delete key"
+msgstr "キーを削除"
+
+msgid "Hide key"
+msgstr "キーを隠す"
+
+msgid "Test all enabled models"
+msgstr "有効なモデルをすべてテスト"
+
+msgid "Select a model to test"
+msgstr "テストするモデルを選択"
+
+msgid "No authentication configured"
+msgstr "認証が設定されていません"
+
+msgid "Testing sends a short fixed message. It may load local models or incur API charges."
+msgstr "テストでは固定の短いメッセージを送信します。ローカルモデルの読み込みや API 料金が発生する場合があります。"
+
+msgid "Enabled models"
+msgstr "有効なモデル"
+
+msgid "Test all models"
+msgstr "すべてのモデルをテスト"
+
+msgid "Testing…"
+msgstr "テスト中…"
+
+msgid "Start"
+msgstr "開始"
+
+msgid "Save or cancel credential editing before testing"
+msgstr "テスト前に認証情報の編集を保存またはキャンセルしてください"
+
+msgid "Skipped"
+msgstr "スキップ"
+
+msgid "Passed"
+msgstr "成功"
+
+msgid "Failed"
+msgstr "失敗"
+
+msgid "Model returned no complete text"
+msgstr "モデルが完全なテキストを返しませんでした"
+
+msgid "Model test failed; check connection and model compatibility"
+msgstr "テストに失敗しました。接続とモデルの互換性を確認してください"

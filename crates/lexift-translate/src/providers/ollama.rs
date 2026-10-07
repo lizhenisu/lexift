@@ -1,4 +1,4 @@
-//! Native Ollama adapter. Requests stay on an explicitly validated loopback origin.
+//! Legacy Ollama adapter; the application uses the shared model service in `llm`.
 use lexift_core::{
     Error, Result,
     domain::{

@@ -195,6 +195,8 @@ pub enum ProviderConfig {
     #[default]
     DeepL,
     Ollama,
+    LmStudio,
+    DeepSeek,
 }
 
 impl ProviderConfig {
@@ -202,6 +204,8 @@ impl ProviderConfig {
         match self {
             Self::DeepL => "deepl",
             Self::Ollama => "ollama",
+            Self::LmStudio => "lmstudio",
+            Self::DeepSeek => "deepseek",
         }
     }
 }
@@ -211,6 +215,8 @@ impl fmt::Display for ProviderConfig {
         formatter.write_str(match self {
             Self::DeepL => "DeepL",
             Self::Ollama => "Ollama",
+            Self::LmStudio => "LM Studio",
+            Self::DeepSeek => "DeepSeek",
         })
     }
 }
@@ -222,6 +228,8 @@ impl FromStr for ProviderConfig {
         match value.trim().to_ascii_lowercase().as_str() {
             "deepl" => Ok(Self::DeepL),
             "ollama" => Ok(Self::Ollama),
+            "lmstudio" => Ok(Self::LmStudio),
+            "deepseek" => Ok(Self::DeepSeek),
             _ => Err(Error::new("Translation provider is not available")),
         }
     }
@@ -233,6 +241,7 @@ pub struct RuntimeConfig {
     pub annotation_hotkey: HotkeyConfig,
     pub provider: ProviderConfig,
     pub ollama: super::ollama::OllamaConfig,
+    pub llm: super::llm::LlmSettings,
     pub launch_at_login: bool,
 }
 
@@ -243,6 +252,7 @@ impl Default for RuntimeConfig {
             annotation_hotkey: HotkeyConfig::annotation_default(),
             provider: ProviderConfig::default(),
             ollama: super::ollama::OllamaConfig::default(),
+            llm: super::llm::LlmSettings::default(),
             launch_at_login: false,
         }
     }

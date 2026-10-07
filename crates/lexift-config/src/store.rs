@@ -136,11 +136,11 @@ mod tests {
     }
 
     #[test]
-    fn save_creates_parent_and_v6_file() {
+    fn save_creates_parent_and_v8_file() {
         let (_directory, store) = fixture();
         store.save(&settings("ja")).unwrap();
         let contents = fs::read_to_string(store.path()).unwrap();
-        assert!(contents.contains("schema_version = 6"));
+        assert!(contents.contains("schema_version = 8"));
         assert!(contents.contains("target_language = \"ja\""));
         assert!(contents.contains("provider = \"deepl\""));
         assert!(contents.contains("key = \"X\""));
@@ -195,7 +195,7 @@ mod tests {
         assert!(
             fs::read_to_string(store.path())
                 .unwrap()
-                .contains("schema_version = 6")
+                .contains("schema_version = 8")
         );
     }
 
@@ -271,7 +271,7 @@ mod tests {
         };
         store.save(&settings).unwrap();
         let contents = fs::read_to_string(store.path()).unwrap();
-        assert!(contents.contains("schema_version = 6"));
+        assert!(contents.contains("schema_version = 8"));
         assert!(contents.contains("[credentials]"));
         assert!(contents.contains("deepl = \"deepl-primary\""));
         assert!(!contents.contains("api_key"));

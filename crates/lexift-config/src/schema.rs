@@ -8,6 +8,230 @@ use serde::{Deserialize, Serialize};
 use crate::migration::CURRENT_SCHEMA_VERSION;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct LlmFile {
+    connections: Vec<ConnectionFile>,
+    models: Vec<ModelFile>,
+    prompt: String,
+    #[serde(default)]
+    catalog: Option<Vec<CatalogFile>>,
+    #[serde(default = "enabled_default")]
+    deepl_enabled: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct ConnectionFile {
+    provider: String,
+    address: String,
+    credential_id: Option<String>,
+    #[serde(default = "enabled_default")]
+    enabled: bool,
+    #[serde(default = "native_protocol")]
+    protocol: String,
+    #[serde(default)]
+    protocols: Vec<ProtocolFile>,
+}
+fn enabled_default() -> bool {
+    true
+}
+fn native_protocol() -> String {
+    "native".into()
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct ProtocolFile {
+    protocol: String,
+    base_url: String,
+    authentication: String,
+    headers: Vec<HeaderFile>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct HeaderFile {
+    name: String,
+    credential_id: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct CatalogFile {
+    provider: String,
+    id: String,
+    #[serde(default)]
+    aliases: Vec<String>,
+    reasoning: Vec<String>,
+    issue: Option<String>,
+    enabled: bool,
+    available: bool,
+    endpoint: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct ModelFile {
+    provider: String,
+    model: String,
+    reasoning: String,
+    temperature: Option<u16>,
+    top_p: Option<u16>,
+}
+impl LlmFile {
+    fn from_domain(s: &lexift_core::domain::llm::LlmSettings) -> Self {
+        Self {
+            connections: s
+                .connections
+                .iter()
+                .map(|c| ConnectionFile {
+                    provider: c.provider.id().into(),
+                    address: c.address.clone(),
+                    credential_id: c.credential_id.clone(),
+                    enabled: c.enabled,
+                    protocol: c.protocol.id().into(),
+                    protocols: c
+                        .protocols
+                        .iter()
+                        .map(|p| ProtocolFile {
+                            protocol: p.protocol.id().into(),
+                            base_url: p.base_url.clone(),
+                            authentication: format!("{:?}", p.authentication),
+                            headers: p
+                                .headers
+                                .iter()
+                                .map(|h| HeaderFile {
+                                    name: h.name.clone(),
+                                    credential_id: h.credential_id.clone(),
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            models: s
+                .models
+                .iter()
+                .map(|m| ModelFile {
+                    provider: m.provider.id().into(),
+                    model: m.model.clone(),
+                    reasoning: m.parameters.reasoning.clone(),
+                    temperature: m.parameters.temperature,
+                    top_p: m.parameters.top_p,
+                })
+                .collect(),
+            prompt: s.prompt.clone(),
+            deepl_enabled: s.deepl_enabled,
+            catalog: Some(
+                s.catalog
+                    .iter()
+                    .map(|m| CatalogFile {
+                        provider: m.provider.id().into(),
+                        id: m.model.id.clone(),
+                        aliases: m.model.aliases.clone(),
+                        reasoning: m.model.reasoning.clone(),
+                        issue: m.model.issue.clone(),
+                        enabled: m.enabled,
+                        available: m.available,
+                        endpoint: m.endpoint.clone(),
+                    })
+                    .collect(),
+            ),
+        }
+    }
+    fn into_domain(self) -> lexift_core::Result<lexift_core::domain::llm::LlmSettings> {
+        use lexift_core::domain::llm::*;
+        let legacy_catalog = self.catalog.is_none();
+        let mut settings = LlmSettings {
+            connections: self
+                .connections
+                .into_iter()
+                .map(|c| {
+                    Ok(LlmConnection {
+                        provider: LlmProvider::parse(&c.provider)?,
+                        address: c.address,
+                        credential_id: c.credential_id,
+                        enabled: c.enabled,
+                        protocol: LlmProtocol::parse(&c.protocol)?,
+                        protocols: c
+                            .protocols
+                            .into_iter()
+                            .map(|p| {
+                                Ok(ProtocolSettings {
+                                    protocol: LlmProtocol::parse(&p.protocol)?,
+                                    base_url: p.base_url,
+                                    authentication: match p.authentication.as_str() {
+                                        "Automatic" => Authentication::Automatic,
+                                        "Headers" => Authentication::Headers,
+                                        "None" => Authentication::None,
+                                        _ => {
+                                            return Err(lexift_core::Error::new(
+                                                "Invalid authentication mode",
+                                            ));
+                                        }
+                                    },
+                                    headers: p
+                                        .headers
+                                        .into_iter()
+                                        .map(|h| HeaderReference {
+                                            name: h.name,
+                                            credential_id: h.credential_id,
+                                        })
+                                        .collect(),
+                                })
+                            })
+                            .collect::<lexift_core::Result<_>>()?,
+                    })
+                })
+                .collect::<lexift_core::Result<_>>()?,
+            models: self
+                .models
+                .into_iter()
+                .map(|m| {
+                    Ok(TranslationModel {
+                        provider: LlmProvider::parse(&m.provider)?,
+                        model: m.model,
+                        parameters: GenerationParameters {
+                            reasoning: m.reasoning,
+                            temperature: m.temperature,
+                            top_p: m.top_p,
+                        },
+                    })
+                })
+                .collect::<lexift_core::Result<_>>()?,
+            prompt: self.prompt,
+            deepl_enabled: self.deepl_enabled,
+            catalog: self
+                .catalog
+                .unwrap_or_default()
+                .into_iter()
+                .map(|m| {
+                    Ok(CatalogModel {
+                        provider: LlmProvider::parse(&m.provider)?,
+                        model: LlmModel {
+                            id: m.id,
+                            aliases: m.aliases,
+                            reasoning: m.reasoning,
+                            issue: m.issue,
+                        },
+                        enabled: m.enabled,
+                        available: m.available,
+                        endpoint: m.endpoint,
+                    })
+                })
+                .collect::<lexift_core::Result<_>>()?,
+        };
+        if legacy_catalog {
+            for m in &settings.models {
+                settings.catalog.push(CatalogModel {
+                    provider: m.provider,
+                    model: LlmModel {
+                        id: m.model.clone(),
+                        aliases: Vec::new(),
+                        reasoning: Vec::new(),
+                        issue: None,
+                    },
+                    enabled: true,
+                    available: true,
+                    endpoint: settings.connection(m.provider).endpoint_key(),
+                });
+            }
+        }
+        settings.validate()?;
+        Ok(settings)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct ConfigFile {
     pub(crate) schema_version: u32,
     pub(crate) settings: SettingsFile,
@@ -26,6 +250,8 @@ pub(crate) struct SettingsFile {
     provider: String,
     #[serde(default)]
     ollama: OllamaFile,
+    #[serde(default)]
+    llm: Option<LlmFile>,
     #[serde(default)]
     launch_at_login: bool,
     #[serde(default = "default_selection_toolbar")]
@@ -129,6 +355,7 @@ impl ConfigFile {
                     address: settings.ollama.address.clone(),
                     model: settings.ollama.model.clone(),
                 },
+                llm: Some(LlmFile::from_domain(&settings.llm)),
                 launch_at_login: settings.launch_at_login,
                 selection_toolbar: settings.selection_toolbar,
                 theme: match settings.theme {
@@ -165,13 +392,48 @@ impl ConfigFile {
             },
             annotation_key,
         )?;
+        let ollama = self.settings.ollama.into_config()?;
+        let llm = match self.settings.llm {
+            Some(file) => file.into_domain()?,
+            None => {
+                let mut settings = lexift_core::domain::llm::LlmSettings::default();
+                settings.connections[0].address = ollama.address.clone();
+                if !ollama.model.is_empty() {
+                    settings
+                        .models
+                        .push(lexift_core::domain::llm::TranslationModel {
+                            provider: lexift_core::domain::llm::LlmProvider::Ollama,
+                            model: ollama.model.clone(),
+                            parameters: Default::default(),
+                        });
+                }
+                for m in &settings.models {
+                    settings
+                        .catalog
+                        .push(lexift_core::domain::llm::CatalogModel {
+                            provider: m.provider,
+                            model: lexift_core::domain::llm::LlmModel {
+                                id: m.model.clone(),
+                                aliases: Vec::new(),
+                                reasoning: Vec::new(),
+                                issue: None,
+                            },
+                            enabled: true,
+                            available: true,
+                            endpoint: settings.connection(m.provider).endpoint_key(),
+                        });
+                }
+                settings
+            }
+        };
         Ok(Settings {
             target_language: Language(self.settings.target_language),
             ui_language: self.settings.ui_language.parse()?,
             hotkey,
             annotation_hotkey,
             provider: self.settings.provider.parse()?,
-            ollama: self.settings.ollama.into_config()?,
+            ollama,
+            llm,
             launch_at_login: self.settings.launch_at_login,
             selection_toolbar: self.settings.selection_toolbar,
             theme: match self.settings.theme.as_str() {
@@ -193,6 +455,76 @@ impl ConfigFile {
 mod tests {
     use super::*;
     use lexift_core::domain::ui_language::UiLanguage;
+    #[test]
+    fn v7_migration_enables_existing_choice_and_v8_catalog_round_trips() {
+        let legacy = "schema_version = 7\n[settings]\ntarget_language = 'zh-CN'\nprovider = 'lmstudio'\n[settings.llm]\nprompt = 'Translate to {target_language}'\n[[settings.llm.connections]]\nprovider = 'lmstudio'\naddress = 'http://127.0.0.1:52341'\ncredential_id = 'key-reference'\n[[settings.llm.models]]\nprovider = 'lmstudio'\nmodel = 'service-real-id'\nreasoning = 'off'\ntemperature = 25\n";
+        let mut settings = toml::from_str::<ConfigFile>(legacy)
+            .unwrap()
+            .into_settings()
+            .unwrap();
+        use lexift_core::domain::llm::*;
+        assert!(
+            settings
+                .llm
+                .model_enabled(LlmProvider::LmStudio, "service-real-id")
+        );
+        assert_eq!(
+            settings
+                .llm
+                .selected(LlmProvider::LmStudio)
+                .unwrap()
+                .parameters
+                .temperature,
+            Some(25)
+        );
+        let mut c = settings.llm.connection(LlmProvider::LmStudio);
+        c.protocol = LlmProtocol::Responses;
+        c.enabled = false;
+        c.protocols.push(ProtocolSettings {
+            protocol: LlmProtocol::Responses,
+            base_url: "https://gateway.example/v1".into(),
+            authentication: Authentication::Headers,
+            headers: vec![HeaderReference {
+                name: "Authorization".into(),
+                credential_id: "header-reference".into(),
+            }],
+        });
+        settings.llm.connections = vec![c];
+        settings.llm.catalog[0].available = false;
+        let file = ConfigFile::from_settings(&settings);
+        let serialized = toml::to_string(&file).unwrap();
+        assert!(serialized.contains("header-reference"));
+        assert!(!serialized.contains("Bearer "));
+        assert_eq!(file.into_settings().unwrap(), settings);
+    }
+    #[test]
+    fn v6_ollama_migrates_into_separate_service_and_translation_settings() {
+        use lexift_core::domain::llm::LlmProvider;
+        let file: ConfigFile = toml::from_str("schema_version = 6\n[settings]\ntarget_language = 'zh-CN'\nprovider = 'ollama'\n[settings.ollama]\naddress = 'http://127.0.0.1:11434'\nmodel = 'saved-model'\n").unwrap();
+        let settings = file.into_settings().unwrap();
+        assert_eq!(
+            settings.llm.connection(LlmProvider::Ollama).address,
+            settings.ollama.address
+        );
+        assert_eq!(
+            settings.llm.selected(LlmProvider::Ollama).unwrap().model,
+            "saved-model"
+        );
+        assert_eq!(
+            settings
+                .llm
+                .selected(LlmProvider::Ollama)
+                .unwrap()
+                .parameters,
+            Default::default()
+        );
+        assert_eq!(
+            ConfigFile::from_settings(&settings)
+                .into_settings()
+                .unwrap(),
+            settings
+        );
+    }
     #[test]
     fn all_ui_languages_round_trip_independently_of_target() {
         for ui_language in UiLanguage::ALL {

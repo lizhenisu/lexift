@@ -1,8 +1,6 @@
-use std::net::IpAddr;
-
 use crate::{Error, Result};
 
-/// User-owned local service configuration. Model weights are never managed by Lexift.
+/// Legacy Ollama configuration shape retained for schema migration and adapter callers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OllamaConfig {
     pub address: String,
@@ -28,45 +26,9 @@ impl OllamaConfig {
     }
 }
 
-/// Strict authority parsing prevents URL normalization from accepting disguised remote hosts.
-/// Returns a canonical HTTP origin; localhost is pinned to loopback rather than resolved by DNS.
+/// Compatibility alias for the common HTTP(S) service-origin validator.
 pub fn local_service_address(input: &str) -> Result<String> {
-    let invalid = || Error::new("Use an HTTP loopback address with a valid port and no path");
-    if input.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return Err(invalid());
-    }
-    let authority = input.strip_prefix("http://").ok_or_else(invalid)?;
-    let authority = authority.strip_suffix('/').unwrap_or(authority);
-    if authority.contains(['/', '?', '#', '@', '\\', '%']) {
-        return Err(invalid());
-    }
-    let (host, port) = if let Some(rest) = authority.strip_prefix('[') {
-        let (host, rest) = rest.split_once(']').ok_or_else(invalid)?;
-        host.parse::<std::net::Ipv6Addr>().map_err(|_| invalid())?;
-        (host, rest.strip_prefix(':').ok_or_else(invalid)?)
-    } else {
-        if authority.matches(':').count() != 1 {
-            return Err(invalid());
-        }
-        authority.rsplit_once(':').ok_or_else(invalid)?
-    };
-    if port.is_empty() || !port.bytes().all(|c| c.is_ascii_digit()) {
-        return Err(invalid());
-    }
-    let port: u16 = port.parse().map_err(|_| invalid())?;
-    if port == 0 {
-        return Err(invalid());
-    }
-    let host = if host.eq_ignore_ascii_case("localhost") {
-        "127.0.0.1".to_owned()
-    } else {
-        match host.parse::<IpAddr>().map_err(|_| invalid())? {
-            IpAddr::V4(ip) if ip.is_loopback() => ip.to_string(),
-            IpAddr::V6(ip) if ip.is_loopback() => format!("[{ip}]"),
-            _ => return Err(invalid()),
-        }
-    };
-    Ok(format!("http://{host}:{port}"))
+    super::llm::service_address(input)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,7 +66,7 @@ mod tests {
         let original = state.desired_settings.clone();
         let commands = state.reduce(AppEvent::SettingsChangeRequested {
             change: SettingsChange::Ollama(OllamaConfig {
-                address: "http://remote:80".into(),
+                address: "http://remote:0".into(),
                 model: "test".into(),
             }),
         });
@@ -118,7 +80,7 @@ mod tests {
         );
     }
     #[test]
-    fn only_explicit_loopback_origins_are_accepted() {
+    fn explicit_service_origins_are_accepted() {
         for address in [
             "http://localhost:11434",
             "http://127.0.0.2:80/",
@@ -127,17 +89,12 @@ mod tests {
             assert!(local_service_address(address).is_ok(), "{address}");
         }
         for address in [
-            "https://localhost:11434",
-            "http://example.org:11434",
-            "http://192.168.1.2:11434",
             "http://127.0.0.1:0",
             "http://localhost:65536",
-            "http://localhost",
             "http://user@localhost:80",
             "http://localhost:80/?x",
             "http://localhost:80/#x",
             "http://localhost:80/api",
-            "http://127.1:80",
             "http://localhost:80\\remote",
             "http://::1:80",
             "http://[127.0.0.1]:80",

@@ -9,7 +9,14 @@ pub(crate) fn apply_main(main: &AppWindow, state: &UiState) {
 }
 
 pub(crate) fn apply_settings(settings: &SettingsWindow, state: &UiState) {
-    crate::ollama_settings::refresh_localized_status(settings);
+    settings.set_deepseek_environment_key(state.deepseek_environment_key);
+    crate::llm_settings::sync(settings, &state.llm);
+    crate::llm_settings::secure_completed(
+        settings,
+        state.credential_busy,
+        state.credential_error.is_empty(),
+    );
+    crate::llm_settings::refresh_localized(settings);
     settings.set_appearance_language_index(state.ui_language.index());
     settings.set_annotation_hotkey_status(crate::annotation::status().into());
     settings.set_appearance_theme_index(crate::theme::index(state.theme));
@@ -25,6 +32,7 @@ pub(crate) fn apply_settings(settings: &SettingsWindow, state: &UiState) {
     }
     if settings.get_draft_provider_id().as_str() != state.provider {
         settings.set_draft_provider_id(state.provider.clone().into());
+        crate::llm_settings::sync_provider(settings, &state.provider);
     }
     if settings.get_launch_at_login() != state.launch_at_login {
         settings.set_launch_at_login(state.launch_at_login);

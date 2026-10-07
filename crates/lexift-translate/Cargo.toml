@@ -6,13 +6,14 @@ license.workspace = true
 
 [features]
 default = []
-mock = ["dep:tokio"]
+mock = []
 
 [dependencies]
 lexift-core.workspace = true
 reqwest.workspace = true
 serde.workspace = true
-tokio = { workspace = true, optional = true }
+tokio.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

@@ -80,5 +80,18 @@ pub enum AppCommand {
         generation: u64,
     },
     ClearCredentialDraft,
+    AccessLlmCredential {
+        connection: crate::domain::llm::LlmConnection,
+        purpose: CredentialAccessPurpose,
+        generation: u64,
+    },
+    PersistLlmConnection {
+        connection: crate::domain::llm::LlmConnection,
+        headers: Vec<crate::ports::llm::LlmHeaderUpdate>,
+    },
+    PersistLlmCredential {
+        provider: crate::domain::llm::LlmProvider,
+        secret: Option<CredentialSecret>,
+    },
     Exit,
 }

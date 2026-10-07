@@ -909,3 +909,378 @@ msgstr "Ollama returned too many models"
 
 msgid "Ollama client initialization failed"
 msgstr "Ollama client initialization failed"
+
+msgid "Translation provider and model"
+msgstr "Translation provider and model"
+
+msgid "Model parameters"
+msgstr "Model parameters"
+
+msgid "Thinking effort"
+msgstr "Thinking effort"
+
+msgid "Model temperature"
+msgstr "Model temperature"
+
+msgid "Custom"
+msgstr "Custom"
+
+msgid "Model default"
+msgstr "Model default"
+
+msgid "Translation prompt"
+msgstr "Translation prompt"
+
+msgid "Use {{target_language}} for the target language."
+msgstr "Use {{target_language}} for the target language."
+
+msgid "Restore default prompt"
+msgstr "Restore default prompt"
+
+msgid "API key configured"
+msgstr "API key configured"
+
+msgid "API key not configured"
+msgstr "API key not configured"
+
+msgid "Remove key"
+msgstr "Remove key"
+
+msgid "Model downloads and service lifecycle are managed outside Lexift."
+msgstr "Model downloads and service lifecycle are managed outside Lexift."
+
+msgid "Off"
+msgstr "Off"
+
+msgid "On"
+msgstr "On"
+
+msgid "Low"
+msgstr "Low"
+
+msgid "High"
+msgstr "High"
+
+msgid "Maximum"
+msgstr "Maximum"
+
+msgid "Thinking capability is unavailable or unknown"
+msgstr "Thinking capability is unavailable or unknown"
+
+msgid "This model requires thinking"
+msgstr "This model requires thinking"
+
+msgid "Sampling controls depend on the selected thinking mode"
+msgstr "Sampling controls depend on the selected thinking mode"
+
+msgid "Model service discovery is unavailable"
+msgstr "Model service discovery is unavailable"
+
+msgid "Connected; no compatible text generation models found"
+msgstr "Connected; no compatible text generation models found"
+
+msgid "Saved model is unavailable; choose another model"
+msgstr "Saved model is unavailable; choose another model"
+
+msgid "Translation prompt must contain {target_language}"
+msgstr "Translation prompt must contain {target_language}"
+
+msgid "Use an HTTP or HTTPS service address without a path"
+msgstr "Use an HTTP or HTTPS service address without a path"
+
+msgid "Unknown model provider"
+msgstr "Unknown model provider"
+
+msgid "Use the official DeepSeek service address"
+msgstr "Use the official DeepSeek service address"
+
+msgid "Invalid model parameters"
+msgstr "Invalid model parameters"
+
+msgid "Model client initialization failed"
+msgstr "Model client initialization failed"
+
+msgid "DeepSeek API key is not configured"
+msgstr "DeepSeek API key is not configured"
+
+msgid "Model request timed out"
+msgstr "Model request timed out"
+
+msgid "Cannot connect to model service"
+msgstr "Cannot connect to model service"
+
+msgid "Invalid model service response"
+msgstr "Invalid model service response"
+
+msgid "Model service authentication failed"
+msgstr "Model service authentication failed"
+
+msgid "Model or API not found; check service version"
+msgstr "Model or API not found; check service version"
+
+msgid "Model service rate limit exceeded"
+msgstr "Model service rate limit exceeded"
+
+msgid "Model service redirects are not allowed"
+msgstr "Model service redirects are not allowed"
+
+msgid "Model service rejected the request"
+msgstr "Model service rejected the request"
+
+msgid "Invalid model list"
+msgstr "Invalid model list"
+
+msgid "Model service returned too many models"
+msgstr "Model service returned too many models"
+
+msgid "Invalid model identifier"
+msgstr "Invalid model identifier"
+
+msgid "Model does not report text generation capability"
+msgstr "Model does not report text generation capability"
+
+msgid "Model discovery timed out"
+msgstr "Model discovery timed out"
+
+msgid "Select a model in translation settings first"
+msgstr "Select a model in translation settings first"
+
+msgid "Selected model is unavailable"
+msgstr "Selected model is unavailable"
+
+msgid "Model does not support the selected thinking setting"
+msgstr "Model does not support the selected thinking setting"
+
+msgid "Model thinking capability is unknown"
+msgstr "Model thinking capability is unknown"
+
+msgid "Invalid sampling parameters"
+msgstr "Invalid sampling parameters"
+
+msgid "Sampling parameters are incompatible with the thinking mode"
+msgstr "Sampling parameters are incompatible with the thinking mode"
+
+msgid "Model returned an incomplete translation"
+msgstr "Model returned an incomplete translation"
+
+msgid "Model returned an empty translation"
+msgstr "Model returned an empty translation"
+
+msgid "API key"
+msgstr "API key"
+
+msgid "Advanced request settings"
+msgstr "Advanced request settings"
+
+msgid "All models"
+msgstr "All models"
+
+msgid "Apply connection settings before saving headers"
+msgstr "Apply connection settings before saving headers"
+
+msgid "Apply connection settings before syncing models"
+msgstr "Apply connection settings before syncing models"
+
+msgid "Authentication"
+msgstr "Authentication"
+
+msgid "Automatic API key"
+msgstr "Automatic API key"
+
+msgid "Connection changed; sync models to confirm"
+msgstr "Connection changed; sync models to confirm"
+
+msgid "Credential source: environment; manage it outside Lexift"
+msgstr "Credential source: environment; manage it outside Lexift"
+
+msgid "Credential source: system storage"
+msgstr "Credential source: system storage"
+
+msgid "Custom request headers"
+msgstr "Custom request headers"
+
+msgid "Header name"
+msgstr "Header name"
+
+msgid "Header value"
+msgstr "Header value"
+
+msgid "Header values are stored securely when you apply. Cancel discards changes."
+msgstr "Header values are stored securely when you apply. Cancel discards changes."
+
+msgid "Invalid API base URL"
+msgstr "Invalid API base URL"
+
+msgid "Invalid request header value"
+msgstr "Invalid request header value"
+
+msgid "Manage models"
+msgstr "Manage models"
+
+msgid "Model capability is unknown; verify using the native model catalog"
+msgstr "Model capability is unknown; verify using the native model catalog"
+
+msgid "Models"
+msgstr "Models"
+
+msgid "Native"
+msgstr "Native"
+
+msgid "Not enabled"
+msgstr "Not enabled"
+
+msgid "Protocol"
+msgstr "Protocol"
+
+msgid "Provider is disabled"
+msgstr "Provider is disabled"
+
+msgid "Request header credential is missing"
+msgstr "Request header credential is missing"
+
+msgid "Save header"
+msgstr "Save header"
+
+msgid "Search models"
+msgstr "Search models"
+
+msgid "Selected model is not enabled or needs confirmation in Provider settings"
+msgstr "Selected model is not enabled or needs confirmation in Provider settings"
+
+msgid "Sync models"
+msgstr "Sync models"
+
+msgid "Test connection"
+msgstr "Test connection"
+
+msgid "Test selected translation model"
+msgstr "Test selected translation model"
+
+msgid "Text generation"
+msgstr "Text generation"
+
+msgid "Thinking settings require verified protocol capabilities"
+msgstr "Thinking settings require verified protocol capabilities"
+
+msgid "Embedding models"
+msgstr "Embedding models"
+
+msgid "Unknown capability"
+msgstr "Unknown capability"
+
+msgid "Invalid or reserved request header"
+msgstr "Invalid or reserved request header"
+
+msgid "Duplicate or invalid request header"
+msgstr "Duplicate or invalid request header"
+
+msgid "Custom authorization and automatic API key are mutually exclusive"
+msgstr "Custom authorization and automatic API key are mutually exclusive"
+
+msgid "Select custom-header authentication first"
+msgstr "Select custom-header authentication first"
+
+msgid "API key is not configured"
+msgstr "API key is not configured"
+
+msgid "Could not copy API key"
+msgstr "Could not copy API key"
+
+msgid "More actions"
+msgstr "More actions"
+
+msgid "Disable model"
+msgstr "Disable model"
+
+msgid "Enable model"
+msgstr "Enable model"
+
+msgid "API address"
+msgstr "API address"
+
+msgid "Request configuration"
+msgstr "Request configuration"
+
+msgid "Filter models"
+msgstr "Filter models"
+
+msgid "No enabled models"
+msgstr "No enabled models"
+
+msgid "No matching models"
+msgstr "No matching models"
+
+msgid "Use Sync models to choose models for translation."
+msgstr "Use Sync models to choose models for translation."
+
+msgid "Add header"
+msgstr "Add header"
+
+msgid "OK"
+msgstr "OK"
+
+msgid "Test model"
+msgstr "Test model"
+
+msgid "Remove from catalog"
+msgstr "Remove from catalog"
+
+msgid "Save or cancel the header before confirming"
+msgstr "Save or cancel the header before confirming"
+
+msgid "Close"
+msgstr "Close"
+
+msgid "View key"
+msgstr "View key"
+
+msgid "Edit key"
+msgstr "Edit key"
+
+msgid "Delete key"
+msgstr "Delete key"
+
+msgid "Hide key"
+msgstr "Hide key"
+
+msgid "Test all enabled models"
+msgstr "Test all enabled models"
+
+msgid "Select a model to test"
+msgstr "Select a model to test"
+
+msgid "No authentication configured"
+msgstr "No authentication configured"
+
+msgid "Testing sends a short fixed message. It may load local models or incur API charges."
+msgstr "Testing sends a short fixed message. It may load local models or incur API charges."
+
+msgid "Enabled models"
+msgstr "Enabled models"
+
+msgid "Test all models"
+msgstr "Test all models"
+
+msgid "Testing…"
+msgstr "Testing…"
+
+msgid "Start"
+msgstr "Start"
+
+msgid "Save or cancel credential editing before testing"
+msgstr "Save or cancel credential editing before testing"
+
+msgid "Skipped"
+msgstr "Skipped"
+
+msgid "Passed"
+msgstr "Passed"
+
+msgid "Failed"
+msgstr "Failed"
+
+msgid "Model returned no complete text"
+msgstr "Model returned no complete text"
+
+msgid "Model test failed; check connection and model compatibility"
+msgstr "Model test failed; check connection and model compatibility"

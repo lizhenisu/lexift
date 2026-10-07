@@ -59,6 +59,7 @@ pub struct AppState {
     pub annotation_hotkey_settings_error: String,
     pub provider_settings_error: String,
     pub launch_at_login_settings_error: String,
+    pub deepseek_environment_key: bool,
     pub credential_configured: bool,
     pub credential_busy: bool,
     pub credential_error_message: String,
@@ -99,6 +100,7 @@ impl AppState {
             annotation_hotkey_settings_error: String::new(),
             provider_settings_error: String::new(),
             launch_at_login_settings_error: String::new(),
+            deepseek_environment_key: false,
             credential_configured: false,
             credential_busy: false,
             credential_error_message: String::new(),
@@ -526,6 +528,143 @@ impl AppState {
                 commands.extend(self.start_next_settings_change());
                 commands
             }
+            AppEvent::LlmCredentialAccessRequested {
+                provider,
+                purpose,
+                generation,
+            } if !self.credential_busy => {
+                self.credential_busy = true;
+                self.credential_error_message.clear();
+                vec![AppCommand::AccessLlmCredential {
+                    connection: self.settings.llm.connection(provider),
+                    purpose,
+                    generation,
+                }]
+            }
+            AppEvent::LlmCredentialAccessRequested { .. } => Vec::new(),
+            AppEvent::LlmConnectionApplyRequested {
+                mut connection,
+                headers,
+            } if !self.credential_busy => {
+                if let Err(e) = connection.validate() {
+                    self.credential_error_message = e.to_string();
+                    return Vec::new();
+                }
+                for header in &headers {
+                    if let Err(e) = crate::domain::llm::validate_header_name(&header.name) {
+                        self.credential_error_message = e.to_string();
+                        return Vec::new();
+                    }
+                }
+                connection.credential_id = self
+                    .settings
+                    .llm
+                    .connection(connection.provider)
+                    .credential_id;
+                self.desired_settings
+                    .llm
+                    .connections
+                    .retain(|c| c.provider != connection.provider);
+                self.desired_settings
+                    .llm
+                    .connections
+                    .push(connection.clone());
+                self.credential_busy = true;
+                self.credential_error_message.clear();
+                vec![AppCommand::PersistLlmConnection {
+                    connection,
+                    headers,
+                }]
+            }
+            AppEvent::LlmConnectionApplyRequested { .. } => Vec::new(),
+            AppEvent::LlmConnectionApplied { config } => {
+                if !self
+                    .queued_settings_changes
+                    .iter()
+                    .any(|c| c.field() == SettingsField::Llm)
+                {
+                    self.desired_settings.llm = config.clone();
+                }
+                let mut commands = self.reduce(AppEvent::LlmCredentialChanged {
+                    config,
+                    removed: false,
+                });
+                for command in &mut commands {
+                    if let AppCommand::ShowSettingsFeedback { feedback } = command {
+                        *feedback = SettingsFeedback::SettingsSaved(SettingsField::Llm);
+                    }
+                }
+                commands
+            }
+            AppEvent::LlmConnectionApplyFailed { error } => {
+                self.restore_desired_field_after_failure(SettingsField::Llm);
+                self.reduce(AppEvent::CredentialSaveFailed { error })
+            }
+            AppEvent::LlmCredentialChangeRequested { provider, secret } => {
+                if self.credential_busy {
+                    return Vec::new();
+                }
+                if secret
+                    .as_ref()
+                    .is_some_and(|s| s.expose().trim().is_empty())
+                {
+                    return Vec::new();
+                }
+                self.credential_busy = true;
+                vec![AppCommand::PersistLlmCredential { provider, secret }]
+            }
+            AppEvent::LlmCredentialChanged { config, removed } => {
+                self.settings.llm = config.clone();
+                for connection in &mut self.desired_settings.llm.connections {
+                    let saved = config.connection(connection.provider);
+                    connection.credential_id = saved.credential_id;
+                    for profile in &mut connection.protocols {
+                        profile.headers = saved
+                            .protocols
+                            .iter()
+                            .find(|p| p.protocol == profile.protocol)
+                            .map(|p| p.headers.clone())
+                            .unwrap_or_default();
+                    }
+                    for profile in saved.protocols {
+                        if !connection
+                            .protocols
+                            .iter()
+                            .any(|p| p.protocol == profile.protocol)
+                        {
+                            connection.protocols.push(profile);
+                        }
+                    }
+                }
+                for change in &mut self.queued_settings_changes {
+                    if let SettingsChange::Llm(pending) = change {
+                        for connection in &mut pending.connections {
+                            let saved = config.connection(connection.provider);
+                            connection.credential_id = saved.credential_id;
+                            for profile in &mut connection.protocols {
+                                profile.headers = saved
+                                    .protocols
+                                    .iter()
+                                    .find(|p| p.protocol == profile.protocol)
+                                    .map(|p| p.headers.clone())
+                                    .unwrap_or_default();
+                            }
+                        }
+                    }
+                }
+                self.runtime_config.llm = self.settings.llm.clone();
+                self.credential_busy = false;
+                self.credential_error_message.clear();
+                let mut commands = vec![AppCommand::ShowSettingsFeedback {
+                    feedback: if removed {
+                        SettingsFeedback::CredentialRemoved
+                    } else {
+                        SettingsFeedback::CredentialSaved
+                    },
+                }];
+                commands.extend(self.start_next_settings_change());
+                commands
+            }
             AppEvent::CredentialSaveRequested { secret } if !self.credential_busy => {
                 let secret = secret.expose().trim().to_owned();
                 if secret.is_empty() {
@@ -618,6 +757,11 @@ impl AppState {
                 }]
             }
             AppEvent::CredentialAccessRequested { .. } => Vec::new(),
+            AppEvent::CredentialAccessCancelled => {
+                self.credential_busy = false;
+                self.credential_error_message.clear();
+                self.start_next_settings_change()
+            }
             AppEvent::CredentialAccessSucceeded { purpose } => {
                 self.credential_busy = false;
                 self.credential_error_message.clear();
@@ -653,6 +797,15 @@ impl AppState {
                 feedback: SettingsFeedback::SettingsSaveFailed(SettingsField::Ollama),
             }];
         }
+        if let SettingsChange::Llm(config) = &change
+            && let Err(error) = config.validate()
+        {
+            self.settings_error_field = Some(SettingsField::Llm);
+            self.set_settings_field_error(SettingsField::Llm, error.to_string());
+            return vec![AppCommand::ShowSettingsFeedback {
+                feedback: SettingsFeedback::SettingsSaveFailed(SettingsField::Llm),
+            }];
+        }
         change.apply_to(&mut self.desired_settings);
         if self.settings_saving || self.credential_busy {
             self.queued_settings_changes
@@ -663,7 +816,21 @@ impl AppState {
         self.start_settings_change(change)
     }
 
-    fn start_settings_change(&mut self, change: SettingsChange) -> Vec<AppCommand> {
+    fn start_settings_change(&mut self, mut change: SettingsChange) -> Vec<AppCommand> {
+        if let SettingsChange::Llm(config) = &mut change {
+            for c in &mut config.connections {
+                let saved = self.settings.llm.connection(c.provider);
+                c.credential_id = saved.credential_id;
+                for profile in &mut c.protocols {
+                    profile.headers = saved
+                        .protocols
+                        .iter()
+                        .find(|p| p.protocol == profile.protocol)
+                        .map(|p| p.headers.clone())
+                        .unwrap_or_default();
+                }
+            }
+        }
         if change.matches(&self.settings) {
             return self.start_next_settings_change();
         }
@@ -689,7 +856,9 @@ impl AppState {
             SettingsField::TargetLanguage => self.target_language_settings_error.clear(),
             SettingsField::Hotkey => self.hotkey_settings_error.clear(),
             SettingsField::AnnotationHotkey => self.annotation_hotkey_settings_error.clear(),
-            SettingsField::Provider | SettingsField::Ollama => self.provider_settings_error.clear(),
+            SettingsField::Provider | SettingsField::Ollama | SettingsField::Llm => {
+                self.provider_settings_error.clear()
+            }
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error.clear(),
             SettingsField::SelectionToolbar | SettingsField::Theme | SettingsField::UiLanguage => {}
         }
@@ -700,7 +869,9 @@ impl AppState {
             SettingsField::TargetLanguage => self.target_language_settings_error = error,
             SettingsField::Hotkey => self.hotkey_settings_error = error,
             SettingsField::AnnotationHotkey => self.annotation_hotkey_settings_error = error,
-            SettingsField::Provider | SettingsField::Ollama => self.provider_settings_error = error,
+            SettingsField::Provider | SettingsField::Ollama | SettingsField::Llm => {
+                self.provider_settings_error = error
+            }
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error = error,
             SettingsField::SelectionToolbar | SettingsField::Theme | SettingsField::UiLanguage => {
                 self.settings_error_message = error;
@@ -730,6 +901,7 @@ impl AppState {
             }
             SettingsField::Provider => self.desired_settings.provider = self.settings.provider,
             SettingsField::Ollama => self.desired_settings.ollama = self.settings.ollama.clone(),
+            SettingsField::Llm => self.desired_settings.llm = self.settings.llm.clone(),
             SettingsField::LaunchAtLogin => {
                 self.desired_settings.launch_at_login = self.settings.launch_at_login;
             }

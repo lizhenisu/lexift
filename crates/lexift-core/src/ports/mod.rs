@@ -5,6 +5,7 @@ pub mod clipboard;
 pub mod credential;
 pub mod hotkey;
 pub mod instance;
+pub mod llm;
 pub mod magnifier;
 pub mod ollama;
 pub mod screen;

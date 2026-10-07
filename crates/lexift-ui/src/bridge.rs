@@ -15,7 +15,7 @@ use lexift_core::{
     domain::{
         geometry::{Point, Rect},
         language::Language,
-        runtime_config::{HotkeyConfig, ProviderConfig},
+        runtime_config::HotkeyConfig,
         settings::{Settings, SettingsChange, SettingsFeedback, SettingsField},
     },
 };
@@ -137,7 +137,7 @@ pub enum PassiveWindowPreparation {
 
 #[derive(Clone)]
 pub struct WindowLifecycleCallbacks {
-    ollama_query: Option<crate::ollama_settings::OllamaQuery>,
+    llm_query: Option<crate::llm_settings::LlmQuery>,
     pub(crate) complete_passive_window_show: CompletePassiveWindowShow,
     complete_toolbar_show: CompletePassiveWindowShow,
     toolbar_target_current: Rc<dyn Fn(lexift_core::domain::selection::SelectionTarget) -> bool>,
@@ -175,11 +175,16 @@ pub struct WindowLifecycleCallbacks {
 }
 
 impl WindowLifecycleCallbacks {
-    pub fn with_ollama_query(
+    pub fn with_llm_query(
         mut self,
-        query: impl Fn(String, crate::OllamaQueryCompletion) -> crate::OllamaQueryCancellation + 'static,
+        query: impl Fn(
+            lexift_core::domain::llm::LlmConnection,
+            lexift_core::ports::llm::LlmQueryMode,
+            crate::LlmQueryCompletion,
+        ) -> crate::LlmQueryCancellation
+        + 'static,
     ) -> Self {
-        self.ollama_query = Some(Rc::new(query));
+        self.llm_query = Some(Rc::new(query));
         self
     }
 
@@ -193,7 +198,7 @@ impl WindowLifecycleCallbacks {
         trim_process_working_set: fn() -> bool,
     ) -> Self {
         Self {
-            ollama_query: None,
+            llm_query: None,
             complete_passive_window_show: Rc::new(complete_passive_window_show),
             complete_toolbar_show: Rc::new(|_, _| true),
             toolbar_target_current: Rc::new(|_| false),
@@ -2075,7 +2080,7 @@ pub struct Ui {
 }
 
 struct AppWindowRegistry {
-    ollama_query: Option<crate::ollama_settings::OllamaQuery>,
+    llm_query: Option<crate::llm_settings::LlmQuery>,
     main: Option<AppWindow>,
     settings: Option<SettingsWindow>,
     configure_resize_background: ConfigureResizeBackground,
@@ -2258,7 +2263,12 @@ fn ensure_settings_window(
         );
     }
     if let Some(handler) = registry.handler.clone() {
-        crate::ollama_settings::wire(&settings, registry.ollama_query.clone(), handler);
+        crate::llm_settings::wire(
+            &settings,
+            registry.latest_state.desired_settings.llm.clone(),
+            registry.llm_query.clone(),
+            handler,
+        );
     }
     registry.settings = Some(settings.clone_strong());
     Ok(settings)
@@ -2407,45 +2417,72 @@ fn wire_settings_callbacks(
         });
     });
     let credential_handler = Rc::clone(&handler);
+    let weak = settings.as_weak();
+    let generation = credential_generation.clone();
     settings.on_credential_save_requested(move |secret| {
-        credential_handler(AppEvent::CredentialSaveRequested {
-            secret: CredentialSecret::new(secret.to_string()),
-        });
+        if let Some(w) = weak.upgrade() {
+            let provider = credential_provider(&w);
+            clear_credential_transient(&w, &generation);
+            credential_handler(if let Some(provider) = provider {
+                AppEvent::LlmCredentialChangeRequested {
+                    provider,
+                    secret: Some(CredentialSecret::new(secret.to_string())),
+                }
+            } else {
+                AppEvent::CredentialSaveRequested {
+                    secret: CredentialSecret::new(secret.to_string()),
+                }
+            });
+        }
     });
     let credential_handler = Rc::clone(&handler);
+    let weak = settings.as_weak();
+    let generation = credential_generation.clone();
     settings.on_credential_remove_requested(move || {
-        credential_handler(AppEvent::CredentialRemoveRequested);
+        if let Some(w) = weak.upgrade() {
+            let provider = credential_provider(&w);
+            clear_credential_transient(&w, &generation);
+            credential_handler(if let Some(provider) = provider {
+                AppEvent::LlmCredentialChangeRequested {
+                    provider,
+                    secret: None,
+                }
+            } else {
+                AppEvent::CredentialRemoveRequested
+            });
+        }
     });
-    let settings_weak = settings.as_weak();
-    let generation = Arc::clone(&credential_generation);
-    let credential_handler = Rc::clone(&handler);
-    settings.on_credential_reveal_requested(move || {
-        let generation = begin_credential_access(&settings_weak, &generation);
-        credential_handler(AppEvent::CredentialAccessRequested {
-            purpose: CredentialAccessPurpose::Reveal,
-            generation,
-        });
-    });
-    let settings_weak = settings.as_weak();
-    let generation = Arc::clone(&credential_generation);
-    let credential_handler = Rc::clone(&handler);
-    settings.on_credential_edit_requested(move || {
-        let generation = begin_credential_access(&settings_weak, &generation);
-        credential_handler(AppEvent::CredentialAccessRequested {
-            purpose: CredentialAccessPurpose::Edit,
-            generation,
-        });
-    });
-    let settings_weak = settings.as_weak();
-    let generation = Arc::clone(&credential_generation);
-    let credential_handler = Rc::clone(&handler);
-    settings.on_credential_copy_requested(move || {
-        let generation = begin_credential_access(&settings_weak, &generation);
-        credential_handler(AppEvent::CredentialAccessRequested {
-            purpose: CredentialAccessPurpose::Copy,
-            generation,
-        });
-    });
+    for purpose in [
+        CredentialAccessPurpose::Reveal,
+        CredentialAccessPurpose::Copy,
+        CredentialAccessPurpose::Edit,
+    ] {
+        let weak = settings.as_weak();
+        let generation = credential_generation.clone();
+        let send = handler.clone();
+        let callback = move || {
+            let current = begin_credential_access(&weak, &generation);
+            if let Some(w) = weak.upgrade() {
+                send(if let Some(provider) = credential_provider(&w) {
+                    AppEvent::LlmCredentialAccessRequested {
+                        provider,
+                        purpose,
+                        generation: current,
+                    }
+                } else {
+                    AppEvent::CredentialAccessRequested {
+                        purpose,
+                        generation: current,
+                    }
+                });
+            }
+        };
+        match purpose {
+            CredentialAccessPurpose::Reveal => settings.on_credential_reveal_requested(callback),
+            CredentialAccessPurpose::Copy => settings.on_credential_copy_requested(callback),
+            CredentialAccessPurpose::Edit => settings.on_credential_edit_requested(callback),
+        }
+    }
     let settings_weak = settings.as_weak();
     let generation = Arc::clone(&credential_generation);
     settings.on_credential_hide_requested(move || {
@@ -2460,29 +2497,30 @@ fn wire_settings_callbacks(
             clear_credential_transient(&settings, &generation);
         }
     });
+    let weak = settings.as_weak();
+    let generation = credential_generation.clone();
+    settings.on_credential_edit_blurred(move || {
+        let weak = weak.clone();
+        let generation = generation.clone();
+        let version = generation.load(Ordering::SeqCst);
+        slint::Timer::single_shot(Duration::from_millis(50), move || {
+            if generation.load(Ordering::SeqCst) == version
+                && let Some(w) = weak.upgrade()
+                && !w.invoke_credential_edit_focused()
+            {
+                clear_credential_transient(&w, &generation);
+            }
+        });
+    });
     let settings_weak = settings.as_weak();
     settings.on_settings_menu_selected(move |index| {
-        if let Some(settings) = settings_weak.upgrade() {
-            if settings.get_settings_menu_model_mode() {
-                crate::ollama_settings::select_model(&settings, index);
-            } else if settings.get_settings_menu_provider_mode() {
-                let provider = if index == 1 {
-                    ProviderConfig::Ollama
-                } else {
-                    ProviderConfig::DeepL
-                };
-                if settings.get_draft_provider_id().as_str() != provider.id() {
-                    settings.set_draft_provider_id(provider.id().into());
-                    handler(AppEvent::SettingsChangeRequested {
-                        change: SettingsChange::Provider(provider),
-                    });
-                }
-            } else if settings.get_draft_target_index() != index {
-                settings.set_draft_target_index(index);
-                handler(AppEvent::SettingsChangeRequested {
-                    change: SettingsChange::TargetLanguage(language_for_index(index)),
-                });
-            }
+        if let Some(settings) = settings_weak.upgrade()
+            && settings.get_draft_target_index() != index
+        {
+            settings.set_draft_target_index(index);
+            handler(AppEvent::SettingsChangeRequested {
+                change: SettingsChange::TargetLanguage(language_for_index(index)),
+            });
         }
     });
 }
@@ -2525,7 +2563,7 @@ impl Ui {
         let background_mode = Rc::new(Cell::new(false));
         APP_WINDOW_REGISTRY.with(|registry| {
             *registry.borrow_mut() = Some(AppWindowRegistry {
-                ollama_query: window_lifecycle.ollama_query.clone(),
+                llm_query: window_lifecycle.llm_query.clone(),
                 main: None,
                 settings: None,
                 configure_resize_background: Rc::clone(
@@ -3053,6 +3091,11 @@ fn reset_credential_view(settings: &SettingsWindow) {
     settings.set_credential_request_pending(false);
 }
 
+fn credential_provider(window: &SettingsWindow) -> Option<lexift_core::domain::llm::LlmProvider> {
+    usize::try_from(window.get_provider_detail_index() - 1)
+        .ok()
+        .and_then(|i| lexift_core::domain::llm::LlmProvider::ALL.get(i).copied())
+}
 fn clear_credential_transient(settings: &SettingsWindow, generation: &AtomicU64) {
     generation.fetch_add(1, Ordering::SeqCst);
     reset_credential_view(settings);
@@ -3139,9 +3182,9 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
         SettingsFeedback::SettingsSaved(SettingsField::AnnotationHotkey) => {
             ("Shortcut saved", false)
         }
-        SettingsFeedback::SettingsSaved(SettingsField::Provider | SettingsField::Ollama) => {
-            ("Provider saved", false)
-        }
+        SettingsFeedback::SettingsSaved(
+            SettingsField::Provider | SettingsField::Ollama | SettingsField::Llm,
+        ) => ("Provider saved", false),
         SettingsFeedback::SettingsSaved(SettingsField::LaunchAtLogin) => {
             ("Startup preference saved", false)
         }
@@ -3157,9 +3200,9 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
         SettingsFeedback::SettingsSaveFailed(SettingsField::AnnotationHotkey) => {
             ("Shortcut wasn't saved", true)
         }
-        SettingsFeedback::SettingsSaveFailed(SettingsField::Provider | SettingsField::Ollama) => {
-            ("Provider wasn't saved", true)
-        }
+        SettingsFeedback::SettingsSaveFailed(
+            SettingsField::Provider | SettingsField::Ollama | SettingsField::Llm,
+        ) => ("Provider wasn't saved", true),
         SettingsFeedback::SettingsSaveFailed(SettingsField::LaunchAtLogin) => {
             ("Startup preference wasn't saved", true)
         }
@@ -3335,8 +3378,7 @@ impl UiHandle {
                     settings.annotation_hotkey.to_string().into(),
                 );
                 window.set_draft_provider_id(settings.provider.id().into());
-                window.set_ollama_address(settings.ollama.address.into());
-                window.set_ollama_model(settings.ollama.model.into());
+                crate::llm_settings::reset(&window, &settings.llm, settings.provider);
                 window.set_launch_at_login(settings.launch_at_login);
                 window.set_selection_toolbar(settings.selection_toolbar);
                 window.set_hotkey_capturing(false);
@@ -3398,6 +3440,11 @@ impl UiHandle {
                 }
             });
         });
+    }
+
+    /// Worker-side guard: a closed window or changed provider invalidates pending secret access.
+    pub fn credential_access_is_current(&self, generation: u64) -> bool {
+        credential_session_is_current(&self.credential_generation, generation)
     }
 
     pub fn present_credential_secret(
@@ -3696,7 +3743,6 @@ mod tests {
         );
         settings.invoke_select_category(1);
         settings.set_draft_target_index(0);
-        settings.set_settings_menu_provider_mode(false);
         settings.invoke_settings_menu_selected(4);
         assert!(
             matches!(&events.borrow()[0], AppEvent::SettingsChangeRequested { change: SettingsChange::TargetLanguage(language) } if language == &language_for_index(4))
@@ -3718,12 +3764,20 @@ mod tests {
 
         settings.invoke_select_category(5);
         settings.set_draft_provider_id("".into());
-        settings.set_settings_menu_provider_mode(true);
-        settings.invoke_settings_menu_selected(0);
+        let recorded = events.clone();
+        crate::llm_settings::wire(
+            &settings,
+            Default::default(),
+            None,
+            Rc::new(move |event| recorded.borrow_mut().push(event)),
+        );
+        settings.invoke_llm_provider_selected(0);
         assert!(matches!(
             &events.borrow()[0],
             AppEvent::SettingsChangeRequested {
-                change: SettingsChange::Provider(ProviderConfig::DeepL)
+                change: SettingsChange::Provider(
+                    lexift_core::domain::runtime_config::ProviderConfig::DeepL
+                )
             }
         ));
         settings.invoke_credential_save_requested("test-only-placeholder".into());
@@ -3759,6 +3813,35 @@ mod tests {
                 }
             ));
             assert!(matches!(&events[5], AppEvent::CredentialRemoveRequested));
+        }
+        events.borrow_mut().clear();
+        for (index, provider) in lexift_core::domain::llm::LlmProvider::ALL
+            .into_iter()
+            .enumerate()
+        {
+            settings.set_provider_detail_index(index as i32 + 1);
+            settings.set_llm_service_index(index as i32);
+            settings.invoke_credential_hide_requested();
+            for purpose in [
+                CredentialAccessPurpose::Reveal,
+                CredentialAccessPurpose::Copy,
+                CredentialAccessPurpose::Edit,
+            ] {
+                match purpose {
+                    CredentialAccessPurpose::Reveal => {
+                        settings.invoke_credential_reveal_requested()
+                    }
+                    CredentialAccessPurpose::Copy => settings.invoke_credential_copy_requested(),
+                    CredentialAccessPurpose::Edit => settings.invoke_credential_edit_requested(),
+                }
+                assert!(
+                    matches!(events.borrow().last().unwrap(),AppEvent::LlmCredentialAccessRequested{provider:p,purpose:requested,..} if *p==provider && *requested==purpose)
+                );
+            }
+            settings.invoke_credential_remove_requested();
+            assert!(
+                matches!(events.borrow().last().unwrap(),AppEvent::LlmCredentialChangeRequested{provider:p,secret:None} if *p==provider)
+            );
         }
         settings.set_credential_draft("test-only-placeholder".into());
         settings.set_credential_transient_secret("test-only-placeholder".into());

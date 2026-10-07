@@ -3,6 +3,7 @@
 mod bootstrap;
 mod controller;
 mod lifecycle;
+mod llm_credentials;
 mod runtime;
 mod wiring;
 

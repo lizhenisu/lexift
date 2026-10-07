@@ -143,11 +143,35 @@ pub enum AppEvent {
         purpose: CredentialAccessPurpose,
         generation: u64,
     },
+    CredentialAccessCancelled,
     CredentialAccessSucceeded {
         purpose: CredentialAccessPurpose,
     },
     CredentialAccessFailed {
         error: String,
+    },
+    LlmCredentialAccessRequested {
+        provider: crate::domain::llm::LlmProvider,
+        purpose: CredentialAccessPurpose,
+        generation: u64,
+    },
+    LlmConnectionApplyRequested {
+        connection: crate::domain::llm::LlmConnection,
+        headers: Vec<crate::ports::llm::LlmHeaderUpdate>,
+    },
+    LlmConnectionApplied {
+        config: crate::domain::llm::LlmSettings,
+    },
+    LlmConnectionApplyFailed {
+        error: String,
+    },
+    LlmCredentialChangeRequested {
+        provider: crate::domain::llm::LlmProvider,
+        secret: Option<CredentialSecret>,
+    },
+    LlmCredentialChanged {
+        config: crate::domain::llm::LlmSettings,
+        removed: bool,
     },
     ExitRequested,
 }

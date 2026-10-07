@@ -363,7 +363,10 @@ mod tests {
         click(200.0, 556.0);
         assert_eq!(settings.get_fallback_target_index(), 4);
         assert_eq!(settings.get_draft_target_index(), 0);
-        click(510.0, 504.0);
+        click(
+            510.0,
+            504.0 + settings.get_translation_model_section_height(),
+        );
         assert!(settings.get_preprocess_join_lines());
         snapshot(&settings_adapter, "en-US-preview-changed", 580, 1000);
         click(320.0, 352.0);
@@ -378,14 +381,20 @@ mod tests {
                 text: slint::platform::Key::Escape.into(),
             });
         render();
-        click(510.0, 504.0);
+        click(
+            510.0,
+            504.0 + settings.get_translation_model_section_height(),
+        );
         assert!(
             !settings.get_preprocess_join_lines(),
             "Escape must release the menu overlay"
         );
         click(320.0, 352.0);
         click(70.0, 900.0);
-        click(510.0, 504.0);
+        click(
+            510.0,
+            504.0 + settings.get_translation_model_section_height(),
+        );
         assert!(
             settings.get_preprocess_join_lines(),
             "Outside click must release the menu overlay"

@@ -44,6 +44,9 @@ pub(crate) trait ViewPort: Send + Sync {
     fn show_settings_window(&self, settings: Settings);
     fn hide_settings_window(&self);
     fn clear_credential_draft(&self);
+    fn credential_access_is_current(&self, _generation: u64) -> bool {
+        true
+    }
     fn present_credential_secret(
         &self,
         purpose: CredentialAccessPurpose,
@@ -55,6 +58,9 @@ pub(crate) trait ViewPort: Send + Sync {
 }
 
 impl ViewPort for lexift_ui::UiHandle {
+    fn credential_access_is_current(&self, generation: u64) -> bool {
+        self.credential_access_is_current(generation)
+    }
     fn update(&self, state: AppState) {
         self.update(state);
     }
@@ -347,6 +353,18 @@ impl AppController {
                 purpose,
                 generation,
             } => self.access_credential(credential_id, purpose, generation),
+            AppCommand::AccessLlmCredential {
+                connection,
+                purpose,
+                generation,
+            } => self.access_llm_credential(connection, purpose, generation),
+            AppCommand::PersistLlmConnection {
+                connection,
+                headers,
+            } => self.persist_llm_connection(connection, headers),
+            AppCommand::PersistLlmCredential { provider, secret } => {
+                self.persist_llm_credential(provider, secret)
+            }
             AppCommand::ClearCredentialDraft => self.ui.clear_credential_draft(),
             AppCommand::Exit => self.ui.quit(),
         }
@@ -365,6 +383,7 @@ impl AppController {
             return;
         };
         let clipboard = self.clipboard.clone();
+        let view = self.ui.clone();
         let controller = Arc::clone(self);
         self.runtime.spawn(async move {
             let result = tokio::task::spawn_blocking(move || {
@@ -374,6 +393,9 @@ impl AppController {
                     .ok_or_else(|| "Stored DeepL API key is missing".to_owned())?;
                 let secret = CredentialSecret::new(secret);
                 if purpose == CredentialAccessPurpose::Copy {
+                    if !view.credential_access_is_current(generation) {
+                        return Ok(None);
+                    }
                     let clipboard =
                         clipboard.ok_or_else(|| "System clipboard is unavailable".to_owned())?;
                     clipboard
@@ -385,6 +407,10 @@ impl AppController {
                 }
             })
             .await;
+            if !controller.ui.credential_access_is_current(generation) {
+                controller.dispatch(AppEvent::CredentialAccessCancelled);
+                return;
+            }
             match result {
                 Ok(Ok(Some(secret))) => {
                     controller
@@ -397,6 +423,187 @@ impl AppController {
                 }
                 Ok(Err(error)) => controller.dispatch(AppEvent::CredentialAccessFailed { error }),
                 Err(_) => controller.dispatch(AppEvent::CredentialAccessFailed {
+                    error: "Credential worker failed".into(),
+                }),
+            }
+        });
+    }
+
+    fn access_llm_credential(
+        self: &Arc<Self>,
+        connection: lexift_core::domain::llm::LlmConnection,
+        purpose: CredentialAccessPurpose,
+        generation: u64,
+    ) {
+        let Some(store) = self.credential_store.clone() else {
+            self.dispatch(AppEvent::CredentialAccessFailed {
+                error: "Secure credential storage is unavailable".into(),
+            });
+            return;
+        };
+        let clipboard = self.clipboard.clone();
+        let view = self.ui.clone();
+        let controller = self.clone();
+        self.runtime.spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let secret = crate::llm_credentials::resolve(store.as_ref(), &connection)
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| "API key is not configured".to_owned())?;
+                if purpose == CredentialAccessPurpose::Copy {
+                    if !view.credential_access_is_current(generation) {
+                        return Ok(None);
+                    }
+                    clipboard
+                        .ok_or_else(|| "System clipboard is unavailable".to_owned())?
+                        .write_text(&secret)
+                        .map_err(|_| "Could not copy API key".to_owned())?;
+                    Ok(None)
+                } else {
+                    Ok(Some(CredentialSecret::new(secret)))
+                }
+            })
+            .await;
+            if !controller.ui.credential_access_is_current(generation) {
+                controller.dispatch(AppEvent::CredentialAccessCancelled);
+                return;
+            }
+            match result {
+                Ok(Ok(secret)) => {
+                    if let Some(secret) = secret {
+                        controller
+                            .ui
+                            .present_credential_secret(purpose, generation, secret);
+                    }
+                    controller.dispatch(AppEvent::CredentialAccessSucceeded { purpose });
+                }
+                Ok(Err(error)) => controller.dispatch(AppEvent::CredentialAccessFailed { error }),
+                Err(_) => controller.dispatch(AppEvent::CredentialAccessFailed {
+                    error: "Credential worker failed".into(),
+                }),
+            }
+        });
+    }
+    fn persist_llm_connection(
+        self: &Arc<Self>,
+        connection: lexift_core::domain::llm::LlmConnection,
+        headers: Vec<lexift_core::ports::llm::LlmHeaderUpdate>,
+    ) {
+        let Some(store) = self.credential_store.clone() else {
+            self.dispatch(AppEvent::LlmConnectionApplyFailed {
+                error: "Secure credential storage is unavailable".into(),
+            });
+            return;
+        };
+        let controller = self.clone();
+        self.runtime.spawn(async move {
+            controller.wait_for_settings_idle().await;
+            let settings = controller
+                .state
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .settings
+                .clone();
+            let settings_store = controller.settings_store.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                crate::llm_credentials::save_connection(
+                    store.as_ref(),
+                    settings_store.as_ref(),
+                    settings,
+                    connection,
+                    headers,
+                )
+            })
+            .await;
+            match result {
+                Ok(Ok(config)) => {
+                    if let Some(runtime) = controller.runtime_manager.as_ref() {
+                        let mut current = controller
+                            .state
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .settings
+                            .runtime_config();
+                        current.llm = config.clone();
+                        let _ = runtime
+                            .apply(lexift_core::domain::settings::SettingsField::Llm, current);
+                    }
+                    controller.dispatch(AppEvent::LlmConnectionApplied { config });
+                }
+                Ok(Err(error)) => controller.dispatch(AppEvent::LlmConnectionApplyFailed {
+                    error: error.to_string(),
+                }),
+                Err(_) => controller.dispatch(AppEvent::LlmConnectionApplyFailed {
+                    error: "Credential worker failed".into(),
+                }),
+            }
+        });
+    }
+
+    fn persist_llm_credential(
+        self: &Arc<Self>,
+        provider: lexift_core::domain::llm::LlmProvider,
+        secret: Option<CredentialSecret>,
+    ) {
+        let Some(store) = self.credential_store.clone() else {
+            self.dispatch(AppEvent::CredentialSaveFailed {
+                error: "Secure credential storage is unavailable".into(),
+            });
+            return;
+        };
+        let controller = self.clone();
+        self.runtime.spawn(async move {
+            controller.wait_for_settings_idle().await;
+            let removed = secret.is_none();
+            let mut settings = controller
+                .state
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .settings
+                .clone();
+            let mut connection = settings.llm.connection(provider);
+            let id = connection
+                .credential_id
+                .clone()
+                .unwrap_or_else(|| format!("llm-{}-primary", provider.id()));
+            connection.credential_id = secret.as_ref().map(|_| id.clone());
+            settings.llm.connections.retain(|c| c.provider != provider);
+            settings.llm.connections.push(connection);
+            let config = settings.llm.clone();
+            let settings_store = controller.settings_store.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                let previous = store.get(&id).map_err(credential_error_message)?;
+                if let Some(secret) = secret {
+                    store
+                        .set(&id, secret.expose().trim())
+                        .map_err(credential_error_message)?;
+                } else {
+                    store.delete(&id).map_err(credential_error_message)?;
+                }
+                if let Err(error) = settings_store.save(&settings) {
+                    restore_credential(store.as_ref(), &id, previous.as_deref());
+                    return Err(error.to_string());
+                }
+                Ok(())
+            })
+            .await;
+            match result {
+                Ok(Ok(())) => {
+                    if let Some(runtime) = controller.runtime_manager.as_ref() {
+                        let _ = runtime.apply(lexift_core::domain::settings::SettingsField::Llm, {
+                            let mut current = controller
+                                .state
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .settings
+                                .runtime_config();
+                            current.llm = config.clone();
+                            current
+                        });
+                    }
+                    controller.dispatch(AppEvent::LlmCredentialChanged { config, removed });
+                }
+                Ok(Err(error)) => controller.dispatch(AppEvent::CredentialSaveFailed { error }),
+                Err(_) => controller.dispatch(AppEvent::CredentialSaveFailed {
                     error: "Credential worker failed".into(),
                 }),
             }
@@ -820,6 +1027,12 @@ fn event_name(event: &AppEvent) -> &'static str {
         AppEvent::RuntimeConfigUpdated { .. } => "runtime_config_updated",
         AppEvent::RuntimeConfigUpdateFailed { .. } => "runtime_config_update_failed",
         AppEvent::SettingsSaveFailed { .. } => "settings_save_failed",
+        AppEvent::LlmCredentialAccessRequested { .. } => "llm_credential_access_requested",
+        AppEvent::LlmConnectionApplyRequested { .. } => "llm_connection_apply_requested",
+        AppEvent::LlmConnectionApplied { .. } => "llm_connection_applied",
+        AppEvent::LlmConnectionApplyFailed { .. } => "llm_connection_apply_failed",
+        AppEvent::LlmCredentialChangeRequested { .. } => "llm_credential_change_requested",
+        AppEvent::LlmCredentialChanged { .. } => "llm_credential_changed",
         AppEvent::CredentialSaveRequested { .. } => "credential_save_requested",
         AppEvent::CredentialSaved { .. } => "credential_saved",
         AppEvent::CredentialSaveFailed { .. } => "credential_save_failed",
@@ -831,6 +1044,7 @@ fn event_name(event: &AppEvent) -> &'static str {
             CredentialAccessPurpose::Edit => "credential_edit_requested",
             CredentialAccessPurpose::Copy => "credential_copy_requested",
         },
+        AppEvent::CredentialAccessCancelled => "credential_access_cancelled",
         AppEvent::CredentialAccessSucceeded { purpose } => match purpose {
             CredentialAccessPurpose::Reveal => "credential_reveal_succeeded",
             CredentialAccessPurpose::Edit => "credential_edit_succeeded",
@@ -1820,6 +2034,94 @@ mod tests {
     }
 
     #[test]
+    fn llm_credentials_preserve_other_providers_and_roll_back_failed_configuration() {
+        use lexift_core::domain::llm::LlmProvider;
+        for failure in [false, true] {
+            let runtime = Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .unwrap();
+            let mut settings = Settings::default();
+            settings
+                .llm
+                .connections
+                .iter_mut()
+                .find(|c| c.provider == LlmProvider::DeepSeek)
+                .unwrap()
+                .credential_id = Some("existing-deepseek-reference".into());
+            let original = settings.clone();
+            let state = Arc::new(Mutex::new(AppState::new(settings)));
+            let credentials = Arc::new(RecordingCredentialStore::default());
+            credentials
+                .set("existing-deepseek-reference", "old-test-key")
+                .unwrap();
+            credentials.set("deepl-primary", "other-test-key").unwrap();
+            let store = Arc::new(RecordingSettingsStore {
+                failure: failure.then(|| "fixture save failure".into()),
+                ..Default::default()
+            });
+            let controller = Arc::new(
+                AppController::new(
+                    runtime.handle().clone(),
+                    state.clone(),
+                    None,
+                    None,
+                    Arc::new(ReorderingTranslator),
+                    store.clone(),
+                    Arc::new(RecordingView::default()),
+                )
+                .with_credential_management(
+                    credentials.clone(),
+                    Arc::new(RwLock::new(None)),
+                    None,
+                ),
+            );
+            controller.dispatch(AppEvent::LlmCredentialChangeRequested {
+                provider: LlmProvider::DeepSeek,
+                secret: None,
+            });
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while state.lock().unwrap().credential_busy {
+                assert!(Instant::now() < deadline, "credential worker timed out");
+                thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(
+                credentials.get("deepl-primary").unwrap().as_deref(),
+                Some("other-test-key")
+            );
+            if failure {
+                assert_eq!(
+                    credentials
+                        .get("existing-deepseek-reference")
+                        .unwrap()
+                        .as_deref(),
+                    Some("old-test-key")
+                );
+                assert_eq!(state.lock().unwrap().settings, original);
+            } else {
+                assert!(
+                    credentials
+                        .get("existing-deepseek-reference")
+                        .unwrap()
+                        .is_none()
+                );
+                assert!(
+                    state
+                        .lock()
+                        .unwrap()
+                        .settings
+                        .llm
+                        .connection(LlmProvider::DeepSeek)
+                        .credential_id
+                        .is_none()
+                );
+                assert_eq!(store.saved.lock().unwrap().len(), 1);
+            }
+        }
+    }
+
+    #[test]
     fn credential_save_persists_secret_reference_and_updates_runtime() {
         let runtime = Builder::new_multi_thread()
             .worker_threads(1)
@@ -1990,6 +2292,78 @@ mod tests {
         }
         assert_eq!(*reference.read().unwrap(), None);
         assert_eq!(credential_store.get("deepl-primary").unwrap(), None);
+    }
+
+    #[test]
+    fn llm_credential_access_uses_each_provider_reference_and_copy_never_exposes_ui_secret() {
+        use lexift_core::domain::llm::LlmProvider;
+        for provider in LlmProvider::ALL {
+            for purpose in [
+                CredentialAccessPurpose::Reveal,
+                CredentialAccessPurpose::Edit,
+                CredentialAccessPurpose::Copy,
+            ] {
+                let runtime = Builder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                let mut settings = Settings::default();
+                let id = format!("fixture-{}", provider.id());
+                settings
+                    .llm
+                    .connections
+                    .iter_mut()
+                    .find(|c| c.provider == provider)
+                    .unwrap()
+                    .credential_id = Some(id.clone());
+                let state = Arc::new(Mutex::new(AppState::new(settings)));
+                let view = Arc::new(RecordingView::default());
+                let store = Arc::new(RecordingCredentialStore::default());
+                store.set(&id, "test-provider-secret").unwrap();
+                store.set("deepl-primary", "wrong-provider-secret").unwrap();
+                let clipboard = Arc::new(RecordingClipboard::default());
+                let controller = Arc::new(
+                    AppController::new(
+                        runtime.handle().clone(),
+                        state.clone(),
+                        None,
+                        None,
+                        Arc::new(ReorderingTranslator),
+                        Arc::new(RecordingSettingsStore::default()),
+                        view.clone(),
+                    )
+                    .with_credential_management(
+                        store,
+                        Arc::new(RwLock::new(Some("deepl-primary".into()))),
+                        Some(clipboard.clone()),
+                    ),
+                );
+                controller.dispatch(AppEvent::LlmCredentialAccessRequested {
+                    provider,
+                    purpose,
+                    generation: 27,
+                });
+                let deadline = Instant::now() + Duration::from_secs(2);
+                while state.lock().unwrap().credential_busy {
+                    assert!(Instant::now() < deadline);
+                    thread::sleep(Duration::from_millis(5));
+                }
+                if purpose == CredentialAccessPurpose::Copy {
+                    assert_eq!(
+                        clipboard.text.lock().unwrap().as_deref(),
+                        Some("test-provider-secret")
+                    );
+                    assert!(view.presented_secret.lock().unwrap().is_none());
+                } else {
+                    assert_eq!(
+                        *view.presented_secret.lock().unwrap(),
+                        Some((purpose, 27, "test-provider-secret".into()))
+                    );
+                }
+                assert!(!format!("{:?}", state.lock().unwrap()).contains("test-provider-secret"));
+            }
+        }
     }
 
     #[test]

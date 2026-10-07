@@ -5,3 +5,8 @@ pub mod gemini;
 pub mod google;
 pub mod ollama;
 pub mod openai;
+
+pub mod llm;
+
+#[cfg(test)]
+mod test_http;
