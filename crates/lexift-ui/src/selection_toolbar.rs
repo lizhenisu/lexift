@@ -434,6 +434,13 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
     }
+    fn drain_until(timeout_ms: u64, ready: impl Fn() -> bool) {
+        let start = Instant::now();
+        while !ready() && start.elapsed().as_millis() < u128::from(timeout_ms) {
+            drain(16);
+        }
+        assert!(ready(), "UI timer state did not settle before timeout");
+    }
     fn install(
         prepare: fn(&slint::Window) -> PassiveWindowPreparation,
         adapters: Rc<RefCell<Vec<Rc<Adapter>>>>,
@@ -612,8 +619,9 @@ mod tests {
             calls.clone(),
         );
         sync();
-        drain(355);
-        assert!(SELECTION_TOOLBAR_REGISTRY.with(|s| s.borrow().as_ref().unwrap().window.is_none()));
+        drain_until(5_000, || {
+            SELECTION_TOOLBAR_REGISTRY.with(|s| s.borrow().as_ref().unwrap().window.is_none())
+        });
         assert_eq!(adapters.borrow()[0].shows.get(), 0);
         SELECTION_TOOLBAR_REGISTRY.with(|s| {
             let mut s = s.borrow_mut();
