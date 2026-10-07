@@ -1,9 +1,13 @@
-use super::geometry::Point;
+use super::geometry::{Point, Rect};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Selection {
     pub text: String,
     pub anchor: Option<Point>,
+    /// Visible selected text rectangles in physical virtual-screen coordinates.
+    pub bounds: Vec<Rect>,
+    /// Original mouse-down point for conservative placement when bounds are absent.
+    pub gesture_start: Option<Point>,
 }
 
 /// Native input target for a passive selection request. Identity includes the

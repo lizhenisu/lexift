@@ -1,5 +1,318 @@
 use lexift_core::domain::geometry::{Point, Rect};
 
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+    fn verify(rects: &[Rect], start: Point, end: Point, scale: f32, area: Rect) -> Point {
+        let size = ((96.0 * scale) as u32, (48.0 * scale) as u32);
+        let p = place_selection_toolbar(rects, start, end, size, scale, area).unwrap();
+        let gap = (8.0 * scale).ceil() as i32;
+        assert!(p.x >= area.left + gap && p.y >= area.top + gap);
+        assert!(i64::from(p.x) + i64::from(size.0) <= i64::from(area.right - gap));
+        assert!(i64::from(p.y) + i64::from(size.1) <= i64::from(area.bottom - gap));
+        for r in rects {
+            assert!(
+                p.x + size.0 as i32 <= r.left - gap
+                    || p.x >= r.right + gap
+                    || p.y + size.1 as i32 <= r.top - gap
+                    || p.y >= r.bottom + gap,
+                "toolbar {p:?} must not overlap {r:?}"
+            );
+        }
+        p
+    }
+    #[test]
+    fn four_drag_directions_and_multiline_selections_preserve_a_clear_gap() {
+        let rows = [
+            Rect {
+                left: 100,
+                top: 100,
+                right: 480,
+                bottom: 125,
+            },
+            Rect {
+                left: 100,
+                top: 130,
+                right: 330,
+                bottom: 155,
+            },
+        ];
+        let area = Rect {
+            left: 0,
+            top: 0,
+            right: 800,
+            bottom: 600,
+        };
+        for (start, end) in [
+            (Point { x: 100, y: 100 }, Point { x: 330, y: 155 }),
+            (Point { x: 330, y: 155 }, Point { x: 100, y: 100 }),
+            (Point { x: 480, y: 100 }, Point { x: 100, y: 155 }),
+            (Point { x: 100, y: 155 }, Point { x: 480, y: 100 }),
+        ] {
+            let p = verify(&rows, start, end, 1.0, area);
+            assert!(p.y >= end.y + 8);
+        }
+    }
+    #[test]
+    fn all_screen_edges_negative_coordinates_dpi_and_cross_screen_text() {
+        for scale in [1.0, 1.25] {
+            let area = Rect {
+                left: -1200,
+                top: -500,
+                right: 0,
+                bottom: 400,
+            };
+            for (x, y) in [
+                (-1198, -498),
+                (-4, -498),
+                (-1198, 398),
+                (-4, 398),
+                (-500, 0),
+            ] {
+                let r = Rect {
+                    left: x - 80,
+                    top: y - 12,
+                    right: x + 80,
+                    bottom: y + 12,
+                };
+                verify(
+                    &[r],
+                    Point {
+                        x: x + 20,
+                        y: y + 10,
+                    },
+                    Point { x, y },
+                    scale,
+                    area,
+                );
+            }
+            verify(
+                &[Rect {
+                    left: -20,
+                    top: -50,
+                    right: 100,
+                    bottom: 40,
+                }],
+                Point { x: 100, y: 30 },
+                Point { x: -10, y: -40 },
+                scale,
+                area,
+            );
+        }
+    }
+    #[test]
+    fn uses_gaps_between_discontinuous_ranges_instead_of_union() {
+        let area = Rect {
+            left: 0,
+            top: 0,
+            right: 200,
+            bottom: 200,
+        };
+        let rows = [
+            Rect {
+                left: 0,
+                top: 0,
+                right: 200,
+                bottom: 40,
+            },
+            Rect {
+                left: 0,
+                top: 140,
+                right: 200,
+                bottom: 200,
+            },
+        ];
+        let p = verify(
+            &rows,
+            Point { x: 20, y: 20 },
+            Point { x: 20, y: 35 },
+            1.0,
+            area,
+        );
+        assert_eq!(p.y, 48);
+    }
+    #[test]
+    fn missing_bounds_double_click_and_no_full_size_space() {
+        let area = Rect {
+            left: 0,
+            top: 0,
+            right: 800,
+            bottom: 600,
+        };
+        let click = Point { x: 300, y: 300 };
+        let p = verify(&[], click, click, 1.25, area);
+        assert!(p.y >= 341 || p.y + 60 <= 260 || p.x >= 311 || p.x + 120 <= 290);
+        for (start, end) in [
+            (Point { x: 500, y: 400 }, Point { x: 100, y: 100 }),
+            (Point { x: 100, y: 100 }, Point { x: 500, y: 400 }),
+        ] {
+            let p = verify(&[], start, end, 1.0, area);
+            assert!(p.y >= 409);
+        }
+        assert!(place_selection_toolbar(&[area], click, click, (96, 48), 1.0, area).is_none());
+        assert!(
+            place_selection_toolbar(
+                &[],
+                click,
+                click,
+                (96, 48),
+                1.0,
+                Rect {
+                    left: 0,
+                    top: 0,
+                    right: 100,
+                    bottom: 50
+                }
+            )
+            .is_none()
+        );
+    }
+}
+
+/// Places a full-size passive toolbar outside selected text. Horizontal free
+/// spans are swept at obstacle edges, avoiding a cubic candidate-grid search.
+pub(crate) fn place_selection_toolbar(
+    bounds: &[Rect],
+    start: Point,
+    end: Point,
+    desired: (u32, u32),
+    scale: f32,
+    area: Rect,
+) -> Option<Point> {
+    let scale = if scale.is_finite() {
+        scale.max(0.1)
+    } else {
+        1.0
+    };
+    let gap = (8.0 * scale).ceil() as i64;
+    let (width, height) = (i64::from(desired.0), i64::from(desired.1));
+    let (left, top, right, bottom) = (
+        i64::from(area.left) + gap,
+        i64::from(area.top) + gap,
+        i64::from(area.right) - gap,
+        i64::from(area.bottom) - gap,
+    );
+    if width <= 0 || height <= 0 || right - left < width || bottom - top < height {
+        return None;
+    }
+    let mut obstacles: Vec<_> = bounds
+        .iter()
+        .copied()
+        .filter(|r| r.left < r.right && r.top < r.bottom)
+        .collect();
+    if obstacles.is_empty() {
+        let near_distance = (6.0 * scale).ceil() as i64;
+        let near = (i64::from(start.x) - i64::from(end.x)).abs() <= near_distance
+            && (i64::from(start.y) - i64::from(end.y)).abs() <= near_distance;
+        let padding = if near {
+            (24.0 * scale).ceil() as i32
+        } else {
+            0
+        };
+        obstacles.push(Rect {
+            left: start.x.min(end.x),
+            right: start.x.max(end.x).saturating_add(1),
+            top: start.y.min(end.y).saturating_sub(padding),
+            bottom: start.y.max(end.y).saturating_add(padding).saturating_add(1),
+        });
+    }
+    let blocked: Vec<_> = obstacles
+        .iter()
+        .map(|r| {
+            (
+                i64::from(r.left) - gap,
+                i64::from(r.top) - gap,
+                i64::from(r.right) + gap,
+                i64::from(r.bottom) + gap,
+            )
+        })
+        .collect();
+    let (ex, ey) = (i64::from(end.x), i64::from(end.y));
+    let mut ys = vec![
+        top,
+        bottom - height,
+        ey + gap,
+        ey - gap - height,
+        ey,
+        ey - height,
+    ];
+    for &(_, t, _, b) in &blocked {
+        ys.extend([t - height, b]);
+    }
+    for y in &mut ys {
+        *y = (*y).clamp(top, bottom - height);
+    }
+    ys.sort_unstable();
+    ys.dedup();
+    let mut best = None;
+    for y in ys {
+        let mut intervals: Vec<_> = blocked
+            .iter()
+            .filter(|&&(_, t, _, b)| y < b && y + height > t)
+            .map(|&(l, _, r, _)| (l.max(left), r.min(right)))
+            .filter(|&(l, r)| l < r)
+            .collect();
+        intervals.sort_unstable();
+        let mut free = Vec::new();
+        let mut cursor = left;
+        for (l, r) in intervals {
+            if l > cursor {
+                free.push((cursor, l));
+            }
+            cursor = cursor.max(r);
+        }
+        if cursor < right {
+            free.push((cursor, right));
+        }
+        for (l, r) in free {
+            if r - l < width {
+                continue;
+            }
+            let mut xs = [
+                l,
+                r - width,
+                ex.clamp(l, r - width),
+                (ex - gap - width).clamp(l, r - width),
+                (ex + gap).clamp(l, r - width),
+            ];
+            xs.sort_unstable();
+            for x in xs {
+                let direction = if y >= ey + gap {
+                    0
+                } else if y + height <= ey - gap {
+                    1
+                } else if x + width <= ex - gap {
+                    2
+                } else if x >= ex + gap {
+                    3
+                } else {
+                    continue;
+                };
+                if blocked
+                    .iter()
+                    .any(|&(l, t, r, b)| x < r && x + width > l && y < b && y + height > t)
+                {
+                    continue;
+                }
+                let dx = (x - ex).max(0).max(ex - x - width);
+                let dy = (y - ey).max(0).max(ey - y - height);
+                let distance = i128::from(dx) * i128::from(dx) + i128::from(dy) * i128::from(dy);
+                let score = (direction, distance, (x - ex).abs() + (y - ey).abs(), y, x);
+                if best.as_ref().is_none_or(|(old, _)| score < *old) {
+                    best = Some((
+                        score,
+                        Point {
+                            x: x as i32,
+                            y: y as i32,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+    best.map(|(_, point)| point)
+}
+
 /// Finds unobstructed physical space for annotation controls. Cropping changes
 /// the viewport, not the content; callers supply scrolling for reduced sizes.
 pub(crate) fn place_annotation_popup(

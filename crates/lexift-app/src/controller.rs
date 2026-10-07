@@ -253,10 +253,11 @@ impl AppController {
         match command {
             AppCommand::CaptureSelection { task_id } => self.capture_selection(task_id),
             AppCommand::CaptureToolbarSelection {
+                start,
                 generation,
                 anchor,
                 target,
-            } => self.capture_toolbar_selection(generation, anchor, target),
+            } => self.capture_toolbar_selection(generation, anchor, target, start),
             AppCommand::CopyToolbarText { text } => {
                 if let Some(clipboard) = self.clipboard.clone() {
                     self.runtime.spawn(async move {
@@ -671,6 +672,7 @@ impl AppController {
         generation: u64,
         anchor: Point,
         target: Option<lexift_core::domain::selection::SelectionTarget>,
+        start: Point,
     ) {
         let Some(selection) = self.selection.clone() else {
             return;
@@ -687,6 +689,7 @@ impl AppController {
             match result {
                 Ok(Ok(Some(mut selection))) => {
                     selection.anchor = Some(anchor);
+                    selection.gesture_start = Some(start);
                     controller.dispatch(AppEvent::SelectionToolbarCaptured {
                         generation,
                         selection,
@@ -1138,6 +1141,8 @@ mod tests {
                 "new request"
             };
             Ok(Some(lexift_core::domain::selection::Selection {
+                bounds: Vec::new(),
+                gesture_start: None,
                 text: text.into(),
                 anchor: None,
             }))
@@ -1189,6 +1194,8 @@ mod tests {
             self.calls.fetch_add(1, Ordering::SeqCst);
             thread::sleep(Duration::from_millis(80));
             Ok(Some(lexift_core::domain::selection::Selection {
+                bounds: Vec::new(),
+                gesture_start: None,
                 text: "Hello world".into(),
                 anchor: None,
             }))

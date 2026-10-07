@@ -13,6 +13,7 @@ pub enum AppCommand {
         task_id: TranslationTaskId,
     },
     CaptureToolbarSelection {
+        start: crate::domain::geometry::Point,
         target: Option<crate::domain::selection::SelectionTarget>,
         generation: u64,
         anchor: Point,

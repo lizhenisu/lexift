@@ -130,13 +130,16 @@ impl AppState {
                 self.toolbar_target = None;
                 Vec::new()
             }
-            AppEvent::SelectionGestureCompleted { anchor, target }
-                if self.desired_settings.selection_toolbar =>
-            {
+            AppEvent::SelectionGestureCompleted {
+                anchor,
+                target,
+                start,
+            } if self.desired_settings.selection_toolbar => {
                 self.toolbar_generation = self.toolbar_generation.wrapping_add(1);
                 self.toolbar_selection = None;
                 self.toolbar_target = target;
                 vec![AppCommand::CaptureToolbarSelection {
+                    start,
                     target,
                     generation: self.toolbar_generation,
                     anchor,
@@ -954,6 +957,7 @@ mod tests {
             thread: 13,
         };
         let first = state.reduce(AppEvent::SelectionGestureCompleted {
+            start: Default::default(),
             anchor: Point { x: 1, y: 2 },
             target: Some(target),
         });
@@ -973,12 +977,15 @@ mod tests {
             ..target
         };
         state.reduce(AppEvent::SelectionGestureCompleted {
+            start: Default::default(),
             anchor: Point { x: 3, y: 4 },
             target: Some(next),
         });
         state.reduce(AppEvent::SelectionToolbarCaptured {
             generation: first_generation,
             selection: Selection {
+                bounds: Vec::new(),
+                gesture_start: None,
                 text: "stale".into(),
                 anchor: None,
             },
@@ -997,6 +1004,7 @@ mod tests {
     fn toolbar_keeps_the_latest_selection_and_ignores_late_captures() {
         let mut state = AppState::default();
         let first = state.reduce(AppEvent::SelectionGestureCompleted {
+            start: Default::default(),
             target: None,
             anchor: Point { x: 10, y: 20 },
         });
@@ -1005,6 +1013,7 @@ mod tests {
             _ => panic!("expected passive capture"),
         };
         let second = state.reduce(AppEvent::SelectionGestureCompleted {
+            start: Default::default(),
             target: None,
             anchor: Point { x: 30, y: 40 },
         });
@@ -1013,6 +1022,8 @@ mod tests {
             _ => panic!("expected passive capture"),
         };
         let selection = |text: &str| Selection {
+            bounds: Vec::new(),
+            gesture_start: None,
             text: text.into(),
             anchor: Some(Point { x: 30, y: 40 }),
         };
@@ -1044,6 +1055,7 @@ mod tests {
         let mut state = AppState::default();
         let anchor = Point { x: 50, y: 60 };
         let commands = state.reduce(AppEvent::SelectionGestureCompleted {
+            start: Default::default(),
             anchor,
             target: None,
         });
@@ -1054,6 +1066,8 @@ mod tests {
         state.reduce(AppEvent::SelectionToolbarCaptured {
             generation,
             selection: Selection {
+                bounds: Vec::new(),
+                gesture_start: None,
                 text: "hello".into(),
                 anchor: Some(anchor),
             },
@@ -1074,6 +1088,7 @@ mod tests {
         let mut state = AppState::default();
         let anchor = Point { x: 50, y: 60 };
         let commands = state.reduce(AppEvent::SelectionGestureCompleted {
+            start: Default::default(),
             anchor,
             target: None,
         });
@@ -1084,6 +1099,8 @@ mod tests {
         state.reduce(AppEvent::SelectionToolbarCaptured {
             generation,
             selection: Selection {
+                bounds: Vec::new(),
+                gesture_start: None,
                 text: "selected".into(),
                 anchor: Some(anchor),
             },
@@ -1093,6 +1110,8 @@ mod tests {
         state.reduce(AppEvent::SelectionToolbarCaptured {
             generation,
             selection: Selection {
+                bounds: Vec::new(),
+                gesture_start: None,
                 text: "stale".into(),
                 anchor: Some(anchor),
             },
@@ -1105,6 +1124,7 @@ mod tests {
         let mut state = AppState::default();
         let anchor = Point { x: 1, y: 2 };
         let commands = state.reduce(AppEvent::SelectionGestureCompleted {
+            start: Default::default(),
             anchor,
             target: None,
         });
@@ -1118,6 +1138,8 @@ mod tests {
         state.reduce(AppEvent::SelectionToolbarCaptured {
             generation,
             selection: Selection {
+                bounds: Vec::new(),
+                gesture_start: None,
                 text: "private".into(),
                 anchor: Some(anchor),
             },
@@ -1126,6 +1148,7 @@ mod tests {
         assert!(
             state
                 .reduce(AppEvent::SelectionGestureCompleted {
+                    start: Default::default(),
                     anchor,
                     target: None
                 })
@@ -1157,6 +1180,8 @@ mod tests {
         let commands = state.reduce(AppEvent::SelectionCaptured {
             task_id: TranslationTaskId::new(1),
             selection: Selection {
+                bounds: Vec::new(),
+                gesture_start: None,
                 text: "Hello world".into(),
                 anchor: Some(Point { x: 10, y: 20 }),
             },
@@ -1209,6 +1234,8 @@ mod tests {
             state.reduce(AppEvent::SelectionCaptured {
                 task_id: TranslationTaskId::new(1),
                 selection: Selection {
+                    bounds: Vec::new(),
+                    gesture_start: None,
                     text: "Hello world".into(),
                     anchor: None,
                 },
@@ -1482,6 +1509,8 @@ mod tests {
         state.reduce(AppEvent::SelectionCaptured {
             task_id,
             selection: Selection {
+                bounds: Vec::new(),
+                gesture_start: None,
                 text: text.into(),
                 anchor: None,
             },
@@ -1702,6 +1731,8 @@ mod tests {
                 .reduce(AppEvent::SelectionCaptured {
                     task_id: TranslationTaskId::new(1),
                     selection: Selection {
+                        bounds: Vec::new(),
+                        gesture_start: None,
                         text: "stale selection".into(),
                         anchor: None,
                     },

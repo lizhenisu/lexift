@@ -37,6 +37,7 @@ pub(super) struct Work {
     input_timer: slint::Timer,
     pending: RefCell<Vec<AppEvent>>,
     generation: u64,
+    placement: Cell<Option<(Point, u32, u32, u32)>>,
 }
 impl Work {
     fn new(generation: u64) -> Rc<Self> {
@@ -46,6 +47,7 @@ impl Work {
             input_timer: Default::default(),
             pending: Default::default(),
             generation,
+            placement: Cell::new(None),
         })
     }
     fn retire(&self) {
@@ -203,16 +205,44 @@ fn schedule_toolbar_show(work: &Rc<Work>, attempt: u8) {
                 };
                 match (r.prepare)(window.window()) {
                     PassiveWindowPreparation::Ready => {
-                        if let Some(anchor) = r.selection.as_ref().and_then(|s| s.anchor)
-                            && let Some(area) = (r.work_area)(anchor)
+                        if let Some(selection) = r.selection.as_ref()
+                            && let Some(anchor) = selection.anchor
                         {
+                            let Some(area) = (r.work_area)(anchor) else {
+                                tracing::debug!("selection toolbar work area unavailable");
+                                r.close();
+                                return;
+                            };
                             let size = window.window().size();
-                            let point =
-                                placement::place_popup(anchor, size.width, size.height, area, 8, 8)
-                                    .position;
-                            window
-                                .window()
-                                .set_position(slint::PhysicalPosition::new(point.x, point.y));
+                            let scale = window.window().scale_factor();
+                            let Some(point) = placement::place_selection_toolbar(
+                                &selection.bounds,
+                                selection.gesture_start.unwrap_or(anchor),
+                                anchor,
+                                (size.width, size.height),
+                                scale,
+                                area,
+                            ) else {
+                                tracing::debug!("selection toolbar has no unobstructed placement");
+                                r.close();
+                                return;
+                            };
+                            let geometry = (point, size.width, size.height, scale.to_bits());
+                            if work.placement.get() != Some(geometry) {
+                                if attempt >= 19 {
+                                    tracing::warn!(
+                                        "selection toolbar DPI/placement did not stabilize"
+                                    );
+                                    r.close();
+                                    return;
+                                }
+                                work.placement.set(Some(geometry));
+                                window
+                                    .window()
+                                    .set_position(slint::PhysicalPosition::new(point.x, point.y));
+                                schedule_toolbar_show(&work, attempt + 1);
+                                return;
+                            }
                         }
                         // Style and pointer subclass precede the first visible frame.
                         if !(r.complete)(
@@ -239,7 +269,7 @@ fn schedule_toolbar_show(work: &Rc<Work>, attempt: u8) {
                             update_toolbar_fade,
                         );
                     }
-                    PassiveWindowPreparation::Pending if attempt < 20 => {
+                    PassiveWindowPreparation::Pending if attempt < 19 => {
                         // Winit creates inactive adapters with a hidden HWND on the
                         // next event-loop turn. Visible priming risks activating an
                         // unconfigured native window before its passive policy exists.
@@ -438,6 +468,8 @@ mod tests {
         SELECTION_TOOLBAR_REGISTRY.with(|slot| {
             slot.borrow_mut().as_mut().unwrap().sync(
                 Some(Selection {
+                    bounds: Vec::new(),
+                    gesture_start: None,
                     text: "fixture".into(),
                     anchor: None,
                 }),
@@ -495,6 +527,82 @@ mod tests {
         SELECTION_TOOLBAR_REGISTRY.with(|s| s.borrow_mut().as_mut().unwrap().close());
     }
     #[test]
+    fn first_visible_frame_waits_for_final_dpi_placement_and_no_space_never_shows() {
+        let adapters = Rc::new(RefCell::new(Vec::new()));
+        install(
+            |_| PassiveWindowPreparation::Ready,
+            adapters.clone(),
+            Rc::new(Cell::new(0)),
+        );
+        let area = Rect {
+            left: 0,
+            top: 0,
+            right: 800,
+            bottom: 600,
+        };
+        SELECTION_TOOLBAR_REGISTRY.with(|s| {
+            let mut s = s.borrow_mut();
+            let r = s.as_mut().unwrap();
+            r.work_area = Rc::new(move |_| Some(area));
+            r.sync(
+                Some(Selection {
+                    text: "fixture".into(),
+                    anchor: Some(Point { x: 100, y: 100 }),
+                    gesture_start: Some(Point { x: 400, y: 150 }),
+                    bounds: vec![Rect {
+                        left: 100,
+                        top: 100,
+                        right: 400,
+                        bottom: 150,
+                    }],
+                }),
+                None,
+            );
+        });
+        drain(0);
+        assert_eq!(
+            adapters.borrow()[0].shows.get(),
+            0,
+            "positioning must stay hidden"
+        );
+        SELECTION_TOOLBAR_REGISTRY.with(|s| {
+            s.borrow()
+                .as_ref()
+                .unwrap()
+                .window
+                .as_ref()
+                .unwrap()
+                .window()
+                .dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged {
+                    scale_factor: 1.25,
+                })
+        });
+        drain(18);
+        assert_eq!(
+            adapters.borrow()[0].shows.get(),
+            0,
+            "DPI change must invalidate the prepared placement"
+        );
+        drain(18);
+        assert_eq!(adapters.borrow()[0].shows.get(), 1);
+        SELECTION_TOOLBAR_REGISTRY.with(|s| {
+            let mut s = s.borrow_mut();
+            let r = s.as_mut().unwrap();
+            r.sync(
+                Some(Selection {
+                    text: "full screen fixture".into(),
+                    anchor: Some(Point { x: 100, y: 100 }),
+                    gesture_start: None,
+                    bounds: vec![area],
+                }),
+                None,
+            );
+        });
+        drain(0);
+        assert_eq!(adapters.borrow()[1].shows.get(), 0);
+        assert!(SELECTION_TOOLBAR_REGISTRY.with(|s| s.borrow().as_ref().unwrap().window.is_none()));
+    }
+    #[test]
     fn changed_target_and_exhausted_preparation_destroy_without_showing() {
         let adapters = Rc::new(RefCell::new(Vec::new()));
         let calls = Rc::new(Cell::new(0));
@@ -517,6 +625,8 @@ mod tests {
         SELECTION_TOOLBAR_REGISTRY.with(|s| {
             s.borrow_mut().as_mut().unwrap().sync(
                 Some(Selection {
+                    bounds: Vec::new(),
+                    gesture_start: None,
                     text: "fixture".into(),
                     anchor: None,
                 }),

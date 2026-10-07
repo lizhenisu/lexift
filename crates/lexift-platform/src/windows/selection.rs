@@ -1,6 +1,9 @@
 use lexift_core::{
     Error, Result,
-    domain::selection::{Selection, SelectionTarget},
+    domain::{
+        geometry::Rect,
+        selection::{Selection, SelectionTarget},
+    },
     ports::selection::SelectionPort,
 };
 use std::time::Instant;
@@ -20,6 +23,183 @@ use windows::{
 };
 
 const MAX_PARENT_DEPTH: usize = 8;
+
+#[cfg(test)]
+mod bounds_tests {
+    use super::*;
+    #[test]
+    fn rounds_outwards_retains_lines_and_collapses_only_after_limit() {
+        let mut bounds = SelectionBounds::default();
+        bounds.push(&[-10.2, 2.4, 5.1, 8.2]);
+        bounds.push(&[20.0, 40.0, 10.0, 10.0]);
+        assert_eq!(
+            bounds.finish(),
+            vec![
+                Rect {
+                    left: -11,
+                    top: 2,
+                    right: -5,
+                    bottom: 11
+                },
+                Rect {
+                    left: 20,
+                    top: 40,
+                    right: 30,
+                    bottom: 50
+                }
+            ]
+        );
+        let mut bounds = SelectionBounds::default();
+        for i in 0..256 {
+            bounds.push(&[f64::from(i), 0.0, 1.0, 1.0]);
+        }
+        assert_eq!(bounds.rectangles.len(), 256);
+        bounds.push(&[-100.0, -20.0, 1.0, 1.0]);
+        bounds.push(&[500.0, 100.0, 1.0, 1.0]);
+        assert_eq!(
+            bounds.finish(),
+            vec![Rect {
+                left: -100,
+                top: -20,
+                right: 501,
+                bottom: 101
+            }]
+        );
+    }
+    #[test]
+    fn rejects_non_finite_empty_overflowing_and_malformed_bounds() {
+        let mut bounds = SelectionBounds::default();
+        for values in [
+            [f64::NAN, 0.0, 1.0, 1.0],
+            [0.0, 0.0, f64::INFINITY, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0, -1.0],
+            [f64::from(i32::MAX), 0.0, 2.0, 1.0],
+        ] {
+            bounds.push(&values);
+        }
+        bounds.push(&[1.0, 2.0]);
+        assert!(bounds.finish().is_empty());
+    }
+}
+
+/// Bounds stay bounded in memory; large selections conservatively use their union.
+#[derive(Default)]
+struct SelectionBounds {
+    rectangles: Vec<Rect>,
+    union: Option<Rect>,
+    collapsed: bool,
+    unreliable: bool,
+}
+impl SelectionBounds {
+    fn push(&mut self, values: &[f64]) {
+        let [x, y, width, height] = *values else {
+            self.unreliable = true;
+            return;
+        };
+        let right = x + width;
+        let bottom = y + height;
+        if ![x, y, width, height, right, bottom]
+            .iter()
+            .all(|v| v.is_finite())
+            || width <= 0.0
+            || height <= 0.0
+            || x < f64::from(i32::MIN)
+            || y < f64::from(i32::MIN)
+            || right > f64::from(i32::MAX)
+            || bottom > f64::from(i32::MAX)
+        {
+            self.unreliable = true;
+            return;
+        }
+        let rect = Rect {
+            left: x.floor() as i32,
+            top: y.floor() as i32,
+            right: right.ceil() as i32,
+            bottom: bottom.ceil() as i32,
+        };
+        self.union = Some(self.union.map_or(rect, |r| Rect {
+            left: r.left.min(rect.left),
+            top: r.top.min(rect.top),
+            right: r.right.max(rect.right),
+            bottom: r.bottom.max(rect.bottom),
+        }));
+        if !self.collapsed {
+            if self.rectangles.len() == 256 {
+                self.collapsed = true;
+                self.rectangles.clear();
+            } else {
+                self.rectangles.push(rect);
+            }
+        }
+    }
+    fn finish(self) -> Vec<Rect> {
+        if self.unreliable {
+            Vec::new()
+        } else if self.collapsed {
+            self.union.into_iter().collect()
+        } else {
+            self.rectangles
+        }
+    }
+}
+
+/// UIA owns no pixel data here. The returned SAFEARRAY must be unlocked before
+/// destruction on every exit, including malformed provider responses.
+fn read_bounds(
+    array: *mut windows::Win32::System::Com::SAFEARRAY,
+    bounds: &mut SelectionBounds,
+) -> bool {
+    use windows::Win32::System::Ole::{
+        SafeArrayAccessData, SafeArrayDestroy, SafeArrayGetDim, SafeArrayGetElemsize,
+        SafeArrayGetLBound, SafeArrayGetUBound, SafeArrayUnaccessData,
+    };
+    if array.is_null() {
+        return false;
+    }
+    struct Array(*mut windows::Win32::System::Com::SAFEARRAY);
+    impl Drop for Array {
+        fn drop(&mut self) {
+            let _ = unsafe { SafeArrayDestroy(self.0) };
+        }
+    }
+    let array = Array(array);
+    if unsafe { SafeArrayGetDim(array.0) } != 1
+        || unsafe { SafeArrayGetElemsize(array.0) } != std::mem::size_of::<f64>() as u32
+    {
+        return false;
+    }
+    let (Ok(lower), Ok(upper)) = (unsafe { SafeArrayGetLBound(array.0, 1) }, unsafe {
+        SafeArrayGetUBound(array.0, 1)
+    }) else {
+        return false;
+    };
+    let count = i64::from(upper) - i64::from(lower) + 1;
+    if count <= 0 || count % 4 != 0 {
+        return false;
+    }
+    let mut data = std::ptr::null_mut();
+    if unsafe { SafeArrayAccessData(array.0, &mut data) }.is_err() {
+        return false;
+    }
+    struct Lock(*mut windows::Win32::System::Com::SAFEARRAY);
+    impl Drop for Lock {
+        fn drop(&mut self) {
+            let _ = unsafe { SafeArrayUnaccessData(self.0) };
+        }
+    }
+    let _lock = Lock(array.0);
+    if data.is_null() || count as u64 > (isize::MAX as u64 / 8) {
+        return false;
+    }
+    for values in unsafe { std::slice::from_raw_parts(data.cast::<f64>(), count as usize) }
+        .as_chunks::<4>()
+        .0
+    {
+        bounds.push(values);
+    }
+    true
+}
 
 #[derive(Debug, Default)]
 struct SelectionCaptureMetrics {
@@ -68,7 +248,14 @@ impl SelectionPort for WindowsSelectionPort {
     fn selected_text_passive(&self) -> Result<Option<Selection>> {
         let started = Instant::now();
         let anchor = super::screen::cursor_position().ok();
-        let result = capture_with_uia().map(|text| text.map(|text| Selection { text, anchor }));
+        let result = capture_with_uia(true).map(|value| {
+            value.map(|(text, bounds)| Selection {
+                bounds,
+                gesture_start: None,
+                text,
+                anchor,
+            })
+        });
         tracing::debug!(
             strategy = "passive_uia",
             elapsed_ms = started.elapsed().as_millis(),
@@ -83,7 +270,7 @@ impl SelectionPort for WindowsSelectionPort {
         let started_at = Instant::now();
         let anchor = super::screen::cursor_position().ok();
         let uia_started_at = Instant::now();
-        let uia_result = capture_with_uia();
+        let uia_result = capture_with_uia(false).map(|value| value.map(|(text, _)| text));
         let mut metrics = SelectionCaptureMetrics {
             uia_latency_ms: uia_started_at.elapsed().as_millis(),
             ..Default::default()
@@ -104,18 +291,25 @@ impl SelectionPort for WindowsSelectionPort {
             "Windows selection capture finished"
         );
 
-        result.map(|text| text.map(|text| Selection { text, anchor }))
+        result.map(|text| {
+            text.map(|text| Selection {
+                bounds: Vec::new(),
+                gesture_start: None,
+                text,
+                anchor,
+            })
+        })
     }
 }
 
-fn capture_with_uia() -> Result<Option<String>> {
+fn capture_with_uia(with_bounds: bool) -> Result<Option<(String, Vec<Rect>)>> {
     let _apartment = ComApartment::initialize()?;
     let automation = create_automation()?;
     probe_foreground_window(&automation)?;
     let focused = unsafe { automation.GetFocusedElement() }
         .map_err(|error| uia_error(error, "Could not access the focused Windows control"))?;
 
-    selected_text_from_ancestors(&automation, focused)
+    selected_text_from_ancestors(&automation, focused, with_bounds)
 }
 
 fn capture_with_fallback<F>(
@@ -188,8 +382,9 @@ fn create_automation() -> Result<IUIAutomation> {
 fn selected_text_from_ancestors(
     automation: &IUIAutomation,
     focused: IUIAutomationElement,
-) -> Result<Option<String>> {
-    if let Some(text) = text_pattern_selection(&focused) {
+    with_bounds: bool,
+) -> Result<Option<(String, Vec<Rect>)>> {
+    if let Some(text) = text_pattern_selection(&focused, with_bounds) {
         return Ok(Some(text));
     }
 
@@ -206,7 +401,7 @@ fn selected_text_from_ancestors(
             }
         };
 
-        if let Some(text) = text_pattern_selection(&element) {
+        if let Some(text) = text_pattern_selection(&element, with_bounds) {
             return Ok(Some(text));
         }
     }
@@ -214,7 +409,10 @@ fn selected_text_from_ancestors(
     Ok(None)
 }
 
-fn text_pattern_selection(element: &IUIAutomationElement) -> Option<String> {
+fn text_pattern_selection(
+    element: &IUIAutomationElement,
+    with_bounds: bool,
+) -> Option<(String, Vec<Rect>)> {
     let pattern =
         match unsafe { element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) }
         {
@@ -240,6 +438,7 @@ fn text_pattern_selection(element: &IUIAutomationElement) -> Option<String> {
         }
     };
     let mut selected_ranges = Vec::with_capacity(length.max(0) as usize);
+    let mut bounds = SelectionBounds::default();
 
     for index in 0..length {
         let range = match unsafe { ranges.GetElement(index) } {
@@ -250,12 +449,25 @@ fn text_pattern_selection(element: &IUIAutomationElement) -> Option<String> {
             }
         };
         match unsafe { range.GetText(-1) } {
-            Ok(text) => selected_ranges.push(text.to_string()),
+            Ok(text) => {
+                let text = text.to_string();
+                if with_bounds && !text.trim().is_empty() {
+                    // Geometry failure must not discard successfully captured text.
+                    if let Ok(array) = unsafe { range.GetBoundingRectangles() } {
+                        if !read_bounds(array, &mut bounds) {
+                            bounds.unreliable = true;
+                        }
+                    } else {
+                        bounds.unreliable = true;
+                    }
+                }
+                selected_ranges.push(text);
+            }
             Err(error) => trace_unavailable_pattern("read TextPattern range", &error),
         }
     }
 
-    merge_selected_ranges(selected_ranges)
+    merge_selected_ranges(selected_ranges).map(|text| (text, bounds.finish()))
 }
 
 fn trace_unavailable_pattern(operation: &'static str, error: &windows::core::Error) {

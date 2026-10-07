@@ -2,9 +2,9 @@
 
 pub(super) mod annotation_cursor;
 pub(super) mod annotation_gpu;
-pub(super) mod annotation_save;
 pub(super) mod annotation_magnifier;
 mod annotation_overlay;
+pub(super) mod annotation_save;
 mod annotation_window_order;
 pub(super) mod app_icon;
 mod autostart;

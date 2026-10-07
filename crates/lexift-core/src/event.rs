@@ -13,6 +13,7 @@ pub enum AppEvent {
     SelectionTranslationRequested,
     SelectionInteractionStarted,
     SelectionGestureCompleted {
+        start: crate::domain::geometry::Point,
         target: Option<crate::domain::selection::SelectionTarget>,
         anchor: crate::domain::geometry::Point,
     },

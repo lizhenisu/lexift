@@ -36,7 +36,7 @@ fn is_drag(start: Point, end: Point) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Gesture {
     Started,
-    Completed(Point),
+    Completed { start: Point, end: Point },
 }
 
 #[derive(Clone, Copy)]
@@ -119,11 +119,17 @@ impl GestureTracker {
         let press = self.press.take()?;
         if is_drag(press.click.point, point) {
             self.last_click = None;
-            return Some(Gesture::Completed(point));
+            return Some(Gesture::Completed {
+                start: press.click.point,
+                end: point,
+            });
         }
         if press.second_click {
             self.last_click = None;
-            return Some(Gesture::Completed(point));
+            return Some(Gesture::Completed {
+                start: press.click.point,
+                end: point,
+            });
         }
         self.last_click = Some(press.click);
         None
@@ -366,7 +372,10 @@ mod tests {
         );
         assert_eq!(
             tracker.up(point(-96, 24)),
-            Some(Gesture::Completed(point(-96, 24)))
+            Some(Gesture::Completed {
+                start: point(-96, 24),
+                end: point(-96, 24)
+            })
         );
         assert_eq!(
             tracker.down(point(-96, 24), 700, 1, false, SETTINGS),
@@ -397,7 +406,10 @@ mod tests {
         tracker.down(point(10, 10), 100, 1, false, SETTINGS);
         assert_eq!(
             tracker.up(point(16, 10)),
-            Some(Gesture::Completed(point(16, 10)))
+            Some(Gesture::Completed {
+                start: point(10, 10),
+                end: point(16, 10)
+            })
         );
         tracker.down(point(10, 10), 200, 1, false, SETTINGS);
         assert_eq!(tracker.up(point(10, 10)), None);
@@ -442,7 +454,10 @@ mod tests {
         );
         assert_eq!(
             process_sample(&mut tracker, sample(false, 610, 10), outside),
-            Some(Gesture::Completed(point(10, 10)))
+            Some(Gesture::Completed {
+                start: point(10, 10),
+                end: point(10, 10)
+            })
         );
         assert_eq!(
             process_sample(&mut tracker, sample(true, 700, 10), |_| (2, true, SETTINGS)),
@@ -496,7 +511,10 @@ mod tests {
         resume.send(()).unwrap();
         assert_eq!(
             worker.join().unwrap(),
-            Some(Gesture::Completed(point(40, 10)))
+            Some(Gesture::Completed {
+                start: point(10, 10),
+                end: point(40, 10)
+            })
         );
     }
 }

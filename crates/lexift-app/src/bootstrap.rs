@@ -399,8 +399,9 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                     lexift_platform::SelectionGesture::Started => {
                         lexift_core::AppEvent::SelectionInteractionStarted
                     }
-                    lexift_platform::SelectionGesture::Completed(anchor) => {
+                    lexift_platform::SelectionGesture::Completed { start, end: anchor } => {
                         lexift_core::AppEvent::SelectionGestureCompleted {
+                            start,
                             anchor,
                             target: selection_for_target
                                 .as_ref()

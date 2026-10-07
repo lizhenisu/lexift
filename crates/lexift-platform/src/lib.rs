@@ -15,7 +15,10 @@ pub use capabilities::PlatformCapabilities;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SelectionGesture {
     Started,
-    Completed(lexift_core::domain::geometry::Point),
+    Completed {
+        start: lexift_core::domain::geometry::Point,
+        end: lexift_core::domain::geometry::Point,
+    },
 }
 
 /// Starts the Windows mouse gesture monitor on a dedicated message thread.
@@ -26,8 +29,8 @@ pub fn start_selection_monitor(
     return windows::selection_monitor::start(std::sync::Arc::new(move |gesture| {
         handler(match gesture {
             windows::selection_monitor::Gesture::Started => SelectionGesture::Started,
-            windows::selection_monitor::Gesture::Completed(point) => {
-                SelectionGesture::Completed(point)
+            windows::selection_monitor::Gesture::Completed { start, end } => {
+                SelectionGesture::Completed { start, end }
             }
         });
     }));

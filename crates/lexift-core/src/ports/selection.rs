@@ -57,6 +57,8 @@ mod tests {
                 self.current.store(false, Ordering::Relaxed);
             }
             Ok(Some(Selection {
+                bounds: Vec::new(),
+                gesture_start: None,
                 text: "fixture".into(),
                 anchor: Some(Point { x: -12, y: 7 }),
             }))
