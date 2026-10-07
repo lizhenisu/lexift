@@ -16,15 +16,14 @@ use lexift_core::{
         geometry::{Point, Rect},
         language::Language,
         runtime_config::{HotkeyConfig, ProviderConfig},
-        selection::Selection,
         settings::{Settings, SettingsChange, SettingsFeedback, SettingsField},
     },
 };
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use crate::{
-    AppWindow, PopupCornerMode, PopupLanguageMenuWindow, SelectionToolbarWindow, SettingsToastData,
-    SettingsWindow, TranslationPopup, binding, mapper, placement,
+    AppWindow, PopupCornerMode, PopupLanguageMenuWindow, SettingsToastData, SettingsWindow,
+    TranslationPopup, binding, mapper, placement,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,6 +139,7 @@ pub enum PassiveWindowPreparation {
 pub struct WindowLifecycleCallbacks {
     pub(crate) complete_passive_window_show: CompletePassiveWindowShow,
     complete_toolbar_show: CompletePassiveWindowShow,
+    toolbar_target_current: Rc<dyn Fn(lexift_core::domain::selection::SelectionTarget) -> bool>,
     configure_translation_popup_corners: fn(&slint::Window) -> PopupCornerMode,
     pub(crate) activate_user_requested_window: fn(&slint::Window) -> bool,
     pub(crate) begin_window_drag: fn(&slint::Window) -> bool,
@@ -186,6 +186,7 @@ impl WindowLifecycleCallbacks {
         Self {
             complete_passive_window_show: Rc::new(complete_passive_window_show),
             complete_toolbar_show: Rc::new(|_, _| true),
+            toolbar_target_current: Rc::new(|_| false),
             configure_translation_popup_corners: |_| PopupCornerMode::SlintRounded,
             activate_user_requested_window,
             begin_window_drag,
@@ -334,6 +335,15 @@ impl WindowLifecycleCallbacks {
         self
     }
 
+    /// Checks the original input target without activating any window.
+    pub fn with_toolbar_target_current(
+        mut self,
+        check: impl Fn(lexift_core::domain::selection::SelectionTarget) -> bool + 'static,
+    ) -> Self {
+        self.toolbar_target_current = Rc::new(check);
+        self
+    }
+
     /// Supplies physical cursor coordinates while the selection toolbar is visible.
     pub fn with_toolbar_cursor_position(
         mut self,
@@ -406,9 +416,11 @@ const LANGUAGE_MENU_GAP_PX: i32 = 4;
 const POPUP_MIN_WIDTH: f32 = 340.0;
 const POPUP_MIN_SOURCE_HEIGHT: f32 = 86.0;
 const NO_WINDOW_MEMORY_TRIM_DELAY: Duration = Duration::from_secs(120);
-const TOOLBAR_FADE_SAMPLE_INTERVAL: Duration = Duration::from_millis(33);
-const TOOLBAR_FADE_START_LOGICAL_PX: f64 = 24.0;
-const TOOLBAR_FADE_END_LOGICAL_PX: f64 = 220.0;
+#[path = "selection_toolbar.rs"]
+mod selection_toolbar;
+#[cfg(test)]
+use selection_toolbar::toolbar_opacity;
+use selection_toolbar::{SELECTION_TOOLBAR_REGISTRY, SelectionToolbarRegistry};
 
 thread_local! {
     static POPUP_REGISTRY: RefCell<Option<PopupRegistry>> = const { RefCell::new(None) };
@@ -1916,208 +1928,6 @@ struct AppWindowRegistry {
 
 thread_local! {
     static APP_WINDOW_REGISTRY: RefCell<Option<AppWindowRegistry>> = const { RefCell::new(None) };
-    static SELECTION_TOOLBAR_REGISTRY: RefCell<Option<SelectionToolbarRegistry>> = const { RefCell::new(None) };
-}
-
-struct SelectionToolbarRegistry {
-    window: Option<SelectionToolbarWindow>,
-    selection: Option<Selection>,
-    handler: Option<Rc<dyn Fn(AppEvent)>>,
-    prepare: fn(&slint::Window) -> PassiveWindowPreparation,
-    complete: CompletePassiveWindowShow,
-    dismiss: SetPopupDismissal,
-    work_area: PopupWorkArea,
-    cursor_position: ToolbarCursorPosition,
-    fade_timer: slint::Timer,
-    generation: u64,
-}
-
-impl SelectionToolbarRegistry {
-    fn close(&mut self) {
-        self.generation = self.generation.wrapping_add(1);
-        self.fade_timer.stop();
-        if let Some(window) = self.window.take() {
-            let _ = (self.dismiss)(window.window(), false);
-            let _ = window.hide();
-        }
-        self.selection = None;
-    }
-
-    fn sync(&mut self, selection: Option<Selection>) {
-        if self.selection == selection {
-            return;
-        }
-        self.close();
-        let Some(selection) = selection else { return };
-        let Ok(window) = SelectionToolbarWindow::new() else {
-            return;
-        };
-        crate::theme::apply(&window);
-        let Some(handler) = self.handler.as_ref() else {
-            return;
-        };
-        let action = Rc::clone(handler);
-        window.on_translate_requested(move || action(AppEvent::SelectionToolbarTranslateRequested));
-        let action = Rc::clone(handler);
-        window.on_copy_requested(move || action(AppEvent::SelectionToolbarCopyRequested));
-        let action = Rc::clone(handler);
-        window.window().on_close_requested(move || {
-            action(AppEvent::SelectionToolbarDismissRequested);
-            slint::CloseRequestResponse::KeepWindowShown
-        });
-        window
-            .window()
-            .set_size(slint::LogicalSize::new(96.0, 48.0));
-        self.selection = Some(selection);
-        self.window = Some(window);
-        self.generation = self.generation.wrapping_add(1);
-        schedule_toolbar_show(self.generation, 0);
-    }
-}
-
-fn schedule_toolbar_show(generation: u64, attempt: u8) {
-    slint::Timer::single_shot(
-        if attempt == 0 {
-            Duration::ZERO
-        } else {
-            Duration::from_millis(16)
-        },
-        move || {
-            SELECTION_TOOLBAR_REGISTRY.with(|slot| {
-                let mut slot = slot.borrow_mut();
-                let Some(registry) = slot
-                    .as_mut()
-                    .filter(|registry| registry.generation == generation)
-                else {
-                    return;
-                };
-                let Some(window) = registry.window.as_ref() else {
-                    return;
-                };
-                match (registry.prepare)(window.window()) {
-                    PassiveWindowPreparation::Ready => {
-                        if let Some(anchor) = registry
-                            .selection
-                            .as_ref()
-                            .and_then(|selection| selection.anchor)
-                            && let Some(area) = (registry.work_area)(anchor)
-                        {
-                            let size = window.window().size();
-                            let point =
-                                placement::place_popup(anchor, size.width, size.height, area, 8, 8)
-                                    .position;
-                            window
-                                .window()
-                                .set_position(slint::PhysicalPosition::new(point.x, point.y));
-                        }
-                        if window.show().is_ok() {
-                            if !(registry.complete)(
-                                window.window(),
-                                toolbar_pointer_sink(window.as_weak()),
-                            ) {
-                                registry.close();
-                            } else {
-                                let _ = (registry.dismiss)(window.window(), true);
-                                registry.fade_timer.start(
-                                    slint::TimerMode::Repeated,
-                                    TOOLBAR_FADE_SAMPLE_INTERVAL,
-                                    update_toolbar_fade,
-                                );
-                            }
-                        } else {
-                            registry.close();
-                        }
-                    }
-                    PassiveWindowPreparation::Pending if attempt < 20 => {
-                        let _ = window.show();
-                        let _ = window.hide();
-                        schedule_toolbar_show(generation, attempt + 1);
-                    }
-                    _ => registry.close(),
-                }
-            });
-        },
-    );
-}
-
-/// Measures from the cursor to the nearest point on the toolbar in logical pixels.
-fn toolbar_opacity(cursor: Point, bounds: Rect, scale_factor: f32) -> f32 {
-    let dx = (i64::from(bounds.left) - i64::from(cursor.x))
-        .max(0)
-        .max(i64::from(cursor.x) - i64::from(bounds.right));
-    let dy = (i64::from(bounds.top) - i64::from(cursor.y))
-        .max(0)
-        .max(i64::from(cursor.y) - i64::from(bounds.bottom));
-    let physical_distance = ((dx as f64).hypot(dy as f64)) / f64::from(scale_factor.max(0.1));
-    ((TOOLBAR_FADE_END_LOGICAL_PX - physical_distance)
-        / (TOOLBAR_FADE_END_LOGICAL_PX - TOOLBAR_FADE_START_LOGICAL_PX))
-        .clamp(0.0, 1.0) as f32
-}
-
-fn update_toolbar_fade() {
-    let dismiss = SELECTION_TOOLBAR_REGISTRY.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        let registry = slot.as_mut()?;
-        let cursor = (registry.cursor_position)()?;
-        let window = registry.window.as_ref()?;
-        let position = window.window().position();
-        let size = window.window().size();
-        let bounds = Rect {
-            left: position.x,
-            top: position.y,
-            right: position.x.saturating_add(size.width as i32),
-            bottom: position.y.saturating_add(size.height as i32),
-        };
-        let opacity = toolbar_opacity(cursor, bounds, window.window().scale_factor());
-        if (window.get_fade_opacity() - opacity).abs() > 0.001 {
-            window.set_fade_opacity(opacity);
-        }
-        if opacity > 0.0 {
-            return None;
-        }
-        let handler = registry.handler.as_ref().map(Rc::clone);
-        registry.close();
-        handler
-    });
-    if let Some(handler) = dismiss {
-        handler(AppEvent::SelectionToolbarDismissRequested);
-    }
-}
-
-fn toolbar_pointer_sink(weak: slint::Weak<SelectionToolbarWindow>) -> PopupPointerSink {
-    Rc::new(move |input| {
-        let Some(window) = weak.upgrade() else { return };
-        if matches!(input, PopupPointerInput::DismissRequested { .. }) {
-            SELECTION_TOOLBAR_REGISTRY.with(|slot| {
-                if let Some(registry) = slot.borrow().as_ref()
-                    && let Some(handler) = registry.handler.as_ref()
-                {
-                    handler(AppEvent::SelectionToolbarDismissRequested);
-                }
-            });
-            return;
-        }
-        use slint::platform::{PointerEventButton, WindowEvent};
-        let scale = window.window().scale_factor().max(f32::EPSILON);
-        let position = |x: f32, y: f32| slint::LogicalPosition::new(x / scale, y / scale);
-        let event = match input {
-            PopupPointerInput::Moved { x, y } => WindowEvent::PointerMoved {
-                position: position(x, y),
-            },
-            PopupPointerInput::Exited => WindowEvent::PointerExited,
-            PopupPointerInput::LeftPressed { x, y } => WindowEvent::PointerPressed {
-                position: position(x, y),
-                button: PointerEventButton::Left,
-            },
-            PopupPointerInput::LeftReleased { x, y }
-            | PopupPointerInput::LeftCancelled { x, y } => WindowEvent::PointerReleased {
-                position: position(x, y),
-                button: PointerEventButton::Left,
-            },
-            _ => return,
-        };
-        let _ = window.window().dispatch_event_with_result(event);
-    })
 }
 
 fn install_resize_background(
@@ -2516,6 +2326,9 @@ impl Ui {
             *registry.borrow_mut() = Some(SelectionToolbarRegistry {
                 window: None,
                 selection: None,
+                target: None,
+                target_current: window_lifecycle.toolbar_target_current.clone(),
+                work: None,
                 handler: None,
                 prepare: prepare_passive_window,
                 complete: Rc::clone(&window_lifecycle.complete_toolbar_show),
@@ -3215,6 +3028,7 @@ impl UiHandle {
     pub fn update(&self, state: AppState) {
         let theme = state.desired_settings.theme;
         let toolbar_selection = state.toolbar_selection.clone();
+        let toolbar_target = state.toolbar_target;
         let toast_records = Arc::clone(&self.toast_records);
         let _ = slint::invoke_from_event_loop(move || {
             let language_changed = crate::i18n::select(state.desired_settings.ui_language);
@@ -3252,7 +3066,7 @@ impl UiHandle {
             });
             SELECTION_TOOLBAR_REGISTRY.with(|registry| {
                 if let Some(registry) = registry.borrow_mut().as_mut() {
-                    registry.sync(toolbar_selection);
+                    registry.sync(toolbar_selection, toolbar_target);
                 }
             });
         });

@@ -66,6 +66,7 @@ pub struct AppState {
     pub active_popup_session: Option<PopupSessionId>,
     pub toolbar_selection: Option<Selection>,
     pub toolbar_generation: u64,
+    pub toolbar_target: Option<crate::domain::selection::SelectionTarget>,
     next_translation_task: u64,
     next_popup_session: u64,
     queued_settings_changes: Vec<SettingsChange>,
@@ -105,6 +106,7 @@ impl AppState {
             active_popup_session: None,
             toolbar_selection: None,
             toolbar_generation: 0,
+            toolbar_target: None,
             next_translation_task: 0,
             next_popup_session: 0,
             queued_settings_changes: Vec::new(),
@@ -125,14 +127,17 @@ impl AppState {
             AppEvent::SelectionInteractionStarted | AppEvent::SelectionToolbarDismissRequested => {
                 self.toolbar_generation = self.toolbar_generation.wrapping_add(1);
                 self.toolbar_selection = None;
+                self.toolbar_target = None;
                 Vec::new()
             }
-            AppEvent::SelectionGestureCompleted { anchor }
+            AppEvent::SelectionGestureCompleted { anchor, target }
                 if self.desired_settings.selection_toolbar =>
             {
                 self.toolbar_generation = self.toolbar_generation.wrapping_add(1);
                 self.toolbar_selection = None;
+                self.toolbar_target = target;
                 vec![AppCommand::CaptureToolbarSelection {
+                    target,
                     generation: self.toolbar_generation,
                     anchor,
                 }]
@@ -151,6 +156,7 @@ impl AppState {
                 if generation == self.toolbar_generation =>
             {
                 self.toolbar_selection = None;
+                self.toolbar_target = None;
                 Vec::new()
             }
             AppEvent::SelectionToolbarCaptured { .. }
@@ -160,6 +166,7 @@ impl AppState {
                     return Vec::new();
                 };
                 self.toolbar_generation = self.toolbar_generation.wrapping_add(1);
+                self.toolbar_target = None;
                 let task_id = self.begin_translation_task();
                 self.phase = TranslationPhase::Translating;
                 self.source_text = selection.text.clone();
@@ -189,6 +196,7 @@ impl AppState {
                     return Vec::new();
                 };
                 self.toolbar_generation = self.toolbar_generation.wrapping_add(1);
+                self.toolbar_target = None;
                 vec![AppCommand::CopyToolbarText {
                     text: selection.text,
                 }]
@@ -444,6 +452,7 @@ impl AppState {
                 if matches!(change, SettingsChange::SelectionToolbar(false)) {
                     self.toolbar_generation = self.toolbar_generation.wrapping_add(1);
                     self.toolbar_selection = None;
+                    self.toolbar_target = None;
                 }
                 self.request_settings_change(change)
             }
@@ -468,6 +477,7 @@ impl AppState {
                 if !self.settings.selection_toolbar {
                     self.toolbar_generation = self.toolbar_generation.wrapping_add(1);
                     self.toolbar_selection = None;
+                    self.toolbar_target = None;
                 }
                 self.runtime_config = config;
                 self.settings_saving = false;
@@ -933,6 +943,51 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn toolbar_target_tracks_only_the_current_request_and_clears_on_dismissal() {
+        use crate::{domain::selection::SelectionTarget, ports::magnifier::WindowToken};
+        let mut state = AppState::default();
+        let target = SelectionTarget {
+            window: WindowToken(10),
+            focus: Some(WindowToken(11)),
+            process: 12,
+            thread: 13,
+        };
+        let first = state.reduce(AppEvent::SelectionGestureCompleted {
+            anchor: Point { x: 1, y: 2 },
+            target: Some(target),
+        });
+        let first_generation = match first[0] {
+            AppCommand::CaptureToolbarSelection {
+                generation,
+                target: Some(value),
+                ..
+            } => {
+                assert_eq!(value, target);
+                generation
+            }
+            _ => panic!("missing passive target"),
+        };
+        let next = SelectionTarget {
+            focus: Some(WindowToken(20)),
+            ..target
+        };
+        state.reduce(AppEvent::SelectionGestureCompleted {
+            anchor: Point { x: 3, y: 4 },
+            target: Some(next),
+        });
+        state.reduce(AppEvent::SelectionToolbarCaptured {
+            generation: first_generation,
+            selection: Selection {
+                text: "stale".into(),
+                anchor: None,
+            },
+        });
+        assert_eq!(state.toolbar_target, Some(next));
+        assert!(state.toolbar_selection.is_none());
+        state.reduce(AppEvent::SelectionToolbarDismissRequested);
+        assert_eq!(state.toolbar_target, None);
+    }
     use super::*;
     use crate::domain::{
         geometry::Point, language::Language, selection::Selection, translation::TranslateResult,
@@ -942,6 +997,7 @@ mod tests {
     fn toolbar_keeps_the_latest_selection_and_ignores_late_captures() {
         let mut state = AppState::default();
         let first = state.reduce(AppEvent::SelectionGestureCompleted {
+            target: None,
             anchor: Point { x: 10, y: 20 },
         });
         let first_generation = match first[0] {
@@ -949,6 +1005,7 @@ mod tests {
             _ => panic!("expected passive capture"),
         };
         let second = state.reduce(AppEvent::SelectionGestureCompleted {
+            target: None,
             anchor: Point { x: 30, y: 40 },
         });
         let second_generation = match second[0] {
@@ -986,7 +1043,10 @@ mod tests {
     fn toolbar_translate_opens_popup_with_the_captured_text_and_anchor() {
         let mut state = AppState::default();
         let anchor = Point { x: 50, y: 60 };
-        let commands = state.reduce(AppEvent::SelectionGestureCompleted { anchor });
+        let commands = state.reduce(AppEvent::SelectionGestureCompleted {
+            anchor,
+            target: None,
+        });
         let generation = match commands[0] {
             AppCommand::CaptureToolbarSelection { generation, .. } => generation,
             _ => unreachable!(),
@@ -1013,7 +1073,10 @@ mod tests {
     fn dismissing_toolbar_clears_snapshot_and_rejects_late_capture() {
         let mut state = AppState::default();
         let anchor = Point { x: 50, y: 60 };
-        let commands = state.reduce(AppEvent::SelectionGestureCompleted { anchor });
+        let commands = state.reduce(AppEvent::SelectionGestureCompleted {
+            anchor,
+            target: None,
+        });
         let generation = match commands[0] {
             AppCommand::CaptureToolbarSelection { generation, .. } => generation,
             _ => unreachable!(),
@@ -1041,7 +1104,10 @@ mod tests {
     fn disabling_toolbar_discards_pending_capture_and_prevents_new_capture() {
         let mut state = AppState::default();
         let anchor = Point { x: 1, y: 2 };
-        let commands = state.reduce(AppEvent::SelectionGestureCompleted { anchor });
+        let commands = state.reduce(AppEvent::SelectionGestureCompleted {
+            anchor,
+            target: None,
+        });
         let generation = match commands[0] {
             AppCommand::CaptureToolbarSelection { generation, .. } => generation,
             _ => unreachable!(),
@@ -1059,7 +1125,10 @@ mod tests {
         assert!(state.toolbar_selection.is_none());
         assert!(
             state
-                .reduce(AppEvent::SelectionGestureCompleted { anchor })
+                .reduce(AppEvent::SelectionGestureCompleted {
+                    anchor,
+                    target: None
+                })
                 .is_empty()
         );
         assert!(

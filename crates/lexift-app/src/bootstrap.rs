@@ -273,6 +273,10 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         .with_toolbar_drag_cancellation(|window| {
             lexift_platform::cancel_toolbar_drag_on_escape(&window.window_handle())
         })
+        .with_toolbar_target_current({
+            let selection = services.selection.clone();
+            move |target| selection.as_ref().is_some_and(|port| port.passive_target() == Some(target))
+        })
         .with_passive_toolbar_interaction(|window, sink| {
             match lexift_platform::enable_passive_tool_window_interaction(
                 &window.window_handle(),
@@ -385,6 +389,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
     #[cfg(not(feature = "m1-demo"))]
     {
         let weak = Arc::downgrade(&controller);
+        let selection_for_target = services.selection.clone();
         if let Err(error) = lexift_platform::start_selection_monitor(Arc::new(move |gesture| {
             if let Some(controller) = weak.upgrade() {
                 if !controller.selection_toolbar_enabled() {
@@ -395,7 +400,12 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                         lexift_core::AppEvent::SelectionInteractionStarted
                     }
                     lexift_platform::SelectionGesture::Completed(anchor) => {
-                        lexift_core::AppEvent::SelectionGestureCompleted { anchor }
+                        lexift_core::AppEvent::SelectionGestureCompleted {
+                            anchor,
+                            target: selection_for_target
+                                .as_ref()
+                                .and_then(|port| port.passive_target()),
+                        }
                     }
                 };
                 controller.dispatch(event);

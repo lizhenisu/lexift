@@ -1,4 +1,8 @@
-use lexift_core::{Error, Result, domain::selection::Selection, ports::selection::SelectionPort};
+use lexift_core::{
+    Error, Result,
+    domain::selection::{Selection, SelectionTarget},
+    ports::selection::SelectionPort,
+};
 use std::time::Instant;
 use windows::{
     Win32::{
@@ -34,9 +38,45 @@ impl WindowsSelectionPort {
 }
 
 impl SelectionPort for WindowsSelectionPort {
+    fn passive_target(&self) -> Option<SelectionTarget> {
+        use lexift_core::ports::magnifier::WindowToken;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GUITHREADINFO, GetGUIThreadInfo, GetWindowThreadProcessId,
+        };
+        let window = unsafe { GetForegroundWindow() };
+        if window.0.is_null() {
+            return None;
+        }
+        let mut process = 0;
+        let thread = unsafe { GetWindowThreadProcessId(window, Some(&mut process)) };
+        if thread == 0 || process == 0 {
+            return None;
+        }
+        let mut info = GUITHREADINFO {
+            cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+            ..Default::default()
+        };
+        unsafe { GetGUIThreadInfo(thread, &mut info) }.ok()?;
+        Some(SelectionTarget {
+            window: WindowToken(window.0 as isize),
+            focus: (!info.hwndFocus.0.is_null()).then_some(WindowToken(info.hwndFocus.0 as isize)),
+            process,
+            thread,
+        })
+    }
+
     fn selected_text_passive(&self) -> Result<Option<Selection>> {
+        let started = Instant::now();
         let anchor = super::screen::cursor_position().ok();
-        capture_with_uia().map(|text| text.map(|text| Selection { text, anchor }))
+        let result = capture_with_uia().map(|text| text.map(|text| Selection { text, anchor }));
+        tracing::debug!(
+            strategy = "passive_uia",
+            elapsed_ms = started.elapsed().as_millis(),
+            success = result.is_ok(),
+            has_selection = matches!(&result, Ok(Some(_))),
+            "Passive selection capture finished"
+        );
+        result
     }
 
     fn selected_text(&self) -> Result<Option<Selection>> {

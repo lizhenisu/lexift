@@ -252,9 +252,11 @@ impl AppController {
     fn execute(self: &Arc<Self>, command: AppCommand) {
         match command {
             AppCommand::CaptureSelection { task_id } => self.capture_selection(task_id),
-            AppCommand::CaptureToolbarSelection { generation, anchor } => {
-                self.capture_toolbar_selection(generation, anchor)
-            }
+            AppCommand::CaptureToolbarSelection {
+                generation,
+                anchor,
+                target,
+            } => self.capture_toolbar_selection(generation, anchor, target),
             AppCommand::CopyToolbarText { text } => {
                 if let Some(clipboard) = self.clipboard.clone() {
                     self.runtime.spawn(async move {
@@ -664,7 +666,12 @@ impl AppController {
         });
     }
 
-    fn capture_toolbar_selection(self: &Arc<Self>, generation: u64, anchor: Point) {
+    fn capture_toolbar_selection(
+        self: &Arc<Self>,
+        generation: u64,
+        anchor: Point,
+        target: Option<lexift_core::domain::selection::SelectionTarget>,
+    ) {
         let Some(selection) = self.selection.clone() else {
             return;
         };
@@ -672,8 +679,11 @@ impl AppController {
         self.runtime.spawn(async move {
             // The target control receives mouse-up after our low-level hook returns.
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            let result =
-                tokio::task::spawn_blocking(move || selection.selected_text_passive()).await;
+            let result = tokio::task::spawn_blocking(move || match target {
+                Some(target) => selection.selected_text_passive_for(target),
+                None => Ok(None),
+            })
+            .await;
             match result {
                 Ok(Ok(Some(mut selection))) => {
                     selection.anchor = Some(anchor);
