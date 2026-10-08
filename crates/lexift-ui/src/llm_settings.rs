@@ -1,5 +1,7 @@
 //! Window-owned discovery and translation drafts. All service work is injected through Core ports.
+mod connection;
 mod detection;
+mod translation;
 
 use crate::{ProviderModelRow, SettingsWindow};
 use lexift_core::ports::llm::{LlmHeaderUpdate, LlmQueryMode};
@@ -37,10 +39,12 @@ struct RequestSnapshot {
     auth: i32,
 }
 struct Page {
+    connections: RefCell<BTreeMap<i32, connection::Draft>>,
+    service_index: Cell<i32>,
     config: RefCell<LlmSettings>,
     draft: RefCell<LlmConnection>,
     pending_headers: RefCell<Vec<LlmHeaderUpdate>>,
-    awaiting_apply: Cell<bool>,
+    awaiting_apply: RefCell<Option<connection::Submission>>,
     request_snapshot: RefCell<Option<RequestSnapshot>>,
     send: Rc<dyn Fn(AppEvent)>,
     cache: RefCell<BTreeMap<LlmProvider, Vec<LlmModel>>>,
@@ -48,6 +52,7 @@ struct Page {
     task: RefCell<Option<Task>>,
     status_source: RefCell<String>,
     probe: RefCell<Option<detection::Run>>,
+    translations: RefCell<translation::Drafts>,
 }
 thread_local! { static PAGES: RefCell<BTreeMap<u64, Weak<Page>>> = const { RefCell::new(BTreeMap::new()) }; }
 static NEXT_PAGE: AtomicU64 = AtomicU64::new(1);
@@ -215,12 +220,12 @@ pub(crate) fn secure_completed(window: &SettingsWindow, busy: bool, success: boo
     if !busy
         && window.get_credential_busy()
         && let Some(page) = lookup_page(window)
-        && page.awaiting_apply.replace(false)
-        && success
+        && matches!(
+            page.awaiting_apply.borrow().as_ref(),
+            Some(connection::Submission::Service { .. })
+        )
     {
-        page.pending_headers.borrow_mut().clear();
-        refresh_headers(window, &page);
-        refresh_dirty(window, &page);
+        connection::completed(window, &page, success);
     }
 }
 fn load_profile(window: &SettingsWindow, connection: &LlmConnection) {
@@ -304,6 +309,7 @@ fn refresh_dirty(window: &SettingsWindow, page: &Page) {
         })
     };
     window.set_llm_connection_dirty(dirty);
+    connection::refresh_pending(window, page);
 }
 fn clear_dialogs(window: &SettingsWindow, page: &Page) {
     page.request_snapshot.borrow_mut().take();
@@ -315,12 +321,9 @@ fn clear_dialogs(window: &SettingsWindow, page: &Page) {
 }
 fn load_service(window: &SettingsWindow, page: &Page) {
     clear_dialogs(window, page);
-    window.set_llm_search_open(false);
-    window.set_llm_filter_open(false);
-    window.set_llm_model_search("".into());
-    window.set_llm_model_filter(0);
+    window.invoke_invalidate_button_focus();
+    window.invoke_reset_provider_filters();
     page.pending_headers.borrow_mut().clear();
-    page.awaiting_apply.set(false);
     let config = page.config.borrow().connection(service_kind(window));
     *page.draft.borrow_mut() = config.clone();
     window.set_llm_address(config.address.clone().into());
@@ -334,6 +337,7 @@ fn load_service(window: &SettingsWindow, page: &Page) {
     window.set_llm_header_name("".into());
     window.set_llm_header_value("".into());
     load_profile(window, &config);
+    connection::restore(window, page);
     refresh_catalog(window, page);
     refresh_dirty(window, page);
 }
@@ -351,6 +355,9 @@ fn run_query(
     mode: LlmQueryMode,
 ) {
     if matches!(mode, LlmQueryMode::Models) {
+        if window.get_llm_connection_pending() || window.get_llm_translation_saving() {
+            return;
+        }
         refresh_dirty(window, page);
         if window.get_llm_connection_dirty() {
             status(window, "Apply connection settings before syncing models");
@@ -435,6 +442,12 @@ fn run_query(
 }
 fn load_translation(window: &SettingsWindow, page: &Page, model: Option<String>) {
     let Some(provider) = translation_kind(window) else {
+        window.set_llm_selected_model("".into());
+        window.set_llm_selection_note(if page.config.borrow().deepl_enabled {
+            "".into()
+        } else {
+            crate::i18n::tr("Provider is disabled").into()
+        });
         return;
     };
     let config = page.config.borrow();
@@ -460,6 +473,7 @@ fn load_translation(window: &SettingsWindow, page: &Page, model: Option<String>)
     drop(config);
     model_list(window, page, provider);
     load_reasoning(window, page, &p.reasoning);
+    translation::loaded(window, page, provider);
 }
 fn load_reasoning(window: &SettingsWindow, page: &Page, selected: &str) {
     let options = translation_kind(window)
@@ -571,16 +585,8 @@ pub(crate) fn sync(window: &SettingsWindow, config: &LlmSettings) {
         *page.config.borrow_mut() = config.clone();
         populate_cache(&page);
         let saved = config.connection(service_kind(window));
-        page.draft.borrow_mut().credential_id = saved.credential_id.clone();
         // Header references are saved independently; preserve unsaved address/protocol drafts.
-        for profile in &mut page.draft.borrow_mut().protocols {
-            profile.headers = saved
-                .protocols
-                .iter()
-                .find(|p| p.protocol == profile.protocol)
-                .map(|p| p.headers.clone())
-                .unwrap_or_default();
-        }
+        connection::refresh_credentials(&mut page.draft.borrow_mut(), &saved);
         window.set_llm_key_configured(saved.credential_id.is_some());
         refresh_headers(window, &page);
         refresh_catalog(window, &page);
@@ -588,6 +594,16 @@ pub(crate) fn sync(window: &SettingsWindow, config: &LlmSettings) {
         if let Some(provider) = translation_kind(window) {
             model_list(window, &page, provider);
         }
+        translation::synced(window, &page);
+        if !window.get_translation_settings_open()
+            && !window.get_translation_selecting()
+            && !window.get_llm_translation_saving()
+        {
+            translation::clear(&page);
+            load_translation(window, &page, None);
+        }
+        translation::choices(window, &page);
+        connection::synced(window, &page);
     }
 }
 /// Reconcile a failed provider change without disturbing unrelated service drafts.
@@ -604,6 +620,47 @@ pub(crate) fn sync_provider(window: &SettingsWindow, provider: &str) {
         load_translation(window, &page, None);
     }
 }
+pub(crate) fn translation_completed(
+    window: &SettingsWindow,
+    request_id: u64,
+    field: lexift_core::domain::settings::SettingsField,
+    saved: bool,
+) -> bool {
+    lookup_page(window)
+        .is_some_and(|page| translation::completed(window, &page, request_id, field, saved))
+}
+#[cfg(test)]
+pub(crate) fn translation_selection_saved(window: &SettingsWindow) {
+    if let Some(page) = lookup_page(window) {
+        translation::selection_saved(window, &page);
+    }
+}
+pub(crate) fn connection_save_failed(window: &SettingsWindow) {
+    if let Some(page) = lookup_page(window) {
+        connection::failed(window, &page);
+    }
+}
+#[cfg(test)]
+pub(crate) fn translation_save_failed(window: &SettingsWindow) {
+    if let Some(page) = lookup_page(window) {
+        translation::failed(window, &page);
+        connection::failed(window, &page);
+    }
+}
+/// Only explicit drafts need a close confirmation; ordinary settings are already applied.
+pub(crate) fn has_unsaved(window: &SettingsWindow) -> bool {
+    let Some(page) = lookup_page(window) else {
+        return false;
+    };
+    refresh_dirty(window, &page);
+    window.get_llm_connection_dirty()
+        || connection::has_unsaved(&page)
+        || translation::has_unsaved(window, &page)
+        || !window.get_credential_draft().is_empty()
+        || !window.get_llm_header_value().is_empty()
+        || !window.get_llm_header_name().is_empty()
+        || page.awaiting_apply.borrow().is_some()
+}
 pub(crate) fn reset(window: &SettingsWindow, config: &LlmSettings, provider: ProviderConfig) {
     sync(window, config);
     window.set_llm_translation_provider_index(match provider {
@@ -616,7 +673,10 @@ pub(crate) fn reset(window: &SettingsWindow, config: &LlmSettings, provider: Pro
     if let Some(page) = lookup_page(window) {
         invalidate(&page);
         window.set_llm_syncing(false);
+        page.connections.borrow_mut().clear();
+        page.awaiting_apply.borrow_mut().take();
         load_service(window, &page);
+        translation::clear(&page);
         load_translation(window, &page, None);
     }
 }
@@ -630,10 +690,12 @@ pub(crate) fn wire(
     let token = NEXT_PAGE.fetch_add(1, Ordering::Relaxed);
     window.set_llm_page_token(token as i32);
     let page = Rc::new(Page {
+        connections: Default::default(),
+        service_index: Cell::new(window.get_provider_detail_index()),
         config: RefCell::new(config.clone()),
         draft: RefCell::new(config.connection(LlmProvider::Ollama)),
         pending_headers: RefCell::new(Vec::new()),
-        awaiting_apply: Cell::new(false),
+        awaiting_apply: Default::default(),
         request_snapshot: RefCell::new(None),
         send: handler.clone(),
         cache: Default::default(),
@@ -641,6 +703,7 @@ pub(crate) fn wire(
         task: Default::default(),
         status_source: Default::default(),
         probe: Default::default(),
+        translations: Default::default(),
     });
     populate_cache(&page);
     PAGES.with(|pages| {
@@ -653,6 +716,7 @@ pub(crate) fn wire(
     window.on_llm_service_selected(move |_| {
         invalidate(&current);
         if let Some(w) = weak.upgrade() {
+            connection::remember(&w, &current);
             w.set_llm_syncing(false);
             status(&w, "");
             load_service(&w, &current);
@@ -749,6 +813,7 @@ pub(crate) fn wire(
     window.on_llm_page_left(move || {
         invalidate(&current);
         if let Some(w) = weak.upgrade() {
+            connection::remember(&w, &current);
             w.set_llm_syncing(false);
             load_service(&w, &current);
         }
@@ -785,6 +850,15 @@ pub(crate) fn wire(
         let Some(w) = weak.upgrade() else {
             return;
         };
+        if current.awaiting_apply.borrow().is_some()
+            || w.get_credential_busy()
+            || w.get_llm_translation_saving()
+        {
+            return;
+        }
+        if w.get_credential_editing() || !w.get_credential_draft().is_empty() {
+            return;
+        }
         let mut config = current.config.borrow().clone();
         if w.get_provider_detail_index() == 0 {
             config.deepl_enabled = w.get_llm_enabled();
@@ -800,10 +874,14 @@ pub(crate) fn wire(
                 .connections
                 .retain(|c| c.provider != connection.provider);
             config.connections.push(connection.clone());
+            invalidate(&current);
+            w.set_llm_syncing(false);
             *current.draft.borrow_mut() = connection.clone();
-            *current.config.borrow_mut() = config.clone();
-            populate_cache(&current);
-            current.awaiting_apply.set(true);
+            *current.awaiting_apply.borrow_mut() = Some(connection::Submission::Service {
+                index: w.get_provider_detail_index(),
+                headers: current.pending_headers.borrow().clone(),
+            });
+            connection::refresh_pending(&w, &current);
             (current.send)(AppEvent::LlmConnectionApplyRequested {
                 connection,
                 headers: current.pending_headers.borrow().clone(),
@@ -815,7 +893,15 @@ pub(crate) fn wire(
             }
             return;
         }
-        persist(&current, config);
+        *current.awaiting_apply.borrow_mut() = Some(connection::Submission::DeepL {
+            enabled: config.deepl_enabled,
+        });
+        invalidate(&current);
+        w.set_llm_syncing(false);
+        connection::refresh_pending(&w, &current);
+        (current.send)(AppEvent::SettingsChangeRequested {
+            change: SettingsChange::Llm(config),
+        });
         refresh_dirty(&w, &current);
         refresh_catalog(&w, &current);
         if let Some(p) = translation_kind(&w) {
@@ -826,6 +912,10 @@ pub(crate) fn wire(
     let weak = window.as_weak();
     window.on_llm_cancel_connection(move || {
         if let Some(w) = weak.upgrade() {
+            if w.get_llm_connection_saving() {
+                return;
+            }
+            connection::discard(&w, &current);
             invalidate(&current);
             w.set_llm_syncing(false);
             load_service(&w, &current);
@@ -858,6 +948,9 @@ pub(crate) fn wire(
     let weak = window.as_weak();
     window.on_llm_model_toggle(move |id, enabled| {
         if let Some(w) = weak.upgrade() {
+            if w.get_llm_connection_pending() || w.get_llm_translation_saving() {
+                return;
+            }
             let provider = service_kind(&w);
             let mut config = current.config.borrow().clone();
             let endpoint = config.connection(provider).endpoint_key();
@@ -976,7 +1069,12 @@ pub(crate) fn wire(
             && let Ok(i) = usize::try_from(index)
             && let Some(model) = w.get_llm_models().row_data(i)
         {
-            load_translation(&w, &current, Some(model.to_string()));
+            translation::select(
+                &w,
+                &current,
+                w.get_llm_translation_provider_index(),
+                model.to_string(),
+            );
         }
     });
     let current = page.clone();
@@ -999,6 +1097,12 @@ pub(crate) fn wire(
         let Some(w) = weak.upgrade() else {
             return;
         };
+        if w.get_llm_translation_saving()
+            || w.get_llm_connection_pending()
+            || w.get_credential_busy()
+        {
+            return;
+        }
         let Some(provider) = translation_kind(&w) else {
             return;
         };
@@ -1030,14 +1134,26 @@ pub(crate) fn wire(
         config
             .models
             .retain(|m| m.provider != provider || m.model != name);
-        config.models.push(model);
+        config.models.push(model.clone());
         if let Err(e) = config.validate() {
             status(&w, &e.to_string());
             return;
         }
-        *current.config.borrow_mut() = config.clone();
+        invalidate(&current);
+        w.set_llm_syncing(false);
+        if current.config.borrow().prompt == config.prompt
+            && current.config.borrow().models.iter().any(|m| m == &model)
+        {
+            w.invoke_finish_translation_settings();
+            return;
+        }
+        let request_id = translation::submitted(&w, &current, &model, &config.prompt);
         send(AppEvent::SettingsChangeRequested {
-            change: SettingsChange::Llm(config),
+            change: SettingsChange::TranslationOptions {
+                request_id,
+                model,
+                prompt: config.prompt,
+            },
         });
     });
     let current = page.clone();
@@ -1048,6 +1164,8 @@ pub(crate) fn wire(
             run_query(&w, &current, services.as_ref(), LlmQueryMode::Models);
         }
     });
+    translation::wire(window, &page);
+    translation::wire_picker(window, &page);
     detection::wire(window, page.clone(), query.clone());
     let current = page;
     let weak = window.as_weak();
@@ -1283,6 +1401,449 @@ mod tests {
         window.set_llm_service_index(2);
         load_service(window, page);
     }
+    fn acknowledge_connection(
+        window: &SettingsWindow,
+        page: &Page,
+        events: &Rc<RefCell<Vec<AppEvent>>>,
+    ) {
+        let (mut connection, headers) = events
+            .borrow()
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                AppEvent::LlmConnectionApplyRequested {
+                    connection,
+                    headers,
+                } => Some((connection.clone(), headers.clone())),
+                _ => None,
+            })
+            .unwrap();
+        for update in headers {
+            let mut scoped = connection.clone();
+            scoped.protocol = update.protocol;
+            let mut profile = scoped.profile();
+            profile
+                .headers
+                .retain(|h| !h.name.eq_ignore_ascii_case(&update.name));
+            if update.secret.is_some() {
+                profile.headers.push(HeaderReference {
+                    name: update.name,
+                    credential_id: "test-saved-reference".into(),
+                });
+            }
+            connection
+                .protocols
+                .retain(|p| p.protocol != profile.protocol);
+            connection.protocols.push(profile);
+        }
+        let mut config = page.config.borrow().clone();
+        config
+            .connections
+            .retain(|c| c.provider != connection.provider);
+        config.connections.push(connection);
+        sync(window, &config);
+        window.set_credential_busy(true);
+        secure_completed(window, false, true);
+        window.set_credential_busy(false);
+    }
+
+    fn connection_saves_wait_for_results_and_preserve_later_edits(
+        adapter: Rc<RefCell<Option<Rc<MinimalSoftwareWindow>>>>,
+    ) {
+        let window = SettingsWindow::new().unwrap();
+        let snapshot = |name: &str| {
+            let Ok(directory) = std::env::var("LEXIFT_SETTINGS_CONNECTION_SAVE_SNAPSHOT_DIR")
+            else {
+                return;
+            };
+            let surface = adapter.borrow().as_ref().unwrap().clone();
+            surface.set_size(slint::PhysicalSize::new(960, 1000));
+            surface.request_redraw();
+            let mut pixels = vec![slint::Rgb8Pixel::default(); 960 * 1000];
+            surface.draw_if_needed(|renderer| {
+                renderer.render(&mut pixels, 960);
+            });
+            crate::i18n::write_test_bitmap(
+                &directory,
+                name,
+                960,
+                1000,
+                pixels.into_iter().map(|p| [p.r, p.g, p.b, 255]),
+            );
+        };
+        let config = LlmSettings::default();
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let recorded = events.clone();
+        wire(
+            &window,
+            config.clone(),
+            None,
+            Rc::new(move |e| recorded.borrow_mut().push(e)),
+        );
+        reset(&window, &config, ProviderConfig::DeepL);
+        window.set_active_category(5);
+        window.set_provider_detail_index(1);
+        window.set_llm_service_index(0);
+        window.invoke_llm_service_selected(1);
+        let page = lookup_page(&window).unwrap();
+        window.set_llm_header_name("X-Unfinished".into());
+        assert!(
+            has_unsaved(&window),
+            "a header name without a value is still an unfinished edit"
+        );
+        window.set_llm_header_name("X-Test".into());
+        window.set_llm_header_value("first-test-value".into());
+        window.invoke_llm_header_save();
+        window.set_llm_base_url("http://127.0.0.1:54321".into());
+        window.invoke_llm_base_edited();
+        window.invoke_llm_save_connection();
+        assert!(window.get_llm_connection_saving());
+        assert_eq!(
+            *page.config.borrow(),
+            config,
+            "Apply does not optimistically replace persisted configuration"
+        );
+        snapshot("pending");
+        let count = events.borrow().len();
+        window.invoke_llm_save_connection();
+        window.invoke_llm_save_translation();
+        window.invoke_llm_model_toggle("ignored".into(), true);
+        assert_eq!(events.borrow().len(), count);
+        window.set_credential_busy(true);
+        secure_completed(&window, false, false);
+        window.set_credential_busy(false);
+        assert!(!window.get_llm_connection_pending());
+        assert!(window.get_llm_connection_dirty());
+        assert_eq!(window.get_llm_base_url(), "http://127.0.0.1:54321");
+        assert_eq!(page.pending_headers.borrow().len(), 1);
+        window.set_credential_error_text("Could not save settings".into());
+        snapshot("failed");
+        window.set_credential_error_text("".into());
+        window.invoke_llm_cancel_connection();
+        assert!(!window.get_llm_connection_dirty());
+        assert!(page.pending_headers.borrow().is_empty());
+
+        window.set_llm_base_url("http://127.0.0.1:54321".into());
+        window.invoke_llm_base_edited();
+        window.set_llm_header_name("X-Test".into());
+        window.set_llm_header_value("first-test-value".into());
+        window.invoke_llm_header_save();
+        window.invoke_llm_save_connection();
+        window.set_llm_header_name("X-Test".into());
+        window.set_llm_header_value("later-test-value".into());
+        window.invoke_llm_header_save();
+        window.set_llm_base_url("http://127.0.0.1:54322".into());
+        window.invoke_llm_base_edited();
+        acknowledge_connection(&window, &page, &events);
+        assert!(!window.get_llm_connection_pending());
+        assert!(window.get_llm_connection_dirty());
+        assert_eq!(window.get_llm_base_url(), "http://127.0.0.1:54322");
+        assert_eq!(
+            page.config
+                .borrow()
+                .connection(LlmProvider::Ollama)
+                .profile()
+                .base_url,
+            "http://127.0.0.1:54321"
+        );
+        assert_eq!(
+            page.pending_headers.borrow().len(),
+            1,
+            "later edits to the same header survive completion"
+        );
+        snapshot("later-edits");
+        window.invoke_llm_save_connection();
+        window.invoke_llm_request_open();
+        acknowledge_connection(&window, &page, &events);
+        window.invoke_llm_request_close(false);
+        assert!(page.pending_headers.borrow().is_empty());
+        assert_eq!(
+            window.get_llm_headers().row_count(),
+            1,
+            "modal Cancel keeps the newly persisted header reference"
+        );
+        assert!(!window.get_llm_connection_dirty());
+
+        window.set_llm_base_url("http://127.0.0.1:54323".into());
+        window.invoke_llm_base_edited();
+        window.set_llm_header_name("X-Next".into());
+        window.set_llm_header_value("next-test-value".into());
+        window.invoke_llm_header_save();
+        window.invoke_llm_save_connection();
+        window.set_provider_detail_index(2);
+        window.set_llm_service_index(1);
+        window.invoke_llm_service_selected(2);
+        assert!(window.get_llm_connection_pending());
+        assert!(
+            !window.get_llm_connection_saving(),
+            "another Provider must not display this request's loading state"
+        );
+        window.set_llm_base_url("http://127.0.0.1:54324".into());
+        window.invoke_llm_base_edited();
+        acknowledge_connection(&window, &page, &events);
+        assert_eq!(window.get_llm_base_url(), "http://127.0.0.1:54324");
+        assert!(window.get_llm_connection_dirty());
+        window.set_provider_detail_index(1);
+        window.set_llm_service_index(0);
+        window.invoke_llm_service_selected(1);
+        assert_eq!(window.get_llm_base_url(), "http://127.0.0.1:54323");
+        assert!(page.pending_headers.borrow().is_empty());
+        assert!(!window.get_llm_connection_dirty());
+
+        window.set_provider_detail_index(0);
+        window.invoke_llm_service_selected(0);
+        window.set_llm_enabled(false);
+        window.invoke_llm_draft_changed();
+        window.invoke_llm_save_connection();
+        assert!(window.get_llm_connection_pending());
+        assert!(page.config.borrow().deepl_enabled);
+        translation_save_failed(&window);
+        assert!(!window.get_llm_connection_pending());
+        assert!(window.get_llm_connection_dirty());
+        window.invoke_llm_save_connection();
+        let saved = events
+            .borrow()
+            .iter()
+            .rev()
+            .find_map(|e| match e {
+                AppEvent::SettingsChangeRequested {
+                    change: SettingsChange::Llm(c),
+                } => Some(c.clone()),
+                _ => None,
+            })
+            .unwrap();
+        sync(&window, &saved);
+        assert!(!window.get_llm_connection_pending());
+        assert!(!window.get_llm_connection_dirty());
+        assert_eq!(
+            window.get_provider_enabled_states().row_data(0),
+            Some(false)
+        );
+        snapshot("saved");
+    }
+
+    fn translation_drafts_survive_switches_cancel_and_failed_saves(
+        adapter: Rc<RefCell<Option<Rc<MinimalSoftwareWindow>>>>,
+    ) {
+        let window = SettingsWindow::new().unwrap();
+        let mut config = LlmSettings::default();
+        for (provider, id) in [
+            (LlmProvider::Ollama, "a"),
+            (LlmProvider::Ollama, "a2"),
+            (LlmProvider::LmStudio, "b"),
+        ] {
+            config.catalog.push(CatalogModel {
+                provider,
+                model: LlmModel {
+                    id: id.into(),
+                    aliases: vec![],
+                    reasoning: vec!["off".into(), "high".into()],
+                    issue: None,
+                },
+                enabled: true,
+                available: true,
+                endpoint: config.connection(provider).endpoint_key(),
+            });
+        }
+        config.models.push(TranslationModel {
+            provider: LlmProvider::Ollama,
+            model: "a".into(),
+            parameters: GenerationParameters {
+                temperature: Some(25),
+                ..Default::default()
+            },
+        });
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let recorded = events.clone();
+        wire(
+            &window,
+            config.clone(),
+            None,
+            Rc::new(move |e| recorded.borrow_mut().push(e)),
+        );
+        reset(&window, &config, ProviderConfig::Ollama);
+        window.set_active_category(1);
+        let last_change = || {
+            events
+                .borrow()
+                .iter()
+                .rev()
+                .find_map(|e| match e {
+                    AppEvent::SettingsChangeRequested { change } => Some(change.clone()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let acknowledge = |change: SettingsChange| {
+            let mut saved = lexift_core::domain::settings::Settings {
+                provider: ProviderConfig::Ollama,
+                llm: lookup_page(&window).unwrap().config.borrow().clone(),
+                ..Default::default()
+            };
+            change.apply_to(&mut saved);
+            sync(&window, &saved.llm);
+            if let SettingsChange::TranslationOptions { request_id, .. } = change {
+                assert!(translation_completed(
+                    &window,
+                    request_id,
+                    lexift_core::domain::settings::SettingsField::TranslationOptions,
+                    true
+                ));
+            }
+            saved
+        };
+        window.invoke_translation_filter();
+        assert_eq!(window.get_translation_choices().row_count(), 4);
+        window.invoke_translation_selected(2);
+        assert!(window.get_translation_selecting());
+        assert_eq!(
+            window.get_llm_selected_model(),
+            "a",
+            "selection stays authoritative until persistence succeeds"
+        );
+        assert!(
+            matches!(last_change(), SettingsChange::TranslationSelection { provider: ProviderConfig::Ollama, model: Some(ref m), .. } if m.model == "a2")
+        );
+        let count = events.borrow().len();
+        window.invoke_translation_selected(3);
+        assert_eq!(events.borrow().len(), count);
+        if let SettingsChange::TranslationSelection { request_id, .. } = last_change() {
+            assert!(
+                !translation_completed(
+                    &window,
+                    request_id + 100,
+                    lexift_core::domain::settings::SettingsField::TranslationSelection,
+                    true
+                ),
+                "stale completion must not touch the picker"
+            );
+            assert!(translation_completed(
+                &window,
+                request_id,
+                lexift_core::domain::settings::SettingsField::TranslationSelection,
+                false
+            ));
+        }
+        assert!(!window.get_translation_selecting());
+        assert_eq!(window.get_llm_selected_model(), "a");
+        window.invoke_translation_selected(2);
+        acknowledge(last_change());
+        translation_selection_saved(&window);
+        assert_eq!(window.get_llm_selected_model(), "a2");
+        assert!(!has_unsaved(&window));
+        window.invoke_translation_open_settings();
+        window.set_translation_settings_open(true);
+        window.set_llm_temperature_custom(true);
+        window.set_llm_temperature(33);
+        window.set_llm_prompt("Draft {target_language}".into());
+        window.invoke_llm_translation_edited();
+        assert!(has_unsaved(&window));
+        window.invoke_llm_cancel_translation();
+        window.invoke_finish_translation_settings();
+        assert_eq!(window.get_llm_prompt(), DEFAULT_TRANSLATION_PROMPT);
+        assert!(!window.get_llm_temperature_custom());
+        assert!(!has_unsaved(&window));
+        window.invoke_translation_open_settings();
+        window.set_translation_settings_open(true);
+        window.set_llm_temperature_custom(true);
+        window.set_llm_temperature(47);
+        window.set_llm_prompt("Saved {target_language}".into());
+        window.invoke_llm_save_translation();
+        assert!(window.get_llm_translation_saving());
+        assert!(
+            matches!(last_change(), SettingsChange::TranslationOptions { ref model, .. } if model.model == "a2" && model.parameters.temperature == Some(47))
+        );
+        translation_save_failed(&window);
+        assert!(window.get_translation_settings_open());
+        assert_eq!(window.get_llm_temperature(), 47);
+        window.invoke_llm_save_translation();
+        let saved = acknowledge(last_change());
+        assert!(!window.get_translation_settings_open());
+        assert!(!window.get_llm_translation_saving());
+        assert_eq!(
+            saved
+                .llm
+                .models
+                .iter()
+                .find(|m| m.model == "a")
+                .unwrap()
+                .parameters
+                .temperature,
+            Some(25)
+        );
+        window.invoke_translation_filter();
+        window.invoke_translation_selected(3);
+        let saved = acknowledge(last_change());
+        translation_selection_saved(&window);
+        assert_eq!(saved.provider, ProviderConfig::LmStudio);
+        assert_eq!(window.get_llm_selected_model(), "b");
+        window.invoke_translation_filter();
+        window.invoke_translation_selected(2);
+        acknowledge(last_change());
+        translation_selection_saved(&window);
+        assert_eq!(window.get_llm_temperature(), 47);
+        assert_eq!(window.get_llm_prompt(), "Saved {target_language}");
+        window.set_translation_search("LM studio".into());
+        window.invoke_translation_filter();
+        assert_eq!(window.get_translation_choices().row_count(), 1);
+        window.set_translation_search("no such model".into());
+        window.invoke_translation_filter();
+        assert_eq!(window.get_translation_choices().row_count(), 0);
+        window.set_translation_search("".into());
+        window.invoke_translation_filter();
+        let mut offline = lookup_page(&window).unwrap().config.borrow().clone();
+        offline.catalog[1].available = false;
+        sync(&window, &offline);
+        assert!(!window.get_translation_choices().row_data(2).unwrap().usable);
+        let count = events.borrow().len();
+        window.invoke_translation_selected(2);
+        assert_eq!(events.borrow().len(), count);
+        assert_eq!(
+            window.get_llm_selected_model(),
+            "a2",
+            "missing current selection is retained"
+        );
+        sync(&window, &saved.llm);
+        if let Ok(directory) = std::env::var("LEXIFT_SETTINGS_DRAFTS_SNAPSHOT_DIR") {
+            let surface = adapter.borrow().as_ref().unwrap().clone();
+            for scale in [1.0, 1.25] {
+                window
+                    .window()
+                    .dispatch_event(WindowEvent::ScaleFactorChanged {
+                        scale_factor: scale,
+                    });
+                let width = (960.0 * scale) as u32;
+                let height = (1000.0 * scale) as u32;
+                surface.set_size(slint::PhysicalSize::new(width, height));
+                for language in lexift_core::domain::ui_language::UiLanguage::ALL {
+                    crate::i18n::select(language);
+                    refresh_localized(&window);
+                    for state in ["compact", "picker", "modal"] {
+                        window.set_translation_selector_open(state == "picker");
+                        if state == "modal" {
+                            window.invoke_translation_open_settings();
+                        }
+                        window.set_translation_settings_open(state == "modal");
+                        surface.request_redraw();
+                        let mut pixels =
+                            vec![slint::Rgb8Pixel::default(); (width * height) as usize];
+                        surface.draw_if_needed(|renderer| {
+                            renderer.render(&mut pixels, width as usize);
+                        });
+                        crate::i18n::write_test_bitmap(
+                            &directory,
+                            &format!("translation-{state}-{}-{scale}", language.code()),
+                            width,
+                            height,
+                            pixels.into_iter().map(|p| [p.r, p.g, p.b, 255]),
+                        );
+                    }
+                }
+            }
+            crate::i18n::select(lexift_core::domain::ui_language::UiLanguage::EnglishUs);
+        }
+    }
+
     #[test]
     fn model_parameters_connection_drafts_and_window_tasks_are_isolated() {
         let adapter = Rc::new(RefCell::new(None));
@@ -1358,6 +1919,53 @@ mod tests {
         assert_eq!(
             page.config
                 .borrow()
+                .selected(LlmProvider::LmStudio)
+                .unwrap()
+                .parameters
+                .temperature,
+            Some(75),
+            "a click is not a persistence acknowledgment"
+        );
+        let saved = events
+            .borrow()
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                AppEvent::SettingsChangeRequested {
+                    change: SettingsChange::TranslationOptions { model, prompt, .. },
+                } => {
+                    let mut c = config.clone();
+                    c.models
+                        .retain(|m| m.provider != model.provider || m.model != model.model);
+                    c.models.push(model.clone());
+                    c.prompt = prompt.clone();
+                    Some(c)
+                }
+                _ => None,
+            })
+            .unwrap();
+        sync(&window, &saved);
+        let request_id = events
+            .borrow()
+            .iter()
+            .rev()
+            .find_map(|e| match e {
+                AppEvent::SettingsChangeRequested {
+                    change: SettingsChange::TranslationOptions { request_id, .. },
+                } => Some(*request_id),
+                _ => None,
+            })
+            .unwrap();
+        assert!(translation_completed(
+            &window,
+            request_id,
+            lexift_core::domain::settings::SettingsField::TranslationOptions,
+            true
+        ));
+
+        assert_eq!(
+            page.config
+                .borrow()
                 .selected(LlmProvider::Ollama)
                 .unwrap()
                 .parameters
@@ -1395,6 +2003,7 @@ mod tests {
         assert!(page.version.load(Ordering::SeqCst) > old);
         assert_eq!(cancellations.get(), 1);
         window.invoke_llm_save_connection();
+        acknowledge_connection(&window, &page, &events);
         assert_eq!(
             page.config.borrow().connection(LlmProvider::Ollama).address,
             "http://192.168.1.20:11434"
@@ -1482,10 +2091,55 @@ mod tests {
             version,
             "unsaved connections must not query or replace the directory"
         );
+        let original_index = window.get_provider_detail_index();
+        let original_service = window.get_llm_service_index();
+        let original_base = window.get_llm_base_url();
+        window.set_llm_address("incomplete-address".into());
+        let saved_credential = page
+            .config
+            .borrow()
+            .connection(service_kind(&window))
+            .credential_id;
+        page.draft.borrow_mut().credential_id = Some("stale-test-reference".into());
+        window.invoke_llm_draft_changed();
+        window.set_provider_detail_index(2);
+        window.set_llm_service_index(1);
+        window.invoke_llm_service_selected(2);
+        assert_ne!(window.get_llm_address(), "incomplete-address");
+        assert!(connection::has_unsaved(&page));
+        window.set_provider_detail_index(original_index);
+        window.set_llm_service_index(original_service);
+        window.invoke_llm_service_selected(original_index);
+        assert_eq!(window.get_llm_address(), "incomplete-address");
+        assert_eq!(window.get_llm_base_url(), original_base);
+        assert_eq!(page.draft.borrow().credential_id, saved_credential);
+        assert_eq!(page.pending_headers.borrow().len(), 1);
+        assert!(window.get_llm_header_value().is_empty());
+        window.invoke_llm_page_left();
+        assert_eq!(window.get_llm_address(), "incomplete-address");
+        // Navigating away cancels unconfirmed modal edits, preserving the page draft.
+        window.set_llm_address(
+            page.config
+                .borrow()
+                .connection(service_kind(&window))
+                .address
+                .into(),
+        );
+        window.invoke_llm_request_open();
+        window.set_llm_base_url("https://unconfirmed.example/v1".into());
+        window.invoke_llm_base_edited();
+        window.invoke_llm_page_left();
+        assert_eq!(window.get_llm_base_url(), original_base);
+        assert!(!window.get_llm_advanced());
         window.invoke_llm_cancel_connection();
         assert!(page.pending_headers.borrow().is_empty());
         assert_eq!(window.get_llm_headers().row_count(), 0);
         let mut saved = page.config.borrow().clone();
+        saved.models.push(TranslationModel {
+            provider: LlmProvider::DeepSeek,
+            model: "cloud".into(),
+            parameters: GenerationParameters::default(),
+        });
         saved.merge_models(
             &saved.connection(LlmProvider::DeepSeek),
             vec![
@@ -1519,10 +2173,17 @@ mod tests {
         window.set_llm_model_search("embedding".into());
         window.invoke_llm_filter_models();
         assert_eq!(window.get_llm_catalog().row_count(), 1);
-        window.set_llm_model_search("".into());
-        window.invoke_llm_filter_models();
+        window.set_llm_search_open(true);
+        window.set_llm_filter_open(true);
+        window.set_llm_model_filter(2);
+        let selection_before_leave = window.get_llm_selected_model();
+        window.invoke_llm_page_left();
+        assert!(!window.get_llm_search_open());
+        assert!(!window.get_llm_filter_open());
+        assert_eq!(window.get_llm_model_search(), "");
+        assert_eq!(window.get_llm_model_filter(), 0);
         assert_eq!(window.get_llm_catalog().row_count(), 2);
-        assert_eq!(window.get_llm_catalog().row_count(), 2);
+        assert_eq!(window.get_llm_selected_model(), selection_before_leave);
         window.set_llm_enabled(false);
         assert_eq!(
             window.get_provider_enabled_states().row_data(3),
@@ -1530,6 +2191,8 @@ mod tests {
             "green indicator follows saved settings, not the switch draft"
         );
         window.invoke_llm_save_connection();
+        assert_eq!(window.get_provider_enabled_states().row_data(3), Some(true));
+        acknowledge_connection(&window, &page, &events);
         assert_eq!(
             window.get_provider_enabled_states().row_data(3),
             Some(false)
@@ -1544,6 +2207,7 @@ mod tests {
         assert!(!window.get_llm_selection_note().is_empty());
         window.set_llm_enabled(true);
         window.invoke_llm_save_connection();
+        acknowledge_connection(&window, &page, &events);
         load_translation(&window, &page, Some("cloud".into()));
         if let Ok(directory) = std::env::var("LEXIFT_LLM_SNAPSHOT_DIR") {
             let adapter = adapter.borrow().as_ref().unwrap().clone();
@@ -1658,17 +2322,7 @@ mod tests {
         draw();
         window.invoke_scroll_model_settings(false);
         draw();
-        let position = slint::LogicalPosition::new(600., 160.);
-        window.window().dispatch_event(WindowEvent::PointerPressed {
-            position,
-            button: slint::platform::PointerEventButton::Left,
-        });
-        window
-            .window()
-            .dispatch_event(WindowEvent::PointerReleased {
-                position,
-                button: slint::platform::PointerEventButton::Left,
-            });
+        window.invoke_open_translation_selector();
         draw();
         for key in [
             slint::platform::Key::DownArrow,
@@ -1681,11 +2335,36 @@ mod tests {
                 .window()
                 .dispatch_event(WindowEvent::KeyReleased { text: key.into() });
         }
-        assert_eq!(
-            window.get_llm_translation_provider_index(),
-            2,
-            "provider picker must open on click and accept keyboard selection"
+        assert!(
+            window.get_translation_selecting(),
+            "combined picker accepts keyboard selection"
         );
+        let change = events
+            .borrow()
+            .iter()
+            .rev()
+            .find_map(|e| match e {
+                AppEvent::SettingsChangeRequested {
+                    change: c @ SettingsChange::TranslationSelection { .. },
+                } => Some(c.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let mut persisted = lexift_core::domain::settings::Settings {
+            llm: page.config.borrow().clone(),
+            ..Default::default()
+        };
+        change.apply_to(&mut persisted);
+        sync(&window, &persisted.llm);
+        if let SettingsChange::TranslationSelection { request_id, .. } = change {
+            assert!(translation_completed(
+                &window,
+                request_id,
+                lexift_core::domain::settings::SettingsField::TranslationSelection,
+                true
+            ));
+        }
+        assert_eq!(window.get_llm_translation_provider_index(), 0);
         window.set_active_category(5);
         window.invoke_open_provider_request();
         draw();
@@ -1724,5 +2403,7 @@ mod tests {
             before_drop + 1,
             "closing destroys the owned query"
         );
+        translation_drafts_survive_switches_cancel_and_failed_saves(adapter.clone());
+        connection_saves_wait_for_results_and_preserve_later_edits(adapter);
     }
 }

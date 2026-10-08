@@ -2230,6 +2230,49 @@ fn ensure_settings_window(
         return Ok(settings.clone_strong());
     }
     let settings = SettingsWindow::new()?;
+    // Observe pointer input without consuming it; blank space and editors also
+    // end keyboard-only button styling. The weak callback dies with this window.
+    {
+        use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
+        let weak = settings.as_weak();
+        settings.window().on_winit_window_event(move |_, event| {
+            if let Some(settings) = weak.upgrade() {
+                match event {
+                    winit::event::WindowEvent::MouseInput { .. }
+                    | winit::event::WindowEvent::Touch(_) => {
+                        settings.invoke_settings_pointer_input()
+                    }
+                    winit::event::WindowEvent::KeyboardInput { event, .. }
+                        if event.state == winit::event::ElementState::Pressed =>
+                    {
+                        use winit::keyboard::{Key, NamedKey};
+                        if matches!(
+                            event.logical_key,
+                            Key::Named(
+                                NamedKey::Tab
+                                    | NamedKey::ArrowUp
+                                    | NamedKey::ArrowDown
+                                    | NamedKey::ArrowLeft
+                                    | NamedKey::ArrowRight
+                                    | NamedKey::Home
+                                    | NamedKey::End
+                                    | NamedKey::Enter
+                                    | NamedKey::Space
+                                    | NamedKey::Escape
+                            )
+                        ) {
+                            settings.invoke_settings_keyboard_input();
+                        }
+                    }
+                    winit::event::WindowEvent::Focused(false) => {
+                        settings.invoke_reset_button_visuals()
+                    }
+                    _ => {}
+                }
+            }
+            EventResult::Propagate
+        });
+    }
     crate::theme::apply(&settings);
     let weak = settings.as_weak();
     let configure = registry.configure_resize_background.clone();
@@ -2298,10 +2341,18 @@ fn schedule_main_window_destruction() {
     });
 }
 
-fn schedule_settings_window_destruction() {
+fn schedule_settings_window_destruction(settings: &SettingsWindow) {
+    let token = settings.get_llm_page_token();
     let generation = APP_WINDOW_REGISTRY.with(|registry| {
         let mut registry = registry.borrow_mut();
         let registry = registry.as_mut()?;
+        if registry
+            .settings
+            .as_ref()
+            .is_none_or(|window| window.get_llm_page_token() != token)
+        {
+            return None;
+        }
         registry.settings_close_generation = registry.settings_close_generation.wrapping_add(1);
         Some(registry.settings_close_generation)
     });
@@ -2313,6 +2364,10 @@ fn schedule_settings_window_destruction() {
             let mut registry = registry.borrow_mut();
             if let Some(registry) = registry.as_mut()
                 && registry.settings_close_generation == generation
+                && registry
+                    .settings
+                    .as_ref()
+                    .is_some_and(|window| window.get_llm_page_token() == token)
                 && let Some(settings) = registry.settings.take()
             {
                 settings.invoke_reset_settings_view();
@@ -2360,9 +2415,22 @@ fn wire_settings_callbacks(
     credential_generation: Arc<AtomicU64>,
     toast_records: Arc<Mutex<Vec<SettingsToastRecord>>>,
 ) {
+    let weak = settings.as_weak();
     settings.window().on_close_requested(move || {
-        schedule_settings_window_destruction();
+        if let Some(window) = weak.upgrade() {
+            if crate::llm_settings::has_unsaved(&window) {
+                window.invoke_confirm_settings_close();
+            } else {
+                schedule_settings_window_destruction(&window);
+            }
+        }
         slint::CloseRequestResponse::KeepWindowShown
+    });
+    let weak = settings.as_weak();
+    settings.on_discard_settings_requested(move || {
+        if let Some(window) = weak.upgrade() {
+            schedule_settings_window_destruction(&window);
+        }
     });
     let settings_weak = settings.as_weak();
     let toast_records_for_dismiss = Arc::clone(&toast_records);
@@ -3143,6 +3211,27 @@ fn remove_settings_toast(
     }
 }
 
+/// Keep feedback compact while giving refreshed notices a new timeout identity.
+fn insert_settings_toast_record(
+    records: &Mutex<Vec<SettingsToastRecord>>,
+    toast: SettingsToastRecord,
+) {
+    let mut records = records
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    records.retain(|previous| {
+        if toast.error {
+            previous.message != toast.message || previous.error != toast.error
+        } else {
+            previous.error
+        }
+    });
+    records.push(toast);
+    // A short queue keeps rapid actions from covering the whole settings page.
+    let excess = records.len().saturating_sub(3);
+    records.drain(..excess);
+}
+
 fn remove_settings_toast_record(records: &Mutex<Vec<SettingsToastRecord>>, id: i32) -> bool {
     let mut records = records
         .lock()
@@ -3183,7 +3272,11 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
             ("Shortcut saved", false)
         }
         SettingsFeedback::SettingsSaved(
-            SettingsField::Provider | SettingsField::Ollama | SettingsField::Llm,
+            SettingsField::Provider
+            | SettingsField::Ollama
+            | SettingsField::Llm
+            | SettingsField::TranslationSelection
+            | SettingsField::TranslationOptions,
         ) => ("Provider saved", false),
         SettingsFeedback::SettingsSaved(SettingsField::LaunchAtLogin) => {
             ("Startup preference saved", false)
@@ -3201,13 +3294,23 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
             ("Shortcut wasn't saved", true)
         }
         SettingsFeedback::SettingsSaveFailed(
-            SettingsField::Provider | SettingsField::Ollama | SettingsField::Llm,
+            SettingsField::Provider
+            | SettingsField::Ollama
+            | SettingsField::Llm
+            | SettingsField::TranslationSelection
+            | SettingsField::TranslationOptions,
         ) => ("Provider wasn't saved", true),
         SettingsFeedback::SettingsSaveFailed(SettingsField::LaunchAtLogin) => {
             ("Startup preference wasn't saved", true)
         }
         SettingsFeedback::SettingsSaveFailed(SettingsField::SelectionToolbar) => {
             ("Selection toolbar preference wasn't saved", true)
+        }
+        SettingsFeedback::TranslationSettingsCompleted { saved: true, .. } => {
+            ("Provider saved", false)
+        }
+        SettingsFeedback::TranslationSettingsCompleted { saved: false, .. } => {
+            ("Provider wasn't saved", true)
         }
         SettingsFeedback::CredentialSaved => ("API key saved", false),
         SettingsFeedback::CredentialRemoved => ("API key removed", false),
@@ -3264,7 +3367,7 @@ impl UiHandle {
                 if let Some(registry) = registry.borrow_mut().as_mut() {
                     if language_changed && let Some(settings) = &registry.settings {
                         settings.invoke_close_settings_menu();
-                        settings.invoke_close_preview_menu();
+                        settings.invoke_close_app_language_menu();
                         render_settings_toasts(settings, &toast_records);
                     }
                     registry.latest_state = state;
@@ -3353,6 +3456,7 @@ impl UiHandle {
     }
 
     pub fn show_settings_window(&self, settings: Settings) {
+        let activate_user_requested_window = self.activate_user_requested_window;
         let credential_generation = Arc::clone(&self.credential_generation);
         let toast_records = Arc::clone(&self.toast_records);
         let _ = slint::invoke_from_event_loop(move || {
@@ -3364,6 +3468,7 @@ impl UiHandle {
                 };
                 registry.settings_close_generation =
                     registry.settings_close_generation.wrapping_add(1);
+                let fresh = registry.settings.is_none();
                 let window = match ensure_settings_window(registry) {
                     Ok(window) => window,
                     Err(error) => {
@@ -3371,24 +3476,28 @@ impl UiHandle {
                         return;
                     }
                 };
-                window.invoke_reset_settings_view();
-                window.set_draft_target_index(language_index(&settings.target_language));
-                window.set_draft_hotkey_label(settings.hotkey.to_string().into());
-                window.set_draft_annotation_hotkey_label(
-                    settings.annotation_hotkey.to_string().into(),
-                );
-                window.set_draft_provider_id(settings.provider.id().into());
-                crate::llm_settings::reset(&window, &settings.llm, settings.provider);
-                window.set_launch_at_login(settings.launch_at_login);
-                window.set_selection_toolbar(settings.selection_toolbar);
-                window.set_hotkey_capturing(false);
-                window.set_annotation_hotkey_capturing(false);
-                clear_credential_transient(&window, &credential_generation);
-                clear_settings_toasts(&window, &toast_records);
+                // Reopening a live window must not discard its drafts or active modal.
+                if fresh {
+                    window.invoke_reset_settings_view();
+                    window.set_draft_target_index(language_index(&settings.target_language));
+                    window.set_draft_hotkey_label(settings.hotkey.to_string().into());
+                    window.set_draft_annotation_hotkey_label(
+                        settings.annotation_hotkey.to_string().into(),
+                    );
+                    window.set_draft_provider_id(settings.provider.id().into());
+                    crate::llm_settings::reset(&window, &settings.llm, settings.provider);
+                    window.set_launch_at_login(settings.launch_at_login);
+                    window.set_selection_toolbar(settings.selection_toolbar);
+                    window.set_hotkey_capturing(false);
+                    window.set_annotation_hotkey_capturing(false);
+                    clear_credential_transient(&window, &credential_generation);
+                    clear_settings_toasts(&window, &toast_records);
+                }
                 if window.window().is_minimized() {
                     window.window().set_minimized(false);
                 }
                 let _ = window.show();
+                activate_user_requested_window(window.window());
                 install_app_window_icon(&window, registry.configure_app_window_icon);
                 let color = window.get_resize_fallback_color();
                 if !install_settings_platform_hooks(
@@ -3508,7 +3617,7 @@ impl UiHandle {
         });
     }
 
-    /// Adds an independently dismissible Settings toast.
+    /// Shows compact, independently dismissible feedback for the current Settings window.
     pub fn show_settings_feedback(&self, feedback: SettingsFeedback) {
         let toast_records = Arc::clone(&self.toast_records);
         let id = self
@@ -3522,16 +3631,6 @@ impl UiHandle {
             SETTINGS_TOAST_SUCCESS_DURATION
         };
         let _ = slint::invoke_from_event_loop(move || {
-            {
-                toast_records
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .push(SettingsToastRecord {
-                        id,
-                        message: message.to_owned(),
-                        error,
-                    });
-            }
             let Some(settings) = APP_WINDOW_REGISTRY.with(|registry| {
                 registry
                     .borrow()
@@ -3542,6 +3641,26 @@ impl UiHandle {
             }) else {
                 return;
             };
+            if let SettingsFeedback::TranslationSettingsCompleted {
+                request_id,
+                field,
+                saved,
+            } = feedback
+                && !crate::llm_settings::translation_completed(&settings, request_id, field, saved)
+            {
+                return;
+            }
+            insert_settings_toast_record(
+                &toast_records,
+                SettingsToastRecord {
+                    id,
+                    message: message.to_owned(),
+                    error,
+                },
+            );
+            if feedback == SettingsFeedback::SettingsSaveFailed(SettingsField::Llm) {
+                crate::llm_settings::connection_save_failed(&settings);
+            }
             render_settings_toasts(&settings, &toast_records);
             let settings_for_timeout = settings.as_weak();
             let records_for_timeout = Arc::clone(&toast_records);
@@ -3710,14 +3829,14 @@ mod tests {
         IdleTrimGeneration, MainWindowClosePolicy, ManualPopupSize, POPUP_MIN_SOURCE_HEIGHT,
         PendingPopupShow, PopupDragPhase, PopupDragScheduler, SettingsToastRecord, clamp_range,
         clamp_source_card_height, close_policy, credential_session_is_current,
-        effective_manual_layout, has_valid_native_client_size, language_index,
-        manual_size_after_external_resize, max_source_card_height, popup_min_height,
-        popup_min_window_height, popup_show_retry_delay, remove_settings_toast_record,
-        source_language_for_index, toolbar_opacity,
+        effective_manual_layout, has_valid_native_client_size, insert_settings_toast_record,
+        language_index, manual_size_after_external_resize, max_source_card_height,
+        popup_min_height, popup_min_window_height, popup_show_retry_delay,
+        remove_settings_toast_record, source_language_for_index, toolbar_opacity,
     };
 
     #[test]
-    fn migrated_settings_keep_real_callbacks_and_isolate_preview_state() {
+    fn settings_keep_real_callbacks_and_clear_window_owned_editing_state() {
         use super::*;
         use slint::platform::{
             Platform, WindowAdapter,
@@ -3749,18 +3868,6 @@ mod tests {
         );
         assert_eq!(settings.get_appearance_language_index(), 2);
         events.borrow_mut().clear();
-
-        settings.set_fallback_target_index(6);
-        settings.set_preprocess_join_lines(true);
-        settings.set_translation_auto_copy(true);
-        settings.set_translation_auto_resize(false);
-        settings.invoke_select_category(5);
-        settings.invoke_select_category(1);
-        assert_eq!(settings.get_fallback_target_index(), 6);
-        assert!(settings.get_preprocess_join_lines());
-        assert!(settings.get_translation_auto_copy());
-        assert!(!settings.get_translation_auto_resize());
-        assert!(events.borrow().is_empty());
 
         settings.invoke_select_category(5);
         settings.set_draft_provider_id("".into());
@@ -3854,10 +3961,10 @@ mod tests {
         assert!(generation.load(Ordering::Relaxed) > old_generation);
         drop(settings);
         let reopened = SettingsWindow::new().unwrap();
-        assert_eq!(reopened.get_fallback_target_index(), 2);
-        assert!(!reopened.get_preprocess_join_lines());
-        assert!(!reopened.get_translation_auto_copy());
-        assert!(reopened.get_translation_auto_resize());
+        assert_eq!(reopened.get_active_category(), 0);
+        assert!(!reopened.get_hotkey_capturing());
+        assert!(reopened.get_credential_draft().is_empty());
+        assert!(!reopened.get_credential_editing());
     }
 
     #[test]
@@ -4167,6 +4274,57 @@ mod tests {
         assert_eq!(replacement.generation, 2);
         assert!(replacement.retried_once);
         assert!(replacement.native_window_creation_requested);
+    }
+
+    #[test]
+    fn settings_feedback_refreshes_duplicates_and_does_not_expire_replacements() {
+        let records = std::sync::Mutex::new(Vec::new());
+        let toast = |id, message: &str, error| SettingsToastRecord {
+            id,
+            message: message.into(),
+            error,
+        };
+        insert_settings_toast_record(&records, toast(1, "Theme saved", false));
+        insert_settings_toast_record(&records, toast(2, "Theme saved", false));
+        assert_eq!(records.lock().unwrap().len(), 1);
+        assert!(
+            !remove_settings_toast_record(&records, 1),
+            "old timeout must not expire refreshed notice"
+        );
+        insert_settings_toast_record(&records, toast(3, "Provider wasn't saved", true));
+        insert_settings_toast_record(&records, toast(4, "Interface language saved", false));
+        assert_eq!(
+            records
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|r| r.id)
+                .collect::<Vec<_>>(),
+            [3, 4]
+        );
+        insert_settings_toast_record(&records, toast(5, "Provider wasn't saved", true));
+        assert!(!remove_settings_toast_record(&records, 3));
+        insert_settings_toast_record(&records, toast(6, "Credential operation failed", true));
+        insert_settings_toast_record(&records, toast(7, "Shortcut wasn't saved", true));
+        assert_eq!(
+            records
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|r| r.id)
+                .collect::<Vec<_>>(),
+            [5, 6, 7]
+        );
+        assert!(remove_settings_toast_record(&records, 6));
+        assert_eq!(
+            records
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|r| r.id)
+                .collect::<Vec<_>>(),
+            [5, 7]
+        );
     }
 
     #[test]

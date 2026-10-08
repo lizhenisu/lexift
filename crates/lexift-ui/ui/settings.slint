@@ -1,5 +1,6 @@
-import { ProviderModelRow, ProviderIconButton, ProviderInput, ProviderModelItem, ProviderDialog, ProviderFilterBar, ProviderProbeRow } from "provider-controls.slint";
-export { ProviderModelRow, ProviderProbeRow }
+import { SettingsInteraction, SettingsFocusScope } from "settings-interaction.slint";
+import { ProviderModelRow, ProviderIconButton, ProviderInput, ProviderModelItem, ProviderDialog, ProviderFilterBar, ProviderProbeRow, TranslationChoice, ProviderLogo } from "provider-controls.slint";
+export { ProviderModelRow, ProviderProbeRow, TranslationChoice }
 import { Colors } from "design/colors.slint";
 import { Spacing } from "design/spacing.slint";
 import { Typography } from "design/typography.slint";
@@ -12,57 +13,68 @@ import { ScrollView } from "std-widgets.slint";
 component SettingsButton inherits Rectangle {
     in property <string> label;
     in property <bool> primary: false;
+    in property <bool> destructive: false;
     in property <bool> compact: false;
     in property <bool> enabled: true;
     callback clicked();
-    public function focus-button() { keyboard.focus(); }
+    public function focus-button() { keyboard.focus-target(); }
 
     width: max(root.compact ? 72px : 104px, button-label.preferred-width + 2 * Spacing.medium);
     height: 40px;
-    border-radius: root.compact ? 6px : 20px;
-    border-width: primary ? 0px : 1px;
-    border-color: Colors.outline;
-    background: !root.enabled ? Colors.outline : button-touch.pressed ? Colors.icon-button-pressed : button-touch.has-hover ? Colors.icon-button-hover : root.primary ? Colors.primary : Colors.surface;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: keyboard.focus-visible ? Colors.primary : root.destructive ? Colors.error : root.primary ? transparent : Colors.outline;
+    background: !root.enabled ? Colors.background : root.destructive && (button-touch.pressed || button-touch.has-hover) ? Colors.error-container : root.primary ? (button-touch.pressed ? Colors.primary.darker(0.18) : button-touch.has-hover ? Colors.primary.darker(0.08) : Colors.primary) : button-touch.pressed ? Colors.icon-button-pressed : button-touch.has-hover ? Colors.icon-button-hover : Colors.surface;
     accessible-role: button; accessible-label: root.label;
 
     button-label := Text {
         x: 8px; width: parent.width - 16px; height: parent.height;
         wrap: word-wrap;
         text: root.label;
-        color: !root.enabled ? Colors.secondary-foreground : root.primary ? Colors.on-primary : Colors.primary;
+        color: !root.enabled ? Colors.secondary-foreground : root.destructive ? Colors.error : root.primary ? Colors.on-primary : Colors.primary;
         font-size: root.compact ? 14px : Typography.body-size;
         font-weight: root.compact ? 500 : 700;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
 
-    keyboard := FocusScope { enabled: root.enabled; key-pressed(event) => { if event.text == " " || event.text == Key.Return { root.clicked(); return accept; } return reject; } }
+    Rectangle { x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px;
+        border-radius: 11px; border-width: keyboard.focus-visible ? 1px : 0px;
+        border-color: Colors.primary; background: transparent;
+    }
+    keyboard := SettingsFocusScope { enabled: root.enabled; key-pressed(event) => { if event.text == " " || event.text == Key.Return { root.clicked(); return accept; } return reject; } }
     button-touch := TouchArea {
         enabled: root.enabled; mouse-cursor: pointer;
-        clicked => { keyboard.focus(); root.clicked(); }
+        clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.clicked(); }
     }
 }
 
 component SettingsSwitch inherits Rectangle {
     in property <bool> checked;
+    in property <string> label;
+    in property <bool> enabled: true;
     callback toggled(bool);
-
-    width: 52px;
-    height: 32px;
-    border-radius: 16px;
+    public function focus-switch() { keyboard.focus-target(); }
+    width: 52px; height: 32px; horizontal-stretch: 0; vertical-stretch: 0; border-radius: 16px;
+    opacity: root.enabled ? 1 : Metrics.disabled-opacity;
     background: root.checked ? Colors.primary : Colors.outline;
-
+    accessible-role: switch; accessible-label: root.label;
+    accessible-checkable: true; accessible-checked: root.checked; accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.toggled(!root.checked); } }
     Rectangle {
-        x: root.checked ? parent.width - self.width - 4px : 4px;
-        y: 4px;
-        width: 24px;
-        height: 24px;
-        border-radius: 12px;
-        background: Colors.surface;
+        x: root.checked ? parent.width - self.width - 4px : 4px; y: 4px;
+        width: 24px; height: 24px; border-radius: 12px; background: Colors.surface;
     }
-
-    TouchArea {
-        clicked => { root.toggled(!root.checked); }
+    // Focus is separate from hover so keyboard navigation never looks like a held click.
+    Rectangle { x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px;
+        border-radius: 19px; border-width: keyboard.focus-visible ? 1px : 0px;
+        border-color: Colors.primary; background: transparent;
+    }
+    keyboard := SettingsFocusScope { enabled: root.enabled;
+        key-pressed(event) => { if event.text == " " || event.text == Key.Return { root.toggled(!root.checked); return accept; } return reject; }
+    }
+    TouchArea { enabled: root.enabled; mouse-cursor: pointer;
+        clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.toggled(!root.checked); }
     }
 }
 
@@ -73,6 +85,9 @@ component CredentialActionButton inherits Rectangle {
     in property <bool> highlighted: false;
     in property <bool> pressed: false;
     callback clicked();
+    public function focus-button() { keyboard.focus-target(); }
+    private property <string> action-label: root.icon-kind == 0 ? @tr("View key") : root.icon-kind == 1 ? @tr("Copy") : root.icon-kind == 2 ? @tr("Edit key") : root.icon-kind == 3 ? @tr("Delete key") : @tr("Hide key");
+    accessible-role: button; accessible-label: root.action-label; accessible-enabled: root.enabled;
 
     width: Metrics.icon-button-size;
     height: Metrics.icon-button-size;
@@ -89,14 +104,19 @@ component CredentialActionButton inherits Rectangle {
         source: root.icon-kind == 0 ? @image-url("icons/credential-reveal.svg") : root.icon-kind == 1 ? @image-url("icons/credential-copy.svg") : root.icon-kind == 2 ? @image-url("icons/credential-edit.svg") : root.icon-kind == 3 ? @image-url("icons/credential-delete.svg") : @image-url("icons/credential-hide.svg");
     }
 
+    Rectangle { x: 0px; y: 0px; width: parent.width; height: parent.height; border-radius: Metrics.icon-button-radius;
+        border-width: keyboard.focus-visible ? 1px : 0px; border-color: Colors.primary; background: transparent; }
+    keyboard := SettingsFocusScope { enabled: root.enabled && root.interactive;
+        key-pressed(event) => { if event.text == " " || event.text == Key.Return { root.clicked(); return accept; } return reject; }
+    }
     action-touch := TouchArea {
         enabled: root.enabled && root.interactive;
-        clicked => { root.clicked(); }
+        mouse-cursor: pointer; clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.clicked(); }
     }
     if root.enabled && (root.highlighted || action-touch.has-hover): Rectangle {
         z: 100; x: min(0px, root.width - self.width); y: root.height + 4px;
         width: tip.preferred-width + 16px; height: 28px; border-radius: 4px; background: Colors.foreground;
-        tip := Text { x: 8px; height: parent.height; text: root.icon-kind == 0 ? @tr("View key") : root.icon-kind == 1 ? @tr("Copy") : root.icon-kind == 2 ? @tr("Edit key") : root.icon-kind == 3 ? @tr("Delete key") : @tr("Hide key"); color: Colors.surface; font-size: 12px; vertical-alignment: center; }
+        tip := Text { x: 8px; height: parent.height; text: root.action-label; color: Colors.surface; font-size: 12px; vertical-alignment: center; }
     }
 
 }
@@ -105,6 +125,7 @@ component CredentialActionButton inherits Rectangle {
 component ProviderCredentialField inherits Rectangle {
     in property <bool> credential-configured;
     in property <bool> credential-busy;
+    in property <bool> operation-blocked: false;
     in property <bool> credential-editing;
     in property <bool> credential-revealed;
     in property <bool> credential-request-pending;
@@ -122,6 +143,7 @@ component ProviderCredentialField inherits Rectangle {
     callback credential-edit-cancel-requested();
     callback credential-edit-blurred();
     callback credential-save-requested(string);
+    public function focus-remove() { delete-key-button.focus-button(); }
     public function focus-reveal() { credential-reveal-input.focus(); }
     public function focus-edit() { credential-edit-input.focus(); }
     public pure function edit-focused() -> bool { return credential-edit-input.has-focus; }
@@ -132,19 +154,10 @@ component ProviderCredentialField inherits Rectangle {
                     border-width: (credential-reveal-input.has-focus || credential-edit-input.has-focus) ? 2px : 1px;
                     border-color: (credential-reveal-input.has-focus || credential-edit-input.has-focus) ? Colors.primary : Colors.outline;
                     background: Colors.background;
-                    field-hover := TouchArea {
-                        enabled: root.credential-configured && !root.credential-editing && !root.credential-revealed && !root.credential-request-pending;
-                        clicked => {
-                            if self.mouse-x >= self.width - 4 * Metrics.icon-button-size - 4px && self.mouse-x < self.width - 3 * Metrics.icon-button-size - 4px { root.credential-reveal-requested(); }
-                            else if self.mouse-x >= self.width - 3 * Metrics.icon-button-size - 4px && self.mouse-x < self.width - 2 * Metrics.icon-button-size - 4px { root.credential-copy-requested(); }
-                            else if self.mouse-x >= self.width - 2 * Metrics.icon-button-size - 4px && self.mouse-x < self.width - Metrics.icon-button-size - 4px { root.credential-edit-requested(); }
-                            else if self.mouse-x >= self.width - Metrics.icon-button-size - 4px && self.mouse-x < self.width - 4px { if root.can-remove { root.credential-remove-requested(); } }
-                        }
-                    }
                     if !root.credential-configured: credential-new-input := TextInput {
-                        x: Spacing.medium; width: parent.width - 2 * Spacing.medium; height: parent.height; text <=> root.credential-draft; input-type: InputType.password; enabled: !root.credential-busy;
+                        x: Spacing.medium; width: parent.width - 2 * Spacing.medium; height: parent.height; text <=> root.credential-draft; input-type: InputType.password; enabled: !root.credential-busy && !root.operation-blocked;
                         color: Colors.foreground; selection-background-color: Colors.primary-container; selection-foreground-color: Colors.foreground; font-size: Typography.body-size; text-cursor-width: 2px; vertical-alignment: center;
-                        accepted => { if root.credential-draft != "" && !root.credential-busy { root.credential-save-requested(root.credential-draft); } }
+                        accepted => { if root.credential-draft != "" && !root.credential-busy && !root.operation-blocked { root.credential-save-requested(root.credential-draft); } }
                     }
                     if root.credential-configured && !root.credential-editing && !root.credential-revealed: Text {
                         x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 4 * Metrics.icon-button-size; height: parent.height; text: "••••••••••••••••"; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center;
@@ -158,18 +171,18 @@ component ProviderCredentialField inherits Rectangle {
                     credential-edit-input := TextInput {
                         visible: root.credential-configured && root.credential-editing;
                         x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 34px; height: parent.height; text <=> root.credential-draft;
-                        input-type: root.credential-secret-visible ? InputType.text : InputType.password; enabled: !root.credential-busy;
+                        input-type: root.credential-secret-visible ? InputType.text : InputType.password; enabled: !root.credential-busy && !root.operation-blocked;
                         changed has-focus => { if !self.has-focus && root.credential-editing {root.credential-edit-blurred();} }
                         color: Colors.foreground; selection-background-color: Colors.primary-container; selection-foreground-color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center;
-                        accepted => { if root.credential-draft != "" && !root.credential-busy { root.credential-save-requested(root.credential-draft); } }
+                        accepted => { if root.credential-draft != "" && !root.credential-busy && !root.operation-blocked { root.credential-save-requested(root.credential-draft); } }
                     }
-                    if root.credential-configured && !root.credential-editing && !root.credential-revealed: HorizontalLayout {
+                    credential-actions := HorizontalLayout {
+                        visible: root.credential-configured && !root.credential-editing && !root.credential-revealed && !root.credential-request-pending;
                         x: parent.width - 4 * Metrics.icon-button-size - 4px; y: (parent.height - Metrics.icon-button-size) / 2; width: 4 * Metrics.icon-button-size; spacing: 0px;
-                        opacity: field-hover.has-hover && !root.credential-request-pending ? 1 : 0;
-                        CredentialActionButton { icon-kind: 0; interactive: false; highlighted: field-hover.mouse-x >= credential-field.width - 4 * Metrics.icon-button-size - 4px && field-hover.mouse-x < credential-field.width - 3 * Metrics.icon-button-size - 4px; pressed: field-hover.pressed && self.highlighted; }
-                        CredentialActionButton { icon-kind: 1; interactive: false; highlighted: field-hover.mouse-x >= credential-field.width - 3 * Metrics.icon-button-size - 4px && field-hover.mouse-x < credential-field.width - 2 * Metrics.icon-button-size - 4px; pressed: field-hover.pressed && self.highlighted; }
-                        CredentialActionButton { icon-kind: 2; interactive: false; highlighted: field-hover.mouse-x >= credential-field.width - 2 * Metrics.icon-button-size - 4px && field-hover.mouse-x < credential-field.width - Metrics.icon-button-size - 4px; pressed: field-hover.pressed && self.highlighted; }
-                        CredentialActionButton { icon-kind: 3; enabled: root.can-remove; interactive: false; highlighted: field-hover.mouse-x >= credential-field.width - Metrics.icon-button-size - 4px && field-hover.mouse-x < credential-field.width - 4px; pressed: field-hover.pressed && self.highlighted; }
+                        CredentialActionButton { icon-kind: 0; enabled: !root.credential-busy && !root.operation-blocked && !root.credential-request-pending; clicked => { root.credential-reveal-requested(); } }
+                        CredentialActionButton { icon-kind: 1; enabled: !root.credential-busy && !root.operation-blocked && !root.credential-request-pending; clicked => { root.credential-copy-requested(); } }
+                        CredentialActionButton { icon-kind: 2; enabled: !root.credential-busy && !root.operation-blocked && !root.credential-request-pending; clicked => { root.credential-edit-requested(); } }
+                        delete-key-button := CredentialActionButton { icon-kind: 3; enabled: root.can-remove && !root.credential-busy && !root.operation-blocked && !root.credential-request-pending; clicked => { root.credential-remove-requested(); } }
                     }
                     if root.credential-configured && root.credential-request-pending && !root.credential-editing: Text {
                         x: parent.width - Spacing.medium - 88px; width: 88px; height: parent.height; text: @tr("Loading…"); color: Colors.secondary-foreground; font-size: 13px; horizontal-alignment: right; vertical-alignment: center;
@@ -184,10 +197,10 @@ component ProviderCredentialField inherits Rectangle {
                 if root.credential-error-text != "": Text { text: root.credential-error-text; color: Colors.error; font-size: 13px; wrap: word-wrap; }
                 if root.credential-editing || (!root.credential-configured && (root.credential-draft != "" || root.credential-busy)): HorizontalLayout {
                     width: 100%; height: 40px; spacing: Spacing.small; alignment: end;
-                    SettingsButton { width: 96px; visible: root.credential-editing; label: @tr("Cancel"); enabled: !root.credential-busy; clicked => { root.credential-edit-cancel-requested(); } }
+                    SettingsButton { width: 96px; visible: root.credential-editing; label: @tr("Cancel"); enabled: !root.credential-busy && !root.operation-blocked; clicked => { root.credential-edit-cancel-requested(); } }
                     SettingsButton {
                         width: 128px; visible: root.credential-editing || (!root.credential-configured && (root.credential-draft != "" || root.credential-busy));
-                        primary: true; label: root.credential-busy ? @tr("Working…") : @tr("Save key"); enabled: root.credential-draft != "" && !root.credential-busy;
+                        primary: true; label: root.credential-busy ? @tr("Working…") : @tr("Save key"); enabled: root.credential-draft != "" && !root.credential-busy && !root.operation-blocked;
                         clicked => { root.credential-save-requested(root.credential-draft); }
                     }
                 }
@@ -263,6 +276,35 @@ component SettingsSelectMenu inherits Rectangle {
     in property <int> selected-index: 0;
     in-out property <length> scroll-y: 0px;
     callback selected(int);
+    callback dismissed();
+    private property <int> active-index: -1;
+    callback focus-state-changed(bool);
+    forward-focus: keyboard;
+    public function focus-menu() {
+        root.active-index = root.selected-index;
+        root.keep-active-visible(); keyboard.focus-target();
+    }
+    function keep-active-visible() {
+        if root.active-index < 0 { return; }
+        root.scroll-y = min(0px, max(min(0px, root.height - root.options.length * 40px),
+            root.active-index * 40px + root.scroll-y < 0px ? -root.active-index * 40px
+            : (root.active-index + 1) * 40px + root.scroll-y > root.height ? root.height - (root.active-index + 1) * 40px : root.scroll-y));
+    }
+    keyboard := SettingsFocusScope {
+        focus-changed-event => { root.focus-state-changed(self.has-focus); if self.has-focus { root.active-index = root.selected-index; root.keep-active-visible(); } }
+        key-pressed(event) => {
+            if event.text == Key.Escape { root.dismissed(); return accept; }
+            if event.text == Key.Tab { root.dismissed(); return reject; }
+            if root.options.length == 0 { return reject; }
+            if event.text == Key.UpArrow { root.active-index = max(0, root.active-index - 1); }
+            else if event.text == Key.DownArrow { root.active-index = min(root.options.length - 1, root.active-index + 1); }
+            else if event.text == Key.Home { root.active-index = 0; }
+            else if event.text == Key.End { root.active-index = root.options.length - 1; }
+            else if event.text == Key.Return || event.text == " " { if root.active-index >= 0 { root.selected(root.active-index); } return accept; }
+            else { return reject; }
+            root.keep-active-visible(); return accept;
+        }
+    }
 
     border-radius: 4px;
     border-width: 1px;
@@ -285,7 +327,7 @@ component SettingsSelectMenu inherits Rectangle {
             y: index * 40px;
             width: menu-scroll.visible-width;
             height: 40px;
-            background: index == root.selected-index
+            background: index == (root.active-index >= 0 ? root.active-index : root.selected-index)
                 ? Colors.primary-container
                 : option-touch.pressed ? Colors.icon-button-pressed
                 : option-touch.has-hover ? Colors.background : Colors.surface;
@@ -347,44 +389,13 @@ component SettingsCard inherits Rectangle {
     }
 }
 
-component SettingsFieldLabel inherits Rectangle {
-    in property <string> label;
-    in property <string> description;
-    in property <string> error-text;
-
-    height: 44px;
-
-    Text {
-        y: 1px;
-        width: parent.width;
-        height: 22px;
-        text: root.label;
-        color: Colors.foreground;
-        font-size: Typography.body-size;
-        font-weight: 600;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    Text {
-        y: 24px;
-        width: parent.width;
-        height: 18px;
-        text: root.error-text != "" ? root.error-text : root.description;
-        color: root.error-text != "" ? Colors.error : Colors.secondary-foreground;
-        font-size: 13px;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-}
-
-// Shared by preview rows so descriptions grow naturally with localized text.
+// Shared by settings rows so descriptions grow naturally with localized text.
 component SettingsTextBlock inherits VerticalLayout {
     in property <string> label;
     in property <string> description;
     in property <string> error-text;
     spacing: 4px;
-    Text { text: root.label; color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; wrap: word-wrap; }
+    Text { text: root.label; color: Colors.foreground; font-size: Typography.body-size; font-weight: 500; wrap: word-wrap; }
     if root.description != "" || root.error-text != "": Text {
         text: root.error-text != "" ? root.error-text : root.description;
         color: root.error-text != "" ? Colors.error : Colors.secondary-foreground;
@@ -392,20 +403,71 @@ component SettingsTextBlock inherits VerticalLayout {
     }
 }
 
-component SettingsPreviewToggleRow inherits Rectangle {
+// Fields share a responsive label/control row; text determines the row height.
+component SettingsControlRow inherits Rectangle {
     in property <string> label;
     in property <string> description;
-    in-out property <bool> checked;
-    height: max(Metrics.settings-row-height, text-block.preferred-height + 16px);
+    in property <string> error-text;
+    in property <length> controls-height: 42px;
+    in property <float> controls-fraction: 0.55;
+    private property <bool> stacked: self.width < 440px;
+    height: self.stacked ? copy.height + Spacing.small + root.controls-height + Spacing.small : max(56px, copy.height + 16px, root.controls-height + 16px);
+    copy := SettingsTextBlock {
+        x: 0px; y: root.stacked ? 0px : (parent.height - self.height) / 2;
+        width: root.stacked ? parent.width : parent.width * (1 - root.controls-fraction) - Spacing.medium;
+        height: self.preferred-height;
+        label: root.label; description: root.description; error-text: root.error-text;
+    }
+    HorizontalLayout {
+        x: root.stacked ? 0px : parent.width * (1 - root.controls-fraction);
+        y: root.stacked ? copy.height + Spacing.small : (parent.height - self.height) / 2;
+        width: root.stacked ? parent.width : parent.width * root.controls-fraction;
+        height: root.controls-height;
+        @children
+    }
+}
+
+// A single target row keeps localized descriptions and the switch on the same center.
+component SettingsToggleRow inherits Rectangle {
+    in property <string> label;
+    in property <string> description;
+    in property <string> error-text;
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+    height: max(56px, text-block.preferred-height + 16px);
+    border-radius: 6px;
+    background: label-touch.has-hover ? Colors.icon-button-hover : transparent;
     text-block := SettingsTextBlock {
         x: 0px; y: (parent.height - self.height) / 2;
         width: parent.width - 52px - Spacing.medium; height: self.preferred-height;
-        label: root.label; description: root.description;
+        label: root.label; description: root.description; error-text: root.error-text;
     }
-    SettingsSwitch {
+    label-touch := TouchArea {
+        width: parent.width - 52px - Spacing.small; enabled: root.enabled; mouse-cursor: pointer;
+        clicked => { toggle.focus-switch(); root.toggled(!root.checked); }
+    }
+    toggle := SettingsSwitch {
         x: parent.width - self.width; y: (parent.height - self.height) / 2;
-        checked: root.checked; toggled(value) => { root.checked = value; }
+        label: root.label; checked: root.checked; enabled: root.enabled; opacity: root.enabled ? 1 : 0.45;
+        toggled(value) => { root.toggled(value); }
     }
+}
+
+// A shared keyboard/pointer target for visually distinct choices.
+component SettingsChoiceTarget inherits SettingsFocusScope {
+    in property <string> label;
+    in property <bool> selected;
+    out property <bool> hovered: touch.has-hover;
+    callback chosen();
+    accessible-role: button; accessible-label: root.label;
+    accessible-checkable: true; accessible-checked: root.selected;
+    accessible-action-default => { root.chosen(); }
+    key-pressed(event) => {
+        if event.text == Key.Return || event.text == " " { root.chosen(); root.refresh-focus(); return accept; }
+        return reject;
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { SettingsInteraction.pointer-input(); root.focus-target(); root.chosen(); root.refresh-focus(); } }
 }
 
 component AppearanceThemeChoice inherits Rectangle {
@@ -415,6 +477,7 @@ component AppearanceThemeChoice inherits Rectangle {
 
     height: 106px;
     background: transparent;
+    forward-focus: choice;
 
     preview := Rectangle {
         x: 0px; y: 0px; width: parent.width; height: 78px;
@@ -426,6 +489,8 @@ component AppearanceThemeChoice inherits Rectangle {
 
         if root.theme-kind == 2: Rectangle {
             x: parent.width / 2; width: parent.width / 2; height: parent.height;
+            border-top-right-radius: Spacing.small;
+            border-bottom-right-radius: Spacing.small;
             background: #15345d;
         }
         Rectangle {
@@ -435,6 +500,8 @@ component AppearanceThemeChoice inherits Rectangle {
             clip: true;
             if root.theme-kind == 2: Rectangle {
                 x: parent.width / 2; width: parent.width / 2; height: parent.height;
+                border-top-right-radius: 5px;
+                border-bottom-right-radius: 5px;
                 background: #25282d;
             }
             Rectangle {
@@ -444,6 +511,7 @@ component AppearanceThemeChoice inherits Rectangle {
             }
             if root.theme-kind == 2: Rectangle {
                 x: parent.width / 2; y: 0px; width: parent.width / 2; height: 14px;
+                border-top-right-radius: 5px;
                 background: #383c43;
             }
             for dot in [0, 1, 2]: Rectangle {
@@ -458,6 +526,13 @@ component AppearanceThemeChoice inherits Rectangle {
             Rectangle { x: 28px; y: 42px; width: parent.width - 48px; height: 3px; border-radius: 2px; background: root.theme-kind == 1 ? #565b63 : #d4d9df; }
             Rectangle { x: parent.width - 27px; y: parent.height - 13px; width: 19px; height: 6px; border-radius: 3px; background: #1967d2; }
         }
+        // Keep the outline above both halves of the system-theme preview.
+        Rectangle {
+            width: parent.width; height: parent.height;
+            background: transparent; border-radius: Spacing.small;
+            border-width: root.selected ? 2px : 1px;
+            border-color: root.selected ? Colors.primary : Colors.outline;
+        }
     }
     Text {
         y: 82px; width: parent.width; height: 24px;
@@ -468,42 +543,33 @@ component AppearanceThemeChoice inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
     }
-    TouchArea { clicked => { root.chosen(); } }
+    Rectangle { x: -3px; y: -3px; width: parent.width + 6px; height: 84px; border-radius: 11px;
+        background: transparent; border-width: choice.focus-visible ? 1px : 0px; border-color: Colors.primary; }
+    choice := SettingsChoiceTarget { label: root.theme-kind == 0 ? @tr("Light") : root.theme-kind == 1 ? @tr("Dark") : @tr("System");
+        selected: root.selected; chosen => { root.chosen(); } }
 }
 
-component AppearanceAccentChoice inherits Rectangle {
-    in property <color> swatch;
-    in property <bool> selected;
-    callback chosen();
-
-    width: 36px; height: 36px;
-    border-radius: 18px;
-    border-width: root.selected ? 2px : 0px;
-    border-color: Colors.primary;
-    background: transparent;
-    Rectangle {
-        x: 3px; y: 3px; width: 30px; height: 30px;
-        border-radius: 15px;
-        background: root.swatch;
-        if root.selected: Path {
-            x: 8px; y: 10px; width: 14px; height: 11px;
-            viewbox-width: 14; viewbox-height: 11;
-            stroke: Colors.on-primary; stroke-width: 2px;
-            MoveTo { x: 1; y: 5; } LineTo { x: 5; y: 9; } LineTo { x: 13; y: 1; }
-        }
-    }
-    TouchArea { clicked => { root.chosen(); } }
-}
-
-component AppearancePreviewField inherits Rectangle {
+component SettingsSelectField inherits Rectangle {
     in property <string> value;
     in property <bool> opened;
+    in property <bool> enabled: true;
     callback clicked();
+    public function focus-field() { keyboard.focus-target(); }
+    forward-focus: keyboard;
+    accessible-role: combobox; accessible-enabled: root.enabled; accessible-value: root.value;
+    accessible-expandable: true; accessible-expanded: root.opened;
+    accessible-action-expand => { if root.enabled { root.clicked(); } }
+    keyboard := SettingsFocusScope { enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " || event.text == Key.DownArrow || event.text == Key.UpArrow { root.clicked(); return accept; }
+            return reject;
+        }
+    }
 
     height: 42px;
     border-radius: 6px;
     border-width: root.opened ? 2px : 1px;
-    border-color: root.opened ? Colors.primary : Colors.outline;
+    border-color: root.opened || keyboard.focus-visible ? Colors.primary : Colors.outline;
     background: Colors.background;
     Text {
         x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 18px; height: parent.height;
@@ -518,7 +584,7 @@ component AppearancePreviewField inherits Rectangle {
         LineTo { x: 6; y: root.opened ? 1 : 5; }
         LineTo { x: 11; y: root.opened ? 5 : 1; }
     }
-    TouchArea { clicked => { root.clicked(); } }
+    TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.clicked(); } }
 }
 
 // Unlike the standard ComboBox, refreshing choices must never select the first model.
@@ -548,8 +614,9 @@ component SettingsComboBox inherits Rectangle {
             root.current-index = index; root.selected(index);
         }
     }
-    field-focus := FocusScope { enabled: root.enabled;
-        AppearancePreviewField {
+    field-focus := SettingsFocusScope { enabled: root.enabled;
+        visual-field := SettingsSelectField {
+            enabled: root.enabled;
             width: parent.width; height: parent.height;
             value: root.current-index >= 0 && root.current-index < root.model.length ? root.model[root.current-index] : root.placeholder;
             opened: root.popup-focused;
@@ -562,182 +629,37 @@ component SettingsComboBox inherits Rectangle {
     }
     menu := PopupWindow {
         x: 0px; y: root.height + 2px; width: root.width; height: min(240px, root.model.length * 40px);
-        close-policy: close-on-click-outside; forward-focus: menu-focus;
-        menu-focus := FocusScope {
-            focus-changed-event => { root.popup-focused = self.has-focus; }
-            key-pressed(event) => {
-                if event.text == Key.UpArrow { root.choose(max(0,root.current-index - 1)); return accept; }
-                if event.text == Key.DownArrow { root.choose(min(root.model.length - 1,root.current-index + 1)); return accept; }
-                if event.text == Key.Return || event.text == Key.Escape { menu.close(); return accept; }
-                return reject;
-            }
-            SettingsSelectMenu {
-                width: parent.width; height: parent.height; options: root.model;
-                selected-index: root.current-index; scroll-y <=> root.menu-scroll-y;
-                selected(index) => { root.choose(index); menu.close(); }
-            }
+        close-policy: close-on-click-outside; forward-focus: choices;
+        choices := SettingsSelectMenu {
+            focus-state-changed(focused) => { root.popup-focused = focused; }
+            width: parent.width; height: parent.height; options: root.model;
+            selected-index: root.current-index; scroll-y <=> root.menu-scroll-y;
+            selected(index) => { root.choose(index); menu.close(); visual-field.focus-field(); }
+            dismissed => { menu.close(); visual-field.focus-field(); }
         }
     }
 }
 
 
-component UnavailableHotkeyRow inherits Rectangle {
-    in property <string> label;
-    in property <bool> compact;
-
-    height: root.compact ? 88px : 64px;
-
-    Text {
-        x: 0px; y: 0px;
-        width: root.compact ? parent.width : parent.width * 0.45 - Spacing.small;
-        height: root.compact ? 32px : parent.height;
-        text: root.label; color: Colors.secondary-foreground; wrap: word-wrap;
-        font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
-    }
-    Rectangle {
-        x: root.compact ? 0px : parent.width * 0.45;
-        y: root.compact ? 38px : (parent.height - 40px) / 2;
-        width: root.compact ? parent.width - 112px : parent.width * 0.55 - 112px;
-        height: 40px; border-radius: 6px; border-width: 1px;
-        border-color: Colors.outline; background: Colors.background;
-        Text {
-            x: Spacing.medium; width: parent.width - 2 * Spacing.medium; height: parent.height;
-            text: @tr("No shortcut"); color: Colors.secondary-foreground;
-            font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
-        }
-    }
-    Rectangle {
-        x: parent.width - 100px; y: root.compact ? 38px : (parent.height - 40px) / 2;
-        width: 100px; height: 40px; border-radius: 6px; background: Colors.background;
-        Text {
-            width: parent.width - 8px; x: 4px; height: parent.height; wrap: word-wrap; text: @tr("Unavailable"); color: Colors.secondary-foreground;
-            font-size: 13px; horizontal-alignment: center; vertical-alignment: center;
-        }
-    }
-}
-
-component OffsetPreviewField inherits Rectangle {
-    in-out property <string> value: "12";
-    in property <string> unit: "px";
-    in property <int> fallback-value: 12;
-    in property <int> min-value: -10000;
-
-    function parsed-value() -> int {
-        if root.value.is-float() { return max(root.min-value, round(root.value.to-float())); }
-        return root.fallback-value;
-    }
-
-    height: 42px;
-    border-radius: 6px; border-width: 1px; border-color: Colors.outline;
-    background: Colors.background;
-
-    TextInput {
-        x: Spacing.medium; width: parent.width - (root.unit == "" ? 72px : 116px); height: parent.height;
-        text <=> root.value;
-        color: Colors.foreground; font-size: Typography.body-size;
-        selection-background-color: Colors.primary-container;
-        selection-foreground-color: Colors.foreground;
-        vertical-alignment: center;
-        accepted => { root.value = root.parsed-value(); }
-        changed has-focus => { if !self.has-focus { root.value = root.parsed-value(); } }
-    }
-    if root.unit != "": Text {
-        x: parent.width - 96px; width: 44px; height: parent.height;
-        text: root.unit; color: Colors.secondary-foreground;
-        font-size: Typography.body-size; vertical-alignment: center;
-    }
-    Rectangle {
-        x: parent.width - 44px; y: 1px; width: 43px; height: parent.height - 2px;
-        clip: true;
-
-        Rectangle {
-            x: 1px; y: 0px; width: parent.width - 1px; height: 20px;
-            background: increase-touch.pressed ? Colors.icon-button-pressed
-                : increase-touch.has-hover ? Colors.icon-button-hover : transparent;
-            Image {
-                x: (parent.width - 20px) / 2; y: 0px; width: 20px; height: 20px;
-                source: AppAssets.icon-expand-less; image-fit: contain;
-                colorize: Colors.secondary-foreground;
-            }
-            increase-touch := TouchArea {
-                clicked => { root.value = root.parsed-value() + 1; }
-            }
-        }
-        Rectangle {
-            x: 1px; y: 21px; width: parent.width - 1px; height: parent.height - 21px;
-            background: decrease-touch.pressed ? Colors.icon-button-pressed
-                : decrease-touch.has-hover ? Colors.icon-button-hover : transparent;
-            Image {
-                x: (parent.width - 20px) / 2; y: (parent.height - 20px) / 2;
-                width: 20px; height: 20px;
-                source: AppAssets.icon-expand-more; image-fit: contain;
-                colorize: Colors.secondary-foreground;
-            }
-            decrease-touch := TouchArea {
-                clicked => { root.value = max(root.min-value, root.parsed-value() - 1); }
-            }
-        }
-        Rectangle { x: 0px; y: 0px; width: 1px; height: parent.height; background: Colors.outline; }
-        Rectangle { x: 1px; y: 20px; width: parent.width - 1px; height: 1px; background: Colors.outline; }
-    }
-}
-
-component SelectionActionRow inherits Rectangle {
-    in property <string> label;
-    in property <image> icon;
-    // 0 is required, 1 is a preview switch, and 2 is unavailable.
-    in property <int> status;
-    in property <bool> checked: false;
-    callback toggled(bool);
-
-    height: Metrics.settings-row-height;
-
-    for dot in [0, 1, 2, 3, 4, 5]: Rectangle {
-        x: Math.mod(dot, 2) * 5px; y: 23px + floor(dot / 2) * 6px;
-        width: 2px; height: 2px; border-radius: 1px;
-        background: Colors.secondary-foreground;
-    }
-    Image {
-        x: 24px; y: (parent.height - 20px) / 2; width: 20px; height: 20px;
-        source: root.icon; image-fit: contain; colorize: Colors.secondary-foreground;
-    }
-    Text {
-        x: 56px; width: parent.width - 56px - (root.status == 1 ? 64px : 112px);
-        height: parent.height; text: root.label; wrap: word-wrap;
-        color: root.status == 2 ? Colors.secondary-foreground : Colors.foreground;
-        font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
-    }
-    if root.status == 0: Rectangle {
-        x: parent.width - 94px; y: (parent.height - 32px) / 2;
-        width: 94px; height: 32px; border-radius: 6px;
-        background: Colors.primary-container;
-        Text { width: parent.width - 8px; x: 4px; height: parent.height; wrap: word-wrap; text: @tr("Required"); color: Colors.primary; font-size: 13px;
-            horizontal-alignment: center; vertical-alignment: center; }
-    }
-    if root.status == 1: SettingsSwitch {
-        x: parent.width - self.width; y: (parent.height - self.height) / 2;
-        checked: root.checked; toggled(value) => { root.toggled(value); }
-    }
-    if root.status == 2: Rectangle {
-        x: parent.width - 100px; y: (parent.height - 36px) / 2;
-        width: 100px; height: 36px; border-radius: 6px; background: Colors.background;
-        Text { width: parent.width - 8px; x: 4px; height: parent.height; wrap: word-wrap; text: @tr("Unavailable"); color: Colors.secondary-foreground; font-size: 13px;
-            horizontal-alignment: center; vertical-alignment: center; }
-    }
-}
-
+// Unimplemented actions are status rows, not disabled copies of editable fields.
 component SettingsNavItem inherits Rectangle {
     in property <string> label;
     in property <int> icon-kind;
     in property <bool> selected;
     in property <bool> expanded;
     callback activated();
+    callback move-focus(int);
+    public function focus-item() { nav-focus.focus-target(); }
+    forward-focus: nav-focus;
+    accessible-role: button; accessible-label: root.label;
+    accessible-action-default => { root.activated(); }
 
     height: Metrics.settings-nav-item-height;
     border-radius: 10px;
+    border-width: nav-focus.focus-visible ? 1px : 0px; border-color: Colors.primary;
     background: root.selected ? Colors.primary-container
         : nav-touch.pressed ? Colors.icon-button-pressed
-        : nav-touch.has-hover || nav-focus.has-focus ? Colors.icon-button-hover : transparent;
+        : nav-touch.has-hover ? Colors.icon-button-hover : transparent;
 
     Path {
         x: root.expanded ? Spacing.medium : (parent.width - Metrics.icon-size) / 2;
@@ -793,8 +715,10 @@ component SettingsNavItem inherits Rectangle {
         }
     }
 
-    nav-focus := FocusScope {
+    nav-focus := SettingsFocusScope {
         key-pressed(event) => {
+            if event.text == Key.DownArrow { root.move-focus(1); return accept; }
+            if event.text == Key.UpArrow { root.move-focus(-1); return accept; }
             if event.text == Key.Return || event.text == Key.Space {
                 root.activated();
                 return accept;
@@ -805,13 +729,68 @@ component SettingsNavItem inherits Rectangle {
 
     nav-touch := TouchArea {
         clicked => {
-            nav-focus.focus();
+            SettingsInteraction.pointer-input(); nav-focus.focus-target();
             root.activated();
         }
     }
 }
 
 export component SettingsWindow inherits Window {
+    in-out property <[TranslationChoice]> translation-choices;
+    in-out property <string> translation-search;
+    in-out property <int> translation-list-height;
+    in-out property <bool> translation-selecting;
+    in-out property <bool> translation-selector-open;
+    in-out property <bool> translation-settings-open;
+    in-out property <int> translation-highlight: -1;
+    callback translation-filter();
+    callback translation-selected(int);
+    callback translation-open-settings();
+    callback translation-move(int);
+    public function open-translation-settings() {
+        if root.llm-translation-provider-index == 0 || root.translation-selecting { return; }
+        root.translation-open-settings(); root.translation-settings-open = true;
+        root.llm-parameters-expanded = true; root.llm-prompt-expanded = true;
+        translation-modal-focus.focus();
+    }
+    public function finish-translation-choice() {
+        root.translation-selector-open = false; selector-focus.focus-target();
+    }
+    public function finish-translation-settings() {
+        root.translation-settings-open = false;
+        root.prompt-can-undo-reset = false;
+        translation-config.focus-button();
+    }
+    function cancel-translation-settings() {
+        if root.llm-translation-saving { return; }
+        root.llm-cancel-translation(); root.finish-translation-settings();
+    }
+    function manage-translation-models() {
+        root.translation-selector-open = false;
+        root.provider-detail-index = root.llm-translation-provider-index;
+        root.llm-service-index = max(0, root.provider-detail-index - 1);
+        root.credential-hide-requested(); root.llm-service-selected(root.provider-detail-index); root.active-category = 5;
+    }
+    in-out property <bool> llm-parameters-expanded: false;
+    in-out property <bool> llm-prompt-expanded: false;
+    in-out property <bool> credential-delete-dialog: false;
+    in-out property <bool> settings-close-dialog: false;
+    private property <int> close-return-focus;
+    private property <int> active-editor;
+    private property <int> editor-focus-request;
+    private property <int> editor-return-target;
+    private property <int> editor-selection-target;
+    private property <int> editor-anchor;
+    private property <int> editor-cursor;
+    private property <int> editor-return-anchor;
+    private property <int> editor-return-cursor;
+    callback discard-settings-requested();
+    private property <int> credential-delete-provider: -1;
+    private property <string> prompt-before-reset;
+    private property <string> prompt-reset-value;
+    private property <bool> prompt-reset-undo;
+    out property <bool> prompt-can-undo-reset: root.prompt-reset-undo && root.llm-prompt == root.prompt-reset-value;
+
     title: @tr("Lexift Settings"); icon: AppAssets.app-icon;
     preferred-width: 820px; preferred-height: 680px; min-width: 520px; min-height: 520px;
     background: Colors.background;
@@ -895,6 +874,9 @@ export component SettingsWindow inherits Window {
     in-out property <string> llm-key-draft;
     in-out property <bool> llm-key-configured;
     in-out property <bool> llm-syncing;
+    in-out property <bool> llm-connection-pending;
+    in-out property <bool> llm-connection-saving;
+    private property <bool> llm-persisting: root.llm-connection-pending || root.llm-translation-saving;
     in-out property <string> llm-status;
     in-out property <[string]> llm-models;
     in-out property <int> llm-model-index: -1;
@@ -910,7 +892,22 @@ export component SettingsWindow inherits Window {
     in-out property <int> llm-top-p: 100;
     in-out property <int> llm-temperature-max: 200;
     in-out property <int> llm-top-p-min: 1;
+    in-out property <bool> llm-translation-dirty;
+    in-out property <bool> llm-translation-can-apply;
+    in-out property <bool> llm-prompt-valid: true;
+    in-out property <bool> llm-translation-saving;
+    callback llm-translation-edited();
+    callback llm-cancel-translation();
+    changed llm-temperature => { root.llm-translation-edited(); }
+    changed llm-top-p => { root.llm-translation-edited(); }
+    changed llm-temperature-custom => { root.llm-translation-edited(); }
+    changed llm-top-p-custom => { root.llm-translation-edited(); }
+    changed llm-reasoning-index => { root.llm-translation-edited(); }
     in-out property <string> llm-prompt;
+    changed llm-prompt => {
+        root.llm-translation-edited();
+        if root.prompt-reset-undo && root.llm-prompt != root.prompt-reset-value { root.prompt-reset-undo = false; root.prompt-before-reset = ""; }
+    }
     callback llm-service-selected(int);
     callback llm-address-edited();
     callback llm-refresh(bool);
@@ -939,44 +936,9 @@ export component SettingsWindow inherits Window {
     in-out property <int> appearance-theme-index: 0;
     callback theme-selected(int);
     callback ui-language-selected(int);
-    in-out property <int> appearance-accent-index: 0;
-    in-out property <int> appearance-font-index: 0;
-    in-out property <int> appearance-size-index: 1;
     in-out property <int> appearance-language-index: 2;
-    in-out property <int> tray-click-index: 0;
-    in-out property <bool> open-settings-on-launch: true;
-    in-out property <bool> check-updates-on-launch: true;
-    in-out property <bool> background-copy-notifications: true;
-    in-out property <bool> anonymous-usage-statistics: false;
-    in-out property <bool> disable-hotkeys-in-fullscreen: false;
-    in-out property <bool> selection-double-click: true;
-    in-out property <string> selection-horizontal-offset: "12";
-    in-out property <string> selection-vertical-offset: "12";
-    in-out property <int> selection-filter-mode-index: 0;
-    in-out property <bool> selection-copy-action: true;
-    in-out property <bool> screenshot-crosshair-guides: false;
-    in-out property <bool> screenshot-magnifier: true;
-    in-out property <bool> screenshot-selection-dimensions: true;
-    in-out property <string> screenshot-line-width: "3";
-    in-out property <string> screenshot-text-size: "22";
-    in-out property <string> screenshot-save-location: "";
-    in-out property <int> screenshot-format-index: 0;
-    in-out property <bool> screenshot-copy-as-file: false;
-    in-out property <bool> screenshot-close-after-output: false;
-    in-out property <int> fallback-target-index: 2;
-    in-out property <bool> preprocess-join-lines: false;
-    in-out property <bool> preprocess-snake-case: false;
-    in-out property <bool> preprocess-camel-case: false;
-    in-out property <bool> preprocess-pascal-case: false;
-    in-out property <bool> preprocess-kebab-case: false;
-    in-out property <bool> translation-auto-copy: false;
-    in-out property <bool> translation-hide-input: false;
-    in-out property <bool> translation-hide-language-bar: false;
-    in-out property <bool> translation-auto-resize: true;
-    in-out property <bool> translation-pin-window: false;
-    private property <bool> preview-menu-open: false;
-    private property <int> preview-menu-kind: 0;
-    private property <length> preview-menu-scroll-y: 0px;
+    private property <bool> app-language-menu-open: false;
+    private property <length> app-language-menu-scroll-y: 0px;
 
     // Match the navigation text's font and leave room for the icon and both margins.
     navigation-measure := Text {
@@ -991,42 +953,10 @@ export component SettingsWindow inherits Window {
         "简体中文", "繁體中文", "English (US)", "English (UK)", "日本語", "한국어",
         "Deutsch", "Français", "Español", "Italiano", "Português (Portugal)", "Português (Brasil)"
     ];
-    private property <[color]> appearance-accents: [
-        #1967d2, #9c4da0, #ec4899, #ff5a5f, #fa8324, #ffbe0b, #5baa43
-    ];
-    private property <[string]> appearance-fonts: [@tr("System default"), "Segoe UI", "Arial"];
-    private property <[string]> appearance-sizes: [@tr("Compact"), @tr("Standard"), @tr("Large")];
-    private property <[string]> appearance-languages: root.language-labels;
-    private property <[string]> tray-click-actions: [@tr("Open settings"), @tr("Open main window"), @tr("Do nothing")];
-    private property <[string]> selection-filter-modes: [@tr("Blacklist"), @tr("Whitelist")];
-    private property <[string]> screenshot-formats: ["PNG", "JPEG", "WebP"];
-    private property <[string]> preview-menu-options: root.preview-menu-kind == 0
-        ? root.appearance-fonts : root.preview-menu-kind == 1 ? root.appearance-sizes
-            : root.preview-menu-kind == 2 ? root.appearance-languages
-                : root.preview-menu-kind == 3 ? root.tray-click-actions
-                    : root.preview-menu-kind == 4 ? root.selection-filter-modes : root.preview-menu-kind == 5 ? root.screenshot-formats : root.language-labels;
-    private property <length> preview-menu-anchor-x: root.preview-menu-kind == 0
-        ? font-preview.absolute-position.x : root.preview-menu-kind == 1
-            ? size-preview.absolute-position.x : root.preview-menu-kind == 2
-                ? app-language-preview.absolute-position.x : root.preview-menu-kind == 3
-                    ? tray-click-preview.absolute-position.x : root.preview-menu-kind == 4
-                        ? filter-mode-preview.absolute-position.x : root.preview-menu-kind == 5 ? screenshot-format-preview.absolute-position.x : fallback-language-preview.absolute-position.x;
-    private property <length> preview-menu-anchor-y: root.preview-menu-kind == 0
-        ? font-preview.absolute-position.y : root.preview-menu-kind == 1
-            ? size-preview.absolute-position.y : root.preview-menu-kind == 2
-                ? app-language-preview.absolute-position.y : root.preview-menu-kind == 3
-                    ? tray-click-preview.absolute-position.y : root.preview-menu-kind == 4
-                        ? filter-mode-preview.absolute-position.y : root.preview-menu-kind == 5 ? screenshot-format-preview.absolute-position.y : fallback-language-preview.absolute-position.y;
-    private property <length> preview-menu-anchor-width: root.preview-menu-kind == 0
-        ? font-preview.width : root.preview-menu-kind == 1 ? size-preview.width
-            : root.preview-menu-kind == 2 ? app-language-preview.width
-                : root.preview-menu-kind == 3 ? tray-click-preview.width
-                    : root.preview-menu-kind == 4 ? filter-mode-preview.width : root.preview-menu-kind == 5 ? screenshot-format-preview.width : fallback-language-preview.width;
-    private property <length> preview-menu-anchor-height: root.preview-menu-kind == 0
-        ? font-preview.height : root.preview-menu-kind == 1 ? size-preview.height
-            : root.preview-menu-kind == 2 ? app-language-preview.height
-                : root.preview-menu-kind == 3 ? tray-click-preview.height
-                    : root.preview-menu-kind == 4 ? filter-mode-preview.height : root.preview-menu-kind == 5 ? screenshot-format-preview.height : fallback-language-preview.height;
+    private property <length> app-language-menu-anchor-x: app-language-field.absolute-position.x;
+    private property <length> app-language-menu-anchor-y: app-language-field.absolute-position.y;
+    private property <length> app-language-menu-anchor-width: app-language-field.width;
+    private property <length> app-language-menu-anchor-height: app-language-field.height;
     private property <length> settings-menu-anchor-x: language-selector.absolute-position.x;
     private property <length> settings-menu-anchor-y: language-selector.absolute-position.y;
     private property <length> settings-menu-anchor-height: language-selector.height;
@@ -1048,22 +978,81 @@ export component SettingsWindow inherits Window {
     callback settings-menu-selected(int);
     callback toast-dismiss-requested(int);
 
+    public function request-credential-delete() {
+        if root.credential-delete-dialog { return; }
+        if root.credential-busy || root.credential-request-pending || root.credential-editing { return; }
+        if root.provider-detail-index == 0 ? !root.credential-configured : !root.llm-key-configured { return; }
+        root.close-app-language-menu(); root.close-settings-menu(); root.credential-hide-requested();
+        root.credential-delete-provider = root.provider-detail-index;
+        root.credential-delete-dialog = true; cancel-delete-key.focus-button();
+    }
+    public function finish-credential-delete(confirmed: bool) {
+        if !root.credential-delete-dialog { return; }
+        let valid = root.credential-delete-dialog && root.credential-delete-provider == root.provider-detail-index && !root.credential-busy && !root.credential-request-pending;
+        root.credential-delete-dialog = false; root.credential-delete-provider = -1;
+        if confirmed && valid { root.credential-remove-requested(); }
+        else if root.active-category == 5 { provider-credential.focus-remove(); }
+    }
+    public function reset-prompt-with-undo() {
+        root.prompt-before-reset = root.llm-prompt;
+        root.llm-reset-prompt(); root.prompt-reset-value = root.llm-prompt;
+        root.prompt-reset-undo = root.prompt-before-reset != root.prompt-reset-value;
+    }
+    public function undo-prompt-reset() {
+        if root.prompt-can-undo-reset { root.llm-prompt = root.prompt-before-reset; }
+        root.prompt-reset-undo = false; root.prompt-before-reset = "";
+    }
     public function focus-credential-reveal() { provider-credential.focus-reveal(); }
+    public function confirm-settings-close() {
+        if root.settings-close-dialog { return; }
+        root.close-return-focus = root.credential-editing ? 1 : provider-address.input-focused() ? 2
+            : root.active-editor == 4 && root.active-category == 1 && root.llm-prompt-expanded ? 4
+            : root.llm-advanced && (root.active-editor == 5 || (root.llm-header-editing && root.active-editor >= 6)) ? root.active-editor
+            : root.llm-advanced || root.llm-model-dialog || root.llm-probe-dialog ? 3 : 0;
+        root.close-settings-menu(); root.close-app-language-menu();
+        root.settings-close-dialog = true;
+        keep-editing-button.focus-button();
+    }
+    public function finish-settings-close(discard: bool) {
+        if !root.settings-close-dialog { return; }
+        root.settings-close-dialog = false;
+        if discard { root.discard-settings-requested(); }
+        else if root.close-return-focus == 1 && root.credential-editing { provider-credential.focus-edit(); }
+        else if root.close-return-focus == 2 { provider-address.focus-input(); }
+        else if root.close-return-focus >= 4 { root.focus-settings-editor(root.close-return-focus); }
+        else if root.llm-advanced || root.llm-model-dialog || root.llm-probe-dialog { provider-modal-focus.focus(); }
+        else { root-content.focus(); }
+    }
+    // Focus requests preserve the existing TextInput and therefore its insertion point and selection.
+    public function focus-settings-editor(target: int) {
+        root.editor-return-target = target;
+        root.editor-return-anchor = root.editor-selection-target == target ? root.editor-anchor : 0;
+        root.editor-return-cursor = root.editor-selection-target == target ? root.editor-cursor : 0;
+        root.editor-focus-request += 1;
+    }
+    // Slint collapses a selection when an in-window modal takes focus; remember it before that happens.
+    function remember-editor-selection(target: int, anchor: int, cursor: int) {
+        root.active-editor = target;
+        root.editor-selection-target = target; root.editor-anchor = anchor; root.editor-cursor = cursor;
+    }
+    function editor-focus-changed(target: int, focused: bool) {
+        if focused { root.active-editor = target; }
+        else if root.active-editor == target { root.active-editor = 0; }
+    }
     public function focus-credential-edit() { provider-credential.focus-edit(); }
     public pure function credential-edit-focused() -> bool {return provider-credential.edit-focused();}
     public function focus-hotkey-capture() { hotkey-capture.focus(); }
     public function focus-annotation-hotkey-capture() { annotation-hotkey-capture.focus(); }
-    public function focus-settings-menu() { settings-menu-focus.focus(); }
+    public function focus-settings-menu() { settings-menu.focus-menu(); }
     public function scroll-model-settings(bottom: bool) {
         translation-scroll.content-y = min(0px, max(translation-scroll.visible-height - translation-scroll.content-height, bottom ? translation-scroll.visible-height - translation-scroll.content-height : -llm-translation-card.y));
     }
-    out property <length> translation-model-section-height: llm-translation-card.height + Metrics.settings-card-gap;
     public function open-provider-request() {
-        root.credential-edit-cancel-requested(); root.close-preview-menu(); root.close-settings-menu();
+        root.credential-edit-cancel-requested(); root.close-app-language-menu(); root.close-settings-menu();
         root.llm-model-hint = ""; root.llm-request-open(); root.llm-advanced = true; provider-modal-focus.focus();
     }
     public function open-provider-models() {
-        if root.llm-connection-dirty { return; }
+        if root.llm-connection-dirty || root.llm-persisting { return; }
         root.credential-edit-cancel-requested(); root.llm-model-hint = ""; root.llm-model-dialog = true; model-viewport.content-y = 0px;
         root.llm-model-search = ""; root.llm-model-filter = 0; root.llm-filter-models();
         root.llm-refresh(false); provider-modal-focus.focus();
@@ -1078,23 +1067,46 @@ export component SettingsWindow inherits Window {
         root.llm-probe-open();
         if root.llm-probe-dialog { root.credential-hide-requested(); provider-modal-focus.focus(); }
     }
+    function dismiss-settings-menu() { root.close-settings-menu(); language-selector.focus-field(); }
+    function dismiss-app-language-menu() {
+        root.close-app-language-menu();
+        app-language-field.focus-field();
+    }
     public function close-settings-menu() { settings-menu-open = false; settings-menu-dismiss-armed = false; }
-    public function close-preview-menu() { preview-menu-open = false; }
+    public function focus-app-language() { app-language-field.focus-field(); }
+    public function close-app-language-menu() { app-language-menu-open = false; }
     public function reset-settings-view() {
-        root.close-settings-menu(); root.close-preview-menu(); root.hotkey-capturing = false; root.annotation-hotkey-capturing = false; root.active-category = 0; root.llm-page-left();
+        root.settings-close-dialog = false;
+        root.credential-delete-dialog = false; root.prompt-reset-undo = false; root.prompt-before-reset = ""; root.prompt-reset-value = "";
+        root.close-settings-menu(); root.close-app-language-menu(); root.hotkey-capturing = false; root.annotation-hotkey-capturing = false; root.active-category = 0; root.llm-page-left();
         general-scroll.content-y = 0px; translation-scroll.content-y = 0px; providers-scroll.content-y = 0px;
-        hotkeys-scroll.content-y = 0px; selection-assistant-scroll.content-y = 0px;
-        screenshot-scroll.content-y = 0px;
+        hotkeys-scroll.content-y = 0px;
+    }
+    function focus-navigation(index: int) {
+        if index <= 0 { nav-0.focus-item(); }
+        else if index == 1 { nav-1.focus-item(); }
+        else if index == 2 { nav-2.focus-item(); }
+        else { nav-3.focus-item(); }
+    }
+    public function settings-keyboard-input() { SettingsInteraction.keyboard-mode = true; }
+    public function settings-pointer-input() { SettingsInteraction.pointer-input(); }
+    public function invalidate-button-focus() { SettingsInteraction.invalidate(); }
+    public function reset-button-visuals() { SettingsInteraction.reset(); }
+    public function reset-provider-filters() {
+        root.llm-search-open = false; root.llm-filter-open = false;
+        root.llm-model-search = ""; root.llm-model-filter = 0;
     }
     public function select-category(category: int) {
-        if root.active-category == category { return; }
-        root.close-settings-menu(); root.close-preview-menu(); root.hotkey-capturing = false; root.annotation-hotkey-capturing = false;
+        if root.settings-close-dialog || root.credential-delete-dialog || root.active-category == category { return; }
+        root.close-settings-menu(); root.close-app-language-menu(); root.hotkey-capturing = false; root.annotation-hotkey-capturing = false;
         if root.active-category == 5 { root.credential-edit-cancel-requested(); root.llm-page-left(); }
+        SettingsInteraction.invalidate();
         root.active-category = category;
+        root.focus-navigation(category == 0 ? 0 : category == 2 ? 1 : category == 1 ? 2 : 3);
     }
 
-    root-content := FocusScope {
-        enabled: !root.llm-advanced && !root.llm-model-dialog && !root.llm-probe-dialog;
+    root-content := SettingsFocusScope {
+        enabled: !root.settings-close-dialog && !root.llm-advanced && !root.llm-model-dialog && !root.llm-probe-dialog && !root.credential-delete-dialog;
         x: 0px; y: 0px; width: root.width; height: root.height;
 
     sidebar := Rectangle {
@@ -1109,46 +1121,36 @@ export component SettingsWindow inherits Window {
             width: parent.width - self.x - Spacing.medium; height: 40px;
             text: "Lexift"; color: Colors.foreground; font-size: 20px; font-weight: 700; vertical-alignment: center;
         }
-        SettingsNavItem {
+        nav-0 := SettingsNavItem {
             x: root.expanded-navigation ? Spacing.medium : Spacing.small;
             y: Spacing.large + 64px; width: parent.width - 2 * self.x;
             label: @tr("General"); icon-kind: 0; selected: root.active-category == 0; expanded: root.expanded-navigation;
             activated => { root.select-category(0); }
+            move-focus(delta) => { root.focus-navigation(0 + delta); }
         }
-        SettingsNavItem {
+        nav-1 := SettingsNavItem {
             x: root.expanded-navigation ? Spacing.medium : Spacing.small;
             y: Spacing.large + 64px + Metrics.settings-nav-item-height + Spacing.small;
             width: parent.width - 2 * self.x;
             label: @tr("Hotkeys"); icon-kind: 2; selected: root.active-category == 2; expanded: root.expanded-navigation;
             activated => { root.select-category(2); }
+            move-focus(delta) => { root.focus-navigation(1 + delta); }
         }
-        SettingsNavItem {
+        nav-2 := SettingsNavItem {
             x: root.expanded-navigation ? Spacing.medium : Spacing.small;
             y: Spacing.large + 64px + 2 * (Metrics.settings-nav-item-height + Spacing.small);
             width: parent.width - 2 * self.x;
-            label: @tr("Selection Assistant"); icon-kind: 3; selected: root.active-category == 3; expanded: root.expanded-navigation;
-            activated => { root.select-category(3); }
+            label: @tr("Translation settings"); icon-kind: 1; selected: root.active-category == 1; expanded: root.expanded-navigation;
+            activated => { root.select-category(1); }
+            move-focus(delta) => { root.focus-navigation(2 + delta); }
         }
-        SettingsNavItem {
+        nav-3 := SettingsNavItem {
             x: root.expanded-navigation ? Spacing.medium : Spacing.small;
             y: Spacing.large + 64px + 3 * (Metrics.settings-nav-item-height + Spacing.small);
             width: parent.width - 2 * self.x;
-            label: @tr("Screenshot settings"); icon-kind: 4; selected: root.active-category == 4; expanded: root.expanded-navigation;
-            activated => { root.select-category(4); }
-        }
-        SettingsNavItem {
-            x: root.expanded-navigation ? Spacing.medium : Spacing.small;
-            y: Spacing.large + 64px + 4 * (Metrics.settings-nav-item-height + Spacing.small);
-            width: parent.width - 2 * self.x;
-            label: @tr("Translation settings"); icon-kind: 1; selected: root.active-category == 1; expanded: root.expanded-navigation;
-            activated => { root.select-category(1); }
-        }
-        SettingsNavItem {
-            x: root.expanded-navigation ? Spacing.medium : Spacing.small;
-            y: Spacing.large + 64px + 5 * (Metrics.settings-nav-item-height + Spacing.small);
-            width: parent.width - 2 * self.x;
             label: @tr("Service providers"); icon-kind: 5; selected: root.active-category == 5; expanded: root.expanded-navigation;
             activated => { root.select-category(5); }
+            move-focus(delta) => { root.focus-navigation(3 + delta); }
         }
         Rectangle { x: parent.width - 1px; width: 1px; height: parent.height; background: Colors.outline; }
     }
@@ -1162,9 +1164,7 @@ export component SettingsWindow inherits Window {
         Text {
             x: Metrics.settings-page-padding; y: (parent.height - 32px) / 2; height: 32px;
             text: root.active-category == 0 ? @tr("General") : root.active-category == 2 ? @tr("Hotkeys")
-                : root.active-category == 3 ? @tr("Selection Assistant")
-                    : root.active-category == 4 ? @tr("Screenshot settings")
-                        : root.active-category == 5 ? @tr("Service providers") : @tr("Translation settings");
+                : root.active-category == 5 ? @tr("Service providers") : @tr("Translation settings");
             color: Colors.foreground; font-size: 24px; font-weight: 700; vertical-alignment: center;
         }
         Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: Colors.outline; }
@@ -1174,10 +1174,10 @@ export component SettingsWindow inherits Window {
         visible: root.active-category == 0;
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
         content-width: self.visible-width;
-        content-height: max(self.visible-height, privacy-card.y + privacy-card.height + Metrics.settings-page-padding);
+        content-height: max(self.visible-height, selection-assistant-card.y + selection-assistant-card.height + Metrics.settings-page-padding);
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
         scrolled => {
-            root.close-preview-menu();
+            root.close-app-language-menu();
             if root.settings-menu-open && (root.settings-menu-anchor-y < Metrics.settings-header-height || root.settings-menu-anchor-y + root.settings-menu-anchor-height > root.height) { root.close-settings-menu(); }
         }
 
@@ -1197,46 +1197,16 @@ export component SettingsWindow inherits Window {
                     for theme in [0, 1, 2]: AppearanceThemeChoice {
                         width: (parent.width - 2 * Spacing.small) / 3;
                         theme-kind: theme; selected: root.appearance-theme-index == theme;
-                        chosen => { root.theme-selected(theme); root.close-preview-menu(); }
+                        chosen => { root.theme-selected(theme); root.close-app-language-menu(); }
                     }
                 }
                 Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                Text { height: 22px; text: @tr("Accent color"); color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; vertical-alignment: center; }
-                HorizontalLayout {
-                    width: 100%; height: 36px; spacing: Spacing.small;
-                    for accent[index] in root.appearance-accents: AppearanceAccentChoice {
-                        swatch: accent; selected: root.appearance-accent-index == index;
-                        chosen => { root.appearance-accent-index = index; root.close-preview-menu(); }
-                    }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                HorizontalLayout {
-                    width: 100%; height: 56px; spacing: Spacing.small; alignment: center;
-                    Text { width: parent.width * 0.36 - Spacing.small; wrap: word-wrap; text: @tr("App font"); color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
-                    font-preview := AppearancePreviewField {
-                        width: parent.width * 0.64; value: root.appearance-fonts[root.appearance-font-index];
-                        opened: root.preview-menu-open && root.preview-menu-kind == 0;
-                        clicked => { root.toggle-preview-menu(0); }
-                    }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                HorizontalLayout {
-                    width: 100%; height: 56px; spacing: Spacing.small; alignment: center;
-                    Text { width: parent.width * 0.36 - Spacing.small; wrap: word-wrap; text: @tr("Text size"); color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
-                    size-preview := AppearancePreviewField {
-                        width: parent.width * 0.64; value: root.appearance-sizes[root.appearance-size-index];
-                        opened: root.preview-menu-open && root.preview-menu-kind == 1;
-                        clicked => { root.toggle-preview-menu(1); }
-                    }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                HorizontalLayout {
-                    width: 100%; height: 56px; spacing: Spacing.small; alignment: center;
-                    Text { width: parent.width * 0.36 - Spacing.small; wrap: word-wrap; text: @tr("App language"); color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
-                    app-language-preview := AppearancePreviewField {
-                        width: parent.width * 0.64; value: root.appearance-languages[root.appearance-language-index];
-                        opened: root.preview-menu-open && root.preview-menu-kind == 2;
-                        clicked => { root.toggle-preview-menu(2); }
+                SettingsControlRow {
+                    width: 100%; label: @tr("App language"); controls-fraction: 0.64;
+                    app-language-field := SettingsSelectField {
+                        value: root.language-labels[root.appearance-language-index];
+                        opened: root.app-language-menu-open;
+                        clicked => { root.toggle-app-language-menu(); }
                     }
                 }
             }
@@ -1246,74 +1216,27 @@ export component SettingsWindow inherits Window {
             x: Metrics.settings-page-padding;
             y: appearance-card.y + appearance-card.height + Metrics.settings-card-gap;
             width: general-scroll.visible-width - 2 * Metrics.settings-page-padding;
-            title: @tr("Startup & updates");
-            VerticalLayout {
-                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
-                HorizontalLayout {
-                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: @tr("Launch at startup"); description: ""; error-text: root.launch-at-login-error-text; }
-                    SettingsSwitch { checked: root.launch-at-login; toggled(value) => { root.launch-at-login = value; root.launch-at-login-change-requested(value); } }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                HorizontalLayout {
-                    width: 100%; height: 56px; spacing: Spacing.small; alignment: center;
-                    Text { width: parent.width * 0.36 - Spacing.small; wrap: word-wrap; text: @tr("On tray icon click"); color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; }
-                    tray-click-preview := AppearancePreviewField {
-                        width: parent.width * 0.64; value: root.tray-click-actions[root.tray-click-index];
-                        opened: root.preview-menu-open && root.preview-menu-kind == 3;
-                        clicked => { root.toggle-preview-menu(3); }
-                    }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                HorizontalLayout {
-                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel {
-                        width: parent.width - 52px - Spacing.medium;
-                        label: @tr("Open settings on launch");
-                        description: @tr("Start in the background when this is off."); error-text: "";
-                    }
-                    SettingsSwitch { checked: root.open-settings-on-launch; toggled(value) => { root.open-settings-on-launch = value; } }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                HorizontalLayout {
-                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: @tr("Check for updates on launch"); description: ""; error-text: ""; }
-                    SettingsSwitch { checked: root.check-updates-on-launch; toggled(value) => { root.check-updates-on-launch = value; } }
-                }
+            title: @tr("Behavior");
+            SettingsToggleRow {
+                label: @tr("Launch at startup"); error-text: root.launch-at-login-error-text;
+                checked: root.launch-at-login;
+                toggled(value) => { root.launch-at-login = value; root.launch-at-login-change-requested(value); }
             }
         }
 
-        privacy-card := SettingsCard {
-            x: Metrics.settings-page-padding;
-            y: startup-card.y + startup-card.height + Metrics.settings-card-gap;
+        selection-assistant-card := SettingsCard {
+            x: Metrics.settings-page-padding; y: startup-card.y + startup-card.height + Metrics.settings-card-gap;
             width: general-scroll.visible-width - 2 * Metrics.settings-page-padding;
-            title: @tr("Notifications & privacy");
-            VerticalLayout {
-                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
-                HorizontalLayout {
-                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel {
-                        width: parent.width - 52px - Spacing.medium;
-                        label: @tr("Show background copy notifications");
-                        description: @tr("Shows background copy results and errors."); error-text: "";
-                    }
-                    SettingsSwitch { checked: root.background-copy-notifications; toggled(value) => { root.background-copy-notifications = value; } }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                HorizontalLayout {
-                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel {
-                        width: parent.width - 52px - Spacing.medium;
-                        label: @tr("Anonymous usage statistics");
-                        description: @tr("No translation text or personal data."); error-text: "";
-                    }
-                    SettingsSwitch { checked: root.anonymous-usage-statistics; toggled(value) => { root.anonymous-usage-statistics = value; } }
-                }
+            title: @tr("Selection Assistant");
+            SettingsToggleRow {
+                label: @tr("Enable selection assistant"); description: @tr("Show Translate and Copy after selecting text");
+                checked: root.selection-toolbar;
+                toggled(value) => { root.selection-toolbar = value; root.selection-toolbar-change-requested(value); }
             }
         }
     }
     AppVerticalScrollBar {
-        visible: root.active-category == 0;
+        visible: root.active-category == 0 && general-scroll.content-height > general-scroll.visible-height + 1px;
         x: main-pane.width - 14px;
         y: Metrics.settings-header-height + 4px;
         height: main-pane.height - Metrics.settings-header-height - 8px;
@@ -1328,48 +1251,17 @@ export component SettingsWindow inherits Window {
         content-height: max(self.visible-height, annotation-hotkeys-card.y + annotation-hotkeys-card.height + Metrics.settings-page-padding);
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
 
-        behavior-hotkeys-card := SettingsCard {
-            x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
-            width: hotkeys-scroll.visible-width - 2 * Metrics.settings-page-padding;
-            title: @tr("Behavior");
-            HorizontalLayout {
-                width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                SettingsFieldLabel {
-                    width: parent.width - 52px - Spacing.medium;
-                    label: @tr("Disable hotkeys in fullscreen apps");
-                    description: @tr("No global hotkeys in fullscreen apps.");
-                    error-text: "";
-                }
-                SettingsSwitch {
-                    checked: root.disable-hotkeys-in-fullscreen;
-                    toggled(value) => { root.disable-hotkeys-in-fullscreen = value; }
-                }
-            }
-        }
-
-        input-hotkeys-card := SettingsCard {
-            x: Metrics.settings-page-padding;
-            y: behavior-hotkeys-card.y + behavior-hotkeys-card.height + Metrics.settings-card-gap;
-            width: behavior-hotkeys-card.width;
-            title: @tr("Input");
-            VerticalLayout {
-                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
-                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: @tr("Input translation"); }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: @tr("Inline input translation"); }
-            }
-        }
-
         selection-hotkeys-card := SettingsCard {
             x: Metrics.settings-page-padding;
-            y: input-hotkeys-card.y + input-hotkeys-card.height + Metrics.settings-card-gap;
-            width: behavior-hotkeys-card.width;
+            y: Metrics.settings-page-padding;
+            width: hotkeys-scroll.visible-width - 2 * Metrics.settings-page-padding;
             title: @tr("Selection");
             VerticalLayout {
                 width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
                 Rectangle {
-                    width: 100%; height: root.hotkeys-compact ? 112px : 76px;
-                    SettingsFieldLabel {
+                    width: 100%; height: root.hotkeys-compact ? capture-label-0.height + 56px : max(76px, capture-label-0.height + 16px);
+                    capture-label-0 := SettingsTextBlock {
+                        height: self.preferred-height;
                         x: 0px; y: root.hotkeys-compact ? 0px : (parent.height - self.height) / 2;
                         width: root.hotkeys-compact ? parent.width : parent.width * 0.45 - Spacing.small;
                         label: @tr("Translate selection");
@@ -1378,7 +1270,7 @@ export component SettingsWindow inherits Window {
                     }
                     hotkey-field := Rectangle {
                         x: root.hotkeys-compact ? 0px : parent.width * 0.45;
-                        y: root.hotkeys-compact ? 58px : (parent.height - 40px) / 2;
+                        y: root.hotkeys-compact ? capture-label-0.height + Spacing.small : (parent.height - 40px) / 2;
                         width: root.hotkeys-compact ? parent.width - 96px : parent.width * 0.55 - 96px;
                         height: 40px; border-radius: 6px;
                         border-width: root.hotkey-capturing ? 2px : 1px;
@@ -1390,7 +1282,7 @@ export component SettingsWindow inherits Window {
                             color: root.hotkey-capturing ? Colors.primary : Colors.foreground;
                             font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
                         }
-                        hotkey-capture := FocusScope {
+                        hotkey-capture := SettingsFocusScope {
                             key-pressed(event) => {
                                 if !root.hotkey-capturing || root.active-category != 2 { return reject; }
                                 if event.text == Key.Escape { root.hotkey-capturing = false; return accept; }
@@ -1401,7 +1293,7 @@ export component SettingsWindow inherits Window {
                         }
                     }
                     SettingsButton {
-                        x: parent.width - 84px; y: root.hotkeys-compact ? 58px : (parent.height - 40px) / 2;
+                        x: parent.width - 84px; y: root.hotkeys-compact ? capture-label-0.height + Spacing.small : (parent.height - 40px) / 2;
                         width: 84px; label: root.hotkey-capturing ? @tr("Cancel") : @tr("Change");
                         clicked => {
                             root.annotation-hotkey-capturing = false;
@@ -1410,23 +1302,18 @@ export component SettingsWindow inherits Window {
                         }
                     }
                 }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: @tr("Translate selection and copy"); }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: @tr("Translate selection and replace"); }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                UnavailableHotkeyRow { width: 100%; compact: root.hotkeys-compact; label: @tr("Read selection aloud"); }
             }
         }
         annotation-hotkeys-card := SettingsCard {
             x: Metrics.settings-page-padding;
             y: selection-hotkeys-card.y + selection-hotkeys-card.height + Metrics.settings-card-gap;
-            width: behavior-hotkeys-card.width; title: @tr("Annotation");
+            width: hotkeys-scroll.visible-width - 2 * Metrics.settings-page-padding; title: @tr("Annotation");
             VerticalLayout {
                 spacing: Spacing.small;
                 Rectangle {
-                    width: 100%; height: root.hotkeys-compact ? 126px : 92px;
-                    SettingsFieldLabel {
+                    width: 100%; height: root.hotkeys-compact ? capture-label-1.height + 56px : max(92px, capture-label-1.height + 16px);
+                    capture-label-1 := SettingsTextBlock {
+                        height: self.preferred-height;
                         x: 0px; y: root.hotkeys-compact ? 0px : (parent.height - self.height) / 2;
                         width: root.hotkeys-compact ? parent.width : parent.width * 0.45 - Spacing.small;
                         label: @tr("Annotation toolbar");
@@ -1435,7 +1322,7 @@ export component SettingsWindow inherits Window {
                     }
                     Rectangle {
                         x: root.hotkeys-compact ? 0px : parent.width * 0.45;
-                        y: root.hotkeys-compact ? 70px : (parent.height - 40px) / 2;
+                        y: root.hotkeys-compact ? capture-label-1.height + Spacing.small : (parent.height - 40px) / 2;
                         width: root.hotkeys-compact ? parent.width - 96px : parent.width * 0.55 - 96px;
                         height: 40px; border-radius: 6px;
                         border-width: root.annotation-hotkey-capturing ? 2px : 1px;
@@ -1447,7 +1334,7 @@ export component SettingsWindow inherits Window {
                             color: root.annotation-hotkey-capturing ? Colors.primary : Colors.foreground;
                             font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
                         }
-                        annotation-hotkey-capture := FocusScope {
+                        annotation-hotkey-capture := SettingsFocusScope {
                             key-pressed(event) => {
                                 if !root.annotation-hotkey-capturing || root.active-category != 2 { return reject; }
                                 if event.text == Key.Escape { root.annotation-hotkey-capturing = false; return accept; }
@@ -1458,7 +1345,7 @@ export component SettingsWindow inherits Window {
                         }
                     }
                     SettingsButton {
-                        x: parent.width - 84px; y: root.hotkeys-compact ? 70px : (parent.height - 40px) / 2;
+                        x: parent.width - 84px; y: root.hotkeys-compact ? capture-label-1.height + Spacing.small : (parent.height - 40px) / 2;
                         width: 84px; label: root.annotation-hotkey-capturing ? @tr("Cancel") : @tr("Change");
                         clicked => {
                             root.hotkey-capturing = false;
@@ -1471,7 +1358,7 @@ export component SettingsWindow inherits Window {
         }
     }
     AppVerticalScrollBar {
-        visible: root.active-category == 2;
+        visible: root.active-category == 2 && hotkeys-scroll.content-height > hotkeys-scroll.visible-height + 1px;
         x: main-pane.width - 14px;
         y: Metrics.settings-header-height + 4px;
         height: main-pane.height - Metrics.settings-header-height - 8px;
@@ -1479,305 +1366,13 @@ export component SettingsWindow inherits Window {
         content-height: hotkeys-scroll.content-height;
         content-y <=> hotkeys-scroll.content-y;
     }
-    selection-assistant-scroll := ScrollView {
-        visible: root.active-category == 3;
-        x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
-        content-width: self.visible-width;
-        content-height: max(self.visible-height, selection-actions-card.y + selection-actions-card.height + Metrics.settings-page-padding);
-        horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
-        scrolled => { root.close-preview-menu(); }
-
-        selection-basic-card := SettingsCard {
-            x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
-            width: selection-assistant-scroll.visible-width - 2 * Metrics.settings-page-padding;
-            title: @tr("Basic settings");
-            VerticalLayout {
-                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
-                HorizontalLayout {
-                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium;
-                        label: @tr("Enable selection assistant"); description: @tr("Show Translate and Copy after selecting text"); error-text: ""; }
-                    SettingsSwitch { checked: root.selection-toolbar;
-                        toggled(value) => { root.selection-toolbar = value; root.selection-toolbar-change-requested(value); } }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                HorizontalLayout {
-                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium;
-                        label: @tr("Detect double-click selection"); description: @tr("Show the assistant after selecting a word by double-clicking"); error-text: ""; }
-                    SettingsSwitch { checked: root.selection-double-click;
-                        toggled(value) => { root.selection-double-click = value; } }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                Rectangle {
-                    width: 100%; height: root.hotkeys-compact ? 102px : 64px;
-                    SettingsFieldLabel {
-                        x: 0px; y: root.hotkeys-compact ? 0px : 10px;
-                        width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
-                        label: @tr("Horizontal offset"); description: @tr("Positive values move the toolbar right"); error-text: "";
-                    }
-                    OffsetPreviewField {
-                        x: root.hotkeys-compact ? 0px : parent.width * 0.58;
-                        y: root.hotkeys-compact ? 52px : 11px;
-                        width: root.hotkeys-compact ? parent.width : parent.width * 0.42;
-                        value <=> root.selection-horizontal-offset;
-                    }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                Rectangle {
-                    width: 100%; height: root.hotkeys-compact ? 102px : 64px;
-                    SettingsFieldLabel {
-                        x: 0px; y: root.hotkeys-compact ? 0px : 10px;
-                        width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
-                        label: @tr("Vertical offset"); description: @tr("Positive values move the toolbar down"); error-text: "";
-                    }
-                    OffsetPreviewField {
-                        x: root.hotkeys-compact ? 0px : parent.width * 0.58;
-                        y: root.hotkeys-compact ? 52px : 11px;
-                        width: root.hotkeys-compact ? parent.width : parent.width * 0.42;
-                        value <=> root.selection-vertical-offset;
-                    }
-                }
-            }
-        }
-
-        selection-filter-card := SettingsCard {
-            x: Metrics.settings-page-padding;
-            y: selection-basic-card.y + selection-basic-card.height + Metrics.settings-card-gap;
-            width: selection-basic-card.width;
-            title: @tr("App filtering");
-            Rectangle {
-                width: 100%; height: root.hotkeys-compact ? 102px : 64px;
-                SettingsFieldLabel {
-                    x: 0px; y: root.hotkeys-compact ? 0px : 10px;
-                    width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
-                    label: @tr("Filter mode"); description: @tr("Choose where the assistant would appear"); error-text: "";
-                }
-                filter-mode-preview := AppearancePreviewField {
-                    x: root.hotkeys-compact ? 0px : parent.width * 0.58;
-                    y: root.hotkeys-compact ? 52px : 11px;
-                    width: root.hotkeys-compact ? parent.width : parent.width * 0.42;
-                    value: root.selection-filter-modes[root.selection-filter-mode-index];
-                    opened: root.preview-menu-open && root.preview-menu-kind == 4;
-                    clicked => { root.toggle-preview-menu(4); }
-                }
-            }
-        }
-        selection-app-list-heading := Rectangle {
-            x: Metrics.settings-page-padding;
-            y: selection-filter-card.y + selection-filter-card.height + Metrics.settings-card-gap;
-            width: selection-basic-card.width; height: 40px;
-            Text { width: parent.width - 120px; height: parent.height; text: @tr("App list");
-                color: Colors.secondary-foreground; font-size: Typography.body-size; vertical-alignment: center; }
-            SettingsButton { x: parent.width - self.width; label: @tr("Add app"); enabled: false; }
-        }
-        selection-app-list-empty := Rectangle {
-            x: Metrics.settings-page-padding;
-            y: selection-app-list-heading.y + selection-app-list-heading.height + Spacing.small;
-            width: selection-basic-card.width; height: 68px;
-            border-radius: Metrics.settings-card-radius; background: Colors.surface;
-            Text { text: @tr("No apps added"); color: Colors.secondary-foreground;
-                font-size: Typography.body-size; horizontal-alignment: center; vertical-alignment: center; }
-        }
-
-        selection-actions-card := SettingsCard {
-            x: Metrics.settings-page-padding;
-            y: selection-app-list-empty.y + selection-app-list-empty.height + Metrics.settings-card-gap;
-            width: selection-basic-card.width;
-            title: @tr("Selection actions");
-            VerticalLayout {
-                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
-                SelectionActionRow { width: 100%; label: @tr("Translate"); icon: AppAssets.icon-translate; status: 0; }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                SelectionActionRow { width: 100%; label: @tr("Translate and copy"); icon: AppAssets.icon-copy; status: 2; }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                SelectionActionRow { width: 100%; label: @tr("Translate and replace"); icon: AppAssets.icon-refresh; status: 2; }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                SelectionActionRow { width: 100%; label: @tr("Read aloud"); icon: AppAssets.icon-volume; status: 2; }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                SelectionActionRow { width: 100%; label: @tr("Copy"); icon: AppAssets.icon-copy; status: 1;
-                    checked: root.selection-copy-action; toggled(value) => { root.selection-copy-action = value; } }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                SelectionActionRow { width: 100%; label: @tr("Paste"); icon: AppAssets.icon-paste; status: 2; }
-            }
-        }
-    }
-    AppVerticalScrollBar {
-        visible: root.active-category == 3;
-        x: main-pane.width - 14px;
-        y: Metrics.settings-header-height + 4px;
-        height: main-pane.height - Metrics.settings-header-height - 8px;
-        viewport-height: selection-assistant-scroll.visible-height;
-        content-height: selection-assistant-scroll.content-height;
-        content-y <=> selection-assistant-scroll.content-y;
-    }
-    screenshot-scroll := ScrollView {
-        visible: root.active-category == 4;
-        x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
-        content-width: self.visible-width;
-        content-height: max(self.visible-height, screenshot-output-card.y + screenshot-output-card.height + Metrics.settings-page-padding);
-        horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
-        scrolled => { root.close-preview-menu(); }
-
-        screenshot-selection-card := SettingsCard {
-            x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
-            width: screenshot-scroll.visible-width - 2 * Metrics.settings-page-padding;
-            title: @tr("Selection");
-            VerticalLayout {
-                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
-                HorizontalLayout {
-                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: @tr("Crosshair guides"); description: ""; error-text: ""; }
-                    SettingsSwitch { checked: root.screenshot-crosshair-guides; toggled(value) => { root.screenshot-crosshair-guides = value; } }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                HorizontalLayout {
-                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: @tr("Magnifier"); description: ""; error-text: ""; }
-                    SettingsSwitch { checked: root.screenshot-magnifier; toggled(value) => { root.screenshot-magnifier = value; } }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                HorizontalLayout {
-                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: @tr("Show selection dimensions"); description: ""; error-text: ""; }
-                    SettingsSwitch { checked: root.screenshot-selection-dimensions; toggled(value) => { root.screenshot-selection-dimensions = value; } }
-                }
-            }
-        }
-
-        screenshot-annotation-card := SettingsCard {
-            x: Metrics.settings-page-padding;
-            y: screenshot-selection-card.y + screenshot-selection-card.height + Metrics.settings-card-gap;
-            width: screenshot-selection-card.width;
-            title: @tr("Default annotation style");
-            VerticalLayout {
-                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
-                Rectangle {
-                    width: 100%; height: root.hotkeys-compact ? 92px : 56px;
-                    Text { x: 0px; y: root.hotkeys-compact ? 0px : 0px;
-                        width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
-                        height: root.hotkeys-compact ? 36px : parent.height;
-                        text: @tr("Annotation color"); color: Colors.foreground;
-                        font-size: Typography.body-size; vertical-alignment: center; }
-                    SettingsButton {
-                        x: root.hotkeys-compact ? 0px : parent.width * 0.58;
-                        y: root.hotkeys-compact ? 44px : 8px;
-                        width: root.hotkeys-compact ? parent.width : parent.width * 0.42;
-                        label: @tr("Select color"); clicked => { }
-                    }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                Rectangle {
-                    width: 100%; height: root.hotkeys-compact ? 92px : 56px;
-                    Text { x: 0px; y: 0px; width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
-                        height: root.hotkeys-compact ? 36px : parent.height;
-                        text: @tr("Line width"); color: Colors.foreground;
-                        font-size: Typography.body-size; vertical-alignment: center; }
-                    OffsetPreviewField {
-                        x: root.hotkeys-compact ? 0px : parent.width * 0.58;
-                        y: root.hotkeys-compact ? 44px : 7px;
-                        width: root.hotkeys-compact ? parent.width : parent.width * 0.42;
-                        unit: ""; fallback-value: 3; min-value: 1;
-                        value <=> root.screenshot-line-width;
-                    }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                Rectangle {
-                    width: 100%; height: root.hotkeys-compact ? 92px : 56px;
-                    Text { x: 0px; y: 0px; width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
-                        height: root.hotkeys-compact ? 36px : parent.height;
-                        text: @tr("Text size"); color: Colors.foreground;
-                        font-size: Typography.body-size; vertical-alignment: center; }
-                    OffsetPreviewField {
-                        x: root.hotkeys-compact ? 0px : parent.width * 0.58;
-                        y: root.hotkeys-compact ? 44px : 7px;
-                        width: root.hotkeys-compact ? parent.width : parent.width * 0.42;
-                        unit: ""; fallback-value: 22; min-value: 1;
-                        value <=> root.screenshot-text-size;
-                    }
-                }
-            }
-        }
-
-        screenshot-output-card := SettingsCard {
-            x: Metrics.settings-page-padding;
-            y: screenshot-annotation-card.y + screenshot-annotation-card.height + Metrics.settings-card-gap;
-            width: screenshot-selection-card.width;
-            title: @tr("Image output");
-            VerticalLayout {
-                width: 100%; horizontal-stretch: 1; spacing: Spacing.small;
-                Rectangle {
-                    width: 100%; height: root.hotkeys-compact ? 92px : 56px;
-                    Text { x: 0px; y: 0px; width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
-                        height: root.hotkeys-compact ? 36px : parent.height;
-                        text: @tr("Save location"); color: Colors.foreground;
-                        font-size: Typography.body-size; vertical-alignment: center; }
-                    Rectangle {
-                        x: root.hotkeys-compact ? 0px : parent.width * 0.58;
-                        y: root.hotkeys-compact ? 44px : 7px;
-                        width: root.hotkeys-compact ? parent.width - 96px : parent.width * 0.42 - 96px;
-                        height: 42px; border-radius: 6px; border-width: 1px;
-                        border-color: Colors.outline; background: Colors.background;
-                        TextInput {
-                            x: Spacing.medium; width: parent.width - 2 * Spacing.medium; height: parent.height;
-                            text <=> root.screenshot-save-location;
-                            color: Colors.foreground; font-size: Typography.body-size;
-                            selection-background-color: Colors.primary-container;
-                            selection-foreground-color: Colors.foreground; vertical-alignment: center;
-                        }
-                    }
-                    SettingsButton {
-                        x: parent.width - 84px; y: root.hotkeys-compact ? 44px : 8px;
-                        width: 84px; label: @tr("Browse"); clicked => { }
-                    }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                Rectangle {
-                    width: 100%; height: root.hotkeys-compact ? 92px : 56px;
-                    Text { x: 0px; y: 0px; width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
-                        height: root.hotkeys-compact ? 36px : parent.height;
-                        text: @tr("Image format"); color: Colors.foreground;
-                        font-size: Typography.body-size; vertical-alignment: center; }
-                    screenshot-format-preview := AppearancePreviewField {
-                        x: root.hotkeys-compact ? 0px : parent.width * 0.58;
-                        y: root.hotkeys-compact ? 44px : 7px;
-                        width: root.hotkeys-compact ? parent.width : parent.width * 0.42;
-                        value: root.screenshot-formats[root.screenshot-format-index];
-                        opened: root.preview-menu-open && root.preview-menu-kind == 5;
-                        clicked => { root.toggle-preview-menu(5); }
-                    }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                HorizontalLayout {
-                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: @tr("Copy image as file"); description: ""; error-text: ""; }
-                    SettingsSwitch { checked: root.screenshot-copy-as-file; toggled(value) => { root.screenshot-copy-as-file = value; } }
-                }
-                Rectangle { width: 100%; height: 1px; background: Colors.outline; }
-                HorizontalLayout {
-                    width: 100%; height: Metrics.settings-row-height; spacing: Spacing.medium; alignment: center;
-                    SettingsFieldLabel { width: parent.width - 52px - Spacing.medium; label: @tr("Close after copying or saving"); description: ""; error-text: ""; }
-                    SettingsSwitch { checked: root.screenshot-close-after-output; toggled(value) => { root.screenshot-close-after-output = value; } }
-                }
-            }
-        }
-    }
-    AppVerticalScrollBar {
-        visible: root.active-category == 4;
-        x: main-pane.width - 14px;
-        y: Metrics.settings-header-height + 4px;
-        height: main-pane.height - Metrics.settings-header-height - 8px;
-        viewport-height: screenshot-scroll.visible-height;
-        content-height: screenshot-scroll.content-height;
-        content-y <=> screenshot-scroll.content-y;
-    }
     translation-scroll := ScrollView {
         visible: root.active-category == 1;
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
         content-width: self.visible-width;
-        content-height: max(self.visible-height, translation-behavior-card.y + translation-behavior-card.height + Metrics.settings-page-padding);
+        content-height: max(self.visible-height, llm-translation-card.y + llm-translation-card.height + 48px + Metrics.settings-page-padding);
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
-        scrolled => { root.close-settings-menu(); root.close-preview-menu(); }
+        scrolled => { root.close-settings-menu(); root.close-app-language-menu(); }
         translation-language-card := SettingsCard {
             x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
             width: translation-scroll.visible-width - 2 * Metrics.settings-page-padding;
@@ -1791,7 +1386,7 @@ export component SettingsWindow inherits Window {
                         width: root.hotkeys-compact ? parent.width : parent.width * 0.45 - Spacing.medium; height: self.preferred-height;
                         label: @tr("Default target language"); description: @tr("Language used for new translations"); error-text: root.target-language-error-text;
                     }
-                    language-selector := AppearancePreviewField {
+                    language-selector := SettingsSelectField {
                         x: root.hotkeys-compact ? 0px : parent.width * 0.45;
                         y: root.hotkeys-compact ? default-language-label.height + Spacing.small : (parent.height - self.height) / 2;
                         width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
@@ -1799,118 +1394,42 @@ export component SettingsWindow inherits Window {
                         clicked => { root.toggle-language-menu(); }
                     }
                 }
-                Rectangle { height: 1px; background: Colors.outline; }
-                Rectangle {
-                    height: root.hotkeys-compact ? fallback-language-label.preferred-height + 52px : max(Metrics.settings-row-height, fallback-language-label.preferred-height + 16px);
-                    fallback-language-label := SettingsTextBlock {
-                        x: 0px; y: root.hotkeys-compact ? 0px : (parent.height - self.height) / 2;
-                        width: root.hotkeys-compact ? parent.width : parent.width * 0.45 - Spacing.medium; height: self.preferred-height;
-                        label: @tr("Fallback target language"); description: @tr("Used when the detected source language matches the default target language."); error-text: "";
-                    }
-                    fallback-language-preview := AppearancePreviewField {
-                        x: root.hotkeys-compact ? 0px : parent.width * 0.45;
-                        y: root.hotkeys-compact ? fallback-language-label.height + Spacing.small : (parent.height - self.height) / 2;
-                        width: root.hotkeys-compact ? parent.width : parent.width * 0.55;
-                        value: root.language-labels[root.fallback-target-index]; opened: root.preview-menu-open && root.preview-menu-kind == 6;
-                        clicked => { root.toggle-preview-menu(6); }
-                    }
-                }
             }
         }
-        preprocess-card := SettingsCard {
-            x: Metrics.settings-page-padding; y: llm-translation-card.y + llm-translation-card.height + Metrics.settings-card-gap;
-            width: translation-language-card.width; title: @tr("Source text preprocessing");
-            VerticalLayout {
-                width: 100%; spacing: Spacing.small;
-                SettingsPreviewToggleRow { label: @tr("Smart line break removal"); description: @tr("Join wrapped lines while preserving paragraph breaks."); checked <=> root.preprocess-join-lines; }
-                Rectangle { height: 1px; background: Colors.outline; }
-                SettingsPreviewToggleRow { label: @tr("Split snake_case"); description: @tr("Convert foo_bar to foo bar before translation."); checked <=> root.preprocess-snake-case; }
-                Rectangle { height: 1px; background: Colors.outline; }
-                SettingsPreviewToggleRow { label: @tr("Split camelCase"); description: @tr("Convert fooBar to foo bar before translation."); checked <=> root.preprocess-camel-case; }
-                Rectangle { height: 1px; background: Colors.outline; }
-                SettingsPreviewToggleRow { label: @tr("Split PascalCase"); description: @tr("Convert FooBar to foo bar before translation."); checked <=> root.preprocess-pascal-case; }
-                Rectangle { height: 1px; background: Colors.outline; }
-                SettingsPreviewToggleRow { label: @tr("Split kebab-case"); description: @tr("Convert foo-bar to foo bar before translation."); checked <=> root.preprocess-kebab-case; }
-            }
-        }
-        translation-behavior-card := SettingsCard {
-            x: Metrics.settings-page-padding; y: preprocess-card.y + preprocess-card.height + Metrics.settings-card-gap;
-            width: translation-language-card.width; title: @tr("Behavior");
-            VerticalLayout {
-                width: 100%; spacing: Spacing.small;
-                SettingsPreviewToggleRow { label: @tr("Copy the first translation result automatically"); checked <=> root.translation-auto-copy; }
-                Rectangle { height: 1px; background: Colors.outline; }
-                SettingsPreviewToggleRow { label: @tr("Hide input area"); description: @tr("Hide source text for selection and screenshot translations. Keep it visible for typed translations."); checked <=> root.translation-hide-input; }
-                Rectangle { height: 1px; background: Colors.outline; }
-                SettingsPreviewToggleRow { label: @tr("Hide language bar"); description: @tr("Hide language controls for selection and screenshot translations. Keep them visible for typed translations."); checked <=> root.translation-hide-language-bar; }
-                Rectangle { height: 1px; background: Colors.outline; }
-                SettingsPreviewToggleRow { label: @tr("Resize the translation window automatically"); description: @tr("Adjust window height to the content. Window width is resized manually."); checked <=> root.translation-auto-resize; }
-                Rectangle { height: 1px; background: Colors.outline; }
-                SettingsPreviewToggleRow { label: @tr("Pin the translation window by default"); checked <=> root.translation-pin-window; }
-            }
-        }
-        llm-translation-card := SettingsCard {
+        llm-translation-card := Rectangle {
             x: Metrics.settings-page-padding; y: translation-language-card.y + translation-language-card.height + Metrics.settings-card-gap;
-            width: translation-language-card.width; title: @tr("Translation provider and model");
-            VerticalLayout { spacing: Spacing.small;
-                SettingsComboBox { model: ["DeepL", "Ollama", "LM Studio", "DeepSeek"]; current-index <=> root.llm-translation-provider-index; selected(index) => { root.llm-provider-selected(self.current-index); } }
-                Text { font-size: Typography.body-size; text: root.provider-error-text; color: Colors.error; wrap: word-wrap; }
-                if root.llm-translation-provider-index == 0 && !root.deepl-provider-enabled: Text { text: @tr("Provider is disabled"); color: Colors.secondary-foreground; font-size: Typography.body-size; wrap: word-wrap; }
-                if root.llm-translation-provider-index > 0: VerticalLayout { spacing: Spacing.small;
-                    SettingsComboBox { model: root.llm-models; placeholder: root.llm-selected-model == "" ? @tr("Select a model") : root.llm-selected-model; current-index <=> root.llm-model-index; enabled: root.llm-models.length > 0; selected(index) => { root.llm-model-selected(self.current-index); } }
-                    Text { visible: root.llm-selection-note != ""; height: self.visible ? self.preferred-height : 0px; text: root.llm-selection-note; font-size: Typography.body-size; color: Colors.secondary-foreground; wrap: word-wrap; }
-                    SettingsButton { label: @tr("Manage models"); clicked => { root.provider-detail-index = root.llm-translation-provider-index; root.llm-service-index = max(0, root.provider-detail-index - 1); root.credential-hide-requested(); root.llm-service-selected(root.provider-detail-index); root.active-category = 5; } }
-                    Text { font-size: Typography.body-size; text: @tr("Model parameters"); color: Colors.foreground; font-weight: 600; }
-                    HorizontalLayout { spacing: Spacing.small;
-                        Text { font-size: Typography.body-size; text: @tr("Thinking effort"); color: Colors.foreground; vertical-alignment: center; horizontal-stretch: 1; }
-                        SettingsComboBox { model: root.llm-reasoning-options; placeholder: @tr("Unavailable"); current-index <=> root.llm-reasoning-index; enabled: root.llm-reasoning-options.length > 1; selected(index) => { root.llm-reasoning-selected(self.current-index); } }
-                    }
-                    Text { font-size: Typography.body-size; text: root.llm-reasoning-note; color: Colors.secondary-foreground; wrap: word-wrap; }
-                    HorizontalLayout { spacing: Spacing.small;
-                        Text { font-size: Typography.body-size; text: @tr("Model temperature"); color: Colors.foreground; vertical-alignment: center; horizontal-stretch: 1; }
-                        Text { font-size: Typography.body-size; text: root.llm-temperature-custom ? @tr("Custom") : @tr("Model default"); color: Colors.secondary-foreground; vertical-alignment: center; }
-                        Rectangle { width: 52px; height: 32px; opacity: root.llm-temperature-available ? 1 : 0.45;
-                            SettingsSwitch { checked: root.llm-temperature-custom; toggled(v) => { if root.llm-temperature-available { root.llm-temperature-custom = v; } } }
-                        }
-                    }
-                    if root.llm-temperature-custom && root.llm-temperature-available: HorizontalLayout { spacing: Spacing.medium;
-                        Rectangle { height: 32px; min-width: 120px; horizontal-stretch: 1;
-                            Slider { y: (parent.height - self.height) / 2; width: parent.width; value: root.llm-temperature; maximum: root.llm-temperature-max; wheel-step: 1; changed value => { root.llm-temperature = round(self.value); } }
-                        }
-                        SpinBox { width: 110px; height: 32px; value <=> root.llm-temperature; minimum: 0; maximum: root.llm-temperature-max; display-divisor: 100; }
-                    }
-                    HorizontalLayout { spacing: Spacing.small;
-                        Text { font-size: Typography.body-size; text: "Top-P"; color: Colors.foreground; vertical-alignment: center; horizontal-stretch: 1; }
-                        Text { font-size: Typography.body-size; text: root.llm-top-p-custom ? @tr("Custom") : @tr("Model default"); color: Colors.secondary-foreground; vertical-alignment: center; }
-                        Rectangle { width: 52px; height: 32px; opacity: root.llm-top-p-available ? 1 : 0.45;
-                            SettingsSwitch { checked: root.llm-top-p-custom; toggled(v) => { if root.llm-top-p-available { root.llm-top-p-custom = v; } } }
-                        }
-                    }
-                    if root.llm-top-p-custom && root.llm-top-p-available: HorizontalLayout { spacing: Spacing.medium;
-                        Rectangle { height: 32px; min-width: 120px; horizontal-stretch: 1;
-                            Slider { y: (parent.height - self.height) / 2; width: parent.width; value: root.llm-top-p; minimum: root.llm-top-p-min; maximum: 100; wheel-step: 1; changed value => { root.llm-top-p = round(self.value); } }
-                        }
-                        SpinBox { width: 110px; height: 32px; value <=> root.llm-top-p; minimum: root.llm-top-p-min; maximum: 100; display-divisor: 100; }
-                    }
-                    Text { font-size: Typography.body-size; text: @tr("Translation prompt"); color: Colors.foreground; font-weight: 600; }
-                    Rectangle { height: 240px; border-radius: 6px; border-width: 1px; border-color: Colors.outline; background: Colors.surface;
-                        ScrollView { x: Spacing.small; y: Spacing.small; width: parent.width - 2 * Spacing.small; height: parent.height - 2 * Spacing.small;
-                            content-width: self.visible-width;
-                            TextInput { width: parent.width; min-height: 220px; text <=> root.llm-prompt; wrap: word-wrap; color: Colors.foreground; font-size: Typography.body-size; selection-background-color: Colors.primary-container; }
-                        }
-                    }
-                    Text { font-size: Typography.body-size; text: @tr("Use {{target_language}} for the target language."); color: Colors.secondary-foreground; wrap: word-wrap; }
-                    FlexboxLayout { flex-wrap: wrap; spacing: Spacing.small;
-                        SettingsButton { label: @tr("Restore default prompt"); clicked => { root.llm-reset-prompt(); } }
-                        SettingsButton { label: @tr("Apply"); primary: true; clicked => { root.llm-save-translation(); } }
-                    }
-                    Text { font-size: Typography.body-size; text: root.llm-status; color: Colors.secondary-foreground; wrap: word-wrap; }
+            width: translation-language-card.width; height: root.hotkeys-compact ? 138px : 104px;
+            border-radius: Metrics.settings-card-radius; background: Colors.surface;
+            Image { x: 24px; y: 24px; width: 20px; height: 20px; source: @image-url("assets/icons/translate.svg"); colorize: Colors.foreground; }
+            Text { x: 52px; y: 21px; width: root.hotkeys-compact ? parent.width - 76px : parent.width * 0.38 - 52px; height: 26px; text: @tr("Translation model"); color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; }
+            Text { x: 24px; y: 52px; width: root.hotkeys-compact ? parent.width - 48px : parent.width * 0.38 - 24px; height: 22px; text: @tr("Model used for translation"); color: Colors.secondary-foreground; font-size: 13px; overflow: elide; }
+            translation-selector := Rectangle {
+                x: root.hotkeys-compact ? 24px : parent.width * 0.40; y: root.hotkeys-compact ? 84px : 24px;
+                width: parent.width - self.x - 68px; height: 40px;
+                border-radius: 8px; border-width: 1px; border-color: selector-focus.focus-visible ? Colors.primary : Colors.outline;
+                background: root.translation-selector-open || selector-touch.pressed ? Colors.icon-button-pressed : selector-touch.has-hover ? Colors.icon-button-hover : Colors.surface;
+                accessible-role: button; accessible-label: @tr("Translation model") + ": " + root.llm-selected-model;
+                ProviderLogo { x: 12px; y: 10px; width: 20px; height: 20px; provider: root.llm-translation-provider-index; }
+                selected-model-caption := Text { x: 42px; width: max(0px, parent.width - 160px); height: parent.height; text: root.llm-translation-provider-index == 0 ? "DeepL" : root.llm-selected-model == "" ? @tr("Select a model") : root.llm-selected-model; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; overflow: elide; }
+                Text { x: parent.width - 112px; width: 80px; height: parent.height; text: ["DeepL", "Ollama", "LM Studio", "DeepSeek"][root.llm-translation-provider-index]; color: Colors.secondary-foreground; font-size: 12px; vertical-alignment: center; overflow: elide; }
+                Image { x: parent.width - 24px; y: 14px; width: 12px; height: 12px; source: @image-url("icons/chevron-down.svg"); colorize: Colors.foreground; }
+                selector-focus := SettingsFocusScope { enabled: !root.translation-selecting;
+                    key-pressed(event) => { if event.text == Key.Return || event.text == " " || event.text == Key.DownArrow { root.open-translation-selector(); return accept; } return reject; }
                 }
+                selector-touch := TouchArea { enabled: !root.translation-selecting; mouse-cursor: pointer; clicked => { SettingsInteraction.pointer-input(); selector-focus.focus-target(); root.open-translation-selector(); } }
+            }
+            translation-config := ProviderIconButton {
+                x: parent.width - 56px; y: translation-selector.y + 4px;
+                icon: @image-url("icons/translation-settings.svg"); tooltip: root.llm-translation-provider-index == 0 ? @tr("DeepL does not use model parameters") : @tr("Translation settings");
+                enabled: root.llm-translation-provider-index > 0 && root.llm-selected-model != "" && !root.translation-selecting;
+                clicked => { root.open-translation-settings(); }
             }
         }
+        Text { x: llm-translation-card.x; y: llm-translation-card.y + llm-translation-card.height; width: llm-translation-card.width; height: self.preferred-height; text: root.provider-error-text != "" ? root.provider-error-text : root.llm-selection-note; color: Colors.secondary-foreground; font-size: 13px; wrap: word-wrap; }
     }
+
     AppVerticalScrollBar {
-        visible: root.active-category == 1;
+        visible: root.active-category == 1 && translation-scroll.content-height > translation-scroll.visible-height + 1px;
         x: main-pane.width - 14px; y: Metrics.settings-header-height + 4px;
         height: main-pane.height - Metrics.settings-header-height - 8px;
         viewport-height: translation-scroll.visible-height; content-height: translation-scroll.content-height;
@@ -1928,14 +1447,15 @@ export component SettingsWindow inherits Window {
             horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
             for name[index] in ["DeepL", "Ollama", "LM Studio", "DeepSeek"]: Rectangle {
                 y: index * 48px; width: parent.width; height: 40px; border-radius: 6px;
-                background: root.provider-detail-index == index ? Colors.primary-container : touch.has-hover ? Colors.icon-button-hover : transparent;
+                background: root.provider-detail-index == index ? Colors.primary-container : choice.hovered ? Colors.icon-button-hover : transparent;
+                border-width: choice.focus-visible ? 1px : 0px; border-color: Colors.primary;
                 Rectangle { x: 8px; y: 6px; width: 28px; height: 28px; border-radius: 7px; background: #ffffff; border-width: 1px; border-color: Colors.outline.with-alpha(0.5);
                     Image { x: 4px; y: 4px; width: 20px; height: 20px; image-fit: contain;
                         source: [@image-url("icons/provider-deepl.svg"), @image-url("icons/provider-ollama.svg"), @image-url("icons/provider-lmstudio.svg"), @image-url("icons/provider-deepseek.svg")][index]; }
                 }
                 Rectangle { x: parent.width - 15px; y: (parent.height - 6px) / 2; width: 6px; height: 6px; border-radius: 3px; background: Colors.success; visible: index < root.provider-enabled-states.length && root.provider-enabled-states[index]; }
                 Text { x: 44px; width: parent.width - 64px; height: parent.height; text: name; color: root.provider-detail-index == index ? Colors.primary : Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; overflow: elide; }
-                touch := TouchArea { clicked => { root.provider-detail-index = index; if index > 0 { root.llm-service-index = index - 1; } root.credential-hide-requested(); root.llm-service-selected(index); providers-scroll.content-y = 0px; } }
+                choice := SettingsChoiceTarget { label: name; selected: root.provider-detail-index == index; chosen => { root.provider-detail-index = index; if index > 0 { root.llm-service-index = index - 1; } root.credential-hide-requested(); root.llm-service-selected(index); providers-scroll.content-y = 0px; } }
             }
         }
     }
@@ -1956,7 +1476,7 @@ export component SettingsWindow inherits Window {
             HorizontalLayout { height: 32px; spacing: 8px;
                 Text { text: ["DeepL", "Ollama", "LM Studio", "DeepSeek"][root.provider-detail-index]; color: Colors.foreground; font-size: Typography.body-size; font-weight: 700; vertical-alignment: center; }
                 Text { text: root.llm-status; color: Colors.secondary-foreground; font-size: 12px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                SettingsSwitch { checked: root.llm-enabled; toggled(value) => { root.llm-enabled = value; root.llm-draft-changed(); } }
+                SettingsSwitch { label: ["Ollama", "LM Studio", "DeepSeek"][root.llm-service-index]; checked: root.llm-enabled; toggled(value) => { root.llm-enabled = value; root.llm-draft-changed(); } }
             }
             VerticalLayout { spacing: 8px;
                 Text { height: 24px; text: @tr("API key"); font-size: Typography.body-size; color: Colors.foreground; vertical-alignment: center; }
@@ -1970,10 +1490,11 @@ export component SettingsWindow inherits Window {
                     width: credential-row.width - (credential-row.wrapped || credential-row.action-width == 0px ? 0px : credential-row.action-width + 8px);
                     credential-configured: root.provider-detail-index == 0 ? root.credential-configured : root.llm-key-configured || (root.llm-service-index == 2 && root.deepseek-environment-key);
                     can-remove: root.provider-detail-index == 0 || root.llm-key-configured;
-                    credential-busy: root.credential-busy;
+                    credential-busy: root.credential-busy && !root.llm-connection-pending;
+                    operation-blocked: root.llm-connection-pending;
                     credential-editing: root.credential-editing;
                     credential-revealed: root.credential-revealed;
-                    credential-request-pending: root.credential-request-pending;
+                    credential-request-pending: root.credential-request-pending && !root.llm-connection-pending;
                     credential-reveal-dismiss-armed: root.credential-reveal-dismiss-armed;
                     credential-secret-visible <=> root.credential-secret-visible;
                     credential-draft <=> root.credential-draft;
@@ -1982,7 +1503,7 @@ export component SettingsWindow inherits Window {
                     credential-reveal-requested => { root.credential-reveal-requested(); }
                     credential-copy-requested => { root.credential-copy-requested(); }
                     credential-edit-requested => { root.credential-edit-requested(); }
-                    credential-remove-requested => { root.credential-remove-requested(); }
+                    credential-remove-requested => { root.request-credential-delete(); }
                     credential-hide-requested => { root.credential-hide-requested(); }
                     credential-edit-cancel-requested => { root.credential-edit-cancel-requested(); }
                     credential-edit-blurred => {root.credential-edit-blurred();}
@@ -1996,7 +1517,7 @@ export component SettingsWindow inherits Window {
             VerticalLayout { visible: root.provider-detail-index > 0; height: self.visible ? self.preferred-height : 0px; spacing: 8px;
                 Text { height: 24px; text: @tr("API address"); font-size: Typography.body-size; color: Colors.foreground; vertical-alignment: center; }
                 HorizontalLayout { height: 40px; spacing: 8px;
-                    ProviderInput { text <=> root.llm-base-url; horizontal-stretch: 1; edited => { root.llm-base-edited(); } }
+                    provider-address := ProviderInput { text <=> root.llm-base-url; horizontal-stretch: 1; edited => { root.llm-base-edited(); } }
                     request-config-button := ProviderIconButton { icon: @image-url("icons/provider-settings.svg"); tooltip: @tr("Request configuration"); selected: root.llm-advanced; clicked => { root.open-provider-request(); } }
                 }
             }
@@ -2011,7 +1532,7 @@ export component SettingsWindow inherits Window {
                     }
                     sync-models-button := SettingsButton { compact: true;
                         x: parent.width - self.width; y: parent.height - 40px;
-                        label: @tr("Sync models"); enabled: !root.llm-connection-dirty; clicked => { root.open-provider-models(); }
+                        label: @tr("Sync models"); enabled: !root.llm-connection-dirty && !root.llm-persisting; clicked => { root.open-provider-models(); }
                     }
                 }
                 if root.llm-connection-dirty: Text { text: @tr("Apply connection settings before syncing models"); color: Colors.secondary-foreground; font-size: 12px; wrap: word-wrap; }
@@ -2024,7 +1545,7 @@ export component SettingsWindow inherits Window {
                     height: root.llm-enabled-catalog.length == 0 ? 168px : enabled-rows.preferred-height + 2px;
                     border-radius: 8px; border-width: root.llm-enabled-catalog.length == 0 ? 0px : 1px; border-color: Colors.outline;
                     enabled-rows := VerticalLayout { x: 1px; y: 1px; width: parent.width - 2px; height: self.preferred-height; spacing: 0px;
-                        for model in root.llm-enabled-catalog: ProviderModelItem { model: model; toggle => { root.llm-model-toggle(model.id, false); } hint(text,x,y) => { root.llm-model-hint = text; root.llm-hint-x = x; root.llm-hint-y = y; } }
+                        for model in root.llm-enabled-catalog: ProviderModelItem { enabled: !root.llm-persisting; model: model; toggle => { root.llm-model-toggle(model.id, false); } hint(text,x,y) => { root.llm-model-hint = text; root.llm-hint-x = x; root.llm-hint-y = y; } }
                     }
                     if root.llm-enabled-catalog.length == 0: Rectangle {
                         width: parent.width; height: parent.height;
@@ -2044,28 +1565,27 @@ export component SettingsWindow inherits Window {
         x: provider-list.width; y: main-pane.height - 64px; width: main-pane.width - self.x; height: 64px; background: Colors.surface;
         Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Colors.outline; }
         HorizontalLayout { padding: 12px; spacing: 8px; alignment: end;
-            SettingsButton { compact: true; label: @tr("Cancel"); clicked => { root.llm-cancel-connection(); } }
-            SettingsButton { compact: true; label: @tr("Apply"); primary: true; enabled: !root.credential-busy; clicked => { root.llm-save-connection(); } }
+            SettingsButton { compact: true; label: @tr("Cancel"); enabled: !root.llm-connection-saving; clicked => { root.llm-cancel-connection(); } }
+            SettingsButton { compact: true; label: root.llm-connection-saving ? @tr("Working…") : @tr("Apply"); primary: true; enabled: !root.credential-busy && !root.llm-persisting && !root.credential-editing && root.credential-draft == ""; clicked => { root.llm-save-connection(); } }
         }
     }
     }
     }
     function toggle-language-menu() {
-        root.close-preview-menu();
+        root.close-app-language-menu();
         if root.settings-menu-open { root.close-settings-menu(); }
         else {
             root.settings-menu-scroll-y = round(min(0px, max(settings-menu.height - root.language-labels.length * 40px, settings-menu.height / 2 - (root.draft-target-index + 0.5) * 40px)) / 4px) * 4px;
             root.settings-menu-open = true; root.settings-menu-dismiss-armed = true; root.focus-settings-menu();
         }
     }
-    function toggle-preview-menu(kind: int) {
-        if root.preview-menu-open && root.preview-menu-kind == kind { root.close-preview-menu(); }
+    function toggle-app-language-menu() {
+        if root.app-language-menu-open { root.close-app-language-menu(); }
         else {
             root.close-settings-menu();
-            root.preview-menu-kind = kind;
-            root.preview-menu-scroll-y = 0px;
-            root.preview-menu-open = true;
-            preview-menu-focus.focus();
+            root.app-language-menu-scroll-y = 0px;
+            root.app-language-menu-open = true;
+            app-language-menu.focus-menu();
         }
     }
 
@@ -2074,8 +1594,8 @@ export component SettingsWindow inherits Window {
 
     TouchArea {
         x: 0px; y: 0px; width: parent.width; height: parent.height; z: 10;
-        enabled: (root.settings-menu-open && root.settings-menu-dismiss-armed) || root.preview-menu-open;
-        clicked => { root.close-settings-menu(); root.close-preview-menu(); }
+        enabled: (root.settings-menu-open && root.settings-menu-dismiss-armed) || root.app-language-menu-open;
+        clicked => { if root.settings-menu-open { root.dismiss-settings-menu(); } else { root.dismiss-app-language-menu(); } }
     }
     settings-menu := SettingsSelectMenu {
         visible: root.settings-menu-open; z: 15;
@@ -2086,48 +1606,24 @@ export component SettingsWindow inherits Window {
         options: root.language-labels;
         selected-index: root.draft-target-index;
         scroll-y <=> root.settings-menu-scroll-y;
-        selected(index) => { root.settings-menu-selected(index); root.close-settings-menu(); }
+        selected(index) => { root.settings-menu-selected(index); root.dismiss-settings-menu(); }
+        dismissed => { root.dismiss-settings-menu(); }
     }
-    settings-menu-focus := FocusScope {
-        visible: root.settings-menu-open; x: settings-menu.x; y: settings-menu.y; width: settings-menu.width; height: settings-menu.height; z: 16;
-        key-pressed(event) => {
-            if event.text == Key.Escape { root.close-settings-menu(); return accept; }
-            return reject;
-        }
-    }
-    preview-menu := SettingsSelectMenu {
-        visible: root.preview-menu-open; z: 15;
-        x: round(root.preview-menu-anchor-x / 1px) * 1px;
-        y: round((root.preview-menu-anchor-y + root.preview-menu-anchor-height + self.height + Metrics.settings-page-padding + 2px <= root.height
-            ? root.preview-menu-anchor-y + root.preview-menu-anchor-height + 2px
-            : max(Metrics.settings-header-height + 4px, root.preview-menu-anchor-y - self.height - 2px)) / 1px) * 1px;
-        width: round(root.preview-menu-anchor-width / 1px) * 1px;
-        height: round(min(root.preview-menu-options.length * 40px, max(0px, root.height - Metrics.settings-header-height - Metrics.settings-page-padding)) / 1px) * 1px;
-        options: root.preview-menu-options;
-        selected-index: root.preview-menu-kind == 0 ? root.appearance-font-index
-            : root.preview-menu-kind == 1 ? root.appearance-size-index
-                : root.preview-menu-kind == 2 ? root.appearance-language-index
-                    : root.preview-menu-kind == 3 ? root.tray-click-index
-                        : root.preview-menu-kind == 4 ? root.selection-filter-mode-index : root.preview-menu-kind == 5 ? root.screenshot-format-index : root.fallback-target-index;
-        scroll-y <=> root.preview-menu-scroll-y;
+    app-language-menu := SettingsSelectMenu {
+        visible: root.app-language-menu-open; z: 15;
+        x: round(root.app-language-menu-anchor-x / 1px) * 1px;
+        y: round((root.app-language-menu-anchor-y + root.app-language-menu-anchor-height + self.height + Metrics.settings-page-padding + 2px <= root.height
+            ? root.app-language-menu-anchor-y + root.app-language-menu-anchor-height + 2px
+            : max(Metrics.settings-header-height + 4px, root.app-language-menu-anchor-y - self.height - 2px)) / 1px) * 1px;
+        width: round(root.app-language-menu-anchor-width / 1px) * 1px;
+        height: round(min(root.language-labels.length * 40px, max(0px, root.height - Metrics.settings-header-height - Metrics.settings-page-padding)) / 1px) * 1px;
+        options: root.language-labels;
+        selected-index: root.appearance-language-index;
+        scroll-y <=> root.app-language-menu-scroll-y;
+        dismissed => { root.dismiss-app-language-menu(); }
         selected(index) => {
-            if root.preview-menu-kind == 0 { root.appearance-font-index = index; }
-            else if root.preview-menu-kind == 1 { root.appearance-size-index = index; }
-            else if root.preview-menu-kind == 2 { root.ui-language-selected(index); }
-            else if root.preview-menu-kind == 3 { root.tray-click-index = index; }
-            else if root.preview-menu-kind == 4 { root.selection-filter-mode-index = index; }
-            else if root.preview-menu-kind == 5 { root.screenshot-format-index = index; }
-            else { root.fallback-target-index = index; }
-            root.close-preview-menu();
-        }
-    }
-    preview-menu-focus := FocusScope {
-        visible: root.preview-menu-open;
-        x: preview-menu.x; y: preview-menu.y;
-        width: preview-menu.width; height: preview-menu.height; z: 16;
-        key-pressed(event) => {
-            if event.text == Key.Escape { root.close-preview-menu(); return accept; }
-            return reject;
+            root.ui-language-selected(index);
+            root.dismiss-app-language-menu();
         }
     }
     for toast[index] in root.toast-items: SettingsToast {
@@ -2137,7 +1633,204 @@ export component SettingsWindow inherits Window {
         dismissed => { root.toast-dismiss-requested(toast.id); }
     }
     }
-    provider-modal-focus := FocusScope {
+    close-settings-modal := SettingsFocusScope {
+        visible: root.settings-close-dialog;
+        x: 0px; y: 0px; width: root.width; height: root.height; z: 130;
+        key-pressed(event) => { if event.text == Key.Escape { root.finish-settings-close(false); return accept; } return reject; }
+        Rectangle { width: parent.width; height: parent.height; background: Colors.foreground.with-alpha(0.30); TouchArea { } }
+        ProviderDialog {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            width: min(480px, parent.width - 48px); height: min(parent.height - 48px, close-settings-copy.preferred-height + 140px);
+            title: @tr("Unsaved changes"); dismissed => { root.finish-settings-close(false); }
+            ScrollView {
+                x: 24px; y: 64px; width: parent.width - 48px; height: parent.height - 140px;
+                content-width: self.visible-width; content-height: close-settings-copy.preferred-height;
+                horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
+                close-settings-copy := Text {
+                    width: parent.width; height: self.preferred-height; wrap: word-wrap; font-size: Typography.body-size; color: Colors.secondary-foreground;
+                    text: @tr("Closing discards unapplied edits. Changes already submitted may still finish saving.");
+                }
+            }
+            HorizontalLayout {
+                x: 24px; y: parent.height - 64px; width: parent.width - 48px; height: 40px; spacing: Spacing.small; alignment: end;
+                keep-editing-button := SettingsButton { compact: true; label: @tr("Keep editing"); clicked => { root.finish-settings-close(false); } }
+                SettingsButton { compact: true; destructive: true; label: @tr("Discard and close"); clicked => { root.finish-settings-close(true); } }
+            }
+        }
+    }
+    delete-key-modal := SettingsFocusScope {
+        visible: root.credential-delete-dialog;
+        enabled: !root.settings-close-dialog;
+        x: 0px; y: 0px; width: root.width; height: root.height; z: 120;
+        key-pressed(event) => { if event.text == Key.Escape { root.finish-credential-delete(false); return accept; } return reject; }
+        Rectangle { width: parent.width; height: parent.height; background: Colors.foreground.with-alpha(0.30); TouchArea { } }
+        ProviderDialog {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            width: min(480px, parent.width - 48px); height: min(parent.height - 48px, delete-key-content.preferred-height + 140px);
+            title: @tr("Delete key"); dismissed => { root.finish-credential-delete(false); }
+            ScrollView {
+                x: 24px; y: 64px; width: parent.width - 48px; height: parent.height - 140px;
+                content-width: self.visible-width; content-height: delete-key-content.preferred-height;
+                horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
+                delete-key-content := VerticalLayout {
+                    x: 0px; y: 0px; width: parent.width; height: self.preferred-height; spacing: Spacing.small;
+                    Text { text: ["DeepL", "Ollama", "LM Studio", "DeepSeek"][root.credential-delete-provider < 0 ? 0 : root.credential-delete-provider]; font-weight: 600; font-size: Typography.body-size; color: Colors.foreground; }
+                    Text { text: @tr("Remove this API key from system storage?"); wrap: word-wrap; font-size: Typography.body-size; color: Colors.secondary-foreground; }
+                    Text { text: root.credential-delete-provider == 3 && root.deepseek-environment-key ? @tr("The environment key will be used again. Your environment and .env file are unchanged.") : @tr("You will need to enter the key again to reconnect."); wrap: word-wrap; font-size: 13px; color: Colors.secondary-foreground; }
+                }
+            }
+            HorizontalLayout {
+                x: 24px; y: parent.height - 64px; width: parent.width - 48px; height: 40px; spacing: Spacing.small; alignment: end;
+                cancel-delete-key := SettingsButton { compact: true; label: @tr("Cancel"); clicked => { root.finish-credential-delete(false); } }
+                SettingsButton { compact: true; destructive: true; label: @tr("Delete key"); enabled: !root.credential-busy && !root.credential-request-pending; clicked => { root.finish-credential-delete(true); } }
+            }
+        }
+    }
+    public function open-translation-selector() {
+        root.close-settings-menu(); root.close-app-language-menu();
+        root.translation-search = ""; root.translation-highlight = -1; root.translation-filter();
+        root.translation-selector-open = !root.translation-selector-open;
+        if root.translation-selector-open { translation-search-input.focus-input(); }
+    }
+    changed active-category => {
+        if root.active-category != 1 {
+            root.translation-selector-open = false;
+            if root.translation-settings-open { root.llm-cancel-translation(); root.translation-settings-open = false; }
+        }
+    }
+    translation-choice-focus := SettingsFocusScope {
+        visible: root.translation-selector-open && root.active-category == 1; z: 100;
+        width: root.width; height: root.height;
+        capture-key-pressed(event) => {
+            if event.text == Key.Escape { root.translation-selector-open = false; selector-focus.focus-target(); return accept; }
+            if event.text == Key.DownArrow || event.text == Key.UpArrow {
+                root.translation-move(event.text == Key.DownArrow ? 1 : -1);
+                if root.translation-highlight >= 0 { choices-viewport.content-y = min(0px, max(choices-viewport.visible-height - choices-viewport.content-height, -root.translation-choices[root.translation-highlight].top * 1px)); }
+                return accept;
+            }
+            if event.text == Key.Return && root.translation-highlight >= 0 { root.translation-selected(root.translation-highlight); return accept; }
+            return reject;
+        }
+        TouchArea { width: parent.width; height: parent.height; clicked => { root.translation-selector-open = false; selector-focus.focus-target(); } }
+        Rectangle {
+            x: max(12px, min(translation-selector.absolute-position.x, root.width - self.width - 12px));
+            y: max(12px, min(translation-selector.absolute-position.y + translation-selector.height + 6px, root.height - self.height - 12px));
+            width: min(500px, root.width - 24px); height: min(460px, root.height - 32px, max(180px, root.translation-list-height * 1px + 116px));
+            border-radius: 12px; border-width: 1px; border-color: Colors.outline; background: Colors.surface;
+            TouchArea { }
+            translation-search-input := ProviderInput { x: 12px; y: 12px; width: parent.width - 24px; text <=> root.translation-search; placeholder: @tr("Search models"); edited => { root.translation-filter(); } }
+            choices-viewport := ScrollView {
+                x: 8px; y: 64px; width: parent.width - 16px; height: parent.height - 116px;
+                content-width: self.visible-width; content-height: max(self.visible-height, root.translation-list-height * 1px);
+                horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
+                if root.translation-choices.length == 0: Text { x: 12px; y: 16px; width: parent.width - 24px; text: @tr("No matching models"); color: Colors.secondary-foreground; font-size: Typography.body-size; }
+                for choice[index] in root.translation-choices: Rectangle {
+                    y: choice.top * 1px; width: parent.width; height: choice.group == "" ? 48px : 76px;
+                    if choice.group != "": Text { x: 12px; y: 0px; height: 28px; text: choice.group; color: Colors.secondary-foreground; font-size: 13px; vertical-alignment: center; }
+                    Rectangle {
+                        y: choice.group == "" ? 0px : 28px; width: parent.width; height: 46px; border-radius: 8px;
+                        background: root.llm-translation-provider-index == choice.provider && (choice.provider == 0 || root.llm-selected-model == choice.id) ? Colors.background : choice-touch.has-hover || root.translation-highlight == index ? Colors.icon-button-hover : transparent;
+                        opacity: choice.usable ? 1 : Metrics.disabled-opacity;
+                        if root.llm-translation-provider-index == choice.provider && (choice.provider == 0 || root.llm-selected-model == choice.id): Rectangle { x: 0px; width: 3px; height: 26px; y: 10px; border-radius: 2px; background: #20bd69; }
+                        ProviderLogo { x: 12px; y: 12px; width: 22px; height: 22px; provider: choice.provider; }
+                        Text { x: 44px; y: choice.note == "" ? 0px : 1px; width: parent.width - 100px; height: choice.note == "" ? 46px : 25px; text: choice.id; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; overflow: elide; }
+                        if choice.note != "": Text { x: 44px; y: 25px; width: parent.width - 56px; height: 18px; text: choice.note; color: Colors.secondary-foreground; font-size: 11px; overflow: elide; }
+                        if choice.thinking: Image { x: parent.width - 32px; y: 14px; width: 18px; height: 18px; source: @image-url("icons/provider-thinking.svg"); colorize: Colors.primary; }
+                        choice-touch := TouchArea { mouse-cursor: choice.usable ? pointer : default;
+
+                            clicked => { if choice.usable && !root.translation-selecting { SettingsInteraction.pointer-input(); root.translation-selected(index); } }
+                        }
+                    }
+                }
+            }
+            Rectangle { y: parent.height - 48px; width: parent.width; height: 1px; background: Colors.outline; }
+            SettingsButton { x: 12px; y: parent.height - 42px; width: parent.width - 24px; compact: true; label: @tr("Manage models"); clicked => { root.manage-translation-models(); } }
+        }
+    }
+    if (selector-touch.has-hover && !root.translation-selector-open && selected-model-caption.preferred-width > selected-model-caption.width) && !root.translation-settings-open: Rectangle {
+        z: 105; x: max(12px, min(translation-selector.absolute-position.x, root.width - self.width - 12px));
+        y: min(root.height - self.height - 12px, translation-selector.absolute-position.y + translation-selector.height + 8px);
+        width: min(480px, root.width - 24px); height: translation-hint.preferred-height + 16px;
+        border-radius: 6px; background: Colors.foreground;
+        translation-hint := Text { x: 8px; y: 8px; width: parent.width - 16px; text: root.llm-selected-model; wrap: word-wrap; color: Colors.surface; font-size: 12px; }
+    }
+    translation-modal-focus := SettingsFocusScope {
+        visible: root.translation-settings-open; z: 110; width: root.width; height: root.height;
+        capture-key-pressed(event) => { if event.text == Key.Escape { root.cancel-translation-settings(); return accept; } return reject; }
+        Rectangle { width: parent.width; height: parent.height; background: Colors.foreground.with-alpha(0.30); TouchArea { } }
+        ProviderDialog {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            width: min(620px, parent.width - 32px); height: min(760px, parent.height - 32px);
+            title: @tr("Translation settings"); dismissed => { root.cancel-translation-settings(); }
+            translation-settings-viewport := ScrollView {
+                x: 24px; y: 64px; width: parent.width - 48px; height: parent.height - 144px;
+                content-width: self.visible-width; content-height: translation-fields.preferred-height;
+                horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
+                translation-fields := VerticalLayout { x: 0px; y: 0px; width: max(0px, translation-settings-viewport.visible-width - 12px); height: self.preferred-height; spacing: 12px; alignment: start;
+                    Text { text: "\{["DeepL", "Ollama", "LM Studio", "DeepSeek"][root.llm-translation-provider-index]} · \{root.llm-selected-model}"; color: Colors.secondary-foreground; font-size: 13px; wrap: word-wrap; }
+                    Text { text: @tr("Model parameters"); color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; }
+                    SettingsControlRow { label: @tr("Thinking effort");
+                        SettingsComboBox { model: root.llm-reasoning-options; placeholder: @tr("Unavailable"); current-index <=> root.llm-reasoning-index; enabled: root.llm-reasoning-options.length > 1; selected(index) => { root.llm-reasoning-selected(self.current-index); } }
+                    }
+                    Text { visible: root.llm-reasoning-note != ""; height: self.visible ? self.preferred-height : 0px; font-size: Typography.body-size; text: root.llm-reasoning-note; color: Colors.secondary-foreground; wrap: word-wrap; }
+                    SettingsToggleRow {
+                        label: @tr("Model temperature"); description: root.llm-temperature-custom ? @tr("Custom") : @tr("Model default");
+                        enabled: root.llm-temperature-available; checked: root.llm-temperature-custom;
+                        toggled(value) => { root.llm-temperature-custom = value; }
+                    }
+                    if root.llm-temperature-custom && root.llm-temperature-available: HorizontalLayout { spacing: Spacing.medium;
+                        Rectangle { height: 32px; min-width: 120px; horizontal-stretch: 1;
+                            Slider { y: (parent.height - self.height) / 2; width: parent.width; value: root.llm-temperature; maximum: root.llm-temperature-max; wheel-step: 1; changed value => { root.llm-temperature = round(self.value); } }
+                        }
+                        SpinBox { width: 110px; height: 32px; value <=> root.llm-temperature; minimum: 0; maximum: root.llm-temperature-max; display-divisor: 100; }
+                    }
+                    SettingsToggleRow {
+                        label: "Top-P"; description: root.llm-top-p-custom ? @tr("Custom") : @tr("Model default");
+                        enabled: root.llm-top-p-available; checked: root.llm-top-p-custom;
+                        toggled(value) => { root.llm-top-p-custom = value; }
+                    }
+                    if root.llm-top-p-custom && root.llm-top-p-available: HorizontalLayout { spacing: Spacing.medium;
+                        Rectangle { height: 32px; min-width: 120px; horizontal-stretch: 1;
+                            Slider { y: (parent.height - self.height) / 2; width: parent.width; value: root.llm-top-p; minimum: root.llm-top-p-min; maximum: 100; wheel-step: 1; changed value => { root.llm-top-p = round(self.value); } }
+                        }
+                        SpinBox { width: 110px; height: 32px; value <=> root.llm-top-p; minimum: root.llm-top-p-min; maximum: 100; display-divisor: 100; }
+                    }
+
+                    Rectangle { height: 1px; background: Colors.outline; }
+                    Text { text: @tr("Translation prompt"); color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; }
+                    Rectangle { height: 240px; border-radius: 6px; border-width: 1px; border-color: Colors.outline; background: Colors.surface;
+                        ScrollView { x: Spacing.small; y: Spacing.small; width: parent.width - 2 * Spacing.small; height: parent.height - 2 * Spacing.small;
+                            content-width: self.visible-width;
+                            TextInput {
+                                in property <int> focus-request: root.editor-focus-request;
+                                changed focus-request => { if root.editor-return-target == 4 && root.active-category == 1 && root.llm-prompt-expanded { self.focus(); self.set-selection-offsets(root.editor-return-anchor, root.editor-return-cursor); } }
+                                cursor-position-changed(position) => { if self.has-focus { root.remember-editor-selection(4, self.anchor-position-byte-offset, self.cursor-position-byte-offset); } }
+                                changed has-focus => { root.editor-focus-changed(4, self.has-focus); }
+                                width: parent.width; min-height: 220px; text <=> root.llm-prompt; wrap: word-wrap; color: Colors.foreground; font-size: Typography.body-size; selection-background-color: Colors.primary-container; }
+                        }
+                    }
+                    Text { font-size: Typography.body-size; text: @tr("Use {{target_language}} for the target language."); color: Colors.secondary-foreground; wrap: word-wrap; }
+                    FlexboxLayout { flex-wrap: wrap; spacing: Spacing.small;
+                        SettingsButton { label: @tr("Restore default prompt"); clicked => { root.reset-prompt-with-undo(); } }
+                    }
+                    if root.prompt-can-undo-reset: HorizontalLayout {
+                        spacing: Spacing.small;
+                        Text { text: @tr("Prompt restored to default."); color: Colors.secondary-foreground; font-size: 13px; wrap: word-wrap; vertical-alignment: center; horizontal-stretch: 1; }
+                        SettingsButton { compact: true; label: @tr("Undo"); clicked => { root.undo-prompt-reset(); } }
+                    }
+
+                    if !root.llm-prompt-valid: Text { text: @tr("Use {{target_language}} for the target language."); color: Colors.error; font-size: 13px; wrap: word-wrap; }
+                }
+            }
+            HorizontalLayout {
+                x: 24px; y: parent.height - 64px; width: parent.width - 48px; height: 40px; spacing: 12px; alignment: end;
+                SettingsButton { compact: true; label: @tr("Cancel"); enabled: !root.llm-translation-saving; clicked => { root.cancel-translation-settings(); } }
+                SettingsButton { compact: true; primary: true; label: root.llm-translation-saving ? @tr("Working…") : @tr("Apply"); enabled: root.llm-translation-can-apply && !root.llm-persisting && !root.credential-busy && !root.llm-translation-saving; clicked => { root.llm-save-translation(); } }
+            }
+        }
+    }
+    provider-modal-focus := SettingsFocusScope {
+        enabled: !root.settings-close-dialog;
         visible: root.active-category == 5 && (root.llm-advanced || root.llm-model-dialog || root.llm-probe-dialog);
         x: 0px; y: 0px; width: root.width; height: root.height; z: 110;
         key-pressed(event) => { if event.text == Key.Escape { root.close-provider-dialog(false); return accept; } return reject; }
@@ -2156,7 +1849,12 @@ export component SettingsWindow inherits Window {
                     Text { height: 24px; text: @tr("Protocol"); color: Colors.foreground; font-size: Typography.body-size; }
                     SettingsComboBox { model: [@tr("Native"), "OpenAI Chat Completions", "OpenAI Responses"]; current-index <=> root.llm-protocol-index; selected(index) => { root.llm-protocol-selected(index); } }
                     Text { height: 24px; text: "API Base URL"; color: Colors.foreground; font-size: Typography.body-size; }
-                    ProviderInput { text <=> root.llm-base-url; edited => { root.llm-base-edited(); } }
+                    ProviderInput { text <=> root.llm-base-url; edited => { root.llm-base-edited(); }
+                        focus-request: root.editor-focus-request; restore-focus: root.editor-return-target == 5 && root.llm-advanced;
+                        focus-state-changed(focused) => { root.editor-focus-changed(5, focused); }
+                        restore-anchor: root.editor-return-anchor; restore-cursor: root.editor-return-cursor;
+                        selection-changed(anchor, cursor) => { root.remember-editor-selection(5, anchor, cursor); }
+                    }
                     Text { text: root.llm-endpoints; color: Colors.secondary-foreground; font-size: 12px; wrap: word-wrap; height: self.preferred-height; }
                     Text { height: 24px; text: @tr("Authentication"); color: Colors.foreground; font-size: Typography.body-size; }
                     SettingsComboBox { model: [@tr("Automatic API key"), @tr("Custom request headers"), @tr("None")]; current-index <=> root.llm-auth-index; selected(index) => { root.llm-draft-changed(); } }
@@ -2170,8 +1868,18 @@ export component SettingsWindow inherits Window {
                         CredentialActionButton { icon-kind: 3; enabled: !root.credential-busy; clicked => { root.llm-header-remove(name); } }
                     }
                     if root.llm-header-editing: VerticalLayout { spacing: 8px;
-                        ProviderInput { text <=> root.llm-header-name; placeholder: @tr("Header name"); }
-                        ProviderInput { text <=> root.llm-header-value; placeholder: @tr("Header value"); secret: true; }
+                        ProviderInput { text <=> root.llm-header-name; placeholder: @tr("Header name");
+                            focus-request: root.editor-focus-request; restore-focus: root.editor-return-target == 6 && root.llm-advanced && root.llm-header-editing;
+                            focus-state-changed(focused) => { root.editor-focus-changed(6, focused); }
+                        restore-anchor: root.editor-return-anchor; restore-cursor: root.editor-return-cursor;
+                        selection-changed(anchor, cursor) => { root.remember-editor-selection(6, anchor, cursor); }
+                        }
+                        ProviderInput { text <=> root.llm-header-value; placeholder: @tr("Header value"); secret: true;
+                            focus-request: root.editor-focus-request; restore-focus: root.editor-return-target == 7 && root.llm-advanced && root.llm-header-editing;
+                            focus-state-changed(focused) => { root.editor-focus-changed(7, focused); }
+                        restore-anchor: root.editor-return-anchor; restore-cursor: root.editor-return-cursor;
+                        selection-changed(anchor, cursor) => { root.remember-editor-selection(7, anchor, cursor); }
+                        }
                         HorizontalLayout { alignment: end; spacing: 8px;
                             SettingsButton { compact: true; label: @tr("Cancel"); clicked => { root.llm-header-value = ""; root.llm-header-name = ""; root.llm-header-editing = false; } }
                             SettingsButton { compact: true; label: @tr("Save header"); enabled: root.llm-header-name != "" && root.llm-header-value != ""; clicked => { root.llm-header-save(); } }
@@ -2246,12 +1954,12 @@ export component SettingsWindow inherits Window {
                     horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
                     scrolled => { root.llm-model-hint = ""; }
                     discovered-rows := VerticalLayout { x: 0px; y: 0px; alignment: start; width: model-viewport.visible-width; height: self.preferred-height; spacing: 0px;
-                        for model in root.llm-catalog: ProviderModelItem { model: model; toggle => { root.llm-model-toggle(model.id, !model.enabled); } hint(text,x,y) => { root.llm-model-hint = text; root.llm-hint-x = x; root.llm-hint-y = y; } }
+                        for model in root.llm-catalog: ProviderModelItem { enabled: !root.llm-persisting; model: model; toggle => { root.llm-model-toggle(model.id, !model.enabled); } hint(text,x,y) => { root.llm-model-hint = text; root.llm-hint-x = x; root.llm-hint-y = y; } }
                     }
                     if root.llm-catalog.length == 0: Text { width: parent.width; height: 100px; text: root.llm-syncing ? @tr("Loading…") : @tr("No matching models"); color: Colors.secondary-foreground; font-size: Typography.body-size; horizontal-alignment: center; vertical-alignment: center; }
                 }
             HorizontalLayout { x: 24px; y: parent.height - 64px; width: parent.width - 48px; height: 40px; alignment: end; spacing: 8px;
-                SettingsButton { compact: true; label: @tr("Sync models"); enabled: !root.llm-syncing; clicked => { root.llm-refresh(false); } }
+                SettingsButton { compact: true; label: @tr("Sync models"); enabled: !root.llm-syncing && !root.llm-persisting; clicked => { root.llm-refresh(false); } }
                 SettingsButton { compact: true; label: @tr("Close"); clicked => { root.close-provider-dialog(false); } }
             }
         }

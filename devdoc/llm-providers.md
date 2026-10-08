@@ -99,3 +99,22 @@ Schema 8 保留 Schema 7 的服务／翻译解耦配置，并将既有选用模�
 ### 标识来源
 
 Ollama、LM Studio、DeepSeek 标识来自 [Cherry Studio Provider SVG](https://github.com/CherryHQ/cherry-studio/tree/main/packages/ui/icons/providers/light)，DeepL 来自 [Simple Icons](https://github.com/simple-icons/simple-icons/blob/develop/icons/deepl.svg)。仅用于识别对应服务；保留原有品牌图形，调整显示色或视口以适应列表。
+
+### 当前工作区复核（2026-10-08）
+
+- 复核 Provider 图标、保存启用绿点、关闭无提示、模型列表无更多菜单及检测队列接线；保留已有未提交改动。
+- 撤回尚未完成的设置编辑器焦点扩展：它从外层直接引用条件布局内的输入控件，导致 Slint 编译失败。恢复原有关闭确认焦点策略，不改动模型检测协议或数据。
+- 当前代码串行 UI 回归 339 项通过、10 项显式忽略；凭证回归 3 项通过。UI Clippy、fmt 和 diff 检查通过。
+- 复查已有实际 100%／125% 检测结果与齿轮关闭截图；本次未重新执行服务生成请求，不把历史实测计作新的实测。
+- 当前 Windows workspace Release 构建通过（3m16s），包含 Slint 编译；未暂存、提交或推送。
+
+
+## 翻译模型选择与设置（2026-10-08）
+
+- 翻译页使用一个紧凑选择器，DeepL 为独立服务项，大模型按 Provider 分组；列表来自已保存的本地目录，打开或搜索不会发现模型或执行生成。列表只展示已启用目录项，失效项保留原因且不可选择；当前失效选择仍显示在收起状态。
+- 模型选择通过 `TranslationSelection` 一次保存服务和模型，保存成功才更新选中状态，失败保持原选择；已有模型参数、共用提示词和连接目录均保留。保存前重新校验 Provider、目录与端点，阻止排队期间失效的选择。
+- 右侧配置按钮打开同一设置窗口内的“翻译设置”模态弹窗。模型参数按 Provider／模型保存，提示词共用；应用成功关闭，失败保留草稿，取消、关闭和 Escape 丢弃本次编辑。DeepL 不提供模型参数。没有自定义语言、绘画模型或无依据的能力筛选。
+- 参数应用使用 `TranslationOptions` 合并一个模型的参数与共用提示词，不改变模型选择或替换连接／目录。状态映射读取已持久化设置；每次保存有唯一请求标识，完成反馈只操作所属页面的匹配请求，旧反馈不会关闭新弹窗。
+- 软件渲染回归覆盖 12 种语言、100%／125% DPI、窄窗口、搜索、键盘选择、弹窗取消、失败及参数隔离；截图位于 `target/translation-picker-snapshots/`。原生验证使用隔离的测试配置，结束后恢复原配置，不进行模型发现、生成、安装或下载。
+
+验证记录：Core 100 项通过，UI 342 项通过（10 项现有性能测量默认忽略），App runtime 12 项通过；Core／UI／App Clippy（all-targets，-D warnings）、Slint 编译、格式及差异检查和 Windows Release 构建通过。原生 100%／125% 双屏验证了分组搜索、服务／模型切换立即写入配置、返回原服务、弹窗 Escape、切页返回及窄窗口；测试退出后恢复原配置并销毁测试进程。实际截图为 `target/translation-picker-native-{list,settings,selected,narrow}-{100,125}.png`，记录见 `target/translation-picker-native.log`。本轮未向真实服务发送生成请求；模型质量、服务离线后的生成及网络协议未重新实测，相关行为沿用原实现和已有回归。

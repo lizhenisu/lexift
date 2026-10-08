@@ -1,0 +1,31 @@
+// Globals are owned by the Settings component instance, not the process.
+export global SettingsInteraction {
+    in-out property <bool> keyboard-mode;
+    out property <int> epoch;
+    public function invalidate() { self.epoch += 1; }
+    public function pointer-input() { self.keyboard-mode = false; }
+    public function reset() { self.keyboard-mode = false; self.invalidate(); }
+    public function key-input(text: string) {
+        if text == Key.Tab || text == Key.Backtab || text == Key.UpArrow || text == Key.DownArrow
+            || text == Key.LeftArrow || text == Key.RightArrow || text == Key.Home || text == Key.End
+            || text == Key.Return || text == " " || text == Key.Escape { self.keyboard-mode = true; }
+    }
+}
+
+// Keep real focus for keyboard continuity, but paint only the current keyboard target.
+export component SettingsFocusScope inherits FocusScope {
+    private property <int> focus-epoch: -1;
+    public function refresh-focus() { if self.has-focus { root.focus-epoch = SettingsInteraction.epoch; } }
+    public function focus-target() { self.focus(); root.refresh-focus(); }
+    out property <bool> focus-visible: self.enabled && self.has-focus
+        && root.focus-epoch == SettingsInteraction.epoch
+        && SettingsInteraction.keyboard-mode;
+    // Slint may use tab-navigation while finding a fallback after a node disappears.
+    // That reason is not evidence of a user key press.
+    focus-changed-event => { root.refresh-focus(); }
+    capture-key-pressed(event) => {
+        SettingsInteraction.key-input(event.text);
+        root.refresh-focus();
+        return reject;
+    }
+}

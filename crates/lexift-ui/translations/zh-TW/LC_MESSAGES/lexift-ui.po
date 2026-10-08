@@ -1284,3 +1284,42 @@ msgstr "模型未傳回完整文字"
 
 msgid "Model test failed; check connection and model compatibility"
 msgstr "模型檢測失敗，請檢查連線和模型相容性"
+
+msgid "Remove this API key from system storage?"
+msgstr "從系統憑證儲存區刪除此 API 金鑰？"
+
+msgid "You will need to enter the key again to reconnect."
+msgstr "重新連線時需要再次輸入金鑰。"
+
+msgid "The environment key will be used again. Your environment and .env file are unchanged."
+msgstr "刪除後將恢復使用環境變數中的金鑰；不會修改環境變數或 .env 檔案。"
+
+msgid "Prompt restored to default."
+msgstr "已還原預設提示詞。"
+
+msgid "Undo"
+msgstr "復原"
+
+msgid "Unsaved changes to this model or the shared prompt"
+msgstr "此模型或共用提示詞有尚未儲存的變更"
+
+msgid "Unsaved changes"
+msgstr "未儲存的變更"
+
+msgid "Closing discards unapplied edits. Changes already submitted may still finish saving."
+msgstr "關閉將捨棄尚未套用的編輯。已提交的變更仍可能完成儲存。"
+
+msgid "Keep editing"
+msgstr "繼續編輯"
+
+msgid "Discard and close"
+msgstr "捨棄並關閉"
+
+msgid "Translation model"
+msgstr "翻譯模型"
+
+msgid "Model used for translation"
+msgstr "翻譯服務使用的模型"
+
+msgid "DeepL does not use model parameters"
+msgstr "DeepL 不使用大型語言模型參數"

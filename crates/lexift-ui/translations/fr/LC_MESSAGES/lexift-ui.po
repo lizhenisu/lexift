@@ -1284,3 +1284,42 @@ msgstr "Le modèle n’a pas renvoyé de texte complet"
 
 msgid "Model test failed; check connection and model compatibility"
 msgstr "Échec du test ; vérifiez la connexion et la compatibilité du modèle"
+
+msgid "Remove this API key from system storage?"
+msgstr "Supprimer cette clé API du stockage système ?"
+
+msgid "You will need to enter the key again to reconnect."
+msgstr "Vous devrez saisir à nouveau la clé pour vous reconnecter."
+
+msgid "The environment key will be used again. Your environment and .env file are unchanged."
+msgstr "La clé de l’environnement sera de nouveau utilisée. L’environnement et le fichier .env restent inchangés."
+
+msgid "Prompt restored to default."
+msgstr "Instruction par défaut rétablie."
+
+msgid "Undo"
+msgstr "Annuler"
+
+msgid "Unsaved changes to this model or the shared prompt"
+msgstr "Modifications non enregistrées du modèle ou de l’instruction partagée"
+
+msgid "Unsaved changes"
+msgstr "Modifications non enregistrées"
+
+msgid "Closing discards unapplied edits. Changes already submitted may still finish saving."
+msgstr "La fermeture abandonne les modifications non appliquées. Les modifications déjà envoyées peuvent encore être enregistrées."
+
+msgid "Keep editing"
+msgstr "Continuer à modifier"
+
+msgid "Discard and close"
+msgstr "Abandonner et fermer"
+
+msgid "Translation model"
+msgstr "Modèle de traduction"
+
+msgid "Model used for translation"
+msgstr "Modèle utilisé pour la traduction"
+
+msgid "DeepL does not use model parameters"
+msgstr "DeepL n’utilise pas de paramètres de modèle"

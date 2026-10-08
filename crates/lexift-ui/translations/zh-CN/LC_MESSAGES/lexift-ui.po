@@ -1284,3 +1284,42 @@ msgstr "模型未返回完整文本"
 
 msgid "Model test failed; check connection and model compatibility"
 msgstr "模型检测失败，请检查连接和模型兼容性"
+
+msgid "Remove this API key from system storage?"
+msgstr "从系统凭证存储中删除此 API 密钥？"
+
+msgid "You will need to enter the key again to reconnect."
+msgstr "重新连接时需要再次输入密钥。"
+
+msgid "The environment key will be used again. Your environment and .env file are unchanged."
+msgstr "删除后将恢复使用环境变量中的密钥；不会修改环境变量或 .env 文件。"
+
+msgid "Prompt restored to default."
+msgstr "已恢复默认提示词。"
+
+msgid "Undo"
+msgstr "撤销"
+
+msgid "Unsaved changes to this model or the shared prompt"
+msgstr "此模型或共用提示词有未保存的修改"
+
+msgid "Unsaved changes"
+msgstr "未保存的更改"
+
+msgid "Closing discards unapplied edits. Changes already submitted may still finish saving."
+msgstr "关闭将放弃尚未应用的编辑。已提交的更改仍可能完成保存。"
+
+msgid "Keep editing"
+msgstr "继续编辑"
+
+msgid "Discard and close"
+msgstr "放弃并关闭"
+
+msgid "Translation model"
+msgstr "翻译模型"
+
+msgid "Model used for translation"
+msgstr "翻译服务使用的模型"
+
+msgid "DeepL does not use model parameters"
+msgstr "DeepL 不使用大模型参数"

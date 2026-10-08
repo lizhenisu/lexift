@@ -492,7 +492,7 @@ impl AppState {
                 self.settings_error_field = None;
                 self.clear_settings_field_error(change.field());
                 let mut commands = vec![AppCommand::ShowSettingsFeedback {
-                    feedback: SettingsFeedback::SettingsSaved(change.field()),
+                    feedback: change.feedback(true),
                 }];
                 commands.extend(self.start_next_settings_change());
                 commands
@@ -509,7 +509,7 @@ impl AppState {
                 );
                 self.restore_desired_field_after_failure(change.field());
                 let mut commands = vec![AppCommand::ShowSettingsFeedback {
-                    feedback: SettingsFeedback::SettingsSaveFailed(change.field()),
+                    feedback: change.feedback(false),
                 }];
                 commands.extend(self.start_next_settings_change());
                 commands
@@ -523,7 +523,7 @@ impl AppState {
                 self.set_settings_field_error(change.field(), self.settings_error_message.clone());
                 self.restore_desired_field_after_failure(change.field());
                 let mut commands = vec![AppCommand::ShowSettingsFeedback {
-                    feedback: SettingsFeedback::SettingsSaveFailed(change.field()),
+                    feedback: change.feedback(false),
                 }];
                 commands.extend(self.start_next_settings_change());
                 commands
@@ -806,6 +806,13 @@ impl AppState {
                 feedback: SettingsFeedback::SettingsSaveFailed(SettingsField::Llm),
             }];
         }
+        if let Err(error) = change.validate_translation_change(&self.desired_settings) {
+            self.settings_error_field = Some(change.field());
+            self.set_settings_field_error(change.field(), error.to_string());
+            return vec![AppCommand::ShowSettingsFeedback {
+                feedback: change.feedback(false),
+            }];
+        }
         change.apply_to(&mut self.desired_settings);
         if self.settings_saving || self.credential_busy {
             self.queued_settings_changes
@@ -831,8 +838,31 @@ impl AppState {
                 }
             }
         }
+        if let Err(error) = change.validate_translation_change(&self.settings) {
+            self.settings_error_field = Some(change.field());
+            self.set_settings_field_error(change.field(), error.to_string());
+            self.restore_desired_field_after_failure(change.field());
+            let mut commands = vec![AppCommand::ShowSettingsFeedback {
+                feedback: change.feedback(false),
+            }];
+            commands.extend(self.start_next_settings_change());
+            return commands;
+        }
         if change.matches(&self.settings) {
-            return self.start_next_settings_change();
+            let mut commands = self.start_next_settings_change();
+            if matches!(
+                &change,
+                SettingsChange::TranslationSelection { .. }
+                    | SettingsChange::TranslationOptions { .. }
+            ) {
+                commands.insert(
+                    0,
+                    AppCommand::ShowSettingsFeedback {
+                        feedback: change.feedback(true),
+                    },
+                );
+            }
+            return commands;
         }
         let mut settings = self.settings.clone();
         change.apply_to(&mut settings);
@@ -856,9 +886,11 @@ impl AppState {
             SettingsField::TargetLanguage => self.target_language_settings_error.clear(),
             SettingsField::Hotkey => self.hotkey_settings_error.clear(),
             SettingsField::AnnotationHotkey => self.annotation_hotkey_settings_error.clear(),
-            SettingsField::Provider | SettingsField::Ollama | SettingsField::Llm => {
-                self.provider_settings_error.clear()
-            }
+            SettingsField::Provider
+            | SettingsField::Ollama
+            | SettingsField::Llm
+            | SettingsField::TranslationSelection
+            | SettingsField::TranslationOptions => self.provider_settings_error.clear(),
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error.clear(),
             SettingsField::SelectionToolbar | SettingsField::Theme | SettingsField::UiLanguage => {}
         }
@@ -869,9 +901,11 @@ impl AppState {
             SettingsField::TargetLanguage => self.target_language_settings_error = error,
             SettingsField::Hotkey => self.hotkey_settings_error = error,
             SettingsField::AnnotationHotkey => self.annotation_hotkey_settings_error = error,
-            SettingsField::Provider | SettingsField::Ollama | SettingsField::Llm => {
-                self.provider_settings_error = error
-            }
+            SettingsField::Provider
+            | SettingsField::Ollama
+            | SettingsField::Llm
+            | SettingsField::TranslationSelection
+            | SettingsField::TranslationOptions => self.provider_settings_error = error,
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error = error,
             SettingsField::SelectionToolbar | SettingsField::Theme | SettingsField::UiLanguage => {
                 self.settings_error_message = error;
@@ -901,7 +935,13 @@ impl AppState {
             }
             SettingsField::Provider => self.desired_settings.provider = self.settings.provider,
             SettingsField::Ollama => self.desired_settings.ollama = self.settings.ollama.clone(),
-            SettingsField::Llm => self.desired_settings.llm = self.settings.llm.clone(),
+            SettingsField::Llm | SettingsField::TranslationOptions => {
+                self.desired_settings.llm = self.settings.llm.clone()
+            }
+            SettingsField::TranslationSelection => {
+                self.desired_settings.provider = self.settings.provider;
+                self.desired_settings.llm = self.settings.llm.clone();
+            }
             SettingsField::LaunchAtLogin => {
                 self.desired_settings.launch_at_login = self.settings.launch_at_login;
             }

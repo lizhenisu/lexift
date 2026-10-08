@@ -1284,3 +1284,42 @@ msgstr "モデルが完全なテキストを返しませんでした"
 
 msgid "Model test failed; check connection and model compatibility"
 msgstr "テストに失敗しました。接続とモデルの互換性を確認してください"
+
+msgid "Remove this API key from system storage?"
+msgstr "この API キーをシステムの資格情報ストアから削除しますか？"
+
+msgid "You will need to enter the key again to reconnect."
+msgstr "再接続するにはキーを再入力する必要があります。"
+
+msgid "The environment key will be used again. Your environment and .env file are unchanged."
+msgstr "環境変数のキーが再び使用されます。環境変数と .env ファイルは変更されません。"
+
+msgid "Prompt restored to default."
+msgstr "既定のプロンプトに戻しました。"
+
+msgid "Undo"
+msgstr "元に戻す"
+
+msgid "Unsaved changes to this model or the shared prompt"
+msgstr "このモデルまたは共通プロンプトに未保存の変更があります"
+
+msgid "Unsaved changes"
+msgstr "未保存の変更"
+
+msgid "Closing discards unapplied edits. Changes already submitted may still finish saving."
+msgstr "閉じると未適用の編集は破棄されます。送信済みの変更は引き続き保存される場合があります。"
+
+msgid "Keep editing"
+msgstr "編集を続ける"
+
+msgid "Discard and close"
+msgstr "破棄して閉じる"
+
+msgid "Translation model"
+msgstr "翻訳モデル"
+
+msgid "Model used for translation"
+msgstr "翻訳に使用するモデル"
+
+msgid "DeepL does not use model parameters"
+msgstr "DeepL はモデルパラメーターを使用しません"
