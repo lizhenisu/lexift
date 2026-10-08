@@ -597,3 +597,19 @@ pub fn cancel_window_resize_tracking(
 ) -> lexift_core::Result<()> {
     Ok(())
 }
+
+/// Opens a user-requested HTTPS link through the default system browser.
+pub fn open_web_link(url: &str) -> lexift_core::Result<()> {
+    if !url.starts_with("https://") || url.contains(['\0', '\r', '\n']) {
+        return Err(lexift_core::Error::new("Invalid web link"));
+    }
+    #[cfg(target_os = "windows")]
+    return windows::browser::open(url);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = url;
+        Err(lexift_core::Error::new(
+            "Opening web links is not supported",
+        ))
+    }
+}

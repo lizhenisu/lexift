@@ -8,6 +8,7 @@ pub(super) mod annotation_save;
 mod annotation_window_order;
 pub(super) mod app_icon;
 mod autostart;
+pub(super) mod browser;
 mod clipboard;
 mod clipboard_selection;
 mod d3d_compare;

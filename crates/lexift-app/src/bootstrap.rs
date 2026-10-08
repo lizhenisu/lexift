@@ -206,6 +206,10 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 }
             },
         )
+        .with_about_links(|link| match lexift_platform::open_web_link(link.url()) {
+            Ok(()) => true,
+            Err(error) => { tracing::warn!(%error, "About link could not be opened"); false }
+        })
         .with_app_window_preparation(|window, role| {
             match window.with_winit_window(|native| lexift_platform::configure_window_shell_role(native, role == lexift_ui::WindowRole::Settings)) {
                 Some(Ok(())) => lexift_ui::PassiveWindowPreparation::Ready,

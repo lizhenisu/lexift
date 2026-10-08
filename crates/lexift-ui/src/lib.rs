@@ -1,3 +1,5 @@
+mod about;
+pub use about::AboutLink;
 mod annotation;
 mod annotation_fingerprint;
 mod annotation_path;

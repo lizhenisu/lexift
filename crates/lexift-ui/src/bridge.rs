@@ -173,6 +173,7 @@ pub struct WindowLifecycleCallbacks {
     configure_window_paint_repair: ConfigureWindowPaintRepair,
     configure_app_window_icon: fn(&slint::Window) -> bool,
     prepare_app_window: PrepareAppWindow,
+    open_about_link: Rc<dyn Fn(crate::AboutLink) -> bool>,
 }
 
 impl WindowLifecycleCallbacks {
@@ -232,7 +233,13 @@ impl WindowLifecycleCallbacks {
             configure_window_paint_repair: Rc::new(|_, _| true),
             configure_app_window_icon: |_| true,
             prepare_app_window: Rc::new(|_, _| PassiveWindowPreparation::Ready),
+            open_about_link: Rc::new(|_| false),
         }
+    }
+
+    pub fn with_about_links(mut self, open: impl Fn(crate::AboutLink) -> bool + 'static) -> Self {
+        self.open_about_link = Rc::new(open);
+        self
     }
 
     pub fn with_app_window_preparation(
@@ -2102,6 +2109,7 @@ struct AppWindowRegistry {
     configure_window_paint_repair: ConfigureWindowPaintRepair,
     configure_app_window_icon: fn(&slint::Window) -> bool,
     prepare_app_window: PrepareAppWindow,
+    open_about_link: Rc<dyn Fn(crate::AboutLink) -> bool>,
     latest_state: AppState,
     show_selection_demo: bool,
     handler: Option<Rc<dyn Fn(AppEvent)>>,
@@ -2276,6 +2284,7 @@ fn ensure_settings_window(
         return Ok(settings.clone_strong());
     }
     let settings = SettingsWindow::new()?;
+    crate::about::wire(&settings, registry.open_about_link.clone());
     // Observe pointer input without consuming it; blank space and editors also
     // end keyboard-only button styling. The weak callback dies with this window.
     {
@@ -2739,6 +2748,7 @@ impl Ui {
                 ),
                 configure_app_window_icon: window_lifecycle.configure_app_window_icon,
                 prepare_app_window: Rc::clone(&window_lifecycle.prepare_app_window),
+                open_about_link: Rc::clone(&window_lifecycle.open_about_link),
                 latest_state: initial_state.clone(),
                 show_selection_demo,
                 handler: None,

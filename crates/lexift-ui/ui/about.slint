@@ -1,0 +1,79 @@
+import { Colors } from "design/colors.slint";
+import { Spacing } from "design/spacing.slint";
+import { Typography } from "design/typography.slint";
+import { Metrics } from "design/metrics.slint";
+import { AppAssets } from "design/assets.slint";
+import { SettingsScrollArea } from "settings-scroll-area.slint";
+import { SettingsColors } from "settings-colors.slint";
+import { SettingsInteraction, SettingsFocusScope } from "settings-interaction.slint";
+
+component AboutLinkRow inherits Rectangle {
+    in property <string> label;
+    in property <string> detail;
+    callback activated();
+    height: row.preferred-height + 2 * Spacing.medium;
+    border-radius: 8px;
+    border-width: keyboard.focus-visible ? 1px : 0px; border-color: Colors.primary;
+    background: SettingsColors.interactive(transparent, touch.has-hover, touch.pressed, false);
+    accessible-role: button; accessible-label: root.label;
+    accessible-action-default => { root.activated(); }
+    forward-focus: keyboard;
+    row := VerticalLayout {
+        x: Spacing.medium; y: Spacing.medium;
+        width: parent.width - 2 * Spacing.medium; height: self.preferred-height;
+        spacing: Spacing.small;
+        Text { text: root.label; color: Colors.primary; font-size: Typography.body-size; wrap: word-wrap; }
+        Text { text: root.detail; color: Colors.secondary-foreground; font-size: Typography.compact-size; wrap: word-wrap; }
+    }
+    keyboard := SettingsFocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == Key.Space { root.activated(); return accept; }
+            return reject;
+        }
+    }
+    touch := TouchArea { mouse-cursor: pointer;
+        clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.activated(); }
+    }
+}
+
+export component AboutPage inherits SettingsScrollArea {
+    in property <string> version;
+    in property <bool> link-failed;
+    callback open-link(int);
+    content-width: self.visible-width;
+    content-height: max(self.visible-height, content.y + content.height + Metrics.settings-page-padding);
+    content := VerticalLayout {
+        x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
+        width: root.visible-width - 2 * Metrics.settings-page-padding;
+        height: self.preferred-height; spacing: Metrics.settings-card-gap;
+        Rectangle {
+            background: Colors.surface; border-radius: 12px;
+            height: intro.preferred-height;
+            intro := VerticalLayout {
+                padding: Spacing.large; spacing: Spacing.medium;
+                HorizontalLayout { spacing: Spacing.medium; alignment: start;
+                    Image { source: AppAssets.app-icon; width: 48px; height: 48px; image-fit: contain; }
+                    Text { text: "Lexift"; color: Colors.foreground; font-size: Typography.title-size; font-weight: 700; vertical-alignment: center; }
+                }
+                Text { text: @tr("Read with ease. Express with clarity."); color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; wrap: word-wrap; }
+                Text { text: @tr("A desktop tool for selection translation, text translation and screen annotation."); color: Colors.secondary-foreground; font-size: Typography.body-size; wrap: word-wrap; }
+                Text { text: @tr("Version") + " " + root.version; color: Colors.secondary-foreground; font-size: Typography.compact-size; wrap: word-wrap; }
+            }
+        }
+        Rectangle {
+            background: Colors.surface; border-radius: 12px;
+            height: links.preferred-height;
+            links := VerticalLayout {
+                padding: Spacing.small; spacing: 0px;
+                AboutLinkRow { label: @tr("Project homepage"); detail: "github.com/lizhenisu/lexift"; activated => { root.open-link(0); } }
+                Rectangle { height: 1px; background: Colors.outline; }
+                AboutLinkRow { label: @tr("Report an issue"); detail: @tr("Report problems or share suggestions to help improve Lexift."); activated => { root.open-link(1); } }
+                Rectangle { height: 1px; background: Colors.outline; }
+                AboutLinkRow { label: @tr("Open-source license"); detail: "GPL-3.0-only"; activated => { root.open-link(2); } }
+            }
+        }
+        if root.link-failed: Text {
+            text: @tr("Could not open the browser. Please try again."); color: Colors.error; font-size: Typography.compact-size; wrap: word-wrap;
+        }
+    }
+}

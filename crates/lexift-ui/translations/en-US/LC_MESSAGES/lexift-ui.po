@@ -1323,3 +1323,30 @@ msgstr "Model used for translation"
 
 msgid "DeepL does not use model parameters"
 msgstr "DeepL does not use model parameters"
+
+msgid "About"
+msgstr "About"
+
+msgid "Read with ease. Express with clarity."
+msgstr "Read with ease. Express with clarity."
+
+msgid "A desktop tool for selection translation, text translation and screen annotation."
+msgstr "A desktop tool for selection translation, text translation and screen annotation."
+
+msgid "Version"
+msgstr "Version"
+
+msgid "Project homepage"
+msgstr "Project homepage"
+
+msgid "Report an issue"
+msgstr "Report an issue"
+
+msgid "Report problems or share suggestions to help improve Lexift."
+msgstr "Report problems or share suggestions to help improve Lexift."
+
+msgid "Open-source license"
+msgstr "Open-source license"
+
+msgid "Could not open the browser. Please try again."
+msgstr "Could not open the browser. Please try again."

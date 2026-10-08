@@ -1323,3 +1323,30 @@ msgstr "翻譯服務使用的模型"
 
 msgid "DeepL does not use model parameters"
 msgstr "DeepL 不使用大型語言模型參數"
+
+msgid "About"
+msgstr "關於"
+
+msgid "Read with ease. Express with clarity."
+msgstr "讓閱讀更流暢，讓表達更清晰。"
+
+msgid "A desktop tool for selection translation, text translation and screen annotation."
+msgstr "一款整合選詞翻譯、輸入翻譯與螢幕標註的桌面工具。"
+
+msgid "Version"
+msgstr "版本"
+
+msgid "Project homepage"
+msgstr "專案首頁"
+
+msgid "Report an issue"
+msgstr "問題回報"
+
+msgid "Report problems or share suggestions to help improve Lexift."
+msgstr "回報問題或提出建議，協助 Lexift 持續改進。"
+
+msgid "Open-source license"
+msgstr "開源授權"
+
+msgid "Could not open the browser. Please try again."
+msgstr "無法開啟瀏覽器，請重試。"

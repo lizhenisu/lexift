@@ -970,6 +970,138 @@ mod tests {
     }
 
     #[test]
+    fn about_navigation_links_feedback_and_localized_layout() {
+        use slint::platform::{Key, PointerEventButton, WindowEvent};
+        use std::cell::Cell;
+        let last = Rc::new(RefCell::new(None));
+        slint::platform::set_platform(Box::new(TestPlatform(last.clone()))).unwrap();
+        let settings = crate::SettingsWindow::new().unwrap();
+        let adapter = last.borrow().as_ref().unwrap().clone();
+        let opened = Rc::new(RefCell::new(Vec::new()));
+        let succeed = Rc::new(Cell::new(true));
+        let records = opened.clone();
+        let result = succeed.clone();
+        crate::about::wire(
+            &settings,
+            Rc::new(move |link| {
+                records.borrow_mut().push(link);
+                result.get()
+            }),
+        );
+        assert_eq!(settings.get_about_version(), env!("CARGO_PKG_VERSION"));
+        assert!(
+            opened.borrow().is_empty(),
+            "creating About never opens the browser"
+        );
+        adapter.set_size(slint::PhysicalSize::new(960, 800));
+        settings.invoke_select_category(5);
+        let left = Rc::new(Cell::new(0));
+        let count = left.clone();
+        settings.on_llm_page_left(move || count.set(count.get() + 1));
+        settings.set_llm_base_url("http://draft.invalid".into());
+        let draw = || {
+            slint::platform::update_timers_and_animations();
+            adapter.request_redraw();
+            adapter.draw_if_needed(|r| {
+                r.render(&mut vec![slint::Rgb8Pixel::default(); 960 * 800], 960);
+            });
+        };
+        draw();
+        let position = slint::LogicalPosition::new(70., 288.);
+        for event in [
+            WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Left,
+            },
+            WindowEvent::PointerReleased {
+                position,
+                button: PointerEventButton::Left,
+            },
+        ] {
+            settings.window().dispatch_event(event);
+        }
+        for text in [Key::DownArrow, Key::Return] {
+            settings
+                .window()
+                .dispatch_event(WindowEvent::KeyPressed { text: text.into() });
+            settings
+                .window()
+                .dispatch_event(WindowEvent::KeyReleased { text: text.into() });
+        }
+        assert_eq!(settings.get_active_category(), 6);
+        assert_eq!(left.get(), 1);
+        assert_eq!(settings.get_llm_base_url(), "http://draft.invalid");
+        // The scroll view may receive the first Tab; links remain reachable in order.
+        draw();
+        for _ in 0..4 {
+            for text in [Key::Tab, Key::Return] {
+                settings
+                    .window()
+                    .dispatch_event(WindowEvent::KeyPressed { text: text.into() });
+                settings
+                    .window()
+                    .dispatch_event(WindowEvent::KeyReleased { text: text.into() });
+                draw();
+            }
+            if !opened.borrow().is_empty() {
+                break;
+            }
+        }
+        assert_eq!(*opened.borrow(), vec![crate::AboutLink::Project]);
+        opened.borrow_mut().clear();
+        for index in 0..3 {
+            settings.invoke_about_link_requested(index);
+            assert!(!settings.get_about_link_failed());
+        }
+        assert_eq!(
+            *opened.borrow(),
+            vec![
+                crate::AboutLink::Project,
+                crate::AboutLink::Feedback,
+                crate::AboutLink::License
+            ]
+        );
+        assert_eq!(
+            crate::AboutLink::License.url(),
+            "https://github.com/lizhenisu/lexift/blob/main/LICENSE"
+        );
+        succeed.set(false);
+        settings.invoke_about_link_requested(1);
+        assert!(settings.get_about_link_failed());
+        settings.invoke_select_category(0);
+        settings.invoke_select_category(6);
+        assert!(!settings.get_about_link_failed());
+        settings.invoke_about_link_requested(99);
+        assert_eq!(opened.borrow().len(), 4);
+        settings.window().dispatch_event(WindowEvent::PointerExited);
+        settings.invoke_reset_button_visuals();
+        for language in UiLanguage::ALL {
+            slint::select_bundled_translation(language.code()).unwrap();
+            for scale in [1., 1.25] {
+                settings
+                    .window()
+                    .dispatch_event(WindowEvent::ScaleFactorChanged {
+                        scale_factor: scale,
+                    });
+                for width in [580, 960] {
+                    for dark in [false, true] {
+                        settings
+                            .global::<crate::Colors>()
+                            .set_preference(i32::from(dark));
+                        snapshot(
+                            &adapter,
+                            &format!("about-{}-{width}-{scale}-{dark}", language.code()),
+                            (width as f32 * scale) as u32,
+                            (800. * scale) as u32,
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(opened.borrow().len(), 4, "rendering is offline");
+    }
+
+    #[test]
     fn all_languages_update_existing_windows_without_losing_user_state() {
         let last = Rc::new(RefCell::new(None));
         slint::platform::set_platform(Box::new(TestPlatform(last.clone()))).unwrap();
@@ -1027,7 +1159,7 @@ mod tests {
                 settings
                     .global::<crate::Colors>()
                     .set_preference(i32::from(dark));
-                for page in [0, 2, 1, 5] {
+                for page in [0, 2, 1, 5, 6] {
                     settings.set_active_category(page);
                     snapshot(
                         &settings_adapter,
@@ -1037,6 +1169,7 @@ mod tests {
                     );
                 }
             }
+            settings.set_active_category(5);
             if matches!(
                 language,
                 UiLanguage::EnglishUs | UiLanguage::SimplifiedChinese | UiLanguage::German

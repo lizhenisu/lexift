@@ -1,3 +1,4 @@
+import { AboutPage } from "about.slint";
 import { SettingsHints, SettingsHintTarget, SettingsHintOverlay } from "settings-hint.slint";
 import { SettingsScrollArea } from "settings-scroll-area.slint";
 import { SettingsColors } from "settings-colors.slint";
@@ -656,7 +657,7 @@ component SettingsNavItem inherits Rectangle {
     border-width: nav-focus.focus-visible ? 1px : 0px; border-color: Colors.primary;
     background: SettingsColors.interactive(transparent, nav-touch.has-hover, nav-touch.pressed, root.selected);
 
-    Path {
+    if root.icon-kind != 6: Path {
         x: root.expanded ? Spacing.medium : (parent.width - Metrics.icon-size) / 2;
         y: (parent.height - Metrics.icon-size) / 2;
         width: Metrics.icon-size;
@@ -677,6 +678,12 @@ component SettingsNavItem inherits Rectangle {
         fill: root.icon-kind == 5 ? transparent : root.selected ? Colors.primary : Colors.secondary-foreground;
         stroke: root.icon-kind == 5 ? (root.selected ? Colors.primary : Colors.secondary-foreground) : transparent;
         stroke-width: root.icon-kind == 5 ? 1.6px : 0px;
+    }
+
+    if root.icon-kind == 6: Image {
+        x: root.expanded ? Spacing.medium : (parent.width - Metrics.icon-size) / 2;
+        y: (parent.height - Metrics.icon-size) / 2; width: Metrics.icon-size; height: Metrics.icon-size;
+        source: @image-url("icons/about.svg"); colorize: root.selected ? Colors.primary : Colors.secondary-foreground;
     }
 
     if root.expanded: Text {
@@ -715,6 +722,9 @@ component SettingsNavItem inherits Rectangle {
 }
 
 export component SettingsWindow inherits Window {
+    in property <string> about-version;
+    in-out property <bool> about-link-failed;
+    callback about-link-requested(int);
     in-out property <[TranslationChoice]> translation-choices;
     in-out property <string> translation-search;
     in-out property <int> translation-list-height;
@@ -921,7 +931,7 @@ export component SettingsWindow inherits Window {
     // Match the navigation text's font and leave room for the icon and both margins.
     navigation-measure := Text {
         visible: false; font-size: Typography.body-size; font-weight: 600;
-        text: @tr("General") + "\n" + @tr("Hotkeys") + "\n" + @tr("Selection Assistant") + "\n" + @tr("Screenshot settings") + "\n" + @tr("Translation settings") + "\n" + @tr("Service providers");
+        text: @tr("General") + "\n" + @tr("Hotkeys") + "\n" + @tr("Selection Assistant") + "\n" + @tr("Screenshot settings") + "\n" + @tr("Translation settings") + "\n" + @tr("Service providers") + "\n" + @tr("About");
     }
     private property <bool> expanded-navigation: root.width >= Metrics.settings-wide-nav-breakpoint;
     private property <length> sidebar-width: root.expanded-navigation ? max(Metrics.settings-sidebar-width, navigation-measure.preferred-width + 100px) : Metrics.settings-sidebar-compact-width;
@@ -1058,13 +1068,14 @@ export component SettingsWindow inherits Window {
         root.credential-delete-dialog = false; root.prompt-reset-undo = false; root.prompt-before-reset = ""; root.prompt-reset-value = "";
         root.close-settings-menu(); root.close-app-language-menu(); root.hotkey-capturing = false; root.annotation-hotkey-capturing = false; root.active-category = 0; root.llm-page-left();
         general-scroll.content-y = 0px; translation-scroll.content-y = 0px; providers-scroll.content-y = 0px;
-        hotkeys-scroll.content-y = 0px;
+        hotkeys-scroll.content-y = 0px; about-page.content-y = 0px; root.about-link-failed = false;
     }
     function focus-navigation(index: int) {
         if index <= 0 { nav-0.focus-item(); }
         else if index == 1 { nav-1.focus-item(); }
         else if index == 2 { nav-2.focus-item(); }
-        else { nav-3.focus-item(); }
+        else if index == 3 { nav-3.focus-item(); }
+        else { nav-4.focus-item(); }
     }
     public function settings-keyboard-input() { SettingsInteraction.keyboard-mode = true; }
     public function settings-pointer-input() { SettingsInteraction.pointer-input(); }
@@ -1089,7 +1100,8 @@ export component SettingsWindow inherits Window {
         if root.active-category == 5 { root.credential-edit-cancel-requested(); root.llm-page-left(); }
         SettingsInteraction.invalidate();
         root.active-category = category;
-        root.focus-navigation(category == 0 ? 0 : category == 2 ? 1 : category == 1 ? 2 : 3);
+        root.about-link-failed = false;
+        root.focus-navigation(category == 0 ? 0 : category == 2 ? 1 : category == 1 ? 2 : category == 5 ? 3 : 4);
     }
 
     root-content := SettingsFocusScope {
@@ -1139,6 +1151,14 @@ export component SettingsWindow inherits Window {
             activated => { root.select-category(5); }
             move-focus(delta) => { root.focus-navigation(3 + delta); }
         }
+        nav-4 := SettingsNavItem {
+            x: root.expanded-navigation ? Spacing.medium : Spacing.small;
+            y: Spacing.large + 64px + 4 * (Metrics.settings-nav-item-height + Spacing.small);
+            width: parent.width - 2 * self.x;
+            label: @tr("About"); icon-kind: 6; selected: root.active-category == 6; expanded: root.expanded-navigation;
+            activated => { root.select-category(6); }
+            move-focus(delta) => { root.focus-navigation(4 + delta); }
+        }
         Rectangle { x: parent.width - 1px; width: 1px; height: parent.height; background: Colors.outline; }
     }
 
@@ -1151,10 +1171,17 @@ export component SettingsWindow inherits Window {
         Text {
             x: Metrics.settings-page-padding; y: (parent.height - 32px) / 2; height: 32px;
             text: root.active-category == 0 ? @tr("General") : root.active-category == 2 ? @tr("Hotkeys")
-                : root.active-category == 5 ? @tr("Service providers") : @tr("Translation settings");
+                : root.active-category == 5 ? @tr("Service providers") : root.active-category == 6 ? @tr("About") : @tr("Translation settings");
             color: Colors.foreground; font-size: 24px; font-weight: 700; vertical-alignment: center;
         }
         Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: Colors.outline; }
+    }
+
+    about-page := AboutPage {
+        visible: root.active-category == 6;
+        x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - self.y;
+        version: root.about-version; link-failed: root.about-link-failed;
+        open-link(index) => { root.about-link-requested(index); }
     }
 
     general-scroll := ScrollView {
