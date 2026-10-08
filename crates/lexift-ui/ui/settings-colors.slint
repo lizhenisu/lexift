@@ -1,0 +1,23 @@
+import { Colors } from "design/colors.slint";
+
+// Settings interaction roles share the active app theme. Status and brand colors
+// retain their meaning, including the confirmed-model marker and provider enabled status.
+export global SettingsColors {
+    out property <color> accent: Colors.primary;
+    out property <color> selected: Colors.primary-container;
+    out property <color> hover: Colors.icon-button-hover;
+    out property <color> pressed: Colors.icon-button-pressed;
+    out property <color> focus: Colors.primary;
+    out property <color> primary-hover: Colors.primary.darker(0.08);
+    out property <color> primary-pressed: Colors.primary.darker(0.18);
+    out property <color> field: Colors.background;
+    out property <color> scrim: Colors.dark ? #00000080 : #2021244d;
+    out property <color> switch-off: Colors.outline;
+    out property <color> switch-thumb-off: Colors.dark ? Colors.foreground : Colors.surface;
+    out property <color> switch-thumb-on: Colors.on-primary;
+    // Original provider marks include black ink; keep their small backing legible in dark mode.
+    out property <color> brand-surface: #ffffff;
+    public pure function interactive(base: color, hovered: bool, pressed: bool, selected: bool) -> color {
+        return pressed ? SettingsColors.pressed : selected ? SettingsColors.selected : hovered ? SettingsColors.hover : base;
+    }
+}

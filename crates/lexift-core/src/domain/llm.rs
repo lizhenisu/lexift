@@ -300,6 +300,36 @@ impl Default for LlmSettings {
     }
 }
 impl LlmSettings {
+    pub fn provider_enabled(&self, provider: super::runtime_config::ProviderConfig) -> bool {
+        if provider == super::runtime_config::ProviderConfig::DeepL {
+            return self.deepl_enabled;
+        }
+        LlmProvider::ALL
+            .into_iter()
+            .find(|p| p.id() == provider.id())
+            .is_some_and(|p| self.connection(p).enabled)
+    }
+    /// Enablement is independent of connection and model configuration.
+    pub fn set_provider_enabled(
+        &mut self,
+        provider: super::runtime_config::ProviderConfig,
+        enabled: bool,
+    ) {
+        if provider == super::runtime_config::ProviderConfig::DeepL {
+            self.deepl_enabled = enabled;
+            return;
+        }
+        if let Some(p) = LlmProvider::ALL
+            .into_iter()
+            .find(|p| p.id() == provider.id())
+        {
+            let mut c = self.connection(p);
+            c.enabled = enabled;
+            self.connections.retain(|c| c.provider != p);
+            self.connections.push(c);
+        }
+    }
+
     pub fn model_enabled(&self, provider: LlmProvider, id: &str) -> bool {
         let key = self.connection(provider).endpoint_key();
         self.catalog.iter().any(|m| {

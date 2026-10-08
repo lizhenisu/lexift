@@ -1,0 +1,38 @@
+import { Colors } from "design/colors.slint";
+// One window-local overlay avoids clipping hints inside scroll viewports.
+export global SettingsHints {
+    in-out property <string> text;
+    in-out property <length> anchor-x;
+    in-out property <length> anchor-y;
+    in-out property <length> anchor-height;
+    public function clear() { self.text = ""; }
+    public function show(text: string, x: length, y: length, height: length) {
+        self.text = text; self.anchor-x = x; self.anchor-y = y; self.anchor-height = height;
+    }
+}
+export component SettingsHintTarget {
+    in property <bool> active;
+    in property <string> text;
+    in property <length> anchor-x;
+    in property <length> anchor-y;
+    in property <length> anchor-height;
+    changed active => {
+        if root.active && root.text != "" { SettingsHints.show(root.text, root.anchor-x, root.anchor-y, root.anchor-height); }
+        else if SettingsHints.anchor-x == root.anchor-x && SettingsHints.anchor-y == root.anchor-y { SettingsHints.clear(); }
+    }
+}
+export component SettingsHintOverlay inherits Rectangle {
+    in property <length> window-width;
+    in property <length> window-height;
+    visible: SettingsHints.text != "";
+    z: 300;
+    width: min(480px, max(16px, root.window-width - 16px), measure.preferred-width + 16px);
+    height: max(28px, hint.preferred-height + 8px);
+    x: max(8px, min(SettingsHints.anchor-x, root.window-width - self.width - 8px));
+    y: max(8px, min(root.window-height - self.height - 8px,
+        SettingsHints.anchor-y + SettingsHints.anchor-height + 4px + self.height <= root.window-height - 8px
+        ? SettingsHints.anchor-y + SettingsHints.anchor-height + 4px : SettingsHints.anchor-y - self.height - 4px));
+    border-radius: 4px; background: Colors.foreground;
+    measure := Text { visible: false; text: SettingsHints.text; font-size: 12px; wrap: no-wrap; }
+    hint := Text { x: 8px; y: 4px; width: parent.width - 16px; height: parent.height - 8px; text: SettingsHints.text; color: Colors.surface; font-size: 12px; wrap: word-wrap; vertical-alignment: center; }
+}

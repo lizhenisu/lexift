@@ -556,6 +556,7 @@ impl AppState {
                         return Vec::new();
                     }
                 }
+                connection.enabled = self.settings.llm.connection(connection.provider).enabled;
                 connection.credential_id = self
                     .settings
                     .llm
@@ -825,8 +826,10 @@ impl AppState {
 
     fn start_settings_change(&mut self, mut change: SettingsChange) -> Vec<AppCommand> {
         if let SettingsChange::Llm(config) = &mut change {
+            config.deepl_enabled = self.settings.llm.deepl_enabled;
             for c in &mut config.connections {
                 let saved = self.settings.llm.connection(c.provider);
+                c.enabled = saved.enabled;
                 c.credential_id = saved.credential_id;
                 for profile in &mut c.protocols {
                     profile.headers = saved
@@ -854,6 +857,7 @@ impl AppState {
                 &change,
                 SettingsChange::TranslationSelection { .. }
                     | SettingsChange::TranslationOptions { .. }
+                    | SettingsChange::ProviderEnabled { .. }
             ) {
                 commands.insert(
                     0,
@@ -890,6 +894,7 @@ impl AppState {
             | SettingsField::Ollama
             | SettingsField::Llm
             | SettingsField::TranslationSelection
+            | SettingsField::ProviderEnabled(_)
             | SettingsField::TranslationOptions => self.provider_settings_error.clear(),
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error.clear(),
             SettingsField::SelectionToolbar | SettingsField::Theme | SettingsField::UiLanguage => {}
@@ -905,6 +910,7 @@ impl AppState {
             | SettingsField::Ollama
             | SettingsField::Llm
             | SettingsField::TranslationSelection
+            | SettingsField::ProviderEnabled(_)
             | SettingsField::TranslationOptions => self.provider_settings_error = error,
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error = error,
             SettingsField::SelectionToolbar | SettingsField::Theme | SettingsField::UiLanguage => {
@@ -922,6 +928,10 @@ impl AppState {
             return;
         }
         match field {
+            SettingsField::ProviderEnabled(provider) => self
+                .desired_settings
+                .llm
+                .set_provider_enabled(provider, self.settings.llm.provider_enabled(provider)),
             SettingsField::Theme => self.desired_settings.theme = self.settings.theme,
             SettingsField::UiLanguage => {
                 self.desired_settings.ui_language = self.settings.ui_language
@@ -2465,5 +2475,100 @@ mod tests {
         assert_eq!(state.runtime_config_error_message, "hotkey conflict");
         assert_eq!(state.error_message, "translation failed");
         assert!(!state.settings_saving);
+    }
+    #[test]
+    fn provider_enable_queue_is_per_provider_and_connection_snapshots_cannot_revert_it() {
+        use crate::domain::runtime_config::ProviderConfig;
+        let mut state = AppState::default();
+        let mut next = state.reduce(AppEvent::SettingsChangeRequested {
+            change: SettingsChange::TargetLanguage(Language("ja".into())),
+        });
+        for (id, provider) in [
+            ProviderConfig::DeepL,
+            ProviderConfig::Ollama,
+            ProviderConfig::LmStudio,
+            ProviderConfig::DeepSeek,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert!(
+                state
+                    .reduce(AppEvent::SettingsChangeRequested {
+                        change: SettingsChange::ProviderEnabled {
+                            request_id: id as u64,
+                            provider,
+                            enabled: false
+                        }
+                    })
+                    .is_empty()
+            );
+        }
+        let mut stale = state.settings.llm.clone();
+        stale.prompt = "Updated {target_language}".into();
+        state.reduce(AppEvent::SettingsChangeRequested {
+            change: SettingsChange::Llm(stale),
+        });
+        let mut completions = 0;
+        while let Some((settings, change)) = next.into_iter().find_map(|c| {
+            if let AppCommand::PersistSettings { settings, change } = c {
+                Some((settings, change))
+            } else {
+                None
+            }
+        }) {
+            completions += 1;
+            next = state.reduce(AppEvent::RuntimeConfigUpdated {
+                config: settings.runtime_config(),
+                settings,
+                change,
+            });
+        }
+        assert_eq!(completions, 6);
+        for provider in [
+            ProviderConfig::DeepL,
+            ProviderConfig::Ollama,
+            ProviderConfig::LmStudio,
+            ProviderConfig::DeepSeek,
+        ] {
+            assert!(!state.settings.llm.provider_enabled(provider));
+        }
+        assert_eq!(state.settings.llm.prompt, "Updated {target_language}");
+    }
+
+    #[test]
+    fn failed_enable_save_restores_only_enablement_and_returns_correlated_feedback() {
+        use crate::domain::runtime_config::ProviderConfig;
+        let mut state = AppState::default();
+        let change = SettingsChange::ProviderEnabled {
+            request_id: 42,
+            provider: ProviderConfig::Ollama,
+            enabled: false,
+        };
+        state.reduce(AppEvent::SettingsChangeRequested {
+            change: change.clone(),
+        });
+        let before = state.settings.clone();
+        let result = state.reduce(AppEvent::SettingsSaveFailed {
+            change,
+            error: "test failure".into(),
+        });
+        assert_eq!(state.settings, before);
+        assert!(
+            state
+                .desired_settings
+                .llm
+                .provider_enabled(ProviderConfig::Ollama)
+        );
+        assert_eq!(
+            result,
+            vec![AppCommand::ShowSettingsFeedback {
+                feedback: SettingsFeedback::ProviderEnabledCompleted {
+                    request_id: 42,
+                    provider: ProviderConfig::Ollama,
+                    saved: false
+                }
+            }]
+        );
     }
 }

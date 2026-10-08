@@ -124,7 +124,9 @@ impl RuntimeManager {
                 self.hotkey.apply_annotation(config.annotation_hotkey)?
             }
             SettingsField::Ollama => self.translator.configure_ollama(config.ollama.clone())?,
-            SettingsField::Llm | SettingsField::TranslationOptions => {
+            SettingsField::Llm
+            | SettingsField::ProviderEnabled(_)
+            | SettingsField::TranslationOptions => {
                 self.translator.configure_llm(config.llm.clone())?
             }
             SettingsField::TranslationSelection => {
@@ -155,7 +157,9 @@ impl RuntimeManager {
             SettingsField::AnnotationHotkey => current.annotation_hotkey = config.annotation_hotkey,
             SettingsField::Provider => current.provider = config.provider,
             SettingsField::Ollama => current.ollama = config.ollama,
-            SettingsField::Llm | SettingsField::TranslationOptions => current.llm = config.llm,
+            SettingsField::Llm
+            | SettingsField::ProviderEnabled(_)
+            | SettingsField::TranslationOptions => current.llm = config.llm,
             SettingsField::TranslationSelection => {
                 current.llm = config.llm;
                 current.provider = config.provider;

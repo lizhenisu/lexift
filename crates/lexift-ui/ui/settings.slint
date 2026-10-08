@@ -1,3 +1,6 @@
+import { SettingsHints, SettingsHintTarget, SettingsHintOverlay } from "settings-hint.slint";
+import { SettingsScrollArea } from "settings-scroll-area.slint";
+import { SettingsColors } from "settings-colors.slint";
 import { SettingsInteraction, SettingsFocusScope } from "settings-interaction.slint";
 import { ProviderModelRow, ProviderIconButton, ProviderInput, ProviderModelItem, ProviderDialog, ProviderFilterBar, ProviderProbeRow, TranslationChoice, ProviderLogo } from "provider-controls.slint";
 export { ProviderModelRow, ProviderProbeRow, TranslationChoice }
@@ -24,7 +27,7 @@ component SettingsButton inherits Rectangle {
     border-radius: 8px;
     border-width: 1px;
     border-color: keyboard.focus-visible ? Colors.primary : root.destructive ? Colors.error : root.primary ? transparent : Colors.outline;
-    background: !root.enabled ? Colors.background : root.destructive && (button-touch.pressed || button-touch.has-hover) ? Colors.error-container : root.primary ? (button-touch.pressed ? Colors.primary.darker(0.18) : button-touch.has-hover ? Colors.primary.darker(0.08) : Colors.primary) : button-touch.pressed ? Colors.icon-button-pressed : button-touch.has-hover ? Colors.icon-button-hover : Colors.surface;
+    background: !root.enabled ? Colors.background : root.destructive && (button-touch.pressed || button-touch.has-hover) ? Colors.error-container : root.primary ? (button-touch.pressed ? SettingsColors.primary-pressed : button-touch.has-hover ? SettingsColors.primary-hover : Colors.primary) : button-touch.pressed ? SettingsColors.pressed : button-touch.has-hover ? SettingsColors.hover : Colors.surface;
     accessible-role: button; accessible-label: root.label;
 
     button-label := Text {
@@ -57,13 +60,13 @@ component SettingsSwitch inherits Rectangle {
     public function focus-switch() { keyboard.focus-target(); }
     width: 52px; height: 32px; horizontal-stretch: 0; vertical-stretch: 0; border-radius: 16px;
     opacity: root.enabled ? 1 : Metrics.disabled-opacity;
-    background: root.checked ? Colors.primary : Colors.outline;
+    background: root.checked ? (switch-touch.pressed ? SettingsColors.primary-pressed : switch-touch.has-hover ? SettingsColors.primary-hover : SettingsColors.accent) : SettingsColors.switch-off;
     accessible-role: switch; accessible-label: root.label;
     accessible-checkable: true; accessible-checked: root.checked; accessible-enabled: root.enabled;
     accessible-action-default => { if root.enabled { root.toggled(!root.checked); } }
     Rectangle {
         x: root.checked ? parent.width - self.width - 4px : 4px; y: 4px;
-        width: 24px; height: 24px; border-radius: 12px; background: Colors.surface;
+        width: 24px; height: 24px; border-radius: 12px; background: root.checked ? SettingsColors.switch-thumb-on : SettingsColors.switch-thumb-off;
     }
     // Focus is separate from hover so keyboard navigation never looks like a held click.
     Rectangle { x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px;
@@ -73,7 +76,7 @@ component SettingsSwitch inherits Rectangle {
     keyboard := SettingsFocusScope { enabled: root.enabled;
         key-pressed(event) => { if event.text == " " || event.text == Key.Return { root.toggled(!root.checked); return accept; } return reject; }
     }
-    TouchArea { enabled: root.enabled; mouse-cursor: pointer;
+    switch-touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer;
         clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.toggled(!root.checked); }
     }
 }
@@ -94,9 +97,9 @@ component CredentialActionButton inherits Rectangle {
     border-radius: Metrics.icon-button-radius;
     opacity: root.enabled ? 1 : Metrics.disabled-opacity;
     background: root.pressed || (root.interactive && action-touch.pressed)
-        ? Colors.icon-button-pressed
+        ? SettingsColors.pressed
         : root.highlighted || (root.interactive && action-touch.has-hover)
-            ? Colors.icon-button-hover : transparent;
+            ? SettingsColors.hover : transparent;
 
     Image {
         x: (parent.width - Metrics.icon-size) / 2; y: (parent.height - Metrics.icon-size) / 2;
@@ -113,11 +116,7 @@ component CredentialActionButton inherits Rectangle {
         enabled: root.enabled && root.interactive;
         mouse-cursor: pointer; clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.clicked(); }
     }
-    if root.enabled && (root.highlighted || action-touch.has-hover): Rectangle {
-        z: 100; x: min(0px, root.width - self.width); y: root.height + 4px;
-        width: tip.preferred-width + 16px; height: 28px; border-radius: 4px; background: Colors.foreground;
-        tip := Text { x: 8px; height: parent.height; text: root.action-label; color: Colors.surface; font-size: 12px; vertical-alignment: center; }
-    }
+    SettingsHintTarget { active: root.enabled && action-touch.has-hover; text: root.action-label; anchor-x: root.absolute-position.x; anchor-y: root.absolute-position.y; anchor-height: root.height; }
 
 }
 
@@ -156,7 +155,7 @@ component ProviderCredentialField inherits Rectangle {
                     background: Colors.background;
                     if !root.credential-configured: credential-new-input := TextInput {
                         x: Spacing.medium; width: parent.width - 2 * Spacing.medium; height: parent.height; text <=> root.credential-draft; input-type: InputType.password; enabled: !root.credential-busy && !root.operation-blocked;
-                        color: Colors.foreground; selection-background-color: Colors.primary-container; selection-foreground-color: Colors.foreground; font-size: Typography.body-size; text-cursor-width: 2px; vertical-alignment: center;
+                        color: Colors.foreground; selection-background-color: SettingsColors.selected; selection-foreground-color: Colors.foreground; font-size: Typography.body-size; text-cursor-width: 2px; vertical-alignment: center;
                         accepted => { if root.credential-draft != "" && !root.credential-busy && !root.operation-blocked { root.credential-save-requested(root.credential-draft); } }
                     }
                     if root.credential-configured && !root.credential-editing && !root.credential-revealed: Text {
@@ -165,7 +164,7 @@ component ProviderCredentialField inherits Rectangle {
                     credential-reveal-input := TextInput {
                         visible: root.credential-configured && root.credential-revealed && !root.credential-editing;
                         x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 34px; height: parent.height; text: root.credential-transient-secret; read-only: true;
-                        color: Colors.foreground; selection-background-color: Colors.primary-container; selection-foreground-color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center;
+                        color: Colors.foreground; selection-background-color: SettingsColors.selected; selection-foreground-color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center;
                         changed has-focus => { if !self.has-focus && root.credential-revealed && root.credential-reveal-dismiss-armed { root.credential-hide-requested(); } }
                     }
                     credential-edit-input := TextInput {
@@ -173,7 +172,7 @@ component ProviderCredentialField inherits Rectangle {
                         x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 34px; height: parent.height; text <=> root.credential-draft;
                         input-type: root.credential-secret-visible ? InputType.text : InputType.password; enabled: !root.credential-busy && !root.operation-blocked;
                         changed has-focus => { if !self.has-focus && root.credential-editing {root.credential-edit-blurred();} }
-                        color: Colors.foreground; selection-background-color: Colors.primary-container; selection-foreground-color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center;
+                        color: Colors.foreground; selection-background-color: SettingsColors.selected; selection-foreground-color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center;
                         accepted => { if root.credential-draft != "" && !root.credential-busy && !root.operation-blocked { root.credential-save-requested(root.credential-draft); } }
                     }
                     credential-actions := HorizontalLayout {
@@ -251,8 +250,8 @@ component SettingsToast inherits Rectangle {
         width: Metrics.icon-button-size;
         height: Metrics.icon-button-size;
         border-radius: Metrics.icon-button-radius;
-        background: close-touch.pressed ? Colors.icon-button-pressed
-            : close-touch.has-hover ? Colors.icon-button-hover : transparent;
+        background: close-touch.pressed ? SettingsColors.pressed
+            : close-touch.has-hover ? SettingsColors.hover : transparent;
 
         Path {
             x: (parent.width - Metrics.icon-size) / 2;
@@ -321,22 +320,19 @@ component SettingsSelectMenu inherits Rectangle {
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
         vertical-scrollbar-policy: ScrollBarPolicy.always-off;
         mouse-drag-pan-enabled: true;
-        scrolled => { root.scroll-y = round(root.scroll-y / 4px) * 4px; }
+        scrolled => { SettingsHints.clear(); root.scroll-y = round(root.scroll-y / 4px) * 4px; }
 
         for option[index] in root.options: option-row := Rectangle {
             y: index * 40px;
             width: menu-scroll.visible-width;
             height: 40px;
-            background: index == (root.active-index >= 0 ? root.active-index : root.selected-index)
-                ? Colors.primary-container
-                : option-touch.pressed ? Colors.icon-button-pressed
-                : option-touch.has-hover ? Colors.background : Colors.surface;
+            background: SettingsColors.interactive(Colors.surface, option-touch.has-hover, option-touch.pressed, index == (root.active-index >= 0 ? root.active-index : root.selected-index));
 
             Text {
                 x: Spacing.medium;
                 width: parent.width - 2 * Spacing.medium;
                 text: option;
-                color: Colors.foreground;
+                color: index == (root.active-index >= 0 ? root.active-index : root.selected-index) ? SettingsColors.accent : Colors.foreground;
                 font-size: Typography.menu-size;
                 font-weight: Typography.menu-weight;
                 vertical-alignment: center;
@@ -437,7 +433,7 @@ component SettingsToggleRow inherits Rectangle {
     callback toggled(bool);
     height: max(56px, text-block.preferred-height + 16px);
     border-radius: 6px;
-    background: label-touch.has-hover ? Colors.icon-button-hover : transparent;
+    background: label-touch.has-hover ? SettingsColors.hover : transparent;
     text-block := SettingsTextBlock {
         x: 0px; y: (parent.height - self.height) / 2;
         width: parent.width - 52px - Spacing.medium; height: self.preferred-height;
@@ -449,7 +445,7 @@ component SettingsToggleRow inherits Rectangle {
     }
     toggle := SettingsSwitch {
         x: parent.width - self.width; y: (parent.height - self.height) / 2;
-        label: root.label; checked: root.checked; enabled: root.enabled; opacity: root.enabled ? 1 : 0.45;
+        label: root.label; checked: root.checked; enabled: root.enabled; opacity: root.enabled ? 1 : Metrics.disabled-opacity;
         toggled(value) => { root.toggled(value); }
     }
 }
@@ -459,6 +455,7 @@ component SettingsChoiceTarget inherits SettingsFocusScope {
     in property <string> label;
     in property <bool> selected;
     out property <bool> hovered: touch.has-hover;
+    out property <bool> pressed: touch.pressed;
     callback chosen();
     accessible-role: button; accessible-label: root.label;
     accessible-checkable: true; accessible-checked: root.selected;
@@ -570,7 +567,7 @@ component SettingsSelectField inherits Rectangle {
     border-radius: 6px;
     border-width: root.opened ? 2px : 1px;
     border-color: root.opened || keyboard.focus-visible ? Colors.primary : Colors.outline;
-    background: Colors.background;
+    background: SettingsColors.interactive(SettingsColors.field, root.enabled && field-touch.has-hover, root.enabled && field-touch.pressed, root.opened);
     Text {
         x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 18px; height: parent.height;
         text: root.value; color: Colors.foreground; font-size: Typography.body-size;
@@ -584,7 +581,7 @@ component SettingsSelectField inherits Rectangle {
         LineTo { x: 6; y: root.opened ? 1 : 5; }
         LineTo { x: 11; y: root.opened ? 5 : 1; }
     }
-    TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.clicked(); } }
+    field-touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.clicked(); } }
 }
 
 // Unlike the standard ComboBox, refreshing choices must never select the first model.
@@ -597,7 +594,7 @@ component SettingsComboBox inherits Rectangle {
     private property <bool> popup-focused;
     private property <length> menu-scroll-y;
     height: 42px; min-width: 140px; horizontal-stretch: 1; vertical-stretch: 0;
-    opacity: root.enabled ? 1 : 0.45;
+    opacity: root.enabled ? 1 : Metrics.disabled-opacity;
     forward-focus: field-focus;
     accessible-role: combobox; accessible-enabled: root.enabled;
     accessible-value: root.current-index >= 0 && root.current-index < root.model.length ? root.model[root.current-index] : root.placeholder;
@@ -657,9 +654,7 @@ component SettingsNavItem inherits Rectangle {
     height: Metrics.settings-nav-item-height;
     border-radius: 10px;
     border-width: nav-focus.focus-visible ? 1px : 0px; border-color: Colors.primary;
-    background: root.selected ? Colors.primary-container
-        : nav-touch.pressed ? Colors.icon-button-pressed
-        : nav-touch.has-hover ? Colors.icon-button-hover : transparent;
+    background: SettingsColors.interactive(transparent, nav-touch.has-hover, nav-touch.pressed, root.selected);
 
     Path {
         x: root.expanded ? Spacing.medium : (parent.width - Metrics.icon-size) / 2;
@@ -697,23 +692,7 @@ component SettingsNavItem inherits Rectangle {
         overflow: elide;
     }
 
-    if !root.expanded && nav-touch.has-hover: Rectangle {
-        x: parent.width + Spacing.small;
-        y: (parent.height - 36px) / 2;
-        width: 112px;
-        height: 36px;
-        z: 100;
-        border-radius: 6px;
-        background: Colors.foreground;
-
-        Text {
-            text: root.label;
-            color: Colors.surface;
-            font-size: 13px;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-    }
+    SettingsHintTarget { active: !root.expanded && nav-touch.has-hover; text: root.label; anchor-x: root.absolute-position.x; anchor-y: root.absolute-position.y; anchor-height: root.height; }
 
     nav-focus := SettingsFocusScope {
         key-pressed(event) => {
@@ -815,6 +794,8 @@ export component SettingsWindow inherits Window {
     in-out property <int> provider-detail-index;
     in-out property <bool> deepl-provider-enabled: true;
     in-out property <bool> deepseek-environment-key;
+    in-out property <bool> llm-enable-saving;
+    callback llm-enable-requested(bool);
     in-out property <bool> llm-enabled: true;
     in-out property <bool> llm-advanced;
     in-out property <bool> llm-model-dialog;
@@ -839,9 +820,6 @@ export component SettingsWindow inherits Window {
     in-out property <int> llm-enabled-count;
     in-out property <int> llm-catalog-count;
     in-out property <[ProviderModelRow]> llm-enabled-catalog;
-    private property <string> llm-model-hint;
-    private property <length> llm-hint-x;
-    private property <length> llm-hint-y;
     callback llm-draft-changed();
     callback llm-base-edited();
     callback llm-request-open();
@@ -1049,11 +1027,11 @@ export component SettingsWindow inherits Window {
     }
     public function open-provider-request() {
         root.credential-edit-cancel-requested(); root.close-app-language-menu(); root.close-settings-menu();
-        root.llm-model-hint = ""; root.llm-request-open(); root.llm-advanced = true; provider-modal-focus.focus();
+        SettingsHints.clear(); root.llm-request-open(); root.llm-advanced = true; provider-modal-focus.focus();
     }
     public function open-provider-models() {
         if root.llm-connection-dirty || root.llm-persisting { return; }
-        root.credential-edit-cancel-requested(); root.llm-model-hint = ""; root.llm-model-dialog = true; model-viewport.content-y = 0px;
+        root.credential-edit-cancel-requested(); SettingsHints.clear(); root.llm-model-dialog = true; model-viewport.content-y = 0px;
         root.llm-model-search = ""; root.llm-model-filter = 0; root.llm-filter-models();
         root.llm-refresh(false); provider-modal-focus.focus();
     }
@@ -1063,7 +1041,7 @@ export component SettingsWindow inherits Window {
         else { root.llm-model-dialog = false; root.llm-models-close(); sync-models-button.focus-button(); }
     }
     public function open-provider-probe() {
-        root.llm-model-hint = "";
+        SettingsHints.clear();
         root.llm-probe-open();
         if root.llm-probe-dialog { root.credential-hide-requested(); provider-modal-focus.focus(); }
     }
@@ -1091,7 +1069,16 @@ export component SettingsWindow inherits Window {
     public function settings-keyboard-input() { SettingsInteraction.keyboard-mode = true; }
     public function settings-pointer-input() { SettingsInteraction.pointer-input(); }
     public function invalidate-button-focus() { SettingsInteraction.invalidate(); }
-    public function reset-button-visuals() { SettingsInteraction.reset(); }
+    public function clear-settings-hint() { SettingsHints.clear(); }
+    changed provider-detail-index => { SettingsHints.clear(); }
+    changed llm-advanced => { SettingsHints.clear(); }
+    changed llm-model-dialog => { SettingsHints.clear(); }
+    changed llm-probe-dialog => { SettingsHints.clear(); }
+    changed translation-settings-open => { SettingsHints.clear(); }
+    changed translation-selector-open => { SettingsHints.clear(); }
+    changed credential-delete-dialog => { SettingsHints.clear(); }
+    changed settings-close-dialog => { SettingsHints.clear(); }
+    public function reset-button-visuals() { SettingsHints.clear(); SettingsInteraction.reset(); }
     public function reset-provider-filters() {
         root.llm-search-open = false; root.llm-filter-open = false;
         root.llm-model-search = ""; root.llm-model-filter = 0;
@@ -1171,12 +1158,13 @@ export component SettingsWindow inherits Window {
     }
 
     general-scroll := ScrollView {
+        changed content-y => { SettingsHints.clear(); }
         visible: root.active-category == 0;
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
         content-width: self.visible-width;
         content-height: max(self.visible-height, selection-assistant-card.y + selection-assistant-card.height + Metrics.settings-page-padding);
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
-        scrolled => {
+        scrolled => { SettingsHints.clear();
             root.close-app-language-menu();
             if root.settings-menu-open && (root.settings-menu-anchor-y < Metrics.settings-header-height || root.settings-menu-anchor-y + root.settings-menu-anchor-height > root.height) { root.close-settings-menu(); }
         }
@@ -1245,6 +1233,7 @@ export component SettingsWindow inherits Window {
         content-y <=> general-scroll.content-y;
     }
     hotkeys-scroll := ScrollView {
+        changed content-y => { SettingsHints.clear(); }
         visible: root.active-category == 2;
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
         content-width: self.visible-width;
@@ -1367,12 +1356,13 @@ export component SettingsWindow inherits Window {
         content-y <=> hotkeys-scroll.content-y;
     }
     translation-scroll := ScrollView {
+        changed content-y => { SettingsHints.clear(); }
         visible: root.active-category == 1;
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
         content-width: self.visible-width;
         content-height: max(self.visible-height, llm-translation-card.y + llm-translation-card.height + 48px + Metrics.settings-page-padding);
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
-        scrolled => { root.close-settings-menu(); root.close-app-language-menu(); }
+        scrolled => { SettingsHints.clear(); root.close-settings-menu(); root.close-app-language-menu(); }
         translation-language-card := SettingsCard {
             x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
             width: translation-scroll.visible-width - 2 * Metrics.settings-page-padding;
@@ -1407,7 +1397,7 @@ export component SettingsWindow inherits Window {
                 x: root.hotkeys-compact ? 24px : parent.width * 0.40; y: root.hotkeys-compact ? 84px : 24px;
                 width: parent.width - self.x - 68px; height: 40px;
                 border-radius: 8px; border-width: 1px; border-color: selector-focus.focus-visible ? Colors.primary : Colors.outline;
-                background: root.translation-selector-open || selector-touch.pressed ? Colors.icon-button-pressed : selector-touch.has-hover ? Colors.icon-button-hover : Colors.surface;
+                background: SettingsColors.interactive(Colors.surface, selector-touch.has-hover, selector-touch.pressed, root.translation-selector-open);
                 accessible-role: button; accessible-label: @tr("Translation model") + ": " + root.llm-selected-model;
                 ProviderLogo { x: 12px; y: 10px; width: 20px; height: 20px; provider: root.llm-translation-provider-index; }
                 selected-model-caption := Text { x: 42px; width: max(0px, parent.width - 160px); height: parent.height; text: root.llm-translation-provider-index == 0 ? "DeepL" : root.llm-selected-model == "" ? @tr("Select a model") : root.llm-selected-model; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; overflow: elide; }
@@ -1441,15 +1431,14 @@ export component SettingsWindow inherits Window {
         width: main-pane.width < 600px ? 148px : 184px; height: main-pane.height - self.y;
         background: Colors.surface;
         Rectangle { x: parent.width - 1px; width: 1px; height: parent.height; background: Colors.outline; }
-        ScrollView {
+        SettingsScrollArea {
             x: 8px; y: 16px; width: parent.width - 16px; height: parent.height - 32px;
             content-width: self.visible-width; content-height: max(self.visible-height, 4 * 48px);
-            horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
             for name[index] in ["DeepL", "Ollama", "LM Studio", "DeepSeek"]: Rectangle {
                 y: index * 48px; width: parent.width; height: 40px; border-radius: 6px;
-                background: root.provider-detail-index == index ? Colors.primary-container : choice.hovered ? Colors.icon-button-hover : transparent;
+                background: SettingsColors.interactive(transparent, choice.hovered, choice.pressed, root.provider-detail-index == index);
                 border-width: choice.focus-visible ? 1px : 0px; border-color: Colors.primary;
-                Rectangle { x: 8px; y: 6px; width: 28px; height: 28px; border-radius: 7px; background: #ffffff; border-width: 1px; border-color: Colors.outline.with-alpha(0.5);
+                Rectangle { x: 8px; y: 6px; width: 28px; height: 28px; border-radius: 7px; background: SettingsColors.brand-surface; border-width: 1px; border-color: Colors.outline.with-alpha(0.5);
                     Image { x: 4px; y: 4px; width: 20px; height: 20px; image-fit: contain;
                         source: [@image-url("icons/provider-deepl.svg"), @image-url("icons/provider-ollama.svg"), @image-url("icons/provider-lmstudio.svg"), @image-url("icons/provider-deepseek.svg")][index]; }
                 }
@@ -1461,6 +1450,7 @@ export component SettingsWindow inherits Window {
     }
     Rectangle { visible: root.active-category == 5; x: provider-list.width; y: Metrics.settings-header-height; width: main-pane.width - self.x; height: main-pane.height - self.y; background: Colors.surface; }
     providers-scroll := ScrollView {
+        changed content-y => { SettingsHints.clear(); }
         visible: root.active-category == 5;
         x: provider-list.width; y: Metrics.settings-header-height;
         width: main-pane.width - self.x;
@@ -1468,7 +1458,7 @@ export component SettingsWindow inherits Window {
         content-width: self.visible-width;
         content-height: max(self.visible-height, provider-content.y + provider-content.height + Metrics.settings-page-padding);
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-        scrolled => { root.llm-model-hint = ""; }
+        scrolled => { SettingsHints.clear(); }
         provider-content := VerticalLayout {
             x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
             width: providers-scroll.visible-width - 2 * Metrics.settings-page-padding;
@@ -1476,7 +1466,7 @@ export component SettingsWindow inherits Window {
             HorizontalLayout { height: 32px; spacing: 8px;
                 Text { text: ["DeepL", "Ollama", "LM Studio", "DeepSeek"][root.provider-detail-index]; color: Colors.foreground; font-size: Typography.body-size; font-weight: 700; vertical-alignment: center; }
                 Text { text: root.llm-status; color: Colors.secondary-foreground; font-size: 12px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                SettingsSwitch { label: ["Ollama", "LM Studio", "DeepSeek"][root.llm-service-index]; checked: root.llm-enabled; toggled(value) => { root.llm-enabled = value; root.llm-draft-changed(); } }
+                SettingsSwitch { label: ["DeepL", "Ollama", "LM Studio", "DeepSeek"][root.provider-detail-index]; enabled: !root.llm-enable-saving; checked: root.llm-enabled; toggled(value) => { root.llm-enable-requested(value); } }
             }
             VerticalLayout { spacing: 8px;
                 Text { height: 24px; text: @tr("API key"); font-size: Typography.body-size; color: Colors.foreground; vertical-alignment: center; }
@@ -1516,9 +1506,9 @@ export component SettingsWindow inherits Window {
             }
             VerticalLayout { visible: root.provider-detail-index > 0; height: self.visible ? self.preferred-height : 0px; spacing: 8px;
                 Text { height: 24px; text: @tr("API address"); font-size: Typography.body-size; color: Colors.foreground; vertical-alignment: center; }
-                HorizontalLayout { height: 40px; spacing: 8px;
-                    provider-address := ProviderInput { text <=> root.llm-base-url; horizontal-stretch: 1; edited => { root.llm-base-edited(); } }
-                    request-config-button := ProviderIconButton { icon: @image-url("icons/provider-settings.svg"); tooltip: @tr("Request configuration"); selected: root.llm-advanced; clicked => { root.open-provider-request(); } }
+                Rectangle { height: 40px;
+                    provider-address := ProviderInput { x: 0px; y: 0px; width: parent.width - 40px; height: 40px; text <=> root.llm-base-url; edited => { root.llm-base-edited(); } }
+                    request-config-button := ProviderIconButton { x: parent.width - 32px; y: (parent.height - self.height) / 2; icon: @image-url("icons/provider-settings.svg"); tooltip: @tr("Request configuration"); selected: root.llm-advanced; clicked => { root.open-provider-request(); } }
                 }
             }
             VerticalLayout { visible: root.provider-detail-index > 0; height: self.visible ? self.preferred-height : 0px; spacing: 12px;
@@ -1545,7 +1535,7 @@ export component SettingsWindow inherits Window {
                     height: root.llm-enabled-catalog.length == 0 ? 168px : enabled-rows.preferred-height + 2px;
                     border-radius: 8px; border-width: root.llm-enabled-catalog.length == 0 ? 0px : 1px; border-color: Colors.outline;
                     enabled-rows := VerticalLayout { x: 1px; y: 1px; width: parent.width - 2px; height: self.preferred-height; spacing: 0px;
-                        for model in root.llm-enabled-catalog: ProviderModelItem { enabled: !root.llm-persisting; model: model; toggle => { root.llm-model-toggle(model.id, false); } hint(text,x,y) => { root.llm-model-hint = text; root.llm-hint-x = x; root.llm-hint-y = y; } }
+                        for model in root.llm-enabled-catalog: ProviderModelItem { enabled: !root.llm-persisting; model: model; toggle => { root.llm-model-toggle(model.id, false); } }
                     }
                     if root.llm-enabled-catalog.length == 0: Rectangle {
                         width: parent.width; height: parent.height;
@@ -1637,15 +1627,14 @@ export component SettingsWindow inherits Window {
         visible: root.settings-close-dialog;
         x: 0px; y: 0px; width: root.width; height: root.height; z: 130;
         key-pressed(event) => { if event.text == Key.Escape { root.finish-settings-close(false); return accept; } return reject; }
-        Rectangle { width: parent.width; height: parent.height; background: Colors.foreground.with-alpha(0.30); TouchArea { } }
+        Rectangle { width: parent.width; height: parent.height; background: SettingsColors.scrim; TouchArea { } }
         ProviderDialog {
             x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
             width: min(480px, parent.width - 48px); height: min(parent.height - 48px, close-settings-copy.preferred-height + 140px);
             title: @tr("Unsaved changes"); dismissed => { root.finish-settings-close(false); }
-            ScrollView {
+            SettingsScrollArea {
                 x: 24px; y: 64px; width: parent.width - 48px; height: parent.height - 140px;
                 content-width: self.visible-width; content-height: close-settings-copy.preferred-height;
-                horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
                 close-settings-copy := Text {
                     width: parent.width; height: self.preferred-height; wrap: word-wrap; font-size: Typography.body-size; color: Colors.secondary-foreground;
                     text: @tr("Closing discards unapplied edits. Changes already submitted may still finish saving.");
@@ -1663,15 +1652,14 @@ export component SettingsWindow inherits Window {
         enabled: !root.settings-close-dialog;
         x: 0px; y: 0px; width: root.width; height: root.height; z: 120;
         key-pressed(event) => { if event.text == Key.Escape { root.finish-credential-delete(false); return accept; } return reject; }
-        Rectangle { width: parent.width; height: parent.height; background: Colors.foreground.with-alpha(0.30); TouchArea { } }
+        Rectangle { width: parent.width; height: parent.height; background: SettingsColors.scrim; TouchArea { } }
         ProviderDialog {
             x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
             width: min(480px, parent.width - 48px); height: min(parent.height - 48px, delete-key-content.preferred-height + 140px);
             title: @tr("Delete key"); dismissed => { root.finish-credential-delete(false); }
-            ScrollView {
+            SettingsScrollArea {
                 x: 24px; y: 64px; width: parent.width - 48px; height: parent.height - 140px;
                 content-width: self.visible-width; content-height: delete-key-content.preferred-height;
-                horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
                 delete-key-content := VerticalLayout {
                     x: 0px; y: 0px; width: parent.width; height: self.preferred-height; spacing: Spacing.small;
                     Text { text: ["DeepL", "Ollama", "LM Studio", "DeepSeek"][root.credential-delete-provider < 0 ? 0 : root.credential-delete-provider]; font-weight: 600; font-size: Typography.body-size; color: Colors.foreground; }
@@ -1692,7 +1680,7 @@ export component SettingsWindow inherits Window {
         root.translation-selector-open = !root.translation-selector-open;
         if root.translation-selector-open { translation-search-input.focus-input(); }
     }
-    changed active-category => {
+    changed active-category => { SettingsHints.clear();
         if root.active-category != 1 {
             root.translation-selector-open = false;
             if root.translation-settings-open { root.llm-cancel-translation(); root.translation-settings-open = false; }
@@ -1719,21 +1707,20 @@ export component SettingsWindow inherits Window {
             border-radius: 12px; border-width: 1px; border-color: Colors.outline; background: Colors.surface;
             TouchArea { }
             translation-search-input := ProviderInput { x: 12px; y: 12px; width: parent.width - 24px; text <=> root.translation-search; placeholder: @tr("Search models"); edited => { root.translation-filter(); } }
-            choices-viewport := ScrollView {
+            choices-viewport := SettingsScrollArea {
                 x: 8px; y: 64px; width: parent.width - 16px; height: parent.height - 116px;
                 content-width: self.visible-width; content-height: max(self.visible-height, root.translation-list-height * 1px);
-                horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
                 if root.translation-choices.length == 0: Text { x: 12px; y: 16px; width: parent.width - 24px; text: @tr("No matching models"); color: Colors.secondary-foreground; font-size: Typography.body-size; }
                 for choice[index] in root.translation-choices: Rectangle {
                     y: choice.top * 1px; width: parent.width; height: choice.group == "" ? 48px : 76px;
                     if choice.group != "": Text { x: 12px; y: 0px; height: 28px; text: choice.group; color: Colors.secondary-foreground; font-size: 13px; vertical-alignment: center; }
                     Rectangle {
                         y: choice.group == "" ? 0px : 28px; width: parent.width; height: 46px; border-radius: 8px;
-                        background: root.llm-translation-provider-index == choice.provider && (choice.provider == 0 || root.llm-selected-model == choice.id) ? Colors.background : choice-touch.has-hover || root.translation-highlight == index ? Colors.icon-button-hover : transparent;
+                        background: SettingsColors.interactive(transparent, choice.usable && choice-touch.has-hover, choice.usable && choice-touch.pressed, root.translation-highlight == index || (root.llm-translation-provider-index == choice.provider && (choice.provider == 0 || root.llm-selected-model == choice.id)));
                         opacity: choice.usable ? 1 : Metrics.disabled-opacity;
-                        if root.llm-translation-provider-index == choice.provider && (choice.provider == 0 || root.llm-selected-model == choice.id): Rectangle { x: 0px; width: 3px; height: 26px; y: 10px; border-radius: 2px; background: #20bd69; }
+                        if root.llm-translation-provider-index == choice.provider && (choice.provider == 0 || root.llm-selected-model == choice.id): Rectangle { x: 0px; width: 3px; height: 26px; y: 10px; border-radius: 2px; background: Colors.success; }
                         ProviderLogo { x: 12px; y: 12px; width: 22px; height: 22px; provider: choice.provider; }
-                        Text { x: 44px; y: choice.note == "" ? 0px : 1px; width: parent.width - 100px; height: choice.note == "" ? 46px : 25px; text: choice.id; color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; overflow: elide; }
+                        Text { x: 44px; y: choice.note == "" ? 0px : 1px; width: parent.width - 100px; height: choice.note == "" ? 46px : 25px; text: choice.id; color: root.translation-highlight == index || (root.llm-translation-provider-index == choice.provider && (choice.provider == 0 || root.llm-selected-model == choice.id)) ? SettingsColors.accent : Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; overflow: elide; }
                         if choice.note != "": Text { x: 44px; y: 25px; width: parent.width - 56px; height: 18px; text: choice.note; color: Colors.secondary-foreground; font-size: 11px; overflow: elide; }
                         if choice.thinking: Image { x: parent.width - 32px; y: 14px; width: 18px; height: 18px; source: @image-url("icons/provider-thinking.svg"); colorize: Colors.primary; }
                         choice-touch := TouchArea { mouse-cursor: choice.usable ? pointer : default;
@@ -1747,25 +1734,18 @@ export component SettingsWindow inherits Window {
             SettingsButton { x: 12px; y: parent.height - 42px; width: parent.width - 24px; compact: true; label: @tr("Manage models"); clicked => { root.manage-translation-models(); } }
         }
     }
-    if (selector-touch.has-hover && !root.translation-selector-open && selected-model-caption.preferred-width > selected-model-caption.width) && !root.translation-settings-open: Rectangle {
-        z: 105; x: max(12px, min(translation-selector.absolute-position.x, root.width - self.width - 12px));
-        y: min(root.height - self.height - 12px, translation-selector.absolute-position.y + translation-selector.height + 8px);
-        width: min(480px, root.width - 24px); height: translation-hint.preferred-height + 16px;
-        border-radius: 6px; background: Colors.foreground;
-        translation-hint := Text { x: 8px; y: 8px; width: parent.width - 16px; text: root.llm-selected-model; wrap: word-wrap; color: Colors.surface; font-size: 12px; }
-    }
+    SettingsHintTarget { active: selector-touch.has-hover && !root.translation-selector-open && !root.translation-settings-open && selected-model-caption.preferred-width > selected-model-caption.width; text: root.llm-selected-model; anchor-x: translation-selector.absolute-position.x; anchor-y: translation-selector.absolute-position.y; anchor-height: translation-selector.height; }
     translation-modal-focus := SettingsFocusScope {
         visible: root.translation-settings-open; z: 110; width: root.width; height: root.height;
         capture-key-pressed(event) => { if event.text == Key.Escape { root.cancel-translation-settings(); return accept; } return reject; }
-        Rectangle { width: parent.width; height: parent.height; background: Colors.foreground.with-alpha(0.30); TouchArea { } }
+        Rectangle { width: parent.width; height: parent.height; background: SettingsColors.scrim; TouchArea { } }
         ProviderDialog {
             x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
             width: min(620px, parent.width - 32px); height: min(760px, parent.height - 32px);
             title: @tr("Translation settings"); dismissed => { root.cancel-translation-settings(); }
-            translation-settings-viewport := ScrollView {
+            translation-settings-viewport := SettingsScrollArea {
                 x: 24px; y: 64px; width: parent.width - 48px; height: parent.height - 144px;
                 content-width: self.visible-width; content-height: translation-fields.preferred-height;
-                horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
                 translation-fields := VerticalLayout { x: 0px; y: 0px; width: max(0px, translation-settings-viewport.visible-width - 12px); height: self.preferred-height; spacing: 12px; alignment: start;
                     Text { text: "\{["DeepL", "Ollama", "LM Studio", "DeepSeek"][root.llm-translation-provider-index]} · \{root.llm-selected-model}"; color: Colors.secondary-foreground; font-size: 13px; wrap: word-wrap; }
                     Text { text: @tr("Model parameters"); color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; }
@@ -1798,15 +1778,15 @@ export component SettingsWindow inherits Window {
 
                     Rectangle { height: 1px; background: Colors.outline; }
                     Text { text: @tr("Translation prompt"); color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; }
-                    Rectangle { height: 240px; border-radius: 6px; border-width: 1px; border-color: Colors.outline; background: Colors.surface;
-                        ScrollView { x: Spacing.small; y: Spacing.small; width: parent.width - 2 * Spacing.small; height: parent.height - 2 * Spacing.small;
+                    Rectangle { height: 240px; border-radius: 6px; border-width: 1px; border-color: prompt-input.has-focus ? SettingsColors.focus : Colors.outline; background: SettingsColors.field;
+                        SettingsScrollArea { x: Spacing.small; y: Spacing.small; width: parent.width - 2 * Spacing.small; height: parent.height - 2 * Spacing.small;
                             content-width: self.visible-width;
-                            TextInput {
+                            prompt-input := TextInput {
                                 in property <int> focus-request: root.editor-focus-request;
                                 changed focus-request => { if root.editor-return-target == 4 && root.active-category == 1 && root.llm-prompt-expanded { self.focus(); self.set-selection-offsets(root.editor-return-anchor, root.editor-return-cursor); } }
                                 cursor-position-changed(position) => { if self.has-focus { root.remember-editor-selection(4, self.anchor-position-byte-offset, self.cursor-position-byte-offset); } }
                                 changed has-focus => { root.editor-focus-changed(4, self.has-focus); }
-                                width: parent.width; min-height: 220px; text <=> root.llm-prompt; wrap: word-wrap; color: Colors.foreground; font-size: Typography.body-size; selection-background-color: Colors.primary-container; }
+                                width: parent.width; min-height: 220px; text <=> root.llm-prompt; wrap: word-wrap; color: Colors.foreground; font-size: Typography.body-size; selection-background-color: SettingsColors.selected; selection-foreground-color: Colors.foreground; }
                         }
                     }
                     Text { font-size: Typography.body-size; text: @tr("Use {{target_language}} for the target language."); color: Colors.secondary-foreground; wrap: word-wrap; }
@@ -1834,16 +1814,15 @@ export component SettingsWindow inherits Window {
         visible: root.active-category == 5 && (root.llm-advanced || root.llm-model-dialog || root.llm-probe-dialog);
         x: 0px; y: 0px; width: root.width; height: root.height; z: 110;
         key-pressed(event) => { if event.text == Key.Escape { root.close-provider-dialog(false); return accept; } return reject; }
-        Rectangle { width: parent.width; height: parent.height; background: Colors.foreground.with-alpha(0.30); TouchArea { } }
+        Rectangle { width: parent.width; height: parent.height; background: SettingsColors.scrim; TouchArea { } }
         request-dialog := ProviderDialog {
             visible: root.llm-advanced;
             x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
             width: min(560px, parent.width - 48px); height: min(680px, parent.height - 48px, request-fields.preferred-height + 140px);
             title: @tr("Request configuration"); dismissed => { root.close-provider-dialog(false); }
-            ScrollView {
+            SettingsScrollArea {
                 x: 24px; y: 64px; width: parent.width - 48px; height: parent.height - 140px;
                 content-width: self.visible-width; content-height: request-fields.preferred-height;
-                horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
                 request-fields := VerticalLayout {
                     x: 0px; y: 0px; alignment: start; width: parent.width; height: self.preferred-height; spacing: 12px;
                     Text { height: 24px; text: @tr("Protocol"); color: Colors.foreground; font-size: Typography.body-size; }
@@ -1901,10 +1880,9 @@ export component SettingsWindow inherits Window {
             height: min(parent.height - 48px, root.llm-probe-results.length > 0 ? 600px : 380px);
             title: root.llm-probe-all ? @tr("Test all enabled models") : @tr("Select a model to test");
             dismissed => { root.close-provider-dialog(false); }
-            ScrollView {
+            SettingsScrollArea {
                 x: 24px; y: 64px; width: parent.width - 48px; height: parent.height - 144px;
                 content-width: self.visible-width; content-height: probe-fields.preferred-height;
-                horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
                 probe-fields := VerticalLayout { x: 0px; y: 0px; width: parent.width; height: self.preferred-height; alignment: start; spacing: 12px;
                     if !root.llm-probe-all: Text { text: @tr("Select a model"); font-size: Typography.body-size; color: Colors.foreground; }
                     if !root.llm-probe-all: SettingsComboBox { model: root.llm-probe-models; current-index <=> root.llm-probe-index; placeholder: @tr("No enabled models"); enabled: !root.llm-probe-running; selected(index) => { root.llm-probe-selected(); } }
@@ -1947,14 +1925,13 @@ export component SettingsWindow inherits Window {
                 }
                 Text { text: root.llm-status; color: Colors.secondary-foreground; font-size: 12px; wrap: word-wrap; height: root.llm-status == "" ? 0px : self.preferred-height; }
             }
-            model-viewport := ScrollView {
+            model-viewport := SettingsScrollArea {
                     x: 24px; y: model-tools.y + model-tools.height + 8px; width: parent.width - 48px;
                     height: max(0px, model-dialog.height - self.y - 80px);
                     content-width: self.visible-width; content-height: max(self.visible-height, discovered-rows.preferred-height);
-                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
-                    scrolled => { root.llm-model-hint = ""; }
+                    scrolled => { SettingsHints.clear(); }
                     discovered-rows := VerticalLayout { x: 0px; y: 0px; alignment: start; width: model-viewport.visible-width; height: self.preferred-height; spacing: 0px;
-                        for model in root.llm-catalog: ProviderModelItem { enabled: !root.llm-persisting; model: model; toggle => { root.llm-model-toggle(model.id, !model.enabled); } hint(text,x,y) => { root.llm-model-hint = text; root.llm-hint-x = x; root.llm-hint-y = y; } }
+                        for model in root.llm-catalog: ProviderModelItem { enabled: !root.llm-persisting; model: model; toggle => { root.llm-model-toggle(model.id, !model.enabled); } }
                     }
                     if root.llm-catalog.length == 0: Text { width: parent.width; height: 100px; text: root.llm-syncing ? @tr("Loading…") : @tr("No matching models"); color: Colors.secondary-foreground; font-size: Typography.body-size; horizontal-alignment: center; vertical-alignment: center; }
                 }
@@ -1964,10 +1941,6 @@ export component SettingsWindow inherits Window {
             }
         }
     }
-    if root.active-category == 5 && root.llm-model-hint != "": Rectangle {
-        z: 150; x: max(8px, min(root.width - self.width - 8px, root.llm-hint-x)); y: max(8px, min(root.height - self.height - 8px, root.llm-hint-y));
-        width: min(480px, root.width - 32px); height: model-hint.preferred-height + 16px; border-radius: 6px; background: Colors.foreground;
-        model-hint := Text { x: 8px; y: 8px; width: parent.width - 16px; text: root.llm-model-hint; color: Colors.surface; font-size: 12px; wrap: word-wrap; }
-    }
+    SettingsHintOverlay { window-width: root.width; window-height: root.height; }
 
 }

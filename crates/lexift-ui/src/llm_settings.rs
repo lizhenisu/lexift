@@ -1,6 +1,7 @@
 //! Window-owned discovery and translation drafts. All service work is injected through Core ports.
 mod connection;
 mod detection;
+mod enable;
 mod translation;
 
 use crate::{ProviderModelRow, SettingsWindow};
@@ -53,6 +54,7 @@ struct Page {
     status_source: RefCell<String>,
     probe: RefCell<Option<detection::Run>>,
     translations: RefCell<translation::Drafts>,
+    enables: RefCell<BTreeMap<i32, (u64, bool)>>,
 }
 thread_local! { static PAGES: RefCell<BTreeMap<u64, Weak<Page>>> = const { RefCell::new(BTreeMap::new()) }; }
 static NEXT_PAGE: AtomicU64 = AtomicU64::new(1);
@@ -276,7 +278,7 @@ fn update_endpoints(window: &SettingsWindow, connection: &LlmConnection) {
 fn draft_connection(window: &SettingsWindow, page: &Page) -> Result<LlmConnection> {
     let mut connection = page.draft.borrow().clone();
     connection.address = service_address(window.get_llm_address().as_str())?;
-    connection.enabled = window.get_llm_enabled();
+    connection.enabled = page.config.borrow().connection(connection.provider).enabled;
     let mut profile = connection.profile();
     profile.base_url = api_base_address(window.get_llm_base_url().as_str())?;
     profile.authentication = match window.get_llm_auth_index() {
@@ -293,7 +295,7 @@ fn draft_connection(window: &SettingsWindow, page: &Page) -> Result<LlmConnectio
 }
 fn refresh_dirty(window: &SettingsWindow, page: &Page) {
     let dirty = if window.get_provider_detail_index() == 0 {
-        window.get_llm_enabled() != page.config.borrow().deepl_enabled
+        false
     } else {
         draft_connection(window, page).map_or(true, |draft| {
             let saved = page.config.borrow().connection(draft.provider);
@@ -310,6 +312,7 @@ fn refresh_dirty(window: &SettingsWindow, page: &Page) {
     };
     window.set_llm_connection_dirty(dirty);
     connection::refresh_pending(window, page);
+    enable::refresh(window, page);
 }
 fn clear_dialogs(window: &SettingsWindow, page: &Page) {
     page.request_snapshot.borrow_mut().take();
@@ -603,7 +606,7 @@ pub(crate) fn sync(window: &SettingsWindow, config: &LlmSettings) {
             load_translation(window, &page, None);
         }
         translation::choices(window, &page);
-        connection::synced(window, &page);
+        enable::refresh(window, &page);
     }
 }
 /// Reconcile a failed provider change without disturbing unrelated service drafts.
@@ -635,16 +638,10 @@ pub(crate) fn translation_selection_saved(window: &SettingsWindow) {
         translation::selection_saved(window, &page);
     }
 }
-pub(crate) fn connection_save_failed(window: &SettingsWindow) {
-    if let Some(page) = lookup_page(window) {
-        connection::failed(window, &page);
-    }
-}
 #[cfg(test)]
 pub(crate) fn translation_save_failed(window: &SettingsWindow) {
     if let Some(page) = lookup_page(window) {
         translation::failed(window, &page);
-        connection::failed(window, &page);
     }
 }
 /// Only explicit drafts need a close confirmation; ordinary settings are already applied.
@@ -704,7 +701,9 @@ pub(crate) fn wire(
         status_source: Default::default(),
         probe: Default::default(),
         translations: Default::default(),
+        enables: Default::default(),
     });
+    enable::wire(window, &page);
     populate_cache(&page);
     PAGES.with(|pages| {
         let mut pages = pages.borrow_mut();
@@ -859,51 +858,30 @@ pub(crate) fn wire(
         if w.get_credential_editing() || !w.get_credential_draft().is_empty() {
             return;
         }
-        let mut config = current.config.borrow().clone();
         if w.get_provider_detail_index() == 0 {
-            config.deepl_enabled = w.get_llm_enabled();
-        } else {
-            let connection = match draft_connection(&w, &current) {
-                Ok(c) => c,
-                Err(e) => {
-                    status(&w, &e.to_string());
-                    return;
-                }
-            };
-            config
-                .connections
-                .retain(|c| c.provider != connection.provider);
-            config.connections.push(connection.clone());
-            invalidate(&current);
-            w.set_llm_syncing(false);
-            *current.draft.borrow_mut() = connection.clone();
-            *current.awaiting_apply.borrow_mut() = Some(connection::Submission::Service {
-                index: w.get_provider_detail_index(),
-                headers: current.pending_headers.borrow().clone(),
-            });
-            connection::refresh_pending(&w, &current);
-            (current.send)(AppEvent::LlmConnectionApplyRequested {
-                connection,
-                headers: current.pending_headers.borrow().clone(),
-            });
-            refresh_catalog(&w, &current);
-            refresh_dirty(&w, &current);
-            if let Some(p) = translation_kind(&w) {
-                model_list(&w, &current, p);
-            }
             return;
         }
-        *current.awaiting_apply.borrow_mut() = Some(connection::Submission::DeepL {
-            enabled: config.deepl_enabled,
-        });
+        let connection = match draft_connection(&w, &current) {
+            Ok(c) => c,
+            Err(e) => {
+                status(&w, &e.to_string());
+                return;
+            }
+        };
         invalidate(&current);
         w.set_llm_syncing(false);
-        connection::refresh_pending(&w, &current);
-        (current.send)(AppEvent::SettingsChangeRequested {
-            change: SettingsChange::Llm(config),
+        *current.draft.borrow_mut() = connection.clone();
+        *current.awaiting_apply.borrow_mut() = Some(connection::Submission::Service {
+            index: w.get_provider_detail_index(),
+            headers: current.pending_headers.borrow().clone(),
         });
-        refresh_dirty(&w, &current);
+        connection::refresh_pending(&w, &current);
+        (current.send)(AppEvent::LlmConnectionApplyRequested {
+            connection,
+            headers: current.pending_headers.borrow().clone(),
+        });
         refresh_catalog(&w, &current);
+        refresh_dirty(&w, &current);
         if let Some(p) = translation_kind(&w) {
             model_list(&w, &current, p);
         }
@@ -1179,6 +1157,15 @@ pub(crate) fn wire(
     window.set_llm_prompt(config.prompt.into());
 }
 
+pub(crate) fn enable_completed(
+    window: &SettingsWindow,
+    request_id: u64,
+    provider: ProviderConfig,
+    saved: bool,
+) -> bool {
+    enable::completed(window, request_id, provider, saved)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1447,6 +1434,75 @@ mod tests {
         window.set_credential_busy(false);
     }
 
+    fn enable_saves_are_correlated_and_never_apply_connection_drafts() {
+        let window = SettingsWindow::new().unwrap();
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let sent = events.clone();
+        wire(
+            &window,
+            LlmSettings::default(),
+            None,
+            Rc::new(move |e| sent.borrow_mut().push(e)),
+        );
+        let page = lookup_page(&window).unwrap();
+        window.set_provider_detail_index(1);
+        window.set_llm_service_index(0);
+        window.invoke_llm_service_selected(1);
+        window.set_llm_base_url("http://draft.example:5678".into());
+        window.invoke_llm_base_edited();
+        window.invoke_llm_enable_requested(false);
+        let (first, _) = page.enables.borrow()[&1];
+        assert!(window.get_llm_enable_saving());
+        window.invoke_llm_enable_requested(true);
+        assert_eq!(page.enables.borrow()[&1].0, first, "pending repeat ignored");
+        window.set_provider_detail_index(3);
+        window.set_llm_service_index(2);
+        window.invoke_llm_service_selected(3);
+        assert!(!window.get_llm_enable_saving());
+        window.invoke_llm_enable_requested(false);
+        let (second, _) = page.enables.borrow()[&3];
+        assert_ne!(first, second);
+        assert!(!enable_completed(
+            &window,
+            second,
+            ProviderConfig::Ollama,
+            true
+        ));
+        assert!(enable_completed(
+            &window,
+            first,
+            ProviderConfig::Ollama,
+            true
+        ));
+        assert!(
+            window.get_llm_enable_saving(),
+            "other provider remains pending"
+        );
+        assert!(enable_completed(
+            &window,
+            second,
+            ProviderConfig::DeepSeek,
+            false
+        ));
+        assert!(window.get_llm_enabled());
+        window.set_provider_detail_index(1);
+        window.set_llm_service_index(0);
+        window.invoke_llm_service_selected(1);
+        assert_eq!(window.get_llm_base_url(), "http://draft.example:5678");
+        assert!(!window.get_llm_enabled());
+        assert!(window.get_llm_connection_dirty());
+        assert_eq!(
+            page.config.borrow().connection(LlmProvider::Ollama).address,
+            "http://127.0.0.1:11434"
+        );
+        assert!(events.borrow().iter().all(|e| matches!(
+            e,
+            AppEvent::SettingsChangeRequested {
+                change: SettingsChange::ProviderEnabled { .. }
+            }
+        )));
+    }
+
     fn connection_saves_wait_for_results_and_preserve_later_edits(
         adapter: Rc<RefCell<Option<Rc<MinimalSoftwareWindow>>>>,
     ) {
@@ -1592,28 +1648,18 @@ mod tests {
 
         window.set_provider_detail_index(0);
         window.invoke_llm_service_selected(0);
-        window.set_llm_enabled(false);
-        window.invoke_llm_draft_changed();
-        window.invoke_llm_save_connection();
-        assert!(window.get_llm_connection_pending());
+        window.invoke_llm_enable_requested(false);
+        assert!(window.get_llm_enable_saving());
+        assert!(!window.get_llm_connection_dirty());
         assert!(page.config.borrow().deepl_enabled);
-        translation_save_failed(&window);
-        assert!(!window.get_llm_connection_pending());
-        assert!(window.get_llm_connection_dirty());
-        window.invoke_llm_save_connection();
-        let saved = events
-            .borrow()
-            .iter()
-            .rev()
-            .find_map(|e| match e {
-                AppEvent::SettingsChangeRequested {
-                    change: SettingsChange::Llm(c),
-                } => Some(c.clone()),
-                _ => None,
-            })
-            .unwrap();
-        sync(&window, &saved);
-        assert!(!window.get_llm_connection_pending());
+        let (id, _) = page.enables.borrow()[&0];
+        assert!(enable_completed(&window, id, ProviderConfig::DeepL, false));
+        assert!(!window.get_llm_enable_saving());
+        assert!(window.get_llm_enabled());
+        window.invoke_llm_enable_requested(false);
+        let (id, _) = page.enables.borrow()[&0];
+        assert!(enable_completed(&window, id, ProviderConfig::DeepL, true));
+        assert!(!window.get_llm_enable_saving());
         assert!(!window.get_llm_connection_dirty());
         assert_eq!(
             window.get_provider_enabled_states().row_data(0),
@@ -2184,15 +2230,20 @@ mod tests {
         assert_eq!(window.get_llm_model_filter(), 0);
         assert_eq!(window.get_llm_catalog().row_count(), 2);
         assert_eq!(window.get_llm_selected_model(), selection_before_leave);
-        window.set_llm_enabled(false);
+        window.invoke_llm_enable_requested(false);
         assert_eq!(
             window.get_provider_enabled_states().row_data(3),
             Some(true),
-            "green indicator follows saved settings, not the switch draft"
+            "indicator follows saved state"
         );
-        window.invoke_llm_save_connection();
-        assert_eq!(window.get_provider_enabled_states().row_data(3), Some(true));
-        acknowledge_connection(&window, &page, &events);
+        assert!(window.get_llm_enable_saving());
+        let (id, _) = page.enables.borrow()[&3];
+        assert!(enable_completed(
+            &window,
+            id,
+            ProviderConfig::DeepSeek,
+            true
+        ));
         assert_eq!(
             window.get_provider_enabled_states().row_data(3),
             Some(false)
@@ -2204,10 +2255,14 @@ mod tests {
                 .connection(LlmProvider::DeepSeek)
                 .enabled
         );
-        assert!(!window.get_llm_selection_note().is_empty());
-        window.set_llm_enabled(true);
-        window.invoke_llm_save_connection();
-        acknowledge_connection(&window, &page, &events);
+        window.invoke_llm_enable_requested(true);
+        let (id, _) = page.enables.borrow()[&3];
+        assert!(enable_completed(
+            &window,
+            id,
+            ProviderConfig::DeepSeek,
+            true
+        ));
         load_translation(&window, &page, Some("cloud".into()));
         if let Ok(directory) = std::env::var("LEXIFT_LLM_SNAPSHOT_DIR") {
             let adapter = adapter.borrow().as_ref().unwrap().clone();
@@ -2405,5 +2460,6 @@ mod tests {
         );
         translation_drafts_survive_switches_cancel_and_failed_saves(adapter.clone());
         connection_saves_wait_for_results_and_preserve_later_edits(adapter);
+        enable_saves_are_correlated_and_never_apply_connection_drafts();
     }
 }

@@ -2223,6 +2223,34 @@ fn ensure_main_window(registry: &mut AppWindowRegistry) -> Result<AppWindow, sli
     Ok(main)
 }
 
+/// Defer full dirtying until winit has applied the restore/resize event. Coalescing
+/// prevents redundant repairs; the weak handle cannot resurrect a closed window.
+fn schedule_settings_restore_repair(
+    settings: &SettingsWindow,
+    pending: &Arc<std::sync::atomic::AtomicBool>,
+) {
+    if pending.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let pending = pending.clone();
+    let _ = settings.as_weak().upgrade_in_event_loop(move |settings| {
+        pending.store(false, Ordering::Release);
+        if !settings.window().is_visible() || settings.window().is_minimized() {
+            return;
+        }
+        let size = settings.window().size();
+        if size.width == 0 || size.height == 0 {
+            return;
+        }
+        tracing::debug!(
+            width = size.width,
+            height = size.height,
+            "Settings restore: full paint repair"
+        );
+        repair_window_paint(settings.window());
+    });
+}
+
 fn ensure_settings_window(
     registry: &mut AppWindowRegistry,
 ) -> Result<SettingsWindow, slint::PlatformError> {
@@ -2235,43 +2263,92 @@ fn ensure_settings_window(
     {
         use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
         let weak = settings.as_weak();
-        settings.window().on_winit_window_event(move |_, event| {
-            if let Some(settings) = weak.upgrade() {
-                match event {
-                    winit::event::WindowEvent::MouseInput { .. }
-                    | winit::event::WindowEvent::Touch(_) => {
-                        settings.invoke_settings_pointer_input()
-                    }
-                    winit::event::WindowEvent::KeyboardInput { event, .. }
-                        if event.state == winit::event::ElementState::Pressed =>
-                    {
-                        use winit::keyboard::{Key, NamedKey};
-                        if matches!(
-                            event.logical_key,
-                            Key::Named(
-                                NamedKey::Tab
-                                    | NamedKey::ArrowUp
-                                    | NamedKey::ArrowDown
-                                    | NamedKey::ArrowLeft
-                                    | NamedKey::ArrowRight
-                                    | NamedKey::Home
-                                    | NamedKey::End
-                                    | NamedKey::Enter
-                                    | NamedKey::Space
-                                    | NamedKey::Escape
-                            )
-                        ) {
-                            settings.invoke_settings_keyboard_input();
+        let suspended = Cell::new(false);
+        let occluded_state = Cell::new(false);
+        let restored_redraw = Cell::new(false);
+        let pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        settings
+            .window()
+            .on_winit_window_event(move |native, event| {
+                if let Some(settings) = weak.upgrade() {
+                    if matches!(
+                        event,
+                        winit::event::WindowEvent::Resized(_)
+                            | winit::event::WindowEvent::Occluded(_)
+                            | winit::event::WindowEvent::Focused(_)
+                            | winit::event::WindowEvent::RedrawRequested
+                    ) {
+                        let minimized = native.is_minimized();
+                        if let winit::event::WindowEvent::Occluded(value) = event {
+                            occluded_state.set(*value);
+                        }
+                        let occluded = occluded_state.get();
+                        let size = if let winit::event::WindowEvent::Resized(size) = event {
+                            slint::PhysicalSize::new(size.width, size.height)
+                        } else {
+                            native.size()
+                        };
+                        if minimized || occluded || size.width == 0 || size.height == 0 {
+                            if !suspended.replace(true) {
+                                tracing::debug!(
+                                    minimized,
+                                    occluded,
+                                    width = size.width,
+                                    height = size.height,
+                                    "Settings rendering suspended"
+                                );
+                            }
+                            settings.invoke_clear_settings_hint();
+                        } else if suspended.replace(false) {
+                            tracing::debug!(
+                                width = size.width,
+                                height = size.height,
+                                "Settings rendering restored"
+                            );
+                            restored_redraw.set(true);
+                            schedule_settings_restore_repair(&settings, &pending);
                         }
                     }
-                    winit::event::WindowEvent::Focused(false) => {
-                        settings.invoke_reset_button_visuals()
+                    if matches!(event, winit::event::WindowEvent::RedrawRequested)
+                        && restored_redraw.replace(false)
+                    {
+                        tracing::debug!("Settings restore: backend redraw event");
                     }
-                    _ => {}
+                    match event {
+                        winit::event::WindowEvent::MouseInput { .. }
+                        | winit::event::WindowEvent::Touch(_) => {
+                            settings.invoke_settings_pointer_input()
+                        }
+                        winit::event::WindowEvent::KeyboardInput { event, .. }
+                            if event.state == winit::event::ElementState::Pressed =>
+                        {
+                            use winit::keyboard::{Key, NamedKey};
+                            if matches!(
+                                event.logical_key,
+                                Key::Named(
+                                    NamedKey::Tab
+                                        | NamedKey::ArrowUp
+                                        | NamedKey::ArrowDown
+                                        | NamedKey::ArrowLeft
+                                        | NamedKey::ArrowRight
+                                        | NamedKey::Home
+                                        | NamedKey::End
+                                        | NamedKey::Enter
+                                        | NamedKey::Space
+                                        | NamedKey::Escape
+                                )
+                            ) {
+                                settings.invoke_settings_keyboard_input();
+                            }
+                        }
+                        winit::event::WindowEvent::Focused(false) => {
+                            settings.invoke_reset_button_visuals()
+                        }
+                        _ => {}
+                    }
                 }
-            }
-            EventResult::Propagate
-        });
+                EventResult::Propagate
+            });
     }
     crate::theme::apply(&settings);
     let weak = settings.as_weak();
@@ -3276,6 +3353,7 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
             | SettingsField::Ollama
             | SettingsField::Llm
             | SettingsField::TranslationSelection
+            | SettingsField::ProviderEnabled(_)
             | SettingsField::TranslationOptions,
         ) => ("Provider saved", false),
         SettingsFeedback::SettingsSaved(SettingsField::LaunchAtLogin) => {
@@ -3298,6 +3376,7 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
             | SettingsField::Ollama
             | SettingsField::Llm
             | SettingsField::TranslationSelection
+            | SettingsField::ProviderEnabled(_)
             | SettingsField::TranslationOptions,
         ) => ("Provider wasn't saved", true),
         SettingsFeedback::SettingsSaveFailed(SettingsField::LaunchAtLogin) => {
@@ -3306,10 +3385,12 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
         SettingsFeedback::SettingsSaveFailed(SettingsField::SelectionToolbar) => {
             ("Selection toolbar preference wasn't saved", true)
         }
-        SettingsFeedback::TranslationSettingsCompleted { saved: true, .. } => {
+        SettingsFeedback::ProviderEnabledCompleted { saved: true, .. }
+        | SettingsFeedback::TranslationSettingsCompleted { saved: true, .. } => {
             ("Provider saved", false)
         }
-        SettingsFeedback::TranslationSettingsCompleted { saved: false, .. } => {
+        SettingsFeedback::ProviderEnabledCompleted { saved: false, .. }
+        | SettingsFeedback::TranslationSettingsCompleted { saved: false, .. } => {
             ("Provider wasn't saved", true)
         }
         SettingsFeedback::CredentialSaved => ("API key saved", false),
@@ -3641,6 +3722,15 @@ impl UiHandle {
             }) else {
                 return;
             };
+            if let SettingsFeedback::ProviderEnabledCompleted {
+                request_id,
+                provider,
+                saved,
+            } = feedback
+                && !crate::llm_settings::enable_completed(&settings, request_id, provider, saved)
+            {
+                return;
+            }
             if let SettingsFeedback::TranslationSettingsCompleted {
                 request_id,
                 field,
@@ -3658,9 +3748,6 @@ impl UiHandle {
                     error,
                 },
             );
-            if feedback == SettingsFeedback::SettingsSaveFailed(SettingsField::Llm) {
-                crate::llm_settings::connection_save_failed(&settings);
-            }
             render_settings_toasts(&settings, &toast_records);
             let settings_for_timeout = settings.as_weak();
             let records_for_timeout = Arc::clone(&toast_records);
@@ -3820,6 +3907,53 @@ pub(crate) fn dispatch_pointer_input(window: &slint::Window, input: PopupPointer
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn full_paint_repair_restores_discarded_pixels_where_plain_redraw_does_not() {
+        use slint::{
+            ComponentHandle,
+            platform::{
+                Platform, WindowAdapter,
+                software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+            },
+        };
+        use std::{cell::RefCell, rc::Rc};
+        struct ReusedPlatform(Rc<RefCell<Option<Rc<MinimalSoftwareWindow>>>>);
+        impl Platform for ReusedPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                let adapter = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+                *self.0.borrow_mut() = Some(adapter.clone());
+                Ok(adapter)
+            }
+        }
+        let slot = Rc::new(RefCell::new(None));
+        slint::platform::set_platform(Box::new(ReusedPlatform(slot.clone()))).unwrap();
+        let settings = crate::SettingsWindow::new().unwrap();
+        settings
+            .window()
+            .set_size(slint::PhysicalSize::new(900, 700));
+        settings.show().unwrap();
+        let adapter = slot.borrow().as_ref().unwrap().clone();
+        let mut pixels = vec![slint::Rgb8Pixel::default(); 900 * 700];
+        adapter.draw_if_needed(|r| {
+            r.render(&mut pixels, 900);
+        });
+        let expected = pixels.clone();
+        pixels.fill(slint::Rgb8Pixel::default());
+        settings.window().request_redraw();
+        adapter.draw_if_needed(|r| {
+            r.render(&mut pixels, 900);
+        });
+        assert_ne!(
+            pixels, expected,
+            "ordinary redraw cannot repair a discarded reused surface"
+        );
+        super::repair_window_paint(settings.window());
+        adapter.draw_if_needed(|r| {
+            r.render(&mut pixels, 900);
+        });
+        assert_eq!(pixels, expected, "full repair restores every client pixel");
+    }
+
     use lexift_core::domain::{
         geometry::{Point, Rect},
         language::Language,

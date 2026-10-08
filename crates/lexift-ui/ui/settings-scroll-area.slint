@@ -1,0 +1,28 @@
+import { SettingsHints } from "settings-hint.slint";
+import { ScrollView } from "std-widgets.slint";
+import { AppVerticalScrollBar } from "design/scrollbar.slint";
+
+// Native widget palettes can follow the OS while Settings explicitly uses dark
+// mode. Reuse the app scrollbar so both pages and embedded dialogs follow Colors.
+export component SettingsScrollArea inherits Rectangle {
+    in-out property <length> content-width <=> viewport.content-width;
+    in-out property <length> content-height <=> viewport.content-height;
+    in-out property <length> content-y <=> viewport.content-y;
+    out property <length> visible-width: viewport.visible-width;
+    out property <length> visible-height: viewport.visible-height;
+    callback scrolled();
+    changed content-y => { SettingsHints.clear(); }
+    viewport := ScrollView {
+        x: 0px; y: 0px;
+        width: root.width; height: root.height;
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+        scrolled => { SettingsHints.clear(); root.scrolled(); }
+        @children
+    }
+    AppVerticalScrollBar {
+        x: parent.width - self.width; height: parent.height;
+        viewport-height: root.visible-height; content-height: root.content-height;
+        content-y <=> root.content-y;
+    }
+}

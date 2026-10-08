@@ -194,6 +194,7 @@ pub(crate) fn save_connection(
         connection.protocols.push(profile);
         changes.push((id, update.secret));
     }
+    connection.enabled = settings.llm.connection(connection.provider).enabled;
     connection.validate()?;
     settings
         .llm
@@ -313,6 +314,11 @@ mod tests {
                 },
             ];
             assert!(!format!("{updates:?}").contains("new-test-value"));
+            settings.llm.set_provider_enabled(
+                lexift_core::domain::runtime_config::ProviderConfig::LmStudio,
+                false,
+            );
+            connection.enabled = true; // stale page draft predates the immediate toggle
             let result = save_connection(&store, &Config(failure), settings, connection, updates);
             if failure {
                 assert!(result.is_err());
@@ -323,6 +329,7 @@ mod tests {
                 );
             } else {
                 let config = result.unwrap();
+                assert!(!config.connection(LlmProvider::LmStudio).enabled);
                 assert_eq!(
                     config
                         .connection(LlmProvider::LmStudio)

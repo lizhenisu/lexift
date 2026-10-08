@@ -3,6 +3,7 @@ use super::*;
 
 /// Keep independently saved credential references current without replacing connection edits.
 pub(super) fn refresh_credentials(connection: &mut LlmConnection, saved: &LlmConnection) {
+    connection.enabled = saved.enabled;
     connection.credential_id = saved.credential_id.clone();
     for profile in &mut connection.protocols {
         profile.headers = saved
@@ -19,9 +20,6 @@ pub(super) enum Submission {
         index: i32,
         headers: Vec<LlmHeaderUpdate>,
     },
-    DeepL {
-        enabled: bool,
-    },
 }
 pub(super) fn refresh_pending(window: &SettingsWindow, page: &Page) {
     let pending = page.awaiting_apply.borrow();
@@ -29,7 +27,6 @@ pub(super) fn refresh_pending(window: &SettingsWindow, page: &Page) {
     window.set_llm_connection_saving(pending.as_ref().is_some_and(|submission| {
         let index = match submission {
             Submission::Service { index, .. } => *index,
-            Submission::DeepL { .. } => 0,
         };
         index == window.get_provider_detail_index()
     }));
@@ -38,7 +35,8 @@ pub(super) fn completed(window: &SettingsWindow, page: &Page, success: bool) {
     let Some(submission) = page.awaiting_apply.borrow_mut().take() else {
         return;
     };
-    if success && let Submission::Service { index, headers } = submission {
+    let Submission::Service { index, headers } = submission;
+    if success {
         if page.service_index.get() == index {
             page.pending_headers
                 .borrow_mut()
@@ -58,20 +56,6 @@ pub(super) fn completed(window: &SettingsWindow, page: &Page, success: bool) {
     refresh_headers(window, page);
     refresh_dirty(window, page);
 }
-pub(super) fn synced(window: &SettingsWindow, page: &Page) {
-    let done = matches!(page.awaiting_apply.borrow().as_ref(), Some(Submission::DeepL { enabled }) if *enabled == page.config.borrow().deepl_enabled);
-    if done {
-        completed(window, page, true);
-    }
-}
-pub(super) fn failed(window: &SettingsWindow, page: &Page) {
-    if matches!(
-        page.awaiting_apply.borrow().as_ref(),
-        Some(Submission::DeepL { .. })
-    ) {
-        completed(window, page, false);
-    }
-}
 
 pub(super) struct Draft {
     connection: LlmConnection,
@@ -79,7 +63,6 @@ pub(super) struct Draft {
     address: String,
     base: String,
     auth: i32,
-    enabled: bool,
 }
 
 /// Capture the previous provider even though Slint has already selected the next row.
@@ -115,7 +98,6 @@ pub(super) fn remember(window: &SettingsWindow, page: &Page) {
             base,
             auth,
             address: window.get_llm_address().to_string(),
-            enabled: window.get_llm_enabled(),
         },
     );
 }
@@ -131,7 +113,6 @@ pub(super) fn restore(window: &SettingsWindow, page: &Page) {
         *page.draft.borrow_mut() = draft.connection.clone();
         *page.pending_headers.borrow_mut() = draft.headers.clone();
         window.set_llm_address(draft.address.clone().into());
-        window.set_llm_enabled(draft.enabled);
         load_profile(window, &draft.connection);
         window.set_llm_base_url(draft.base.clone().into());
         window.set_llm_auth_index(draft.auth);
@@ -149,7 +130,7 @@ pub(super) fn has_unsaved(page: &Page) -> bool {
     let config = page.config.borrow();
     page.connections.borrow().iter().any(|(index, draft)| {
         if *index == 0 {
-            return draft.enabled != config.deepl_enabled;
+            return false;
         }
         let Ok(address) = service_address(&draft.address) else {
             return true;
@@ -159,7 +140,7 @@ pub(super) fn has_unsaved(page: &Page) -> bool {
         };
         let mut connection = draft.connection.clone();
         connection.address = address;
-        connection.enabled = draft.enabled;
+        connection.enabled = config.connection(connection.provider).enabled;
         let mut profile = connection.profile();
         profile.base_url = base;
         profile.authentication = match draft.auth {

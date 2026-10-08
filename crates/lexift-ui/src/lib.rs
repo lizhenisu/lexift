@@ -14,6 +14,8 @@ mod llm_settings;
 mod mapper;
 pub use llm_settings::{LlmQueryCancellation, LlmQueryCompletion};
 mod placement;
+#[cfg(test)]
+mod settings_theme_tests;
 mod theme;
 #[cfg(test)]
 mod translation_layout_tests;
@@ -25,3 +27,6 @@ pub use bridge::{
     PassiveWindowPreparation, PopupDismissCause, PopupPointerInput, PopupPointerSink,
     PopupResizeEdge, Ui, UiHandle, WindowLifecycleCallbacks,
 };
+
+#[cfg(test)]
+mod settings_hint_tests;

@@ -21,6 +21,7 @@ pub enum SettingsField {
     Provider,
     Ollama,
     Llm,
+    ProviderEnabled(ProviderConfig),
     TranslationSelection,
     TranslationOptions,
     LaunchAtLogin,
@@ -38,6 +39,11 @@ pub enum SettingsFeedback {
         field: SettingsField,
         saved: bool,
     },
+    ProviderEnabledCompleted {
+        request_id: u64,
+        provider: ProviderConfig,
+        saved: bool,
+    },
     CredentialSaved,
     CredentialRemoved,
     CredentialCopied,
@@ -52,6 +58,12 @@ pub enum SettingsChange {
     Provider(ProviderConfig),
     Ollama(super::ollama::OllamaConfig),
     Llm(super::llm::LlmSettings),
+    /// Toggle one provider without applying connection drafts.
+    ProviderEnabled {
+        request_id: u64,
+        provider: ProviderConfig,
+        enabled: bool,
+    },
     /// Select a service and model together without replacing connection/catalog state.
     TranslationSelection {
         request_id: u64,
@@ -79,6 +91,7 @@ impl SettingsChange {
             Self::Provider(_) => SettingsField::Provider,
             Self::Ollama(_) => SettingsField::Ollama,
             Self::Llm(_) => SettingsField::Llm,
+            Self::ProviderEnabled { provider, .. } => SettingsField::ProviderEnabled(*provider),
             Self::TranslationSelection { .. } => SettingsField::TranslationSelection,
             Self::TranslationOptions { .. } => SettingsField::TranslationOptions,
             Self::LaunchAtLogin(_) => SettingsField::LaunchAtLogin,
@@ -122,6 +135,15 @@ impl SettingsChange {
 
     pub fn feedback(&self, saved: bool) -> SettingsFeedback {
         match self {
+            Self::ProviderEnabled {
+                request_id,
+                provider,
+                ..
+            } => SettingsFeedback::ProviderEnabledCompleted {
+                request_id: *request_id,
+                provider: *provider,
+                saved,
+            },
             Self::TranslationSelection { request_id, .. }
             | Self::TranslationOptions { request_id, .. } => {
                 SettingsFeedback::TranslationSettingsCompleted {
@@ -142,7 +164,17 @@ impl SettingsChange {
             Self::AnnotationHotkey(value) => settings.annotation_hotkey = *value,
             Self::Provider(value) => settings.provider = *value,
             Self::Ollama(value) => settings.ollama = value.clone(),
-            Self::Llm(value) => settings.llm = value.clone(),
+            Self::Llm(value) => {
+                let previous = settings.llm.clone();
+                settings.llm = value.clone();
+                settings.llm.deepl_enabled = previous.deepl_enabled;
+                for c in &mut settings.llm.connections {
+                    c.enabled = previous.connection(c.provider).enabled;
+                }
+            }
+            Self::ProviderEnabled {
+                provider, enabled, ..
+            } => settings.llm.set_provider_enabled(*provider, *enabled),
             Self::TranslationSelection {
                 provider, model, ..
             } => {
@@ -192,6 +224,9 @@ impl SettingsChange {
             Self::Provider(value) => settings.provider == *value,
             Self::Ollama(value) => settings.ollama == *value,
             Self::Llm(value) => settings.llm == *value,
+            Self::ProviderEnabled {
+                provider, enabled, ..
+            } => settings.llm.provider_enabled(*provider) == *enabled,
             Self::TranslationSelection {
                 provider, model, ..
             } => {

@@ -1,3 +1,5 @@
+import { SettingsHints, SettingsHintTarget } from "settings-hint.slint";
+import { SettingsColors } from "settings-colors.slint";
 import { SettingsInteraction, SettingsFocusScope } from "settings-interaction.slint";
 import { Colors } from "design/colors.slint";
 import { Spacing } from "design/spacing.slint";
@@ -6,10 +8,13 @@ import { Metrics } from "design/metrics.slint";
 
 export struct TranslationChoice { provider: int, id: string, group: string, note: string, usable: bool, thinking: bool, top: int }
 
-export component ProviderLogo inherits Image {
+export component ProviderLogo inherits Rectangle {
+    border-radius: 4px; background: SettingsColors.brand-surface;
     in property <int> provider;
-    source: root.provider == 0 ? @image-url("icons/provider-deepl.svg") : root.provider == 1 ? @image-url("icons/provider-ollama.svg") : root.provider == 2 ? @image-url("icons/provider-lmstudio.svg") : @image-url("icons/provider-deepseek.svg");
-    image-fit: contain;
+    Image { width: parent.width; height: parent.height;
+        source: root.provider == 0 ? @image-url("icons/provider-deepl.svg") : root.provider == 1 ? @image-url("icons/provider-ollama.svg") : root.provider == 2 ? @image-url("icons/provider-lmstudio.svg") : @image-url("icons/provider-deepseek.svg");
+        image-fit: contain;
+    }
 }
 
 export struct ProviderProbeRow { id: string, state: string, detail: string, elapsed: string, failed: bool }
@@ -26,20 +31,17 @@ export component ProviderIconButton inherits Rectangle {
     public function focus-button() { keyboard.focus-target(); }
     width: 32px; height: 32px; border-radius: 6px;
     opacity: enabled ? 1 : Metrics.disabled-opacity;
-    background: selected ? Colors.primary-container : touch.pressed ? Colors.icon-button-pressed : touch.has-hover ? Colors.icon-button-hover : transparent;
+    background: SettingsColors.interactive(transparent, root.enabled && touch.has-hover, root.enabled && touch.pressed, root.selected);
     accessible-role: button; accessible-label: root.accessible-name;
-    border-width: keyboard.focus-visible && root.enabled ? 1px : 0px; border-color: Colors.primary;
+    border-width: keyboard.focus-visible && root.enabled ? 1px : 0px; border-color: SettingsColors.focus;
     Image { x: 7px; y: 7px; width: 18px; height: 18px; source: root.icon; colorize: root.selected ? Colors.primary : Colors.secondary-foreground; }
     keyboard := SettingsFocusScope {
         enabled: root.enabled;
         key-pressed(event) => { if event.text == " " || event.text == Key.Return { root.clicked(); return accept; } return reject; }
     }
     touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.clicked(); } }
-    if touch.has-hover && root.tooltip != "": Rectangle {
-        z: 100; x: min(0px, root.width - self.width); y: root.height + 4px;
-        width: hint.preferred-width + 16px; height: 28px; border-radius: 4px; background: Colors.foreground;
-        hint := Text { x: 8px; height: parent.height; text: root.tooltip; color: Colors.surface; font-size: 12px; vertical-alignment: center; }
-    }
+    SettingsHintTarget { active: root.enabled && touch.has-hover; text: root.tooltip; anchor-x: root.absolute-position.x; anchor-y: root.absolute-position.y; anchor-height: root.height; }
+
 }
 
 export component ProviderInput inherits Rectangle {
@@ -58,13 +60,13 @@ export component ProviderInput inherits Rectangle {
     public function focus-input() { input.focus(); }
     public pure function input-focused() -> bool { return input.has-focus; }
     height: 40px; border-radius: 6px; border-width: 1px;
-    border-color: input.has-focus ? Colors.primary : Colors.outline;
-    background: Colors.background;
+    border-color: input.has-focus ? SettingsColors.focus : Colors.outline;
+    background: SettingsColors.field;
     input := TextInput {
         x: 12px; width: parent.width - 24px; height: parent.height;
         text <=> root.text; input-type: root.secret ? InputType.password : InputType.text;
         color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center;
-        selection-background-color: Colors.primary-container; selection-foreground-color: Colors.foreground;
+        selection-background-color: SettingsColors.selected; selection-foreground-color: Colors.foreground;
         edited => { root.edited(); }
         changed has-focus => { root.focus-state-changed(self.has-focus); }
         cursor-position-changed(position) => { if self.has-focus { root.selection-changed(self.anchor-position-byte-offset, self.cursor-position-byte-offset); } }
@@ -79,10 +81,9 @@ export component ProviderModelItem inherits Rectangle {
     in property <bool> enabled: true;
     in property <ProviderModelRow> model;
     callback toggle();
-    callback hint(string, length, length);
     height: root.model.usable ? 52px : 72px;
-    background: hover.has-hover ? Colors.background : transparent;
-    hover := TouchArea { changed has-hover => { root.hint(self.has-hover && model-name.preferred-width > model-name.width ? root.model.id : "", root.absolute-position.x, root.absolute-position.y + root.height); } }
+    background: SettingsColors.interactive(transparent, hover.has-hover, false, false);
+    hover := TouchArea { changed has-hover => { if self.has-hover && model-name.preferred-width > model-name.width { SettingsHints.show(root.model.id, root.absolute-position.x, root.absolute-position.y, root.height); } else { SettingsHints.clear(); } } }
     Rectangle { y: parent.height - 1px; height: 1px; width: parent.width; background: Colors.outline.with-alpha(0.5); }
     model-name := Text {
         x: 16px; y: 8px; width: max(0px, parent.width - 112px); height: 36px;
@@ -121,7 +122,7 @@ export component ProviderFilterChip inherits Rectangle {
     in property <bool> selected;
     callback clicked();
     width: caption.preferred-width + 20px; height: 32px; border-radius: 6px;
-    background: selected ? Colors.primary-container : touch.has-hover ? Colors.icon-button-hover : Colors.background;
+    background: SettingsColors.interactive(SettingsColors.field, touch.has-hover, touch.pressed, root.selected);
     caption := Text { x: 10px; height: parent.height; text: root.label; color: root.selected ? Colors.primary : Colors.secondary-foreground; font-size: 13px; vertical-alignment: center; }
     touch := TouchArea { clicked => { root.clicked(); } }
 }
