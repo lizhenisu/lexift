@@ -33,3 +33,31 @@ Windows supplies passive/interactive style changes, native custom-title-bar drag
 Popup sessions are intentionally in-memory only and end when their windows close or the process exits.
 
 The Main and Settings components are also created on demand. Background startup creates no Slint window components. Closing Main with a working tray destroys the component while leaving the process, tray, global hotkey, and Slint event loop running; a tray or second-instance open request reconstructs Main from the latest Core snapshot. Closing or hiding Settings clears credential drafts and transient feedback before destroying it; opening Settings again reconstructs it from current state. Closing without a usable tray retains the existing exit behavior. Destroying the final window releases that window's renderer and its surface and GPU resources, when present; the process-level Slint/Winit event loop and allocator remain alive. After two minutes with no window components, the Windows adapter asks the OS to trim the process working set. This evicts resident pages but does not decommit private allocations or recreate the renderer backend, and pages may fault back in on the next UI request.
+
+## Windows Shell identity: Settings only (2026-10-08)
+
+Only the explicitly registered Settings instance may appear in the taskbar and Alt+Tab. Main, translation Popup (including pinned/editing), selection toolbar, annotation toolbars/editors/canvases, secondary panels, popovers, menus and native save/overwrite dialogs are excluded. This replaces the earlier Main + Settings exception.
+
+UI owns the `WindowRole` and App maps it to Platform during hidden preparation; titles and UI language never identify Settings. Winit creation attributes default to `skip_taskbar(true)`. Main startup, tray/second-instance restoration and Settings opening use shared bounded preparation (20 attempts, 16 ms between retries), show only after readiness, and discard stale generations. Timers stop on close; callbacks hold no strong window reference. Preparation exhaustion destroys the hidden component. Activation and native frame/input behavior remain separate from Shell membership.
+
+Platform `window_shell_policy.rs` owns one policy/subclass per HWND. Before backend extended-style writes, auxiliaries clear `WS_EX_APPWINDOW` and retain `WS_EX_TOOLWINDOW`; Settings does the reverse. Activation changes preserve the registered Shell role. `WM_NCDESTROY` removes the property/subclass and releases its state. The UI thread and native save STA also hold a thread-local `WH_CALLWNDPROC` guard, which prepares unregistered top-level windows before a showing `WM_WINDOWPOSCHANGING`; child windows are untouched. Native GPU/magnifier hosts explicitly install the same policy while hidden. The thread hooks observe only their own threads and are removed with their scopes. No periodic polling, post-click repair or window reconstruction is used.
+
+### Verification
+
+- Platform: 163 passed, 83 existing desktop-dependent ignored. UI: 346 passed, 10 existing ignored. App: 49 passed. New regressions cover same-title Settings/auxiliary instances, backend rewrites, activation, unrelated flags, native thread fallback, HWND destruction, hidden show ordering, bounded failure and stale show requests.
+- All-target Platform/UI/App Clippy with warnings denied passed. Windows Release and Slint build passed; final rerun logs are linked below.
+- Owned Release App: normal startup Main, close/reopen via second instance, minimize/restore, Popup pin/click/drag/resize, 125% to 100% cross-screen, annotation main/options/tertiary dropdown/GPU canvases, native save and nested overwrite confirmation. Live HWND checks retained the correct role.
+- Actual Shell screenshots independently confirm no Main/Popup/annotation/save taskbar or Alt+Tab entry; opening Settings adds only Settings, and closing it removes the Lexift taskbar entry while Main continues running. The native save was cancelled; an owned existing PNG remained byte-identical after cancelling overwrite. These checks do not rely solely on style bits.
+- The controlled source fixture began with an image in the clipboard; selection Ctrl+C copied the expected text and Ctrl+X removed it without re-clicking the source. The test used temporary unconfigured Ollama settings and sent no network generation request. Original configuration bytes and clipboard were restored, and owned test processes/windows were retired.
+
+Evidence in ignored local `target/` artifacts:
+
+- [Native operation log](../target/settings-only-native.log)
+- [Startup Main excluded / Alt+Tab](../target/settings-only-startup-alt-tab.png), [Main taskbar](../target/settings-only-main-taskbar.png)
+- [Only Settings / Alt+Tab](../target/settings-only-normal-alt-tab.png), [Settings taskbar](../target/settings-only-normal-taskbar.png)
+- [Settings closed / Alt+Tab](../target/settings-only-settings-closed-alt-tab.png), [Settings closed / taskbar](../target/settings-only-settings-closed-taskbar.png)
+- [Popup / Alt+Tab](../target/settings-only-popup-alt-tab.png), [annotation / taskbar](../target/settings-only-toolbar-taskbar.png)
+- [Native save / Alt+Tab](../target/settings-only-save-alt-tab.png), [overwrite / Alt+Tab](../target/settings-only-overwrite-alt-tab.png)
+- [Tests](../target/settings-only-tests-final.log), [Clippy](../target/settings-only-clippy-final.log), [Release](../target/settings-only-release-complete.log)
+
+Limits: Chinese IME composition, annotation text-editor focus, capture loss/Escape mid-drag, native edge snap, Explorer restart, a physical tray click and GPU device recovery were not separately exercised in this run. Tray and second-instance requests share the tested Main show path. GPU/magnifier hidden policy wiring and existing interaction tests cover their code paths, but no live magnifier or device-loss scene was created. This Windows-only change adds no Core Port, configuration schema, dependency or crate.

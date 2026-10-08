@@ -222,6 +222,10 @@ fn create_view(preview: bool) -> Result<View> {
         )
     }
     .map_err(|e| Error::new(format!("Could not create magnifier host: {e}")))?;
+    if let Err(error) = super::window_shell_policy::set_settings_role(host, false) {
+        let _ = unsafe { DestroyWindow(host) };
+        return Err(error);
+    }
     if let Err(error) = super::annotation_overlay::mark(host) {
         let _ = unsafe { DestroyWindow(host) };
         return Err(Error::new(format!(

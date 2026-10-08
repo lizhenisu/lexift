@@ -110,15 +110,19 @@ impl Surface {
             // HTTRANSPARENT only searches windows on this thread. Layered
             // transparency lets User32 skip this visual across application
             // boundaries; constant alpha leaves composition pixels unchanged.
-            let result = SetLayeredWindowAttributes(
-                window,
-                windows::Win32::Foundation::COLORREF(0),
-                255,
-                LWA_ALPHA,
-            )
-            .and_then(|()| super::super::annotation_overlay::mark(window))
-            .and_then(|()| super::super::annotation_window_order::visual(window))
-            .and_then(|()| Self::attach(graphics, spec, window));
+            let result = super::super::window_shell_policy::set_settings_role(window, false)
+                .map_err(|_| windows::core::Error::from_hresult(windows::Win32::Foundation::E_FAIL))
+                .and_then(|()| {
+                    SetLayeredWindowAttributes(
+                        window,
+                        windows::Win32::Foundation::COLORREF(0),
+                        255,
+                        LWA_ALPHA,
+                    )
+                })
+                .and_then(|()| super::super::annotation_overlay::mark(window))
+                .and_then(|()| super::super::annotation_window_order::visual(window))
+                .and_then(|()| Self::attach(graphics, spec, window));
             if result.is_err() {
                 let _ = DestroyWindow(window);
             }

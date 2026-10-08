@@ -38,4 +38,5 @@ pub(crate) use speech::WindowsSpeechPort;
 pub(crate) use tray::WindowsTrayPort;
 
 pub(super) mod popup;
+pub(crate) mod window_shell_policy;
 pub(crate) use clipboard::WindowsClipboardPort;

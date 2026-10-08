@@ -71,6 +71,7 @@ impl AnnotationSavePort for WindowsAnnotationSavePort {
         if cancelled.load(Ordering::Acquire) {
             return Ok(SaveOutcome::Cancelled);
         }
+        let _shell_policy = super::window_shell_policy::ThreadGuard::new()?;
         let _apartment = Apartment::new()?;
         let dialog: IFileSaveDialog =
             unsafe { CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER) }

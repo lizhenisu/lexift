@@ -33,6 +33,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
     } else {
         Some("femtovg")
     };
+    let _shell_policy = lexift_platform::protect_window_thread()?;
     let selector = slint::BackendSelector::new().backend_name("winit".into());
     #[cfg(not(feature = "renderer-diagnostic"))]
     let selector = if let Some(renderer) = renderer {
@@ -40,6 +41,9 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
     } else {
         selector
     };
+    #[cfg(target_os = "windows")]
+    let selector =
+        selector.with_winit_window_attributes_hook(lexift_platform::default_window_attributes);
     selector.select()?;
     #[cfg(not(feature = "renderer-diagnostic"))]
     tracing::info!(
@@ -82,16 +86,28 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
     let ui = lexift_ui::Ui::new(
         &initial_state,
         cfg!(feature = "m1-demo"),
-        |window| match lexift_platform::configure_passive_tool_window(&window.window_handle()) {
-            Ok(lexift_platform::PassiveToolWindowPreparation::Ready) => {
-                lexift_ui::PassiveWindowPreparation::Ready
+        |window| {
+            // Keep Winit's Shell registration consistent with the native auxiliary policy
+            // before the first show. This also covers every annotation-owned window.
+            match window.with_winit_window(lexift_platform::configure_menu_window) {
+                Some(Ok(())) => {}
+                None => return lexift_ui::PassiveWindowPreparation::Pending,
+                Some(Err(error)) => {
+                    tracing::warn!(%error, "auxiliary window shell policy is unavailable");
+                    return lexift_ui::PassiveWindowPreparation::Failed;
+                }
             }
-            Ok(lexift_platform::PassiveToolWindowPreparation::Pending) => {
-                lexift_ui::PassiveWindowPreparation::Pending
-            }
-            Err(error) => {
-                tracing::warn!(%error, "passive window activation policy is unavailable");
-                lexift_ui::PassiveWindowPreparation::Failed
+            match lexift_platform::configure_passive_tool_window(&window.window_handle()) {
+                Ok(lexift_platform::PassiveToolWindowPreparation::Ready) => {
+                    lexift_ui::PassiveWindowPreparation::Ready
+                }
+                Ok(lexift_platform::PassiveToolWindowPreparation::Pending) => {
+                    lexift_ui::PassiveWindowPreparation::Pending
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "passive window activation policy is unavailable");
+                    lexift_ui::PassiveWindowPreparation::Failed
+                }
             }
         },
         lexift_ui::WindowLifecycleCallbacks::new(
@@ -190,6 +206,13 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 }
             },
         )
+        .with_app_window_preparation(|window, role| {
+            match window.with_winit_window(|native| lexift_platform::configure_window_shell_role(native, role == lexift_ui::WindowRole::Settings)) {
+                Some(Ok(())) => lexift_ui::PassiveWindowPreparation::Ready,
+                Some(Err(error)) => { tracing::warn!(%error, "application window Shell preparation failed"); lexift_ui::PassiveWindowPreparation::Failed }
+                None => lexift_ui::PassiveWindowPreparation::Pending,
+            }
+        })
         .with_app_window_icon(|window| {
             match lexift_platform::configure_app_window_icon(&window.window_handle()) {
                 Ok(()) => true,

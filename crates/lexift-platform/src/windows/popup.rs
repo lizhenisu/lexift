@@ -1,3 +1,5 @@
+use super::window_shell_policy as shell_policy;
+
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -40,6 +42,7 @@ pub(crate) fn configure_passive(
         ));
     };
     let hwnd = HWND(handle.hwnd.get() as *mut core::ffi::c_void);
+    shell_policy::install(hwnd, Some(shell_policy::Activation::Passive))?;
     configure_hwnd_extended_style(hwnd, passive_extended_style)?;
     Ok(PassiveToolWindowPreparation::Ready)
 }
@@ -48,12 +51,19 @@ pub(crate) fn configure_passive(
 pub(crate) fn configure_menu_window(
     window: &impl raw_window_handle::HasWindowHandle,
 ) -> lexift_core::Result<()> {
+    shell_policy::install(required_hwnd(window)?, None)?;
     configure_extended_style(window, menu_window_extended_style)
 }
 
+pub(crate) fn configure_shell_role(
+    window: &impl raw_window_handle::HasWindowHandle,
+    settings: bool,
+) -> lexift_core::Result<()> {
+    shell_policy::set_settings_role(required_hwnd(window)?, settings)
+}
+
 fn menu_window_extended_style(style: isize) -> isize {
-    use windows::Win32::UI::WindowsAndMessaging::{WS_EX_APPWINDOW, WS_EX_TOOLWINDOW};
-    (style & !(WS_EX_APPWINDOW.0 as isize)) | WS_EX_TOOLWINDOW.0 as isize
+    shell_policy::tool_style(style)
 }
 
 /// Requests Windows 11's native rounded outer corners for the translation popup.
@@ -98,8 +108,12 @@ pub(crate) fn enable_interaction_without_activation(
     window: &impl raw_window_handle::HasWindowHandle,
     pointer_handler: PopupPointerHandler,
 ) -> lexift_core::Result<()> {
-    // Update the policy before writing styles; an existing passive subclass
-    // otherwise correctly rejects removal of WS_EX_NOACTIVATE.
+    // Update the role before writing styles; the persistent guard otherwise
+    // correctly retains the previous passive WS_EX_NOACTIVATE policy.
+    shell_policy::install(
+        required_hwnd(window)?,
+        Some(shell_policy::Activation::Interactive),
+    )?;
     install_pointer_bridge(window, pointer_handler, true)?;
     configure_extended_style(window, interactive_extended_style)
 }
@@ -108,6 +122,10 @@ pub(crate) fn enable_passive_interaction(
     window: &impl raw_window_handle::HasWindowHandle,
     pointer_handler: PopupPointerHandler,
 ) -> lexift_core::Result<()> {
+    shell_policy::install(
+        required_hwnd(window)?,
+        Some(shell_policy::Activation::Passive),
+    )?;
     install_pointer_bridge(window, pointer_handler, false)?;
     configure_extended_style(window, passive_extended_style)
 }
@@ -822,23 +840,6 @@ unsafe extern "system" fn popup_input_subclass(
     }
     let _input_timing = input_timing::begin(hwnd, message);
 
-    // Winit reconstructs extended styles when visibility, DPI or window
-    // properties change. Preserve the passive policy before that write, rather
-    // than restoring focus after an accidental activation.
-    if message == windows::Win32::UI::WindowsAndMessaging::WM_STYLECHANGING
-        && wparam.0 as isize == windows::Win32::UI::WindowsAndMessaging::GWL_EXSTYLE.0 as isize
-        && lparam.0 != 0
-    {
-        let bridge = unsafe { &*(reference_data as *const PopupInputBridge) };
-        if !bridge.activate_on_click {
-            let styles = unsafe {
-                &mut *(lparam.0 as *mut windows::Win32::UI::WindowsAndMessaging::STYLESTRUCT)
-            };
-            styles.styleNew = passive_extended_style(styles.styleNew as isize) as u32;
-        }
-        return unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
-    }
-
     if message == WM_NCHITTEST {
         let popup = unsafe { GetPropW(hwnd, w!("Lexift.TranslationPopup")) };
         if !popup.0.is_null() {
@@ -1093,8 +1094,9 @@ pub(crate) fn activate_user_requested(
     use windows::Win32::UI::WindowsAndMessaging::{
         BringWindowToTop, SW_RESTORE, SetForegroundWindow, ShowWindow,
     };
-    configure_extended_style(window, interactive_extended_style)?;
     let hwnd = required_hwnd(window)?;
+    shell_policy::allow_activation_if_registered(hwnd);
+    configure_extended_style(window, activation_extended_style)?;
     unsafe {
         let _ = ShowWindow(hwnd, SW_RESTORE);
         BringWindowToTop(hwnd)
@@ -1351,8 +1353,8 @@ fn window_hwnd(
 }
 
 fn passive_extended_style(style: isize) -> isize {
-    use windows::Win32::UI::WindowsAndMessaging::{WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW};
-    style | WS_EX_NOACTIVATE.0 as isize | WS_EX_TOOLWINDOW.0 as isize
+    use windows::Win32::UI::WindowsAndMessaging::WS_EX_NOACTIVATE;
+    shell_policy::tool_style(style) | WS_EX_NOACTIVATE.0 as isize
 }
 
 pub(crate) fn set_click_through(
@@ -1480,9 +1482,14 @@ pub(crate) fn present_annotation_frame(
     result.map_err(|_| lexift_core::Error::new("Could not present annotation frame"))
 }
 
+// Normal application windows must keep their taskbar/Alt+Tab identity when raised.
+fn activation_extended_style(style: isize) -> isize {
+    use windows::Win32::UI::WindowsAndMessaging::WS_EX_NOACTIVATE;
+    style & !(WS_EX_NOACTIVATE.0 as isize)
+}
+
 fn interactive_extended_style(style: isize) -> isize {
-    use windows::Win32::UI::WindowsAndMessaging::{WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW};
-    (style & !(WS_EX_NOACTIVATE.0 as isize)) | WS_EX_TOOLWINDOW.0 as isize
+    shell_policy::tool_style(activation_extended_style(style))
 }
 
 fn passive_refresh_flags() -> windows::Win32::UI::WindowsAndMessaging::SET_WINDOW_POS_FLAGS {
@@ -1879,6 +1886,17 @@ mod tests {
     }
 
     #[test]
+    fn activating_settings_preserves_its_shell_identity() {
+        use windows::Win32::UI::WindowsAndMessaging::{WS_EX_APPWINDOW, WS_EX_LAYERED};
+        let original = (WS_EX_APPWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED).0 as isize;
+        let activated = super::activation_extended_style(original);
+        assert_ne!(activated & WS_EX_APPWINDOW.0 as isize, 0);
+        assert_ne!(activated & WS_EX_LAYERED.0 as isize, 0);
+        assert_eq!(activated & WS_EX_TOOLWINDOW.0 as isize, 0);
+        assert_eq!(activated & WS_EX_NOACTIVATE.0 as isize, 0);
+    }
+
+    #[test]
     fn passive_windows_do_not_activate_or_enter_the_task_switcher() {
         let style = passive_extended_style(0x100);
         assert_ne!(style & WS_EX_NOACTIVATE.0 as isize, 0);
@@ -1940,19 +1958,46 @@ mod passive_style_regression {
             }
             .unwrap(),
         );
+        assert_eq!(
+            configure_passive(&window).unwrap(),
+            PassiveToolWindowPreparation::Ready
+        );
+        // First show can rewrite styles before pointer forwarding is installed.
+        unsafe { SetWindowLongPtrW(window.0, GWL_EXSTYLE, WS_EX_APPWINDOW.0 as isize) };
+        assert_eq!(
+            unsafe { GetWindowLongPtrW(window.0, GWL_EXSTYLE) } & WS_EX_APPWINDOW.0 as isize,
+            0
+        );
         enable_passive_interaction(&window, Box::new(|_| {})).unwrap();
         for backend_style in [0, WS_EX_APPWINDOW.0 as isize, WS_EX_LAYERED.0 as isize] {
             unsafe { SetWindowLongPtrW(window.0, GWL_EXSTYLE, backend_style) };
             let style = unsafe { GetWindowLongPtrW(window.0, GWL_EXSTYLE) };
             assert_ne!(style & WS_EX_NOACTIVATE.0 as isize, 0);
             assert_ne!(style & WS_EX_TOOLWINDOW.0 as isize, 0);
-            assert_eq!(style & backend_style, backend_style);
+            assert_eq!(style & WS_EX_APPWINDOW.0 as isize, 0);
+            assert_eq!(
+                style & (backend_style & !(WS_EX_APPWINDOW.0 as isize)),
+                backend_style & !(WS_EX_APPWINDOW.0 as isize)
+            );
         }
         enable_interaction_without_activation(&window, Box::new(|_| {})).unwrap();
         assert_eq!(
             unsafe { GetWindowLongPtrW(window.0, GWL_EXSTYLE) } & WS_EX_NOACTIVATE.0 as isize,
             0
         );
+        for backend_style in [
+            0,
+            WS_EX_APPWINDOW.0 as isize,
+            (WS_EX_APPWINDOW | WS_EX_LAYERED | WS_EX_TRANSPARENT).0 as isize,
+        ] {
+            unsafe { SetWindowLongPtrW(window.0, GWL_EXSTYLE, backend_style) };
+            let style = unsafe { GetWindowLongPtrW(window.0, GWL_EXSTYLE) };
+            assert_eq!(style & WS_EX_NOACTIVATE.0 as isize, 0);
+            assert_eq!(style & WS_EX_APPWINDOW.0 as isize, 0);
+            assert_ne!(style & WS_EX_TOOLWINDOW.0 as isize, 0);
+            let retained = backend_style & !(WS_EX_APPWINDOW.0 as isize);
+            assert_eq!(style & retained, retained);
+        }
         enable_passive_interaction(&window, Box::new(|_| {})).unwrap();
         unsafe { SetWindowLongPtrW(window.0, GWL_EXSTYLE, 0) };
         assert_ne!(

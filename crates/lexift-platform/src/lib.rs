@@ -209,6 +209,45 @@ pub fn configure_passive_tool_window(
     }
 }
 
+/// Platform lifetime guard for default-excluded top-level native windows.
+pub fn protect_window_thread() -> lexift_core::Result<Box<dyn std::any::Any>> {
+    #[cfg(target_os = "windows")]
+    {
+        Ok(Box::new(windows::window_shell_policy::ThreadGuard::new()?))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(Box::new(()))
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn default_window_attributes(
+    attributes: winit::window::WindowAttributes,
+) -> winit::window::WindowAttributes {
+    use winit::platform::windows::WindowAttributesExtWindows;
+    attributes.with_skip_taskbar(true)
+}
+
+/// Explicit Shell membership is granted only to the Settings window instance.
+#[cfg(target_os = "windows")]
+pub fn configure_window_shell_role(
+    window: &winit::window::Window,
+    settings: bool,
+) -> lexift_core::Result<()> {
+    use winit::platform::windows::WindowExtWindows;
+    windows::popup::configure_shell_role(window, settings)?;
+    window.set_skip_taskbar(!settings);
+    Ok(())
+}
+#[cfg(not(target_os = "windows"))]
+pub fn configure_window_shell_role(
+    _window: &impl raw_window_handle::HasWindowHandle,
+    _settings: bool,
+) -> lexift_core::Result<()> {
+    Ok(())
+}
+
 /// Keeps transient menus out of the taskbar and task switcher.
 /// Updating Winit's policy also preserves this behavior after Explorer restarts.
 #[cfg(target_os = "windows")]

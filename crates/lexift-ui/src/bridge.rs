@@ -172,6 +172,7 @@ pub struct WindowLifecycleCallbacks {
     configure_resize_background: ConfigureResizeBackground,
     configure_window_paint_repair: ConfigureWindowPaintRepair,
     configure_app_window_icon: fn(&slint::Window) -> bool,
+    prepare_app_window: PrepareAppWindow,
 }
 
 impl WindowLifecycleCallbacks {
@@ -230,7 +231,16 @@ impl WindowLifecycleCallbacks {
             configure_resize_background: Rc::new(|_, _| true),
             configure_window_paint_repair: Rc::new(|_, _| true),
             configure_app_window_icon: |_| true,
+            prepare_app_window: Rc::new(|_, _| PassiveWindowPreparation::Ready),
         }
+    }
+
+    pub fn with_app_window_preparation(
+        mut self,
+        callback: impl Fn(&slint::Window, WindowRole) -> PassiveWindowPreparation + 'static,
+    ) -> Self {
+        self.prepare_app_window = Rc::new(callback);
+        self
     }
 
     /// Prepares floating menus without changing ordinary application windows.
@@ -2071,6 +2081,11 @@ struct SettingsToastRecord {
     error: bool,
 }
 
+#[path = "app_window.rs"]
+mod app_window;
+pub use app_window::WindowRole;
+type PrepareAppWindow = Rc<dyn Fn(&slint::Window, WindowRole) -> PassiveWindowPreparation>;
+
 pub struct Ui {
     credential_generation: Arc<AtomicU64>,
     toast_next_id: Arc<AtomicU64>,
@@ -2086,12 +2101,15 @@ struct AppWindowRegistry {
     configure_resize_background: ConfigureResizeBackground,
     configure_window_paint_repair: ConfigureWindowPaintRepair,
     configure_app_window_icon: fn(&slint::Window) -> bool,
+    prepare_app_window: PrepareAppWindow,
     latest_state: AppState,
     show_selection_demo: bool,
     handler: Option<Rc<dyn Fn(AppEvent)>>,
     background_mode: Rc<Cell<bool>>,
     credential_generation: Arc<AtomicU64>,
     toast_records: Arc<Mutex<Vec<SettingsToastRecord>>>,
+    main_show_timer: slint::Timer,
+    settings_show_timer: slint::Timer,
     main_close_generation: u64,
     settings_close_generation: u64,
 }
@@ -2398,6 +2416,7 @@ fn schedule_main_window_destruction() {
     let generation = APP_WINDOW_REGISTRY.with(|registry| {
         let mut registry = registry.borrow_mut();
         let registry = registry.as_mut()?;
+        registry.main_show_timer.stop();
         registry.main_close_generation = registry.main_close_generation.wrapping_add(1);
         Some(registry.main_close_generation)
     });
@@ -2430,6 +2449,7 @@ fn schedule_settings_window_destruction(settings: &SettingsWindow) {
         {
             return None;
         }
+        registry.settings_show_timer.stop();
         registry.settings_close_generation = registry.settings_close_generation.wrapping_add(1);
         Some(registry.settings_close_generation)
     });
@@ -2718,12 +2738,15 @@ impl Ui {
                     &window_lifecycle.configure_window_paint_repair,
                 ),
                 configure_app_window_icon: window_lifecycle.configure_app_window_icon,
+                prepare_app_window: Rc::clone(&window_lifecycle.prepare_app_window),
                 latest_state: initial_state.clone(),
                 show_selection_demo,
                 handler: None,
                 background_mode: Rc::clone(&background_mode),
                 credential_generation: Arc::clone(&credential_generation),
                 toast_records: Arc::clone(&toast_records),
+                main_show_timer: Default::default(),
+                settings_show_timer: Default::default(),
                 main_close_generation: 0,
                 settings_close_generation: 0,
             });
@@ -2838,9 +2861,14 @@ impl Ui {
             APP_WINDOW_REGISTRY.with(|registry| {
                 let mut registry = registry.borrow_mut();
                 let registry = registry.as_mut().expect("UI registry initialized");
-                let main = ensure_main_window(registry)?;
-                main.show()?;
-                install_app_window_icon(&main, registry.configure_app_window_icon);
+                ensure_main_window(registry)?;
+                app_window::schedule(
+                    registry,
+                    WindowRole::Auxiliary,
+                    false,
+                    self.activate_user_requested_window,
+                    0,
+                );
                 Ok::<(), slint::PlatformError>(())
             })?;
         }
@@ -3522,13 +3550,14 @@ impl UiHandle {
                     clear_settings_toasts(settings, &toast_records);
                 }
                 match ensure_main_window(registry) {
-                    Ok(main) => {
-                        if main.window().is_minimized() {
-                            main.window().set_minimized(false);
-                        }
-                        let _ = main.show();
-                        install_app_window_icon(&main, registry.configure_app_window_icon);
-                        activate_user_requested_window(main.window());
+                    Ok(_) => {
+                        app_window::schedule(
+                            registry,
+                            WindowRole::Auxiliary,
+                            true,
+                            activate_user_requested_window,
+                            0,
+                        );
                     }
                     Err(error) => tracing::error!(%error, "main window could not be created"),
                 }
@@ -3574,26 +3603,13 @@ impl UiHandle {
                     clear_credential_transient(&window, &credential_generation);
                     clear_settings_toasts(&window, &toast_records);
                 }
-                if window.window().is_minimized() {
-                    window.window().set_minimized(false);
-                }
-                let _ = window.show();
-                activate_user_requested_window(window.window());
-                install_app_window_icon(&window, registry.configure_app_window_icon);
-                let color = window.get_resize_fallback_color();
-                if !install_settings_platform_hooks(
-                    &registry.configure_resize_background,
-                    &registry.configure_window_paint_repair,
-                    &window,
-                    color,
-                ) {
-                    retry_settings_resize_background(
-                        Rc::clone(&registry.configure_resize_background),
-                        Rc::clone(&registry.configure_window_paint_repair),
-                        window.as_weak(),
-                        RESIZE_BACKGROUND_RETRY_ATTEMPTS,
-                    );
-                }
+                app_window::schedule(
+                    registry,
+                    WindowRole::Settings,
+                    true,
+                    activate_user_requested_window,
+                    0,
+                );
             });
         });
     }
@@ -3607,6 +3623,7 @@ impl UiHandle {
                 if let Some(registry) = registry.as_mut()
                     && let Some(settings) = registry.settings.take()
                 {
+                    registry.settings_show_timer.stop();
                     registry.settings_close_generation =
                         registry.settings_close_generation.wrapping_add(1);
                     settings.invoke_reset_settings_view();
