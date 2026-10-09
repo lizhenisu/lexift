@@ -1449,3 +1449,15 @@ msgstr "Transmissão contínua"
 
 msgid "Show translation progressively as it is generated"
 msgstr "Mostrar a tradução progressivamente durante a geração"
+
+msgid "Pin"
+msgstr "Fixar"
+
+msgid "Unpin"
+msgstr "Desafixar"
+
+msgid "Collapse toolbar"
+msgstr "Recolher barra de ferramentas"
+
+msgid "Expand toolbar"
+msgstr "Expandir barra de ferramentas"

@@ -1449,3 +1449,15 @@ msgstr "Streaming"
 
 msgid "Show translation progressively as it is generated"
 msgstr "Show translation progressively as it is generated"
+
+msgid "Pin"
+msgstr "Pin"
+
+msgid "Unpin"
+msgstr "Unpin"
+
+msgid "Collapse toolbar"
+msgstr "Collapse toolbar"
+
+msgid "Expand toolbar"
+msgstr "Expand toolbar"

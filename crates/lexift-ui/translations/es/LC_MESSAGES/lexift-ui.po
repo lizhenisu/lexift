@@ -1449,3 +1449,15 @@ msgstr "Transmisión en tiempo real"
 
 msgid "Show translation progressively as it is generated"
 msgstr "Mostrar la traducción progresivamente mientras se genera"
+
+msgid "Pin"
+msgstr "Fijar"
+
+msgid "Unpin"
+msgstr "Desfijar"
+
+msgid "Collapse toolbar"
+msgstr "Contraer barra de herramientas"
+
+msgid "Expand toolbar"
+msgstr "Expandir barra de herramientas"

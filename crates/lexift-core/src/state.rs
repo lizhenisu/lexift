@@ -135,7 +135,13 @@ impl AppState {
             AppEvent::Started => Vec::new(),
             AppEvent::SelectionTranslationRequested => self.request_selection_translation(),
             AppEvent::SelectionInteractionStarted | AppEvent::SelectionToolbarDismissRequested => {
-                if matches!(event, AppEvent::SelectionInteractionStarted) {
+                if matches!(event, AppEvent::SelectionInteractionStarted)
+                    && !self
+                        .clipboard_history
+                        .session
+                        .as_ref()
+                        .is_some_and(|s| s.pinned)
+                {
                     self.clipboard_history.session = None;
                 }
                 self.toolbar_generation = self.toolbar_generation.wrapping_add(1);

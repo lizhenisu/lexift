@@ -1449,3 +1449,15 @@ msgstr "ストリーミング"
 
 msgid "Show translation progressively as it is generated"
 msgstr "生成中の翻訳結果を順次表示します"
+
+msgid "Pin"
+msgstr "固定"
+
+msgid "Unpin"
+msgstr "固定を解除"
+
+msgid "Collapse toolbar"
+msgstr "ツールバーを折りたたむ"
+
+msgid "Expand toolbar"
+msgstr "ツールバーを展開"

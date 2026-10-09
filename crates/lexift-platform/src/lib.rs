@@ -120,6 +120,7 @@ pub enum PopupCornerMode {
 /// Why the existing popup monitor requested dismissal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PopupDismissCause {
+    Escape,
     PointerOutside,
     ForegroundChanged,
 }

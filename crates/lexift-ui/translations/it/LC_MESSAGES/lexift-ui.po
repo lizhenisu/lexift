@@ -1449,3 +1449,15 @@ msgstr "Trasmissione in streaming"
 
 msgid "Show translation progressively as it is generated"
 msgstr "Mostra la traduzione progressivamente durante la generazione"
+
+msgid "Pin"
+msgstr "Fissa"
+
+msgid "Unpin"
+msgstr "Sblocca"
+
+msgid "Collapse toolbar"
+msgstr "Comprimi barra degli strumenti"
+
+msgid "Expand toolbar"
+msgstr "Espandi barra degli strumenti"

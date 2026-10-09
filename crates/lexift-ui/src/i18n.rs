@@ -1844,16 +1844,13 @@ mod tests {
         let drag_output = drags.clone();
         window.on_header_drag_requested(move |x, y| drag_output.borrow_mut().push((x, y)));
         let drag_points = [
-            (40., 25.),  // Icon/title content.
-            (170., 1.),  // Top padding.
-            (1., 36.),   // Left edge.
-            (339., 36.), // Right edge.
-            (275., 25.), // Count badge.
-            (310., 6.),  // Above close.
-            (288., 30.), // Left of close.
-            (324., 30.), // Right of the 32px close hit area.
+            (40., 25.),  // Brand mark.
+            (170., 20.), // Header center below the resize strip.
+            (20., 36.),  // Left padding inside the resize handles.
+            (325., 36.), // Right padding inside the resize handles.
+            (230., 25.), // Count badge.
             (310., 46.), // Below close.
-            (310., 47.), // Bottom padding above the compact header divider.
+            (310., 50.), // Padding above the header divider.
         ];
         for scale in [1., 1.25] {
             window
@@ -2090,8 +2087,8 @@ mod tests {
             snapshot(
                 &adapter,
                 &format!("history-opt-in-narrow-{}", language.code()),
-                200,
-                260,
+                340,
+                300,
             );
             window
                 .window()
@@ -2103,10 +2100,15 @@ mod tests {
             snapshot(
                 &adapter,
                 &format!("history-opt-in-narrow-end-{}", language.code()),
-                200,
-                260,
+                340,
+                300,
             );
-            click(100., 170.);
+            let y = window.get_enable_action_center_y();
+            assert!(
+                y > 52. && y < 260.,
+                "opt-in button must remain in the viewport: {y}"
+            );
+            click(100., y);
             assert_eq!(
                 enabled.get(),
                 index + 1,

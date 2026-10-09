@@ -17,6 +17,12 @@ pub trait ClipboardHistoryStore: Send + Sync {
     fn save(&self, entries: &[HistoryEntry]) -> Result<()>;
 }
 pub trait ClipboardPastePort: Send + Sync {
+    /// Freezes the current foreground input identity without activating a window.
+    fn capture_current_target(&self) -> Result<PasteTarget> {
+        Err(crate::Error::new(
+            crate::domain::clipboard_history::UNSUPPORTED_TARGET_MESSAGE,
+        ))
+    }
     fn capture_target(&self, target: SelectionTarget) -> Result<PasteTarget>;
     fn paste(&self, target: &PasteTarget, text: &str, cancelled: &AtomicBool) -> Result<()>;
 }

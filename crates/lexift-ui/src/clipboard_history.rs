@@ -7,7 +7,7 @@ use crate::{ClipboardHistoryRow, ClipboardHistoryWindow};
 use lexift_core::{
     AppEvent, AppState,
     domain::{
-        clipboard_history::{HistoryEvent, PasteTargetState, UNSUPPORTED_TARGET_MESSAGE},
+        clipboard_history::{HistoryEvent, UNSUPPORTED_TARGET_MESSAGE},
         geometry::Point,
     },
 };
@@ -20,6 +20,8 @@ use std::{
 thread_local! {pub(super) static HISTORY: RefCell<Option<Registry>> = const { RefCell::new(None) };}
 struct Work {
     alive: Cell<bool>,
+    pinned: Cell<bool>,
+    resizing: Cell<bool>,
     drag_offset: Cell<Option<(f32, f32)>>,
     timer: slint::Timer,
     input: slint::Timer,
@@ -77,7 +79,7 @@ impl Work {
                             event,
                             AppEvent::ClipboardHistory(HistoryEvent::OpenSettings { .. })
                         );
-                        let terminal = settings
+                        let terminal = (settings && !work.pinned.get())
                             || matches!(
                                 event,
                                 AppEvent::ClipboardHistory(HistoryEvent::Close { .. })
@@ -105,6 +107,10 @@ impl Work {
     }
 }
 pub(super) struct Registry {
+    pub begin_resize: super::BeginWindowResize,
+    pub resize_background: super::ConfigureResizeBackground,
+    pub configure_corners: fn(&slint::Window) -> crate::PopupCornerMode,
+    pub paint_repair: super::ConfigureWindowPaintRepair,
     pub window: Option<ClipboardHistoryWindow>,
     pub handler: Option<Rc<dyn Fn(AppEvent)>>,
     pub prepare: fn(&slint::Window) -> PassiveWindowPreparation,
@@ -124,6 +130,10 @@ impl Registry {
         area: PopupWorkArea,
     ) -> Self {
         Self {
+            begin_resize: Rc::new(|_, _, _| false),
+            resize_background: Rc::new(|_, _| true),
+            configure_corners: |_| crate::PopupCornerMode::SlintRounded,
+            paint_repair: Rc::new(|_, _| true),
             window: None,
             handler: None,
             prepare,
@@ -142,6 +152,7 @@ impl Registry {
         if let Some(w) = self.work.take() {
             w.alive.set(false);
             w.drag_offset.set(None);
+            w.resizing.set(false);
             w.timer.stop();
             w.input.stop();
             w.toast.stop();
@@ -167,6 +178,8 @@ impl Registry {
             window.set_entries(slint::ModelRc::from(self.rows.clone()));
             let work = Rc::new(Work {
                 alive: Cell::new(true),
+                pinned: Cell::new(session.pinned),
+                resizing: Cell::new(false),
                 drag_offset: Cell::new(None),
                 timer: Default::default(),
                 input: Default::default(),
@@ -176,6 +189,22 @@ impl Registry {
                 id: session.id,
             });
             let id = session.id;
+            let action = work.clone();
+            window.on_pin_requested(move |pinned| {
+                action.pinned.set(pinned);
+                action.post(AppEvent::ClipboardHistory(HistoryEvent::SetPinned {
+                    session: id,
+                    pinned,
+                }));
+            });
+            let action = work.clone();
+            let weak = window.as_weak();
+            let begin = self.begin_resize.clone();
+            window.on_resize_requested(move |index| {
+                if let Some(edge) = super::PopupResizeEdge::from_index(index) {
+                    begin_history_resize(weak.clone(), action.clone(), begin.clone(), edge, false);
+                }
+            });
             let action = work.clone();
             let weak = window.as_weak();
             window.on_target_toast_dismissed(move || {
@@ -254,6 +283,10 @@ impl Registry {
             schedule(&work, 0);
         }
         if let Some(w) = &self.window {
+            w.set_pinned(session.pinned);
+            if let Some(work) = &self.work {
+                work.pinned.set(session.pinned);
+            }
             let rows: Vec<_> = state
                 .clipboard_history
                 .entries
@@ -318,7 +351,7 @@ impl Registry {
                 state.desired_settings.clipboard_history_enabled
                     != state.settings.clipboard_history_enabled,
             );
-            w.set_ready(session.paste_target != PasteTargetState::Pending);
+            w.set_ready(true);
             if let Some(work) = self.work.as_ref() {
                 work.show_target_toast(w, session.unsupported_attempt);
             }
@@ -364,6 +397,27 @@ fn schedule(work: &Rc<Work>, attempt: u8) {
                     }
                     PassiveWindowPreparation::Ready => {
                         if let Some(area) = (r.area)(r.anchor) {
+                            update_bounds(w, area);
+                            w.set_corner_mode((r.configure_corners)(w.window()));
+                            let weak = w.as_weak();
+                            let alive = Rc::downgrade(&work);
+                            let _ = (r.paint_repair)(
+                                w.window(),
+                                Rc::new(move || {
+                                    if alive.upgrade().is_some_and(|w| w.alive.get())
+                                        && let Some(w) = weak.upgrade()
+                                    {
+                                        super::repair_window_paint(w.window());
+                                    }
+                                }),
+                            );
+                            let color = w.global::<crate::Colors>().get_surface();
+                            if !(r.resize_background)(
+                                w.window(),
+                                [color.red(), color.green(), color.blue()],
+                            ) {
+                                return r.handler.clone().map(|h| (h, work.id));
+                            }
                             let (p, size) =
                                 history_placement(r.anchor, area, w.window().scale_factor());
                             if w.window().position() != p || w.window().size() != size {
@@ -378,10 +432,19 @@ fn schedule(work: &Rc<Work>, attempt: u8) {
                                 r.close();
                                 return handler.map(|h| (h, id));
                             }
-                            if (r.complete)(w.window(), pointer(w.as_weak(), work.clone()))
-                                && w.show().is_ok()
+                            if (r.complete)(
+                                w.window(),
+                                pointer(
+                                    w.as_weak(),
+                                    work.clone(),
+                                    r.begin_resize.clone(),
+                                    r.dismiss.clone(),
+                                    r.area.clone(),
+                                ),
+                            ) && w.show().is_ok()
                                 && (r.dismiss)(w.window(), true)
                             {
+                                super::repair_window_paint(w.window());
                                 return None;
                             }
                         }
@@ -401,7 +464,13 @@ fn schedule(work: &Rc<Work>, attempt: u8) {
         },
     );
 }
-fn pointer(weak: slint::Weak<ClipboardHistoryWindow>, work: Rc<Work>) -> super::PopupPointerSink {
+fn pointer(
+    weak: slint::Weak<ClipboardHistoryWindow>,
+    work: Rc<Work>,
+    begin_resize: super::BeginWindowResize,
+    dismiss: SetPopupDismissal,
+    area: PopupWorkArea,
+) -> super::PopupPointerSink {
     Rc::new(move |input| {
         if !work.alive.get() {
             return;
@@ -409,10 +478,46 @@ fn pointer(weak: slint::Weak<ClipboardHistoryWindow>, work: Rc<Work>) -> super::
         let Some(w) = weak.upgrade() else {
             return;
         };
-        if matches!(input, PopupPointerInput::DismissRequested { .. }) {
-            work.post(AppEvent::ClipboardHistory(HistoryEvent::Close {
-                session: work.id,
-            }));
+        if let PopupPointerInput::DismissRequested { cause } = input {
+            if cause == super::PopupDismissCause::Escape || !work.pinned.get() {
+                work.post(AppEvent::ClipboardHistory(
+                    if cause == super::PopupDismissCause::Escape {
+                        HistoryEvent::Close { session: work.id }
+                    } else {
+                        HistoryEvent::Dismiss { session: work.id }
+                    },
+                ));
+            } else {
+                // Dismissal watches are one-shot. Re-arm after an intentionally
+                // ignored outside event so Escape remains observed while pinned.
+                let _ = dismiss(w.window(), false);
+                let _ = dismiss(w.window(), true);
+            }
+            return;
+        }
+        if matches!(input, PopupPointerInput::NativeTopResizeRequested) {
+            begin_history_resize(
+                w.as_weak(),
+                work.clone(),
+                begin_resize.clone(),
+                super::PopupResizeEdge::Top,
+                true,
+            );
+            return;
+        }
+        if matches!(
+            input,
+            PopupPointerInput::Resized { .. } | PopupPointerInput::ResizeFinished { .. }
+        ) {
+            if matches!(input, PopupPointerInput::ResizeFinished { .. }) {
+                work.resizing.set(false);
+            }
+            // Native WM_SIZE can re-enter while the registry prepares/show its
+            // window. Use captured capabilities instead of borrowing it again.
+            let p = w.window().position();
+            if let Some(area) = area(Point { x: p.x, y: p.y }) {
+                update_bounds(&w, area);
+            }
             return;
         }
         use slint::platform::{PointerEventButton, WindowEvent};
@@ -461,6 +566,47 @@ fn pointer(weak: slint::Weak<ClipboardHistoryWindow>, work: Rc<Work>) -> super::
     })
 }
 
+fn update_bounds(window: &ClipboardHistoryWindow, area: lexift_core::domain::geometry::Rect) {
+    let scale = window.window().scale_factor().max(0.1);
+    window.set_max_history_width(
+        (i64::from(area.right) - i64::from(area.left)).max(1) as f32 / scale,
+    );
+    window.set_max_history_height(
+        (i64::from(area.bottom) - i64::from(area.top)).max(1) as f32 / scale,
+    );
+}
+
+/// Dispatch after Slint releases its pointer callback; native sizing owns capture.
+fn begin_history_resize(
+    weak: slint::Weak<ClipboardHistoryWindow>,
+    work: Rc<Work>,
+    begin: super::BeginWindowResize,
+    edge: super::PopupResizeEdge,
+    native: bool,
+) {
+    work.drag_offset.set(None);
+    work.resizing.set(true);
+    if native {
+        // HTTOP must be armed synchronously before DefWindowProc starts sizing.
+        if let Some(window) = weak.upgrade()
+            && (!work.alive.get() || !begin(window.window(), edge, true))
+        {
+            work.resizing.set(false);
+        }
+        return;
+    }
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        if !work.alive.get() {
+            return;
+        }
+        if let Some(window) = weak.upgrade().filter(|w| w.window().is_visible())
+            && !begin(window.window(), edge, native)
+        {
+            work.resizing.set(false);
+        }
+    });
+}
+
 fn drag_position(
     position: slint::PhysicalPosition,
     offset: (f32, f32),
@@ -483,7 +629,7 @@ fn history_placement(
 ) -> (slint::PhysicalPosition, slint::PhysicalSize) {
     let scale = scale.max(0.1);
     let width =
-        (340.0 * scale).min((i64::from(area.right) - i64::from(area.left)).max(1) as f32) as u32;
+        (420.0 * scale).min((i64::from(area.right) - i64::from(area.left)).max(1) as f32) as u32;
     let height =
         (420.0 * scale).min((i64::from(area.bottom) - i64::from(area.top)).max(1) as f32) as u32;
     let x = anchor.x.clamp(
@@ -507,6 +653,7 @@ fn history_placement(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lexift_core::domain::clipboard_history::PasteTargetState;
     use lexift_core::domain::geometry::Rect;
     #[test]
     fn history_target_toast_restarts_expires_and_cannot_escape_its_session() {
@@ -534,6 +681,7 @@ mod tests {
         let mut state = AppState::new(Default::default());
         state.clipboard_history.session =
             Some(lexift_core::domain::clipboard_history::HistorySession {
+                pinned: false,
                 copy: Default::default(),
                 id: 1,
                 target: lexift_core::domain::selection::SelectionTarget {
@@ -551,7 +699,10 @@ mod tests {
             });
         registry.sync(&state);
         let old = registry.window.as_ref().unwrap().clone_strong();
-        assert!(!old.get_ready());
+        assert!(
+            old.get_ready(),
+            "each click can capture the current input independently of preflight"
+        );
         state
             .clipboard_history
             .session
@@ -672,7 +823,7 @@ mod tests {
         );
         assert_eq!(s.height, 420);
         assert_eq!(p.y, 130);
-        assert_eq!(p.x, 460);
+        assert_eq!(p.x, 380);
     }
     #[test]
     fn retired_history_callbacks_and_preparation_cannot_touch_reopened_session() {
@@ -700,6 +851,7 @@ mod tests {
         let mut state = AppState::new(Default::default());
         state.clipboard_history.session =
             Some(lexift_core::domain::clipboard_history::HistorySession {
+                pinned: false,
                 copy: Default::default(),
                 id: 1,
                 target: lexift_core::domain::selection::SelectionTarget {
@@ -725,6 +877,56 @@ mod tests {
                 .unwrap()
                 .clone_strong()
         });
+        let rearms = Rc::new(Cell::new(0));
+        let output = rearms.clone();
+        let resizes = Rc::new(Cell::new(0));
+        let resize_output = resizes.clone();
+        HISTORY.with(|s| {
+            // Mirrors WM_SIZE/HTTOP re-entering the still-borrowed registry
+            // during native preparation. No callback may borrow HISTORY here.
+            let mut registry = s.borrow_mut();
+            let r = registry.as_mut().unwrap();
+            let work = r.work.as_ref().unwrap().clone();
+            work.pinned.set(true);
+            let sink = pointer(
+                old.as_weak(),
+                work.clone(),
+                Rc::new(move |_, edge, native| {
+                    assert_eq!(edge, super::super::PopupResizeEdge::Top);
+                    assert!(native);
+                    resize_output.set(resize_output.get() + 1);
+                    true
+                }),
+                Rc::new(move |_, _| {
+                    output.set(output.get() + 1);
+                    true
+                }),
+                Rc::new(|_| {
+                    Some(Rect {
+                        left: 0,
+                        top: 0,
+                        right: 800,
+                        bottom: 600,
+                    })
+                }),
+            );
+            sink(PopupPointerInput::Resized {
+                width: 420.,
+                height: 420.,
+            });
+            sink(PopupPointerInput::NativeTopResizeRequested);
+            sink(PopupPointerInput::ResizeFinished {
+                width: 420.,
+                height: 420.,
+            });
+            sink(PopupPointerInput::DismissRequested {
+                cause: super::super::PopupDismissCause::PointerOutside,
+            });
+            work.pinned.set(false);
+        });
+        assert_eq!(resizes.get(), 1);
+        assert_eq!(rearms.get(), 2);
+        assert_eq!(old.get_max_history_width(), 800.);
         old.invoke_enable_requested();
         HISTORY.with(|s| s.borrow_mut().as_mut().unwrap().close());
         state.clipboard_history.session.as_mut().unwrap().id = 2;

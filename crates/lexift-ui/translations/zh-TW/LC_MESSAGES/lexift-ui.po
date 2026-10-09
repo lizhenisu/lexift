@@ -1449,3 +1449,15 @@ msgstr "串流傳輸"
 
 msgid "Show translation progressively as it is generated"
 msgstr "在生成過程中逐步顯示翻譯結果"
+
+msgid "Pin"
+msgstr "固定"
+
+msgid "Unpin"
+msgstr "取消固定"
+
+msgid "Collapse toolbar"
+msgstr "收合工具列"
+
+msgid "Expand toolbar"
+msgstr "展開工具列"

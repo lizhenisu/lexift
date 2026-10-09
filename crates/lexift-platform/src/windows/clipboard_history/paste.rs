@@ -117,6 +117,15 @@ fn focused(target: SelectionTarget) -> Result<Vec<i32>> {
     }
 }
 impl ClipboardPastePort for Paste {
+    fn capture_current_target(&self) -> Result<PasteTarget> {
+        let target = super::super::selection::WindowsSelectionPort::new()
+            .passive_target()
+            .ok_or_else(error)?;
+        if target.process == std::process::id() {
+            return Err(error());
+        }
+        self.capture_target(target).map_err(|_| error())
+    }
     fn capture_target(&self, target: SelectionTarget) -> Result<PasteTarget> {
         Ok(PasteTarget {
             selection: target,

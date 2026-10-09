@@ -1,4 +1,7 @@
 import { CopyFeedbackIcon } from "design/copy-feedback.slint";
+import { WindowHeaderButton, WindowHeaderMark } from "design/window-header.slint";
+import { ResizeEdges } from "design/resize-edges.slint";
+import { PopupCornerMode } from "popup.slint";
 import { AppToast } from "design/toast.slint";
 import { Colors } from "design/colors.slint";
 import { AppAssets } from "design/assets.slint";
@@ -85,8 +88,14 @@ component HistoryButton inherits Rectangle {
 }
 
 export component ClipboardHistoryWindow inherits Window {
-    title: @tr("Clipboard history"); no-frame: true; always-on-top: true; background: transparent;
-    preferred-width: 340px; preferred-height: 420px;
+    title: @tr("Clipboard history"); no-frame: true; always-on-top: true; background: Colors.surface;
+    in-out property <PopupCornerMode> corner-mode: PopupCornerMode.slint-rounded;
+    preferred-width: 420px; preferred-height: 420px;
+    min-width: min(340px, root.max-history-width); min-height: min(300px, root.max-history-height);
+    max-width: root.max-history-width; max-height: root.max-history-height;
+    in property <length> max-history-width: 1920px;
+    in property <length> max-history-height: 1080px;
+    in property <bool> pinned: false;
     in property <[ClipboardHistoryRow]> entries;
     in property <bool> recording: false;
     in property <bool> ready: false;
@@ -102,7 +111,10 @@ export component ClipboardHistoryWindow inherits Window {
     callback close-requested(); callback enable-requested(); callback settings-requested();
     callback copy-requested(string); callback paste-requested(string); callback delete-requested(string);
     callback header-drag-requested(float, float);
+    callback pin-requested(bool);
+    callback resize-requested(int);
     callback target-toast-dismissed();
+    out property <length> enable-action-center-y: shell.y + scroll.y + scroll.content-y + opt-in.y + enable-action.y + enable-action.height / 2;
 
     // Hit testing follows the full title band, independently of the content padding.
     // The close button above this layer consumes its own clicks.
@@ -115,35 +127,38 @@ export component ClipboardHistoryWindow inherits Window {
         }
     }
     shell := Rectangle {
-        x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px;
-        background: Colors.surface; border-radius: Metrics.popup-shell-radius; border-color: Colors.outline; border-width: 1px;
+        x: 0px; y: 0px; width: parent.width; height: parent.height;
+        background: Colors.surface; border-radius: root.corner-mode == PopupCornerMode.slint-rounded ? Metrics.popup-shell-radius : 0px; border-color: Colors.popup-outline; border-width: 1px;
         header := Rectangle {
             accessible-role: window-title-bar; accessible-label: @tr("Clipboard history");
-            x: Spacing.medium; y: Spacing.small; width: parent.width - 2 * Spacing.medium; height: 32px;
-            Rectangle {
-                x: 0px; y: 0px; width: 32px; height: 32px; border-radius: 10px; background: Colors.primary-container;
-                Image { x: 8px; y: 8px; width: 16px; height: 16px; source: AppAssets.icon-paste; colorize: Colors.primary; }
+            x: 20px; y: 0px; width: parent.width - 40px; height: Metrics.auxiliary-header-height;
+            WindowHeaderMark {
+                x: 0px; y: (parent.height - self.height) / 2; icon: AppAssets.icon-paste;
             }
             Rectangle { x: 44px; y: (parent.height - self.height) / 2; width: 6px; height: 6px; border-radius: 3px; background: root.busy ? Colors.primary : root.recording ? Colors.success : Colors.secondary-foreground.with-alpha(0.6); }
             Text {
-                x: 56px; y: 0px; height: parent.height; width: max(0px, (count-badge.visible ? count-badge.x : close-action.x) - self.x - Spacing.small);
+                x: 56px; y: 0px; height: parent.height; width: max(0px, (count-badge.visible ? count-badge.x : pin-action.x) - self.x - Spacing.small);
                 text: root.busy ? @tr("Pasting…") : root.recording ? @tr("Recording") : @tr("Recording paused");
                 color: Colors.secondary-foreground; font-size: 12px; overflow: elide; vertical-alignment: center;
             }
             count-badge := Rectangle {
-                visible: !root.first-use; x: close-action.x - Spacing.small - self.width; y: (parent.height - self.height) / 2;
+                visible: !root.first-use; x: pin-action.x - Spacing.small - self.width; y: (parent.height - self.height) / 2;
                 width: count-label.preferred-width + 14px; height: 22px; border-radius: 7px; background: Colors.background;
                 count-label := Text { width: parent.width; height: parent.height; text: root.entries.length; color: Colors.secondary-foreground; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
             }
-            close-action := Rectangle {
-                x: parent.width - 32px; y: 0px; width: 32px; height: 32px; border-radius: 8px;
-                background: close-touch.pressed ? Colors.icon-button-pressed : close-touch.has-hover ? Colors.icon-button-hover : transparent;
-                animate background { duration: 120ms; }
-                Image { x: 8px; y: 8px; width: 16px; height: 16px; source: AppAssets.icon-close; colorize: Colors.secondary-foreground; }
-                close-touch := TouchArea { accessible-role: button; accessible-label: @tr("Close"); mouse-cursor: pointer; clicked => { root.close-requested(); } }
+            pin-action := WindowHeaderButton {
+                x: parent.width - 72px; y: (parent.height - self.height) / 2;
+                icon: @image-url("assets/icons/header-pin.svg"); active: root.pinned;
+                label: root.pinned ? @tr("Unpin") : @tr("Pin");
+                clicked => { root.pin-requested(!root.pinned); }
+            }
+            close-action := WindowHeaderButton {
+                x: parent.width - 32px; y: (parent.height - self.height) / 2;
+                icon: @image-url("assets/icons/header-close.svg"); label: @tr("Close");
+                clicked => { root.close-requested(); }
             }
         }
-        body := Rectangle { x: 1px; y: header.y + header.height + Spacing.small; width: parent.width - 2px; height: max(0px, footer.y - self.y); background: Colors.background; }
+        body := Rectangle { x: 1px; y: header.y + header.height; width: parent.width - 2px; height: max(0px, footer.y - self.y); background: Colors.background; }
         Rectangle { x: 1px; y: body.y; width: parent.width - 2px; height: 1px; background: Colors.outline.with-alpha(0.5); }
         scroll := ScrollView {
             x: 12px; y: body.y + Spacing.small; width: parent.width - 24px; height: max(0px, footer.y - self.y - 8px);
@@ -251,6 +266,7 @@ export component ClipboardHistoryWindow inherits Window {
                 footer-label-measure := Text { visible: false; text: @tr("Clipboard settings"); font-size: 13px; font-weight: 500; }
             }
         }
+        ResizeEdges { width: parent.width; height: parent.height; z: 20; resize-requested(edge) => { root.resize-requested(edge); } }
         if root.target-toast != "": AppToast {
             x: Spacing.medium; width: parent.width - 2 * Spacing.medium;
             y: max(scroll.y, footer.y - self.height - Spacing.small);

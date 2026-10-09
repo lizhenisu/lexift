@@ -1449,3 +1449,15 @@ msgstr "流式传输"
 
 msgid "Show translation progressively as it is generated"
 msgstr "生成过程中逐步显示翻译结果"
+
+msgid "Pin"
+msgstr "固定"
+
+msgid "Unpin"
+msgstr "取消固定"
+
+msgid "Collapse toolbar"
+msgstr "收起工具条"
+
+msgid "Expand toolbar"
+msgstr "展开工具条"

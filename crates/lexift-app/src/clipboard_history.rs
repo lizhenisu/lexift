@@ -166,7 +166,6 @@ impl HistoryRuntime {
             HistoryCommand::Paste {
                 session,
                 request,
-                target,
                 entry,
             } => {
                 let cancel = self
@@ -180,7 +179,7 @@ impl HistoryRuntime {
                     let port = self.paste.clone();
                     let done = completion(controller);
                     controller.spawn_history(move || {
-                        let result = port.paste(&target, &entry.text, &cancel);
+                        let result = paste_current(&*port, &entry.text, &cancel);
                         done(HistoryEvent::PasteFinished {
                             session,
                             request,
@@ -218,6 +217,22 @@ impl Drop for HistoryRuntime {
     }
 }
 
+/// Capture and inject within one cancellable operation; never reuse a prior click's target.
+fn paste_current(
+    port: &dyn ClipboardPastePort,
+    text: &str,
+    cancel: &AtomicBool,
+) -> lexift_core::Result<()> {
+    if cancel.load(Ordering::Acquire) {
+        return Err(lexift_core::Error::new("Clipboard paste was cancelled."));
+    }
+    let target = port.capture_current_target()?;
+    if cancel.load(Ordering::Acquire) {
+        return Err(lexift_core::Error::new("Clipboard paste was cancelled."));
+    }
+    port.paste(&target, text, cancel)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,6 +257,58 @@ mod tests {
         fn paste(&self, _: &PasteTarget, _: &str, _: &AtomicBool) -> Result<()> {
             unreachable!()
         }
+    }
+    #[test]
+    fn current_target_failure_and_cancel_never_reach_clipboard_or_injection() {
+        struct Current {
+            captures: std::sync::atomic::AtomicUsize,
+            writes: std::sync::atomic::AtomicUsize,
+            valid: bool,
+        }
+        impl ClipboardPastePort for Current {
+            fn capture_target(&self, _: SelectionTarget) -> Result<PasteTarget> {
+                unreachable!()
+            }
+            fn capture_current_target(&self) -> Result<PasteTarget> {
+                let index = self.captures.fetch_add(1, Ordering::SeqCst);
+                if !self.valid {
+                    return Err(lexift_core::Error::new(
+                        lexift_core::domain::clipboard_history::UNSUPPORTED_TARGET_MESSAGE,
+                    ));
+                }
+                Ok(PasteTarget {
+                    selection: SelectionTarget {
+                        window: lexift_core::ports::magnifier::WindowToken(1),
+                        focus: None,
+                        process: 2,
+                        thread: 3,
+                    },
+                    runtime_id: vec![index as i32],
+                })
+            }
+            fn paste(&self, target: &PasteTarget, text: &str, _: &AtomicBool) -> Result<()> {
+                let index = self.writes.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(target.runtime_id, vec![index as i32]);
+                assert_eq!(text, "  full\ntext  ");
+                Ok(())
+            }
+        }
+        let mut current = Current {
+            captures: Default::default(),
+            writes: Default::default(),
+            valid: false,
+        };
+        let cancel = AtomicBool::new(false);
+        assert!(paste_current(&current, "  full\ntext  ", &cancel).is_err());
+        assert_eq!(current.writes.load(Ordering::SeqCst), 0);
+        current.valid = true;
+        current.captures.store(0, Ordering::SeqCst);
+        paste_current(&current, "  full\ntext  ", &cancel).unwrap();
+        paste_current(&current, "  full\ntext  ", &cancel).unwrap();
+        cancel.store(true, Ordering::SeqCst);
+        assert!(paste_current(&current, "  full\ntext  ", &cancel).is_err());
+        assert_eq!(current.captures.load(Ordering::SeqCst), 2);
+        assert_eq!(current.writes.load(Ordering::SeqCst), 2);
     }
     #[derive(Default)]
     struct Store(Mutex<Vec<Vec<HistoryEntry>>>);

@@ -2,6 +2,31 @@
 use lexift_core::domain::geometry::Rect;
 use slint::{PhysicalPosition, PhysicalSize};
 
+/// Preserve the top-left anchor unless expansion would leave the work area.
+pub(super) fn fit_layout(
+    position: PhysicalPosition,
+    width: f32,
+    scale: f32,
+    area: Option<Rect>,
+) -> (PhysicalSize, PhysicalPosition) {
+    let available = area.map_or(f32::MAX, |a| (a.right - a.left).max(1) as f32);
+    let size = PhysicalSize::new(
+        (width * scale).round().min(available).max(1.) as u32,
+        (54. * scale).round().max(1.) as u32,
+    );
+    let position = area.map_or(position, |a| {
+        PhysicalPosition::new(
+            position
+                .x
+                .clamp(a.left, (a.right - size.width as i32).max(a.left)),
+            position
+                .y
+                .clamp(a.top, (a.bottom - size.height as i32).max(a.top)),
+        )
+    });
+    (size, position)
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Drag {
     pub origin: PhysicalPosition,

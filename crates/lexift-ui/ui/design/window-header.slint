@@ -1,0 +1,34 @@
+import { Colors } from "colors.slint";
+import { Metrics } from "metrics.slint";
+
+export component WindowHeaderButton inherits Rectangle {
+    in property <image> icon;
+    in property <bool> active: false;
+    in property <string> label;
+    callback clicked();
+    width: Metrics.auxiliary-header-button;
+    height: Metrics.auxiliary-header-button;
+    border-radius: 10px;
+    background: touch.pressed ? Colors.icon-button-pressed
+        : root.active ? Colors.primary-container
+        : touch.has-hover ? Colors.icon-button-hover : transparent;
+    accessible-role: button; accessible-label: root.label;
+    Image {
+        width: Metrics.auxiliary-header-icon; height: self.width;
+        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        source: root.icon; image-fit: contain;
+        colorize: root.active ? Colors.primary : Colors.secondary-foreground;
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+export component WindowHeaderMark inherits Rectangle {
+    in property <image> icon;
+    width: Metrics.auxiliary-header-button; height: self.width;
+    border-radius: 10px; background: Colors.primary-container;
+    Image {
+        width: Metrics.auxiliary-header-icon; height: self.width;
+        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        source: root.icon; image-fit: contain; colorize: Colors.primary;
+    }
+}

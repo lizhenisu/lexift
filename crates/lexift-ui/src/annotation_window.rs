@@ -318,6 +318,11 @@ impl<C: ComponentHandle> Slot<C> {
                 .start(slint::TimerMode::SingleShot, delay, position);
         }
     }
+
+    /// User placement or layout changes supersede startup anchor settlement.
+    pub fn cancel_position(&self) {
+        self.placement.stop();
+    }
 }
 
 impl<C: ComponentHandle> Drop for Slot<C> {

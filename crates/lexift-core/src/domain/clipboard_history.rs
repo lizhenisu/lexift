@@ -32,6 +32,7 @@ pub enum PasteTargetState {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HistorySession {
+    pub pinned: bool,
     pub copy: std::collections::BTreeMap<u64, super::copy_feedback::CopyStatus>,
     pub id: u64,
     pub target: SelectionTarget,
@@ -56,6 +57,13 @@ pub struct HistoryState {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HistoryEvent {
+    SetPinned {
+        session: u64,
+        pinned: bool,
+    },
+    Dismiss {
+        session: u64,
+    },
     Open {
         generation: u64,
         anchor: Point,
@@ -130,7 +138,6 @@ pub enum HistoryCommand {
     Paste {
         session: u64,
         request: u64,
-        target: PasteTarget,
         entry: HistoryEntry,
     },
 }
@@ -181,8 +188,12 @@ pub fn reduce(state: &mut AppState, event: HistoryEvent) -> Vec<AppCommand> {
             };
             state.toolbar_selection = None;
             state.toolbar_generation = state.toolbar_generation.wrapping_add(1);
+            if h.session.as_ref().is_some_and(|s| s.pinned) {
+                return vec![];
+            }
             h.next_session = h.next_session.wrapping_add(1);
             h.session = Some(HistorySession {
+                pinned: false,
                 copy: Default::default(),
                 id: h.next_session,
                 target,
@@ -199,6 +210,21 @@ pub fn reduce(state: &mut AppState, event: HistoryEvent) -> Vec<AppCommand> {
                     target,
                 },
             )]
+        }
+        HistoryEvent::SetPinned { session, pinned } => {
+            if let Some(s) = h.session.as_mut().filter(|s| s.id == session) {
+                s.pinned = pinned;
+            }
+            vec![]
+        }
+        HistoryEvent::Dismiss { session } => {
+            if h.session
+                .as_ref()
+                .is_some_and(|s| s.id == session && !s.pinned)
+            {
+                h.session = None;
+            }
+            vec![]
         }
         HistoryEvent::Close { session } => {
             if h.session.as_ref().is_some_and(|s| s.id == session) {
@@ -298,7 +324,9 @@ pub fn reduce(state: &mut AppState, event: HistoryEvent) -> Vec<AppCommand> {
             if !h.session.as_ref().is_some_and(|s| s.id == session) {
                 return vec![];
             }
-            h.session = None;
+            if !h.session.as_ref().is_some_and(|s| s.pinned) {
+                h.session = None;
+            }
             state.reduce(crate::AppEvent::SettingsWindowRequested)
         }
         HistoryEvent::Clear => {
@@ -380,21 +408,12 @@ pub fn reduce(state: &mut AppState, event: HistoryEvent) -> Vec<AppCommand> {
             let Some(entry) = h.entries.iter().find(|e| e.id == entry).cloned() else {
                 return vec![];
             };
-            let target = match &s.paste_target {
-                PasteTargetState::Pending => return vec![],
-                PasteTargetState::Unsupported => {
-                    s.unsupported_attempt = s.unsupported_attempt.wrapping_add(1);
-                    return vec![];
-                }
-                PasteTargetState::Ready(target) => target.clone(),
-            };
             s.busy = true;
             s.request = s.request.wrapping_add(1);
             s.error.clear();
             vec![AppCommand::ClipboardHistory(HistoryCommand::Paste {
                 session,
                 request: s.request,
-                target,
                 entry,
             })]
         }
@@ -409,10 +428,18 @@ pub fn reduce(state: &mut AppState, event: HistoryEvent) -> Vec<AppCommand> {
                 .filter(|s| s.id == session && s.request == request && s.busy)
             {
                 match result {
-                    Ok(()) => h.session = None,
+                    Ok(()) if !s.pinned => h.session = None,
+                    Ok(()) => {
+                        s.busy = false;
+                        s.error.clear();
+                    }
                     Err(e) => {
                         s.busy = false;
-                        s.error = e.to_string();
+                        if e.to_string() == UNSUPPORTED_TARGET_MESSAGE {
+                            s.unsupported_attempt = s.unsupported_attempt.wrapping_add(1);
+                        } else {
+                            s.error = e.to_string();
+                        }
                     }
                 }
             }
@@ -478,12 +505,18 @@ mod tests {
         s.clipboard_history.session.as_ref().unwrap().id
     }
     #[test]
-    fn unsupported_target_is_silent_until_a_valid_entry_is_clicked_and_never_injects() {
+    fn unsupported_current_target_only_shows_toast_after_click() {
         let mut s = state();
         capture(&mut s, "clipboard text");
         let id = open(&mut s);
         let entry = s.clipboard_history.entries[0].id;
-        assert!(reduce(&mut s, HistoryEvent::Paste { session: id, entry }).is_empty());
+        reduce(
+            &mut s,
+            HistoryEvent::TargetReady {
+                session: id,
+                target: Err(crate::Error::new("private error")),
+            },
+        );
         assert_eq!(
             s.clipboard_history
                 .session
@@ -492,60 +525,87 @@ mod tests {
                 .unsupported_attempt,
             0
         );
-        assert!(
-            reduce(
-                &mut s,
-                HistoryEvent::TargetReady {
-                    session: id,
-                    target: Err(crate::Error::new("private native error")),
-                }
-            )
-            .is_empty()
-        );
-        let session = s.clipboard_history.session.as_ref().unwrap();
-        assert_eq!(session.paste_target, PasteTargetState::Unsupported);
-        assert!(session.error.is_empty());
-        assert_eq!(session.unsupported_attempt, 0);
-        assert!(
-            reduce(
-                &mut s,
-                HistoryEvent::Paste {
-                    session: id,
-                    entry: u64::MAX
-                }
-            )
-            .is_empty()
-        );
         for attempt in 1..=2 {
-            // No commands means no clipboard write, Ctrl+V, persistence or activation.
+            assert!(matches!(
+                reduce(&mut s, HistoryEvent::Paste { session: id, entry }).as_slice(),
+                [AppCommand::ClipboardHistory(HistoryCommand::Paste { .. })]
+            ));
             assert!(reduce(&mut s, HistoryEvent::Paste { session: id, entry }).is_empty());
+            let request = s.clipboard_history.session.as_ref().unwrap().request;
+            reduce(
+                &mut s,
+                HistoryEvent::PasteFinished {
+                    session: id,
+                    request,
+                    result: Err(crate::Error::new(UNSUPPORTED_TARGET_MESSAGE)),
+                },
+            );
             let session = s.clipboard_history.session.as_ref().unwrap();
             assert_eq!(session.unsupported_attempt, attempt);
-            assert!(session.error.is_empty());
             assert!(!session.busy);
+            assert!(session.error.is_empty());
         }
         assert!(matches!(
             reduce(&mut s, HistoryEvent::Copy { session: id, entry }).as_slice(),
             [AppCommand::ClipboardHistory(HistoryCommand::Copy { .. })]
         ));
-        assert!(matches!(
-            reduce(&mut s, HistoryEvent::Delete { session: id, entry }).as_slice(),
-            [AppCommand::ClipboardHistory(HistoryCommand::Save { .. })]
-        ));
         reduce(&mut s, HistoryEvent::Close { session: id });
-        let next = open(&mut s);
         assert!(reduce(&mut s, HistoryEvent::Paste { session: id, entry }).is_empty());
+    }
+    #[test]
+    fn pinned_history_survives_selection_paste_settings_and_reuses_session() {
+        let mut s = state();
+        capture(&mut s, "test");
+        let id = open(&mut s);
+        let entry = s.clipboard_history.entries[0].id;
         reduce(
             &mut s,
-            HistoryEvent::TargetReady {
+            HistoryEvent::SetPinned {
                 session: id,
-                target: Err(crate::Error::new("late")),
+                pinned: true,
             },
         );
-        let session = s.clipboard_history.session.as_ref().unwrap();
-        assert_eq!(session.id, next);
-        assert_eq!(session.paste_target, PasteTargetState::Pending);
-        assert_eq!(session.unsupported_attempt, 0);
+        reduce(&mut s, HistoryEvent::Dismiss { session: id });
+        s.reduce(AppEvent::SelectionInteractionStarted);
+        assert_eq!(s.clipboard_history.session.as_ref().unwrap().id, id);
+        // A new toolbar open consumes the toolbar but retains the independent session.
+        let reopened = open(&mut s);
+        assert_eq!(reopened, id);
+        reduce(&mut s, HistoryEvent::Paste { session: id, entry });
+        let request = s.clipboard_history.session.as_ref().unwrap().request;
+        reduce(
+            &mut s,
+            HistoryEvent::PasteFinished {
+                session: id,
+                request,
+                result: Ok(()),
+            },
+        );
+        assert!(!s.clipboard_history.session.as_ref().unwrap().busy);
+        reduce(&mut s, HistoryEvent::OpenSettings { session: id });
+        assert!(s.clipboard_history.session.is_some());
+        reduce(
+            &mut s,
+            HistoryEvent::SetPinned {
+                session: id,
+                pinned: false,
+            },
+        );
+        reduce(&mut s, HistoryEvent::Dismiss { session: id });
+        assert!(s.clipboard_history.session.is_none());
+        let next = open(&mut s);
+        assert_ne!(next, id);
+        assert!(!s.clipboard_history.session.as_ref().unwrap().pinned);
+        reduce(
+            &mut s,
+            HistoryEvent::SetPinned {
+                session: id,
+                pinned: true,
+            },
+        );
+        assert!(!s.clipboard_history.session.as_ref().unwrap().pinned);
+        reduce(&mut s, HistoryEvent::Close { session: next });
+        assert!(s.clipboard_history.session.is_none());
     }
     #[test]
     fn copying_keeps_full_text_and_survives_dedup_reordering() {

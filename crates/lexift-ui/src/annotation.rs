@@ -43,6 +43,9 @@ use drawing::arrow_drag_commits;
 #[cfg(test)]
 use drawing::polyline_preview;
 use drawing::{ArrowPending, PendingState, Polyline};
+#[cfg(test)]
+#[path = "annotation_collapse_tests.rs"]
+mod collapse_tests;
 #[path = "annotation_editor.rs"]
 mod editor;
 #[path = "annotation_erase.rs"]
@@ -1585,6 +1588,10 @@ pub(crate) fn toggle(requested_at: Instant) {
             })
         });
         let input = r.main.input();
+        main.on_collapse_requested(move || {
+            later_main(&input, generation, revision, toggle_toolbar_collapse)
+        });
+        let input = r.main.input();
         main.on_operate_requested(move || {
             later_main(&input, generation, revision, activate_mouse_mode)
         });
@@ -1622,6 +1629,7 @@ pub(crate) fn toggle(requested_at: Instant) {
                 if let Some(r) = slot.borrow_mut().as_mut()
                     && permits_focus_activation(r, origin)
                 {
+                    r.main.cancel_position();
                     r.toolbar_drag = r.toolbar_press;
                 }
             });
@@ -1631,7 +1639,8 @@ pub(crate) fn toggle(requested_at: Instant) {
             later_main(&input, generation, revision, close);
             slint::CloseRequestResponse::KeepWindowShown
         });
-        main.window().set_size(slint::LogicalSize::new(650., 54.));
+        main.window()
+            .set_size(slint::LogicalSize::new(main.get_toolbar_width(), 54.));
         if let Some(timing) = r.cold_open_timing.as_mut() {
             let elapsed = toolbar_start.elapsed();
             timing.toolbar_create += elapsed;
@@ -4359,7 +4368,9 @@ fn show_main(generation: u64, revision: u64, attempt: u8) {
                 let anchor = (r.lifecycle.toolbar_cursor_position)().unwrap_or_default();
                 if let Some(area) = (r.lifecycle.popup_work_area)(anchor) {
                     let scale = main.window().scale_factor();
-                    let width = (650. * scale).min((area.right - area.left) as f32).max(1.);
+                    let width = (main.get_toolbar_width() * scale)
+                        .min((area.right - area.left) as f32)
+                        .max(1.);
                     main.window()
                         .set_size(slint::PhysicalSize::new(width as u32, (54. * scale) as u32));
                     let size = main.window().size();
@@ -4395,7 +4406,7 @@ fn show_main(generation: u64, revision: u64, attempt: u8) {
                     timing.largest_stage = timing.largest_stage.max(elapsed);
                 }
                 let native_start = Instant::now();
-                if !(r.lifecycle.complete_passive_window_show)(
+                if !(r.lifecycle.complete_toolbar_show)(
                     main.window(),
                     pointer_main(main.as_weak(), generation, revision, r.main.input()),
                 ) {
@@ -4542,7 +4553,7 @@ fn open_panel(group: usize, menu: bool) {
     REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
         let Some(r) = slot.as_mut() else { return };
-        if r.main.get().is_none() {
+        if r.main.get().is_none_or(|main| main.get_collapsed()) {
             return;
         }
         if !menu && !r.set_mode(InteractionMode::Tool(group)) {
@@ -5101,9 +5112,54 @@ fn show_panel(generation: u64, panel_revision: u64, attempt: u8) {
     });
 }
 
+/// Collapse only presentation: tool mode, drawing drafts and document history stay live.
+fn toggle_toolbar_collapse() {
+    REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot.as_mut() else { return };
+        let Some(main) = r.main.get().map(ComponentHandle::clone_strong) else {
+            return;
+        };
+        r.main.cancel_position();
+        r.toolbar_drag = None;
+        r.toolbar_press = None;
+        if !main.get_collapsed() {
+            r.pending_edit_panel = false;
+            r.close_panel();
+        }
+        main.set_collapsed(!main.get_collapsed());
+        fit_toolbar_layout(r, true);
+        sync_toolbar_owner(r);
+        if r.native_presenter
+            .exclusions_changed(&capture_exclusions(r))
+        {
+            r.queue_render();
+        }
+    });
+}
+
+/// Follow the realized monitor DPI without resetting user placement during a drag.
+fn fit_toolbar_layout(r: &Registry, constrain_position: bool) {
+    let Some(main) = r.main.get() else { return };
+    let position = main.window().position();
+    let area = (r.lifecycle.popup_work_area)(Point {
+        x: position.x,
+        y: position.y,
+    });
+    let scale = main.window().scale_factor().max(0.1);
+    let (size, position) = toolbar::fit_layout(position, main.get_toolbar_width(), scale, area);
+    if main.window().size() != size {
+        main.window().set_size(size);
+    }
+    if constrain_position && main.window().position() != position {
+        main.window().set_position(position);
+    }
+}
+
 fn reposition_panel() {
     let changed = REGISTRY.with(|s| {
         if let Some(r) = s.borrow_mut().as_mut() {
+            fit_toolbar_layout(r, false);
             if let Some(drag) = r.toolbar_drag
                 && let Some(main) = r.main.get()
                 && (r.lifecycle.cancel_toolbar_drag_on_escape)(main.window())

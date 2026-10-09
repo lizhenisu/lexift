@@ -1,0 +1,46 @@
+export component ResizeEdges inherits Rectangle {
+    background: transparent;
+    callback resize-requested(int);
+        // Resize handles follow the Popup surface, not the source editor card.
+        left-resize := TouchArea {
+            x: 0px; y: 20px; width: 12px; height: parent.height - 40px;
+            mouse-cursor: ew-resize;
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(0); } }
+        }
+        right-resize := TouchArea {
+            x: parent.width - 12px; y: 20px; width: 12px; height: parent.height - 40px;
+            mouse-cursor: ew-resize;
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(1); } }
+        }
+        top-resize := TouchArea {
+            x: 20px; y: 0px; width: parent.width - 40px; height: 12px;
+            mouse-cursor: ns-resize;
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(2); } }
+        }
+        bottom-resize := TouchArea {
+            x: 20px; y: parent.height - 12px; width: parent.width - 40px; height: 12px;
+            mouse-cursor: ns-resize;
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(3); } }
+        }
+        top-left-resize := TouchArea {
+            x: 0px; y: 0px; width: 20px; height: 20px;
+            mouse-cursor: nwse-resize;
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(4); } }
+        }
+        top-right-resize := TouchArea {
+            x: parent.width - 20px; y: 0px; width: 20px; height: 20px;
+            mouse-cursor: nesw-resize;
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(5); } }
+        }
+        bottom-left-resize := TouchArea {
+            x: 0px; y: parent.height - 20px; width: 20px; height: 20px;
+            mouse-cursor: nesw-resize;
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(6); } }
+        }
+        bottom-right-resize := TouchArea {
+            x: parent.width - 20px; y: parent.height - 20px; width: 20px; height: 20px;
+            mouse-cursor: nwse-resize;
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(7); } }
+        }
+
+}

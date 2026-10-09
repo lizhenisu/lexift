@@ -335,7 +335,7 @@ fn start_dismissal() -> lexift_core::Result<PopupDismissHandle> {
                                 .0
                                 .is_null()
                             {
-                                post_dismissal(hwnd, watch, PopupDismissCause::PointerOutside);
+                                post_dismissal(hwnd, watch, PopupDismissCause::Escape);
                             }
                         }
                     }
@@ -777,12 +777,14 @@ fn dismissal_instance_matches(hwnd: windows::Win32::Foundation::HWND, instance: 
 
 fn dismissal_code(cause: PopupDismissCause) -> usize {
     match cause {
+        PopupDismissCause::Escape => 2,
         PopupDismissCause::PointerOutside => 0,
         PopupDismissCause::ForegroundChanged => 1,
     }
 }
 fn dismissal_cause(code: usize) -> Option<PopupDismissCause> {
     match code {
+        2 => Some(PopupDismissCause::Escape),
         0 => Some(PopupDismissCause::PointerOutside),
         1 => Some(PopupDismissCause::ForegroundChanged),
         _ => None,

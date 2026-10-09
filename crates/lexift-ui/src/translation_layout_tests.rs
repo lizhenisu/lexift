@@ -18,6 +18,265 @@ impl Platform for TestPlatform {
 }
 
 #[test]
+fn auxiliary_headers_align_and_history_supports_all_resize_edges() {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let adapters = Rc::new(std::cell::RefCell::new(Vec::new()));
+    slint::platform::set_platform(Box::new(TestPlatform(adapters.clone()))).unwrap();
+    let popup = TranslationPopup::new().unwrap();
+    let history = crate::ClipboardHistoryWindow::new().unwrap();
+    popup.set_source_text("A quiet moment, a clear thought.".into());
+    popup.set_translated_text("片刻安静，思绪清晰。".into());
+    history.set_first_use(false);
+    history.set_ready(true);
+    history.set_recording(true);
+    history.set_entries(
+        Rc::new(slint::VecModel::from(vec![
+            crate::ClipboardHistoryRow {
+                id: "1".into(),
+                preview: "A quiet moment, a clear thought.".into(),
+                ..Default::default()
+            },
+            crate::ClipboardHistoryRow {
+                id: "2".into(),
+                preview: "片刻安静，思绪清晰。".into(),
+                ..Default::default()
+            },
+        ]))
+        .into(),
+    );
+    let edges = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let output = edges.clone();
+    history.on_resize_requested(move |edge| output.borrow_mut().push(edge));
+    let pins = Rc::new(std::cell::Cell::new(0));
+    let count = pins.clone();
+    history.on_pin_requested(move |_| count.set(count.get() + 1));
+    let closes = Rc::new(std::cell::Cell::new(0));
+    let count = closes.clone();
+    history.on_close_requested(move || count.set(count.get() + 1));
+    let drags = Rc::new(std::cell::Cell::new(0));
+    let count = drags.clone();
+    history.on_header_drag_requested(move |_, _| count.set(count.get() + 1));
+    let click = |adapter: &MinimalSoftwareWindow, x, y| {
+        let position = slint::LogicalPosition::new(x, y);
+        adapter
+            .window()
+            .dispatch_event(WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Left,
+            });
+        adapter
+            .window()
+            .dispatch_event(WindowEvent::PointerReleased {
+                position,
+                button: PointerEventButton::Left,
+            });
+    };
+    for dark in [false, true] {
+        popup
+            .global::<crate::Colors>()
+            .set_preference(i32::from(dark));
+        history
+            .global::<crate::Colors>()
+            .set_preference(i32::from(dark));
+        for scale in [1., 1.25] {
+            for logical_width in [340., 420.] {
+                popup.set_popup_width(logical_width);
+                popup.set_popup_height(420.);
+                for (index, name) in [(0, "popup"), (1, "history")] {
+                    let adapter = adapters.borrow()[index].clone();
+                    adapter
+                        .window()
+                        .dispatch_event(WindowEvent::ScaleFactorChanged {
+                            scale_factor: scale,
+                        });
+                    let width = (logical_width * scale) as u32;
+                    let height = (420. * scale) as u32;
+                    adapter.set_size(slint::PhysicalSize::new(width, height));
+                    let mut pixels = vec![slint::Rgb8Pixel::default(); (width * height) as usize];
+                    adapter.request_redraw();
+                    adapter.draw_if_needed(|renderer| {
+                        renderer.render(&mut pixels, width as usize);
+                    });
+                    if let Ok(directory) = std::env::var("LEXIFT_TRANSLATION_SNAPSHOT_DIR") {
+                        crate::i18n::write_test_bitmap(
+                            &directory,
+                            &format!("headers-{name}-{dark}-{scale}-{logical_width}"),
+                            width,
+                            height,
+                            pixels.iter().map(|p| [p.r, p.g, p.b, 255]),
+                        );
+                    }
+                }
+                let adapter = adapters.borrow()[1].clone();
+                let before = edges.borrow().len();
+                let drag_before = drags.get();
+                for (x, y) in [
+                    (2., 210.),
+                    (logical_width - 2., 210.),
+                    (logical_width / 2., 2.),
+                    (logical_width / 2., 418.),
+                    (8., 8.),
+                    (logical_width - 8., 8.),
+                    (8., 412.),
+                    (logical_width - 8., 412.),
+                ] {
+                    click(&adapter, x, y);
+                }
+                assert_eq!(&edges.borrow()[before..], &[0, 1, 2, 3, 4, 5, 6, 7]);
+                assert_eq!(
+                    drags.get(),
+                    drag_before,
+                    "resize edges take precedence over dragging"
+                );
+                let before = pins.get();
+                click(&adapter, logical_width - 76., 26.);
+                assert_eq!(pins.get(), before + 1);
+                let before = closes.get();
+                click(&adapter, logical_width - 36., 26.);
+                assert_eq!(closes.get(), before + 1);
+                assert_eq!(drags.get(), drag_before, "header buttons do not drag");
+                click(&adapter, 60., 26.);
+                assert_eq!(drags.get(), drag_before + 1);
+            }
+        }
+    }
+}
+
+#[test]
+fn language_menu_rows_stay_inside_rounded_shell() {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let adapters = Rc::new(std::cell::RefCell::new(Vec::new()));
+    slint::platform::set_platform(Box::new(TestPlatform(adapters.clone()))).unwrap();
+    let menu = crate::PopupLanguageMenuWindow::new().unwrap();
+    let options: Vec<slint::SharedString> =
+        (0..12).map(|i| format!("Language {i}").into()).collect();
+    menu.set_language_options(Rc::new(slint::VecModel::from(options)).into());
+    menu.set_menu_width(196.);
+    menu.set_menu_height(400.);
+    let selected = Rc::new(std::cell::Cell::new(-1));
+    let result = selected.clone();
+    menu.on_language_selected(move |index| result.set(index));
+    let adapter = adapters.borrow()[0].clone();
+    for dark in [false, true] {
+        menu.global::<crate::Colors>()
+            .set_preference(i32::from(dark));
+        for scale in [1., 1.25] {
+            adapter
+                .window()
+                .dispatch_event(WindowEvent::ScaleFactorChanged {
+                    scale_factor: scale,
+                });
+            let width = (196. * scale) as u32;
+            let height = (400. * scale) as u32;
+            adapter.set_size(slint::PhysicalSize::new(width, height));
+            for bottom in [false, true] {
+                menu.set_selected_index(if bottom { 11 } else { 0 });
+                menu.set_menu_scroll_y(if bottom { -94. } else { 0. });
+                let mut pixels = vec![slint::Rgb8Pixel::default(); (width * height) as usize];
+                adapter.request_redraw();
+                adapter.draw_if_needed(|renderer| {
+                    renderer.render(&mut pixels, width as usize);
+                });
+                // The straight shell edge remains surface-colored even when
+                // a selected or partially scrolled row touches the viewport.
+                let surface = menu.global::<crate::Colors>().get_surface();
+                let pixel = pixels[((20. * scale) as u32 * width + (3. * scale) as u32) as usize];
+                assert_eq!(
+                    [pixel.r, pixel.g, pixel.b],
+                    [surface.red(), surface.green(), surface.blue()]
+                );
+                if let Ok(directory) = std::env::var("LEXIFT_TRANSLATION_SNAPSHOT_DIR") {
+                    crate::i18n::write_test_bitmap(
+                        &directory,
+                        &format!("language-menu-{dark}-{scale}-{bottom}"),
+                        width,
+                        height,
+                        pixels.iter().map(|p| [p.r, p.g, p.b, 255]),
+                    );
+                }
+            }
+            menu.set_menu_scroll_y(0.);
+            let position = slint::LogicalPosition::new(50., 26.);
+            adapter
+                .window()
+                .dispatch_event(WindowEvent::PointerPressed {
+                    position,
+                    button: PointerEventButton::Left,
+                });
+            adapter
+                .window()
+                .dispatch_event(WindowEvent::PointerReleased {
+                    position,
+                    button: PointerEventButton::Left,
+                });
+            assert_eq!(selected.get(), 0);
+        }
+    }
+}
+
+#[test]
+fn popup_visual_states_render_in_both_themes_and_scales() {
+    let adapters = Rc::new(std::cell::RefCell::new(Vec::new()));
+    slint::platform::set_platform(Box::new(TestPlatform(adapters.clone()))).unwrap();
+    let popup = TranslationPopup::new().unwrap();
+    popup.set_source_text("Find beauty in the everyday.\nMake room for a little wonder.".into());
+    popup.set_translated_text("在日常中发现美。\n为一点惊喜留出空间。".into());
+    let adapter = adapters.borrow()[0].clone();
+    for dark in [false, true] {
+        popup
+            .global::<crate::Colors>()
+            .set_preference(i32::from(dark));
+        for scale in [1., 1.25] {
+            adapter
+                .window()
+                .dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged {
+                    scale_factor: scale,
+                });
+            for logical_width in [340., 420.] {
+                popup.set_popup_width(logical_width);
+                let width = (logical_width * scale) as u32;
+                let height = (420. * scale) as u32;
+                adapter.set_size(slint::PhysicalSize::new(width, height));
+                for state in ["result", "streaming", "error", "empty"] {
+                    popup.set_busy(state == "streaming");
+                    popup.set_error_text(
+                        if state == "error" {
+                            "Unable to connect. Please try again."
+                        } else {
+                            ""
+                        }
+                        .into(),
+                    );
+                    popup.set_translated_text(
+                        if state == "empty" {
+                            ""
+                        } else {
+                            "在日常中发现美。\n为一点惊喜留出空间。"
+                        }
+                        .into(),
+                    );
+                    let mut pixels = vec![slint::Rgb8Pixel::default(); (width * height) as usize];
+                    adapter.request_redraw();
+                    assert!(adapter.draw_if_needed(|renderer| {
+                        renderer.render(&mut pixels, width as usize);
+                    }));
+                    assert!(popup.get_result_viewport_height() > 40.);
+                    if let Ok(directory) = std::env::var("LEXIFT_TRANSLATION_SNAPSHOT_DIR") {
+                        crate::i18n::write_test_bitmap(
+                            &directory,
+                            &format!("refresh-{dark}-{scale}-{logical_width}-{state}"),
+                            width,
+                            height,
+                            pixels.iter().map(|p| [p.r, p.g, p.b, 255]),
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn resize_edges_stay_visually_unchanged_and_interactive() {
     use slint::platform::{PointerEventButton, WindowEvent};
     let adapters = Rc::new(std::cell::RefCell::new(Vec::new()));

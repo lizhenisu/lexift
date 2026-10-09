@@ -1449,3 +1449,15 @@ msgstr "스트리밍"
 
 msgid "Show translation progressively as it is generated"
 msgstr "생성 중 번역 결과를 점진적으로 표시합니다"
+
+msgid "Pin"
+msgstr "고정"
+
+msgid "Unpin"
+msgstr "고정 해제"
+
+msgid "Collapse toolbar"
+msgstr "도구 모음 접기"
+
+msgid "Expand toolbar"
+msgstr "도구 모음 펼치기"

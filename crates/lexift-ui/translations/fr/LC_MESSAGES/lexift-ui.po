@@ -1449,3 +1449,15 @@ msgstr "Diffusion en continu"
 
 msgid "Show translation progressively as it is generated"
 msgstr "Afficher progressivement la traduction pendant sa génération"
+
+msgid "Pin"
+msgstr "Épingler"
+
+msgid "Unpin"
+msgstr "Désépingler"
+
+msgid "Collapse toolbar"
+msgstr "Réduire la barre d’outils"
+
+msgid "Expand toolbar"
+msgstr "Développer la barre d’outils"

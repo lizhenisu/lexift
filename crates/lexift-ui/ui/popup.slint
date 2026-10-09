@@ -1,3 +1,4 @@
+import { ResizeEdges } from "design/resize-edges.slint";
 import { CopyFeedbackIcon } from "design/copy-feedback.slint";
 import { ScrollView } from "std-widgets.slint";
 import { Colors } from "design/colors.slint";
@@ -6,6 +7,7 @@ import { Typography } from "design/typography.slint";
 import { AppAssets } from "design/assets.slint";
 import { AppVerticalScrollBar } from "design/scrollbar.slint";
 import { Metrics } from "design/metrics.slint";
+import { WindowHeaderButton, WindowHeaderMark } from "design/window-header.slint";
 
 export enum PopupCornerMode { native-dwm, opaque-square, slint-rounded }
 
@@ -32,7 +34,7 @@ component IconButton inherits Rectangle {
         height: root.icon-size;
         source: root.icon;
         image-fit: contain;
-        colorize: root.active ? Colors.primary : Colors.foreground;
+        colorize: root.active ? Colors.primary : Colors.secondary-foreground;
     }
     if root.copy-action: CopyFeedbackIcon { x: (parent.width - root.icon-size) / 2; y: (parent.height - root.icon-size) / 2; width: root.icon-size; height: root.icon-size; copied: root.copied; }
     button := TouchArea {
@@ -48,7 +50,9 @@ component ActionButton inherits Rectangle {
     callback clicked();
     height: 36px;
     border-radius: 10px;
-    background: root.enabled ? Colors.primary : Colors.outline;
+    background: !root.enabled ? Colors.outline
+        : action.pressed ? Colors.primary.darker(12%)
+        : action.has-hover ? Colors.primary.darker(6%) : Colors.primary;
     Image {
         x: (parent.width - root.icon-size) / 2;
         y: (parent.height - root.icon-size) / 2;
@@ -58,7 +62,7 @@ component ActionButton inherits Rectangle {
         image-fit: contain;
         colorize: Colors.on-primary;
     }
-    TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+    action := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }
 
 export component TranslationPopup inherits Window {
@@ -194,25 +198,29 @@ export component TranslationPopup inherits Window {
             ? Metrics.popup-shell-radius : 0px;
         background: Colors.surface;
         border-width: 1px;
-        border-color: Colors.outline;
+        border-color: Colors.popup-outline;
         clip: true;
 
         top := Rectangle {
-            x: 8px; y: 8px; width: parent.width - 16px; height: 44px;
+            x: 20px; y: 0px; width: parent.width - 40px; height: Metrics.auxiliary-header-height;
             background: transparent;
             z: 30;
+            WindowHeaderMark {
+                x: 0px; y: (parent.height - self.height) / 2;
+                icon: AppAssets.icon-translate;
+            }
             Text {
-                x: Spacing.medium; width: 180px; height: parent.height;
+                x: 40px; width: 140px; height: parent.height;
                 text: "Lexift";
                 color: Colors.foreground;
-                font-size: Typography.body-size;
-                font-weight: 700;
+                font-size: Typography.compact-size;
+                font-weight: 600;
                 vertical-alignment: center;
             }
             drag := TouchArea {
                 // Leave the top resize strip and the corner handles clear, but
                 // make the remaining title row an easy, continuous drag target.
-                x: 16px; y: 4px; width: parent.width - 104px; height: parent.height - 4px;
+                x: 0px; y: 12px; width: parent.width - 80px; height: parent.height - 12px;
                 z: 1;
                 clicked => { root.interaction-requested(); }
                 pointer-event(event) => {
@@ -224,18 +232,19 @@ export component TranslationPopup inherits Window {
                     }
                 }
             }
-            IconButton {
-                x: parent.width - 94px; y: 5px;
+            WindowHeaderButton {
+                x: parent.width - 72px; y: (parent.height - self.height) / 2;
                 z: 2;
-                icon: AppAssets.icon-pin;
-                icon-size: 18px;
+                icon: @image-url("assets/icons/header-pin.svg");
+                label: root.pinned ? @tr("Unpin") : @tr("Pin");
                 active: root.pinned;
                 clicked => { root.interaction-requested(); root.pin-requested(!root.pinned); }
             }
-            IconButton {
-                x: parent.width - 54px; y: 5px;
+            WindowHeaderButton {
+                x: parent.width - 32px; y: (parent.height - self.height) / 2;
                 z: 2;
-                icon: AppAssets.icon-close;
+                icon: @image-url("assets/icons/header-close.svg");
+                label: @tr("Close");
                 clicked => { root.source-menu-open = false; root.target-menu-open = false; root.close-requested(); }
             }
         }
@@ -256,10 +265,10 @@ export component TranslationPopup inherits Window {
                         : root.source-card-height,
                     root.resize-max-source-height
                 );
-                border-radius: 12px;
-                background: Colors.background;
-                border-width: source-input.has-focus ? 2px : 0px;
-                border-color: Colors.primary;
+                border-radius: 16px;
+                background: Colors.popup-source;
+                border-width: 1px;
+                border-color: source-input.has-focus ? Colors.primary : transparent;
                 source-scroll := ScrollView {
                     x: 14px; y: 12px; width: parent.width - 28px; height: parent.height - 58px;
                     content-width: self.visible-width;
@@ -335,12 +344,12 @@ export component TranslationPopup inherits Window {
             language-bar := Rectangle {
                 height: 44px;
                 border-radius: 12px;
-                background: Colors.background;
+                background: transparent;
                 source-segment := Rectangle {
                     x: 0px; width: (parent.width - 44px) / 2; height: parent.height;
                     border-radius: 10px;
                     background: source-touch.pressed ? Colors.icon-button-pressed
-                        : source-touch.has-hover ? Colors.icon-button-hover : Colors.background;
+                        : source-touch.has-hover || root.source-menu-open ? Colors.icon-button-hover : transparent;
                     source-touch := TouchArea {
                         clicked => { root.interaction-requested(); root.source-menu-requested(); }
                     }
@@ -373,7 +382,7 @@ export component TranslationPopup inherits Window {
                     x: source-segment.width + 44px; width: source-segment.width; height: parent.height;
                     border-radius: 10px;
                     background: target-touch.pressed ? Colors.icon-button-pressed
-                        : target-touch.has-hover ? Colors.icon-button-hover : Colors.background;
+                        : target-touch.has-hover || root.target-menu-open ? Colors.icon-button-hover : transparent;
                     target-touch := TouchArea {
                         clicked => { root.interaction-requested(); root.target-menu-requested(); }
                     }
@@ -399,12 +408,14 @@ export component TranslationPopup inherits Window {
             result-card := Rectangle {
                 vertical-stretch: 1;
                 min-height: 104px;
-                border-radius: 12px;
-                background: Colors.background;
+                border-radius: 16px;
+                background: Colors.popup-result;
+                border-width: 1px;
+                border-color: Colors.popup-result-edge;
                 Text {
                     x: 14px; y: 8px; width: parent.width - 28px; height: 24px;
                     text: root.busy ? @tr("Translating…") : root.error-text != "" ? @tr("Translation failed") : @tr("Translation");
-                    color: root.error-text != "" ? Colors.error : Colors.secondary-foreground;
+                    color: root.error-text != "" ? Colors.error : Colors.primary;
                     font-size: 13px;
                     font-weight: 600;
                 }
@@ -444,47 +455,7 @@ export component TranslationPopup inherits Window {
                 }
             }
         }
-        // Resize handles follow the Popup surface, not the source editor card.
-        left-resize := TouchArea {
-            x: 0px; y: 20px; width: 12px; height: parent.height - 40px; z: 20;
-            mouse-cursor: ew-resize;
-            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(0); } }
-        }
-        right-resize := TouchArea {
-            x: parent.width - 12px; y: 20px; width: 12px; height: parent.height - 40px; z: 20;
-            mouse-cursor: ew-resize;
-            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(1); } }
-        }
-        top-resize := TouchArea {
-            x: 20px; y: 0px; width: parent.width - 40px; height: 12px; z: 20;
-            mouse-cursor: ns-resize;
-            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(2); } }
-        }
-        bottom-resize := TouchArea {
-            x: 20px; y: parent.height - 12px; width: parent.width - 40px; height: 12px; z: 20;
-            mouse-cursor: ns-resize;
-            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(3); } }
-        }
-        top-left-resize := TouchArea {
-            x: 0px; y: 0px; width: 20px; height: 20px; z: 20;
-            mouse-cursor: nwse-resize;
-            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(4); } }
-        }
-        top-right-resize := TouchArea {
-            x: parent.width - 20px; y: 0px; width: 20px; height: 20px; z: 20;
-            mouse-cursor: nesw-resize;
-            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(5); } }
-        }
-        bottom-left-resize := TouchArea {
-            x: 0px; y: parent.height - 20px; width: 20px; height: 20px; z: 20;
-            mouse-cursor: nesw-resize;
-            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(6); } }
-        }
-        bottom-right-resize := TouchArea {
-            x: parent.width - 20px; y: parent.height - 20px; width: 20px; height: 20px; z: 20;
-            mouse-cursor: nwse-resize;
-            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.resize-requested(7); } }
-        }
+        ResizeEdges { width: parent.width; height: parent.height; z: 20; resize-requested(edge) => { root.resize-requested(edge); } }
 
         if root.feedback-text != "": Rectangle {
             x: (parent.width - min(280px, feedback-label.preferred-width + 28px)) / 2;
@@ -523,13 +494,14 @@ export component PopupLanguageMenuWindow inherits Window {
     in-out property <length> menu-width: 196px;
     in-out property <length> menu-height: 400px;
     in-out property <length> menu-scroll-y: 0px;
+    private property <length> content-inset: 6px;
     callback language-selected(int);
     callback dismiss-requested();
 
     changed selected-index => {
         root.menu-scroll-y = round(min(0px, max(
-            root.menu-height - root.language-options.length * 40px,
-            root.menu-height / 2 - (root.selected-index + 0.5) * 40px
+            root.menu-height - 2px - root.content-inset * 2 - root.language-options.length * 40px,
+            (root.menu-height - 2px - root.content-inset * 2) / 2 - (root.selected-index + 0.5) * 40px
         )) / 4px) * 4px;
     }
 
@@ -547,7 +519,11 @@ export component PopupLanguageMenuWindow inherits Window {
         drop-shadow-color: #00000024;
 
         menu-scroll := ScrollView {
-            x: 0px; y: 0px; width: parent.width - 10px; height: parent.height;
+            // Slint's rectangular viewport clip does not mask rounded parent
+            // corners. Keep every scrolled row inside the shell's curved edge.
+            x: root.content-inset; y: root.content-inset;
+            width: parent.width - root.content-inset - 12px;
+            height: parent.height - root.content-inset * 2;
             content-height: root.language-options.length * 40px;
             content-y <=> root.menu-scroll-y;
             horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
@@ -557,6 +533,7 @@ export component PopupLanguageMenuWindow inherits Window {
                 y: index * 40px;
                 width: menu-scroll.visible-width;
                 height: 40px;
+                border-radius: 6px;
                 background: index == root.selected-index ? Colors.primary-container
                     : row.pressed ? Colors.icon-button-pressed
                     : row.has-hover ? Colors.background : Colors.surface;
@@ -574,8 +551,8 @@ export component PopupLanguageMenuWindow inherits Window {
         }
         AppVerticalScrollBar {
             x: parent.width - 12px;
-            y: 2px;
-            height: parent.height - 4px;
+            y: root.content-inset;
+            height: parent.height - root.content-inset * 2;
             viewport-height: menu-scroll.visible-height;
             content-height: menu-scroll.content-height;
             content-y <=> menu-scroll.content-y;

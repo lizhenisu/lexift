@@ -534,6 +534,9 @@ fn map_pointer_event(event: lexift_platform::PopupPointerEvent) -> lexift_ui::Po
         lexift_platform::PopupPointerEvent::DismissRequested { cause } => {
             lexift_ui::PopupPointerInput::DismissRequested {
                 cause: match cause {
+                    lexift_platform::PopupDismissCause::Escape => {
+                        lexift_ui::PopupDismissCause::Escape
+                    }
                     lexift_platform::PopupDismissCause::PointerOutside => {
                         lexift_ui::PopupDismissCause::PointerOutside
                     }

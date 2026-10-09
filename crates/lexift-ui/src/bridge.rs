@@ -28,6 +28,7 @@ use crate::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PopupDismissCause {
+    Escape,
     PointerOutside,
     ForegroundChanged,
 }
@@ -141,7 +142,7 @@ pub struct WindowLifecycleCallbacks {
     clipboard_history_supported: bool,
     history_dismissal: SetPopupDismissal,
     pub(crate) complete_passive_window_show: CompletePassiveWindowShow,
-    complete_toolbar_show: CompletePassiveWindowShow,
+    pub(crate) complete_toolbar_show: CompletePassiveWindowShow,
     toolbar_target_current: Rc<dyn Fn(lexift_core::domain::selection::SelectionTarget) -> bool>,
     configure_translation_popup_corners: fn(&slint::Window) -> PopupCornerMode,
     pub(crate) activate_user_requested_window: fn(&slint::Window) -> bool,
@@ -2794,7 +2795,13 @@ impl Ui {
                 window_lifecycle.complete_toolbar_show.clone(),
                 window_lifecycle.history_dismissal.clone(),
                 window_lifecycle.popup_work_area.clone(),
-            ))
+            ));
+            if let Some(r) = s.borrow_mut().as_mut() {
+                r.begin_resize = window_lifecycle.begin_window_resize.clone();
+                r.resize_background = window_lifecycle.configure_resize_background.clone();
+                r.configure_corners = window_lifecycle.configure_translation_popup_corners;
+                r.paint_repair = window_lifecycle.configure_window_paint_repair.clone();
+            }
         });
         SELECTION_TOOLBAR_REGISTRY.with(|registry| {
             *registry.borrow_mut() = Some(SelectionToolbarRegistry {
