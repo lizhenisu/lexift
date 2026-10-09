@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bootstrap;
+mod clipboard_history;
 mod controller;
 mod lifecycle;
 mod llm_credentials;

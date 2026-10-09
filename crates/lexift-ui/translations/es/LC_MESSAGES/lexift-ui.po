@@ -1350,3 +1350,96 @@ msgstr "Licencia de código abierto"
 
 msgid "Could not open the browser. Please try again."
 msgstr "No se pudo abrir el navegador. Inténtalo de nuevo."
+
+msgid "Clear clipboard history"
+msgstr "Borrar historial"
+
+msgid "Clipboard history"
+msgstr "Historial del portapapeles"
+
+msgid "Clipboard history could not be loaded. Clear history to start again."
+msgstr "No se pudo cargar el historial. Bórrelo para empezar de nuevo."
+
+msgid "Clipboard history could not be saved."
+msgstr "No se pudo guardar el historial."
+
+msgid "Clipboard paste could not be sent to this input."
+msgstr "No se pudo pegar en este campo."
+
+msgid "Clipboard paste was cancelled."
+msgstr "Pegado cancelado."
+
+msgid "Clipboard settings"
+msgstr "Ajustes del portapapeles"
+
+msgid "Enable and record"
+msgstr "Activar y registrar"
+
+msgid "History limit"
+msgstr "Límite del historial"
+
+msgid "Keep encrypted plain-text history on this device"
+msgstr "Guardar texto cifrado en este dispositivo"
+
+msgid "No clipboard history yet"
+msgstr "Aún no hay historial"
+
+msgid "Pasting…"
+msgstr "Pegando…"
+
+msgid "Record clipboard history"
+msgstr "Registrar historial del portapapeles"
+
+msgid "Recording"
+msgstr "Registrando"
+
+msgid "Recording paused"
+msgstr "Registro en pausa"
+
+msgid "Release modifier keys and try again."
+msgstr "Suelte las teclas modificadoras e inténtelo de nuevo."
+
+msgid "Save recent plain text on this device. History is encrypted for your Windows account. Recording starts only after you enable it."
+msgstr "Guarda el texto copiado recientemente en este dispositivo, cifrado con su cuenta de Windows. El registro comienza al activarlo."
+
+msgid "Show Translate, Copy and Clipboard after selecting text"
+msgstr "Mostrar Traducir, Copiar y Portapapeles al seleccionar texto"
+
+msgid "The original input has changed. Select text again."
+msgstr "El campo original ha cambiado. Seleccione el texto de nuevo."
+
+msgid "The original selection is not a supported editable input."
+msgstr "La selección original no es un campo editable confirmado."
+
+msgid "This clipboard text is too large to record."
+msgstr "El texto es demasiado grande para registrarlo."
+
+msgid "Clipboard history monitoring is unavailable"
+msgstr "La supervisión del portapapeles no está disponible"
+
+msgid "Clipboard settings saved"
+msgstr "Ajustes del portapapeles guardados"
+
+msgid "Could not save clipboard settings"
+msgstr "No se pudieron guardar los ajustes del portapapeles"
+
+msgid "Delete clipboard entry"
+msgstr "Eliminar entrada del portapapeles"
+
+msgid "Could not copy clipboard entry."
+msgstr "No se pudo copiar la entrada del portapapeles."
+
+msgid "Delete"
+msgstr "Eliminar"
+
+msgid "Delete all saved clipboard history? This cannot be undone."
+msgstr "¿Eliminar todo el historial guardado del portapapeles? Esta acción no se puede deshacer."
+
+msgid "Copying…"
+msgstr "Copiando…"
+
+msgid "Click to paste"
+msgstr "Clic para pegar"
+
+msgid "Copied text appears here."
+msgstr "El texto copiado aparece aquí."

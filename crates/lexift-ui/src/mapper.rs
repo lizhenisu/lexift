@@ -12,6 +12,9 @@ pub(crate) struct UiState {
     pub llm: lexift_core::domain::llm::LlmSettings,
     pub launch_at_login: bool,
     pub selection_toolbar: bool,
+    pub history_enabled: bool,
+    pub history_limit: i32,
+    pub history_error: String,
     pub ui_language: lexift_core::domain::ui_language::UiLanguage,
     pub theme: lexift_core::domain::settings::ThemePreference,
     pub target_language_error: String,
@@ -27,6 +30,8 @@ pub(crate) struct UiState {
 
 #[derive(Clone)]
 pub(crate) struct PopupUiState {
+    pub copy: [lexift_core::domain::copy_feedback::CopyStatus; 2],
+    pub copy_text: [String; 2],
     pub session_id: u64,
     pub status: String,
     pub busy: bool,
@@ -62,6 +67,9 @@ pub(crate) fn view_state(state: &AppState) -> UiState {
         llm: state.settings.llm.clone(),
         launch_at_login: state.desired_settings.launch_at_login,
         selection_toolbar: state.desired_settings.selection_toolbar,
+        history_enabled: state.desired_settings.clipboard_history_enabled,
+        history_limit: i32::from(state.desired_settings.clipboard_history_limit),
+        history_error: crate::i18n::tr(&state.clipboard_history.error),
         theme: state.desired_settings.theme,
         ui_language: state.desired_settings.ui_language,
         target_language_error: crate::i18n::error(&state.target_language_settings_error),
@@ -82,6 +90,8 @@ pub(crate) fn popup_states(state: &AppState) -> Vec<PopupUiState> {
 
 fn popup_state(session: &PopupSessionState) -> PopupUiState {
     PopupUiState {
+        copy: session.copy.clone(),
+        copy_text: session.copy_text.clone(),
         session_id: session.id.value(),
         status: crate::i18n::tr(phase_label(session.phase)),
         busy: matches!(

@@ -1,0 +1,262 @@
+import { CopyFeedbackIcon } from "design/copy-feedback.slint";
+import { AppToast } from "design/toast.slint";
+import { Colors } from "design/colors.slint";
+import { AppAssets } from "design/assets.slint";
+import { Typography } from "design/typography.slint";
+import { Spacing } from "design/spacing.slint";
+import { Metrics } from "design/metrics.slint";
+import { ScrollView } from "std-widgets.slint";
+import { AppVerticalScrollBar } from "design/scrollbar.slint";
+
+export struct ClipboardHistoryRow { id: string, preview: string, copy-pending: bool, copied: bool }
+
+// Keep a press attached to its entry even if clipboard notifications reorder the list.
+component HistoryEntryTouch inherits TouchArea {
+    in property <string> entry-id;
+    private property <string> pressed-entry;
+    callback invoked(string);
+    mouse-cursor: self.enabled ? pointer : default;
+    pointer-event(event) => {
+        if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.pressed-entry = root.entry-id; }
+    }
+    clicked => { if root.pressed-entry == root.entry-id { root.invoked(root.entry-id); } }
+}
+
+// Instantiated only while pending, so its timer dies with the operation/window.
+component HistorySpinner inherits Rectangle {
+    private property <angle> turn;
+    width: 16px; height: 16px;
+    Image { x: 0px; y: 0px; width: parent.width; height: parent.height; source: AppAssets.icon-refresh; colorize: Colors.primary; transform-rotation: root.turn; }
+    Timer { interval: 80ms; running: true; triggered => { root.turn += 45deg; } }
+}
+
+component HistoryCopyAction inherits Rectangle {
+    in property <string> entry-id;
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <bool> copied: false;
+    in property <bool> pending: false;
+    out property <bool> hovered: touch.has-hover;
+    callback invoked(string);
+    width: 28px; height: 28px; border-radius: 8px;
+    opacity: root.enabled || root.pending ? 1 : Metrics.disabled-opacity; border-width: 1px;
+    border-color: root.copied || root.pending ? Colors.primary.with-alpha(0.3)
+        : root.enabled && touch.has-hover ? Colors.primary.with-alpha(0.4) : Colors.outline.with-alpha(0.65);
+    background: root.copied || root.pending ? Colors.primary-container
+        : root.enabled && touch.pressed ? Colors.icon-button-pressed
+        : root.enabled && touch.has-hover ? Colors.primary-container : Colors.surface;
+    animate background, border-color { duration: 120ms; }
+    if root.pending: HistorySpinner { x: 6px; y: 6px; }
+    if !root.pending: CopyFeedbackIcon {
+        x: 6px; y: 6px; width: 16px; height: 16px; copied: root.copied; normal-color: touch.has-hover ? Colors.primary : Colors.secondary-foreground;
+    }
+    touch := HistoryEntryTouch {
+        entry-id: root.entry-id; enabled: root.enabled;
+        accessible-role: button; accessible-label: root.pending ? @tr("Copying…") : root.label; accessible-enabled: root.enabled;
+        invoked(id) => { root.invoked(id); }
+    }
+}
+
+component HistoryButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <bool> primary: false;
+    in property <bool> settings-action: false;
+    in property <bool> icon-only: false;
+    callback clicked();
+    height: root.icon-only ? 36px : max(36px, button-label.preferred-height + 12px); border-radius: 8px;
+    accessible-role: button; accessible-label: root.label; accessible-enabled: root.enabled;
+    opacity: root.enabled ? 1 : Metrics.disabled-opacity;
+    background: root.primary ? (touch.pressed ? Colors.primary.darker(0.12) : touch.has-hover ? Colors.primary.darker(0.06) : Colors.primary)
+        : touch.pressed ? Colors.icon-button-pressed : touch.has-hover ? Colors.primary-container : transparent;
+    animate background { duration: 120ms; }
+    if root.settings-action: Image {
+        x: root.icon-only ? (parent.width - self.width) / 2 : 8px; y: (parent.height - self.height) / 2; width: 16px; height: 16px;
+        source: @image-url("icons/provider-settings.svg"); colorize: touch.has-hover ? Colors.primary : Colors.secondary-foreground;
+    }
+    button-label := Text {
+        visible: !root.icon-only;
+        x: root.settings-action ? 30px : 12px; width: max(0px, parent.width - self.x - 12px);
+        y: (parent.height - self.height) / 2; height: self.preferred-height; wrap: word-wrap;
+        text: root.label; color: root.primary ? Colors.on-primary : touch.has-hover ? Colors.primary : Colors.secondary-foreground;
+        font-size: 13px; font-weight: root.primary ? 600 : 500; vertical-alignment: center; horizontal-alignment: center;
+    }
+    touch := TouchArea { enabled: root.enabled; mouse-cursor: root.enabled ? pointer : default; clicked => { root.clicked(); } }
+}
+
+export component ClipboardHistoryWindow inherits Window {
+    title: @tr("Clipboard history"); no-frame: true; always-on-top: true; background: transparent;
+    preferred-width: 340px; preferred-height: 420px;
+    in property <[ClipboardHistoryRow]> entries;
+    in property <bool> recording: false;
+    in property <bool> ready: false;
+    in property <bool> busy: false;
+    in property <bool> copying: false;
+    in property <bool> saving: false;
+    in property <bool> first-use: true;
+    in property <string> error-text;
+    in-out property <string> target-toast;
+    in-out property <string> delete-confirmation;
+    private property <string> paste-entry;
+    private property <length> entry-pitch: 88px;
+    callback close-requested(); callback enable-requested(); callback settings-requested();
+    callback copy-requested(string); callback paste-requested(string); callback delete-requested(string);
+    callback header-drag-requested(float, float);
+    callback target-toast-dismissed();
+
+    // Hit testing follows the full title band, independently of the content padding.
+    // The close button above this layer consumes its own clicks.
+    TouchArea {
+        x: 0px; y: 0px; width: root.width; height: shell.y + body.y; mouse-cursor: default;
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                root.header-drag-requested(self.mouse-x / 1px, self.mouse-y / 1px);
+            }
+        }
+    }
+    shell := Rectangle {
+        x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px;
+        background: Colors.surface; border-radius: Metrics.popup-shell-radius; border-color: Colors.outline; border-width: 1px;
+        header := Rectangle {
+            accessible-role: window-title-bar; accessible-label: @tr("Clipboard history");
+            x: Spacing.medium; y: Spacing.small; width: parent.width - 2 * Spacing.medium; height: 32px;
+            Rectangle {
+                x: 0px; y: 0px; width: 32px; height: 32px; border-radius: 10px; background: Colors.primary-container;
+                Image { x: 8px; y: 8px; width: 16px; height: 16px; source: AppAssets.icon-paste; colorize: Colors.primary; }
+            }
+            Rectangle { x: 44px; y: (parent.height - self.height) / 2; width: 6px; height: 6px; border-radius: 3px; background: root.busy ? Colors.primary : root.recording ? Colors.success : Colors.secondary-foreground.with-alpha(0.6); }
+            Text {
+                x: 56px; y: 0px; height: parent.height; width: max(0px, (count-badge.visible ? count-badge.x : close-action.x) - self.x - Spacing.small);
+                text: root.busy ? @tr("Pasting…") : root.recording ? @tr("Recording") : @tr("Recording paused");
+                color: Colors.secondary-foreground; font-size: 12px; overflow: elide; vertical-alignment: center;
+            }
+            count-badge := Rectangle {
+                visible: !root.first-use; x: close-action.x - Spacing.small - self.width; y: (parent.height - self.height) / 2;
+                width: count-label.preferred-width + 14px; height: 22px; border-radius: 7px; background: Colors.background;
+                count-label := Text { width: parent.width; height: parent.height; text: root.entries.length; color: Colors.secondary-foreground; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+            }
+            close-action := Rectangle {
+                x: parent.width - 32px; y: 0px; width: 32px; height: 32px; border-radius: 8px;
+                background: close-touch.pressed ? Colors.icon-button-pressed : close-touch.has-hover ? Colors.icon-button-hover : transparent;
+                animate background { duration: 120ms; }
+                Image { x: 8px; y: 8px; width: 16px; height: 16px; source: AppAssets.icon-close; colorize: Colors.secondary-foreground; }
+                close-touch := TouchArea { accessible-role: button; accessible-label: @tr("Close"); mouse-cursor: pointer; clicked => { root.close-requested(); } }
+            }
+        }
+        body := Rectangle { x: 1px; y: header.y + header.height + Spacing.small; width: parent.width - 2px; height: max(0px, footer.y - self.y); background: Colors.background; }
+        Rectangle { x: 1px; y: body.y; width: parent.width - 2px; height: 1px; background: Colors.outline.with-alpha(0.5); }
+        scroll := ScrollView {
+            x: 12px; y: body.y + Spacing.small; width: parent.width - 24px; height: max(0px, footer.y - self.y - 8px);
+            content-width: self.visible-width;
+            content-height: max(self.visible-height, root.first-use ? opt-in.height : root.entries.length == 0 ? 160px : root.entries.length * root.entry-pitch);
+            horizontal-scrollbar-policy: always-off; vertical-scrollbar-policy: always-off;
+            opt-in := Rectangle {
+                visible: root.first-use; x: 0px; y: 0px; width: scroll.visible-width; height: enable-action.y + enable-action.height + 16px;
+                Rectangle {
+                    x: (parent.width - self.width) / 2; y: 8px; width: 48px; height: 48px; border-radius: 14px; background: Colors.primary-container;
+                    Image { x: 12px; y: 12px; width: 24px; height: 24px; source: AppAssets.icon-paste; colorize: Colors.primary; }
+                }
+                opt-in-text := Text {
+                    x: Spacing.medium; y: 76px; width: max(0px, parent.width - 2 * Spacing.medium); height: self.preferred-height;
+                    text: @tr("Save recent plain text on this device. History is encrypted for your Windows account. Recording starts only after you enable it.");
+                    wrap: word-wrap; color: Colors.secondary-foreground; font-size: 13px; horizontal-alignment: center;
+                }
+                enable-action := HistoryButton {
+                    x: Spacing.medium; y: opt-in-text.y + opt-in-text.height + Spacing.medium; width: parent.width - 2 * Spacing.medium;
+                    label: @tr("Enable and record"); primary: true; enabled: !root.saving; clicked => { root.enable-requested(); }
+                }
+            }
+            if !root.first-use && root.entries.length == 0: Rectangle {
+                y: max(8px, (scroll.visible-height - self.height) / 2); width: scroll.visible-width; height: 144px;
+                Rectangle {
+                    x: (parent.width - self.width) / 2; y: 0px; width: 48px; height: 48px; border-radius: 14px; background: Colors.surface;
+                    Image { x: 12px; y: 12px; width: 24px; height: 24px; source: AppAssets.icon-paste; colorize: Colors.secondary-foreground; }
+                }
+                Text { x: 12px; y: 64px; width: parent.width - 24px; height: 40px; text: @tr("No clipboard history yet"); color: Colors.foreground; font-size: Typography.compact-size; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
+                Text { x: 12px; y: 108px; width: parent.width - 24px; height: 36px; text: @tr("Copied text appears here."); color: Colors.secondary-foreground; font-size: 12px; horizontal-alignment: center; wrap: word-wrap; }
+            }
+            if !root.first-use: Rectangle {
+                x: 0px; y: 0px; width: scroll.visible-width; height: root.entries.length * root.entry-pitch;
+                for entry[index] in root.entries: Rectangle {
+                    private property <bool> confirming: root.delete-confirmation == entry.id;
+                    private property <bool> pasting: root.busy && root.paste-entry == entry.id;
+                    private property <length> actions-width: max(64px, delete-label.preferred-width + 38px);
+                    private property <bool> hovered: paste-touch.has-hover || copy-action.hovered || delete-touch.has-hover;
+                    y: index * root.entry-pitch; width: parent.width; height: root.entry-pitch - Spacing.small; border-radius: 10px; border-width: 1px;
+                    background: self.confirming ? Colors.error-container.with-alpha(0.45) : self.pasting || paste-touch.pressed ? Colors.primary-container : self.hovered ? Colors.primary-container.with-alpha(0.4) : Colors.surface;
+                    border-color: self.confirming ? Colors.error.with-alpha(0.45) : self.pasting || self.hovered ? Colors.primary.with-alpha(0.35) : Colors.outline.with-alpha(0.6);
+                    animate background, border-color { duration: 120ms; }
+                    paste-touch := HistoryEntryTouch {
+                        entry-id: entry.id; enabled: root.ready && !root.busy && !root.copying;
+                        accessible-role: button; accessible-label: @tr("Paste") + ": " + entry.preview;
+                        invoked(id) => { root.delete-confirmation = ""; root.paste-entry = id; root.paste-requested(id); }
+                    }
+                    Text {
+                        x: 12px; y: 13px; width: max(0px, parent.width - parent.actions-width - 28px); height: 54px;
+                        text: entry.preview; wrap: word-wrap; overflow: elide; vertical-alignment: center; color: Colors.foreground; font-size: Typography.compact-size;
+                    }
+                    copy-action := HistoryCopyAction {
+                        visible: !parent.confirming && !parent.pasting;
+                        x: parent.width - 68px; y: (parent.height - self.height) / 2; entry-id: entry.id;
+                        label: @tr("Copy"); copied: entry.copied; pending: entry.copy-pending;
+                        enabled: !root.busy && !entry.copy-pending;
+                        invoked(id) => { root.delete-confirmation = ""; root.copy-requested(id); }
+                    }
+                    delete-action := Rectangle {
+                        in property <bool> confirming: parent.confirming;
+                        visible: !parent.pasting;
+                        x: parent.width - self.width - 8px; y: (parent.height - self.height) / 2;
+                        width: parent.confirming ? parent.actions-width : 28px; height: 28px; border-radius: parent.confirming ? 14px : 8px;
+                        opacity: root.busy ? Metrics.disabled-opacity : 1; border-width: parent.confirming ? 0px : 1px;
+                        border-color: delete-touch.has-hover ? Colors.error.with-alpha(0.4) : Colors.outline.with-alpha(0.65);
+                        background: parent.confirming ? (delete-touch.pressed ? Colors.error.darker(0.1) : Colors.error) : delete-touch.has-hover ? Colors.error-container : Colors.surface;
+                        animate background, border-color { duration: 120ms; }
+                        Image { x: parent.confirming ? 10px : 6px; y: 6px; width: 16px; height: 16px; source: @image-url("icons/credential-delete.svg"); colorize: parent.confirming ? Colors.surface : delete-touch.has-hover ? Colors.error : Colors.secondary-foreground; }
+                        delete-label := Text { visible: parent.confirming; x: 30px; width: parent.width - 38px; height: parent.height; text: @tr("Delete"); color: Colors.surface; font-size: 13px; vertical-alignment: center; }
+                        delete-touch := HistoryEntryTouch {
+                            entry-id: entry.id; accessible-role: button; accessible-label: @tr("Delete clipboard entry"); enabled: !root.busy;
+                            invoked(id) => { if root.delete-confirmation == id { root.delete-confirmation = ""; root.delete-requested(id); } else { root.delete-confirmation = id; } }
+                        }
+                    }
+                    if self.pasting: HistorySpinner { x: parent.width - 40px; y: (parent.height - self.height) / 2; }
+                }
+            }
+        }
+        AppVerticalScrollBar { x: parent.width - 9px; y: scroll.y; height: scroll.height; viewport-height: scroll.visible-height; content-height: scroll.content-height; content-y <=> scroll.content-y; }
+        footer := Rectangle {
+            x: Spacing.medium; y: parent.height - self.height; width: parent.width - 2 * Spacing.medium;
+            height: action-row.height + 12px + (root.error-text != "" ? error-banner.height + Spacing.small : 0px);
+            Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Colors.outline.with-alpha(0.5); }
+            error-banner := Rectangle {
+                visible: root.error-text != ""; y: 8px; width: parent.width; height: max(36px, feedback.preferred-height + 20px);
+                background: Colors.error-container; border-radius: 8px;
+                Image { x: 10px; y: 10px; width: 16px; height: 16px; source: @image-url("icons/about.svg"); colorize: Colors.error; }
+                feedback := Text { x: 34px; y: 10px; width: max(0px, parent.width - 44px); height: self.preferred-height; text: root.error-text; wrap: word-wrap; color: Colors.error; font-size: 12px; }
+            }
+            action-row := Rectangle {
+                y: root.error-text != "" ? error-banner.y + error-banner.height + 4px : 4px;
+                width: parent.width; height: max(36px, footer-action.height);
+                Text {
+                    visible: !root.first-use && root.entries.length > 0;
+                    x: 0px; y: 0px;
+                    width: max(0px, footer-action.x - Spacing.small); height: parent.height;
+                    text: root.busy ? @tr("Pasting…") : @tr("Click to paste"); wrap: word-wrap; vertical-alignment: center;
+                    color: Colors.secondary-foreground; font-size: 12px;
+                }
+                footer-action := HistoryButton {
+                    icon-only: root.width < 280px;
+                    x: parent.width - self.width; width: self.icon-only ? 36px : min(parent.width * 0.62, footer-label-measure.preferred-width + 42px);
+                    label: @tr("Clipboard settings"); settings-action: true; enabled: !root.busy; clicked => { root.settings-requested(); }
+                }
+                footer-label-measure := Text { visible: false; text: @tr("Clipboard settings"); font-size: 13px; font-weight: 500; }
+            }
+        }
+        if root.target-toast != "": AppToast {
+            x: Spacing.medium; width: parent.width - 2 * Spacing.medium;
+            y: max(scroll.y, footer.y - self.height - Spacing.small);
+            message: root.target-toast; error: true; adaptive-height: true;
+            height-limit: max(Metrics.toast-height, footer.y - scroll.y - Spacing.small);
+            dismissed => { root.target-toast-dismissed(); }
+        }
+    }
+}

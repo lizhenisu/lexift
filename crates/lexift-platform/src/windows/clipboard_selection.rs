@@ -70,6 +70,7 @@ where
         return Ok(None);
     }
 
+    let _history_transaction = super::clipboard_history::Transient::begin();
     let snapshot = ClipboardSnapshot::capture()?;
     let before_copy = snapshot.sequence;
     let mut transaction = ClipboardTransaction::new(snapshot);
@@ -237,6 +238,7 @@ impl ClipboardTransaction {
     }
 
     fn mark_copy(&mut self, sequence: u32) {
+        super::clipboard_history::Transient::exclude(sequence);
         self.copied_sequence = Some(sequence);
     }
 
@@ -288,6 +290,7 @@ impl ClipboardTransaction {
         // a failed flush can be retried by Drop without overwriting a newer
         // clipboard update that happens in between.
         self.copied_sequence = Some(unsafe { GetClipboardSequenceNumber() });
+        super::clipboard_history::Transient::exclude(self.copied_sequence.unwrap());
         let Some(snapshot) = self.snapshot.as_ref() else {
             return Ok(Ok(()));
         };

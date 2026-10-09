@@ -26,6 +26,8 @@ pub enum SettingsField {
     TranslationOptions,
     LaunchAtLogin,
     SelectionToolbar,
+    ClipboardHistoryEnabled,
+    ClipboardHistoryLimit,
     Theme,
     UiLanguage,
 }
@@ -46,7 +48,9 @@ pub enum SettingsFeedback {
     },
     CredentialSaved,
     CredentialRemoved,
-    CredentialCopied,
+    CredentialCopied {
+        generation: u64,
+    },
     CredentialOperationFailed,
 }
 
@@ -78,6 +82,8 @@ pub enum SettingsChange {
     },
     LaunchAtLogin(bool),
     SelectionToolbar(bool),
+    ClipboardHistoryEnabled(bool),
+    ClipboardHistoryLimit(u16),
     Theme(ThemePreference),
     UiLanguage(UiLanguage),
 }
@@ -96,6 +102,8 @@ impl SettingsChange {
             Self::TranslationOptions { .. } => SettingsField::TranslationOptions,
             Self::LaunchAtLogin(_) => SettingsField::LaunchAtLogin,
             Self::SelectionToolbar(_) => SettingsField::SelectionToolbar,
+            Self::ClipboardHistoryEnabled(_) => SettingsField::ClipboardHistoryEnabled,
+            Self::ClipboardHistoryLimit(_) => SettingsField::ClipboardHistoryLimit,
             Self::Theme(_) => SettingsField::Theme,
             Self::UiLanguage(_) => SettingsField::UiLanguage,
         }
@@ -103,6 +111,13 @@ impl SettingsChange {
 
     /// Validate targeted translation edits against the current configuration at dispatch time.
     pub fn validate_translation_change(&self, settings: &Settings) -> crate::Result<()> {
+        if let Self::ClipboardHistoryLimit(value) = self
+            && !(10..=200).contains(value)
+        {
+            return Err(crate::Error::new(
+                "Clipboard history limit must be between 10 and 200",
+            ));
+        }
         if !matches!(
             self,
             Self::TranslationSelection { .. } | Self::TranslationOptions { .. }
@@ -211,6 +226,8 @@ impl SettingsChange {
             }
             Self::LaunchAtLogin(value) => settings.launch_at_login = *value,
             Self::SelectionToolbar(value) => settings.selection_toolbar = *value,
+            Self::ClipboardHistoryEnabled(value) => settings.clipboard_history_enabled = *value,
+            Self::ClipboardHistoryLimit(value) => settings.clipboard_history_limit = *value,
             Self::Theme(value) => settings.theme = *value,
             Self::UiLanguage(value) => settings.ui_language = *value,
         }
@@ -243,6 +260,8 @@ impl SettingsChange {
             }
             Self::LaunchAtLogin(value) => settings.launch_at_login == *value,
             Self::SelectionToolbar(value) => settings.selection_toolbar == *value,
+            Self::ClipboardHistoryEnabled(value) => settings.clipboard_history_enabled == *value,
+            Self::ClipboardHistoryLimit(value) => settings.clipboard_history_limit == *value,
             Self::Theme(value) => settings.theme == *value,
             Self::UiLanguage(value) => settings.ui_language == *value,
         }
@@ -259,6 +278,8 @@ pub struct Settings {
     pub llm: super::llm::LlmSettings,
     pub launch_at_login: bool,
     pub selection_toolbar: bool,
+    pub clipboard_history_enabled: bool,
+    pub clipboard_history_limit: u16,
     pub theme: ThemePreference,
     pub ui_language: UiLanguage,
     /// Reference to a system credential. This value is never the credential secret.
@@ -276,6 +297,8 @@ impl Default for Settings {
             llm: super::llm::LlmSettings::default(),
             launch_at_login: false,
             selection_toolbar: true,
+            clipboard_history_enabled: false,
+            clipboard_history_limit: 50,
             theme: ThemePreference::default(),
             ui_language: UiLanguage::default(),
             deepl_credential_id: None,

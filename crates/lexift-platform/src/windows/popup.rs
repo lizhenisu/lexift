@@ -208,6 +208,8 @@ enum DismissalEvent {
     Unwatch(usize),
     MouseDown(i32, i32, Instant),
     Foreground(usize, Instant),
+    Escape(Instant),
+    Focus(usize, Instant),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -294,6 +296,49 @@ fn start_dismissal() -> lexift_core::Result<PopupDismissHandle> {
                             .fetch_max(sent_at.elapsed().as_micros() as u64, Ordering::Relaxed);
                         post_dismissals_for_outside_point(&mut monitor, x, y, sent_at);
                     }
+                    DismissalEvent::Focus(focus, sent_at) => {
+                        let root = hwnd_key(unsafe {
+                            windows::Win32::UI::WindowsAndMessaging::GetAncestor(
+                                hwnd_from_key(focus),
+                                windows::Win32::UI::WindowsAndMessaging::GA_ROOT,
+                            )
+                        });
+                        for (key, watch) in &mut monitor.watches {
+                            let hwnd = hwnd_from_key(*key);
+                            if root == watch.initial_foreground
+                                && sent_at >= watch.started_at
+                                && !watch.dismissal_posted
+                                && !unsafe {
+                                    windows::Win32::UI::WindowsAndMessaging::GetPropW(
+                                        hwnd,
+                                        windows::core::w!("Lexift.ClipboardHistoryEscape"),
+                                    )
+                                }
+                                .0
+                                .is_null()
+                            {
+                                post_dismissal(hwnd, watch, PopupDismissCause::ForegroundChanged);
+                            }
+                        }
+                    }
+                    DismissalEvent::Escape(sent_at) => {
+                        for (key, watch) in &mut monitor.watches {
+                            let hwnd = hwnd_from_key(*key);
+                            if sent_at >= watch.started_at
+                                && !watch.dismissal_posted
+                                && !unsafe {
+                                    windows::Win32::UI::WindowsAndMessaging::GetPropW(
+                                        hwnd,
+                                        windows::core::w!("Lexift.ClipboardHistoryEscape"),
+                                    )
+                                }
+                                .0
+                                .is_null()
+                            {
+                                post_dismissal(hwnd, watch, PopupDismissCause::PointerOutside);
+                            }
+                        }
+                    }
                     DismissalEvent::Foreground(hwnd, sent_at) => {
                         dispatch_delay
                             .fetch_max(sent_at.elapsed().as_micros() as u64, Ordering::Relaxed);
@@ -330,6 +375,43 @@ fn start_dismissal() -> lexift_core::Result<PopupDismissHandle> {
                 "Could not monitor foreground changes for popup",
             ));
         }
+        let keyboard_hook = match unsafe {
+            SetWindowsHookExW(
+                windows::Win32::UI::WindowsAndMessaging::WH_KEYBOARD_LL,
+                Some(history_keyboard_hook),
+                None,
+                0,
+            )
+        } {
+            Ok(h) => h,
+            Err(_) => {
+                let _ = unsafe { UnhookWindowsHookEx(mouse_hook) };
+                let _ =
+                    unsafe { windows::Win32::UI::Accessibility::UnhookWinEvent(foreground_hook) };
+                return Err(lexift_core::Error::new(
+                    "Could not monitor clipboard history cancellation",
+                ));
+            }
+        };
+        let focus_hook = unsafe {
+            SetWinEventHook(
+                windows::Win32::UI::WindowsAndMessaging::EVENT_OBJECT_FOCUS,
+                windows::Win32::UI::WindowsAndMessaging::EVENT_OBJECT_FOCUS,
+                None,
+                Some(history_focus_hook),
+                0,
+                0,
+                WINEVENT_OUTOFCONTEXT,
+            )
+        };
+        if focus_hook.0.is_null() {
+            let _ = unsafe { UnhookWindowsHookEx(mouse_hook) };
+            let _ = unsafe { UnhookWindowsHookEx(keyboard_hook) };
+            let _ = unsafe { windows::Win32::UI::Accessibility::UnhookWinEvent(foreground_hook) };
+            return Err(lexift_core::Error::new(
+                "Could not monitor original input focus",
+            ));
+        }
         POPUP_HOOK_STATE.with(|slot| {
             *slot.borrow_mut() = Some(PopupHookState {
                 sender: hook_sender,
@@ -340,7 +422,9 @@ fn start_dismissal() -> lexift_core::Result<PopupDismissHandle> {
             use windows::Win32::UI::Accessibility::UnhookWinEvent;
             POPUP_HOOK_STATE.with(|slot| *slot.borrow_mut() = None);
             let _ = unsafe { UnhookWindowsHookEx(mouse_hook) };
+            let _ = unsafe { UnhookWindowsHookEx(keyboard_hook) };
             let _ = unsafe { UnhookWinEvent(foreground_hook) };
+            let _ = unsafe { UnhookWinEvent(focus_hook) };
         }))
     }) {
         Ok(thread) => thread,
@@ -468,6 +552,70 @@ pub(crate) fn set_dismissal(
 
 fn unregister_dismissal_hwnd(hwnd: windows::Win32::Foundation::HWND) {
     unwatch_dismissal(hwnd);
+}
+
+/// Escape is observed, never swallowed; only explicitly marked history windows close.
+pub(crate) fn set_history_dismissal(
+    window: &impl raw_window_handle::HasWindowHandle,
+    enabled: bool,
+) -> lexift_core::Result<()> {
+    let hwnd = required_hwnd(window)?;
+    unsafe {
+        if enabled {
+            windows::Win32::UI::WindowsAndMessaging::SetPropW(
+                hwnd,
+                windows::core::w!("Lexift.ClipboardHistoryEscape"),
+                Some(windows::Win32::Foundation::HANDLE(1usize as _)),
+            )
+            .map_err(|_| lexift_core::Error::new("Could not prepare history cancellation"))?;
+        } else {
+            let _ = windows::Win32::UI::WindowsAndMessaging::RemovePropW(
+                hwnd,
+                windows::core::w!("Lexift.ClipboardHistoryEscape"),
+            );
+        }
+    }
+    set_dismissal(window, enabled)
+}
+unsafe extern "system" fn history_focus_hook(
+    _hook: windows::Win32::UI::Accessibility::HWINEVENTHOOK,
+    _event: u32,
+    hwnd: windows::Win32::Foundation::HWND,
+    _object: i32,
+    _child: i32,
+    _thread: u32,
+    event_time: u32,
+) {
+    POPUP_HOOK_STATE.with(|s| {
+        if let Some(s) = s.borrow().as_ref() {
+            let _ = s.sender.send(DismissalEvent::Focus(
+                hwnd_key(hwnd),
+                event_instant(
+                    Instant::now(),
+                    unsafe { windows::Win32::System::SystemInformation::GetTickCount() },
+                    event_time,
+                ),
+            ));
+        }
+    });
+}
+unsafe extern "system" fn history_keyboard_hook(
+    code: i32,
+    w: windows::Win32::Foundation::WPARAM,
+    l: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::UI::WindowsAndMessaging::*;
+    if code == HC_ACTION as i32 && matches!(w.0 as u32, WM_KEYDOWN | WM_SYSKEYDOWN) && l.0 != 0 {
+        let data = unsafe { &*(l.0 as *const KBDLLHOOKSTRUCT) };
+        if data.vkCode == u32::from(windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE.0) {
+            POPUP_HOOK_STATE.with(|s| {
+                if let Some(s) = s.borrow().as_ref() {
+                    let _ = s.sender.send(DismissalEvent::Escape(Instant::now()));
+                }
+            });
+        }
+    }
+    unsafe { CallNextHookEx(None, code, w, l) }
 }
 
 unsafe extern "system" fn popup_mouse_hook(

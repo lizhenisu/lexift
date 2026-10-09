@@ -1350,3 +1350,96 @@ msgstr "开源许可"
 
 msgid "Could not open the browser. Please try again."
 msgstr "无法打开浏览器，请重试。"
+
+msgid "Clear clipboard history"
+msgstr "清空剪贴板历史"
+
+msgid "Clipboard history"
+msgstr "剪贴板历史"
+
+msgid "Clipboard history could not be loaded. Clear history to start again."
+msgstr "无法读取剪贴板历史。请清空历史后重新开始。"
+
+msgid "Clipboard history could not be saved."
+msgstr "无法保存剪贴板历史。"
+
+msgid "Clipboard paste could not be sent to this input."
+msgstr "无法向此输入框发送粘贴操作。"
+
+msgid "Clipboard paste was cancelled."
+msgstr "已取消粘贴。"
+
+msgid "Clipboard settings"
+msgstr "剪贴板设置"
+
+msgid "Enable and record"
+msgstr "启用并记录"
+
+msgid "History limit"
+msgstr "历史数量上限"
+
+msgid "Keep encrypted plain-text history on this device"
+msgstr "在本机保存加密的纯文本历史"
+
+msgid "No clipboard history yet"
+msgstr "暂无剪贴板历史"
+
+msgid "Pasting…"
+msgstr "正在粘贴…"
+
+msgid "Record clipboard history"
+msgstr "记录剪贴板历史"
+
+msgid "Recording"
+msgstr "正在记录"
+
+msgid "Recording paused"
+msgstr "已暂停记录"
+
+msgid "Release modifier keys and try again."
+msgstr "请松开修饰键后重试。"
+
+msgid "Save recent plain text on this device. History is encrypted for your Windows account. Recording starts only after you enable it."
+msgstr "在本机保存最近复制的纯文本，并使用你的 Windows 账户加密。启用后才会开始记录。"
+
+msgid "Show Translate, Copy and Clipboard after selecting text"
+msgstr "划词后显示翻译、复制和剪贴板"
+
+msgid "The original input has changed. Select text again."
+msgstr "原输入目标已改变，请重新选择文本。"
+
+msgid "The original selection is not a supported editable input."
+msgstr "原选区不是可确认的可编辑输入框。"
+
+msgid "This clipboard text is too large to record."
+msgstr "此剪贴板文本过大，无法记录。"
+
+msgid "Clipboard history monitoring is unavailable"
+msgstr "剪贴板历史监听不可用"
+
+msgid "Clipboard settings saved"
+msgstr "剪贴板设置已保存"
+
+msgid "Could not save clipboard settings"
+msgstr "无法保存剪贴板设置"
+
+msgid "Delete clipboard entry"
+msgstr "删除此剪贴板记录"
+
+msgid "Could not copy clipboard entry."
+msgstr "无法复制剪贴板记录。"
+
+msgid "Delete"
+msgstr "删除"
+
+msgid "Delete all saved clipboard history? This cannot be undone."
+msgstr "确定清空所有已保存的剪贴板历史吗？此操作无法撤销。"
+
+msgid "Copying…"
+msgstr "复制中…"
+
+msgid "Click to paste"
+msgstr "点击条目粘贴"
+
+msgid "Copied text appears here."
+msgstr "复制的文本会显示在这里。"

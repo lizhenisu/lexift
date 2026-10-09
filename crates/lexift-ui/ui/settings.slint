@@ -1,3 +1,5 @@
+import { AppToast } from "design/toast.slint";
+import { CopyFeedbackIcon } from "design/copy-feedback.slint";
 import { AboutPage } from "about.slint";
 import { SettingsHints, SettingsHintTarget, SettingsHintOverlay } from "settings-hint.slint";
 import { SettingsScrollArea } from "settings-scroll-area.slint";
@@ -20,10 +22,12 @@ component SettingsButton inherits Rectangle {
     in property <bool> destructive: false;
     in property <bool> compact: false;
     in property <bool> enabled: true;
+    in property <length> available-width: self.preferred-button-width;
+    private property <length> preferred-button-width: max(root.compact ? 72px : 104px, button-label.preferred-width + 2 * Spacing.medium);
     callback clicked();
     public function focus-button() { keyboard.focus-target(); }
 
-    width: max(root.compact ? 72px : 104px, button-label.preferred-width + 2 * Spacing.medium);
+    width: min(root.available-width, root.preferred-button-width);
     height: 40px;
     border-radius: 8px;
     border-width: 1px;
@@ -83,6 +87,7 @@ component SettingsSwitch inherits Rectangle {
 }
 
 component CredentialActionButton inherits Rectangle {
+    in property <bool> copied: false;
     in property <int> icon-kind;
     in property <bool> enabled: true;
     in property <bool> interactive: true;
@@ -102,12 +107,13 @@ component CredentialActionButton inherits Rectangle {
         : root.highlighted || (root.interactive && action-touch.has-hover)
             ? SettingsColors.hover : transparent;
 
-    Image {
+    if root.icon-kind != 1: Image {
         x: (parent.width - Metrics.icon-size) / 2; y: (parent.height - Metrics.icon-size) / 2;
         width: Metrics.icon-size; height: Metrics.icon-size; colorize: Colors.secondary-foreground;
         source: root.icon-kind == 0 ? @image-url("icons/credential-reveal.svg") : root.icon-kind == 1 ? @image-url("icons/credential-copy.svg") : root.icon-kind == 2 ? @image-url("icons/credential-edit.svg") : root.icon-kind == 3 ? @image-url("icons/credential-delete.svg") : @image-url("icons/credential-hide.svg");
     }
 
+    if root.icon-kind == 1: CopyFeedbackIcon {x: (parent.width - Metrics.icon-size) / 2; y: (parent.height - Metrics.icon-size) / 2; width: Metrics.icon-size; height: Metrics.icon-size; copied: root.copied; normal-color: Colors.secondary-foreground;}
     Rectangle { x: 0px; y: 0px; width: parent.width; height: parent.height; border-radius: Metrics.icon-button-radius;
         border-width: keyboard.focus-visible ? 1px : 0px; border-color: Colors.primary; background: transparent; }
     keyboard := SettingsFocusScope { enabled: root.enabled && root.interactive;
@@ -123,6 +129,8 @@ component CredentialActionButton inherits Rectangle {
 
 
 component ProviderCredentialField inherits Rectangle {
+    in property <bool> credential-copy-active;
+    in property <bool> credential-copied;
     in property <bool> credential-configured;
     in property <bool> credential-busy;
     in property <bool> operation-blocked: false;
@@ -177,14 +185,14 @@ component ProviderCredentialField inherits Rectangle {
                         accepted => { if root.credential-draft != "" && !root.credential-busy && !root.operation-blocked { root.credential-save-requested(root.credential-draft); } }
                     }
                     credential-actions := HorizontalLayout {
-                        visible: root.credential-configured && !root.credential-editing && !root.credential-revealed && !root.credential-request-pending;
+                        visible: root.credential-configured && !root.credential-editing && !root.credential-revealed && (!root.credential-request-pending || root.credential-copy-active);
                         x: parent.width - 4 * Metrics.icon-button-size - 4px; y: (parent.height - Metrics.icon-button-size) / 2; width: 4 * Metrics.icon-button-size; spacing: 0px;
                         CredentialActionButton { icon-kind: 0; enabled: !root.credential-busy && !root.operation-blocked && !root.credential-request-pending; clicked => { root.credential-reveal-requested(); } }
-                        CredentialActionButton { icon-kind: 1; enabled: !root.credential-busy && !root.operation-blocked && !root.credential-request-pending; clicked => { root.credential-copy-requested(); } }
+                        CredentialActionButton { icon-kind: 1; copied: root.credential-copied; enabled: !root.credential-busy && !root.operation-blocked && !root.credential-request-pending; clicked => { root.credential-copy-requested(); } }
                         CredentialActionButton { icon-kind: 2; enabled: !root.credential-busy && !root.operation-blocked && !root.credential-request-pending; clicked => { root.credential-edit-requested(); } }
                         delete-key-button := CredentialActionButton { icon-kind: 3; enabled: root.can-remove && !root.credential-busy && !root.operation-blocked && !root.credential-request-pending; clicked => { root.credential-remove-requested(); } }
                     }
-                    if root.credential-configured && root.credential-request-pending && !root.credential-editing: Text {
+                    if root.credential-configured && root.credential-request-pending && !root.credential-copy-active && !root.credential-editing: Text {
                         x: parent.width - Spacing.medium - 88px; width: 88px; height: parent.height; text: @tr("Loading…"); color: Colors.secondary-foreground; font-size: 13px; horizontal-alignment: right; vertical-alignment: center;
                     }
                     if root.credential-configured && (root.credential-editing || root.credential-revealed): CredentialActionButton {
@@ -204,70 +212,6 @@ component ProviderCredentialField inherits Rectangle {
                         clicked => { root.credential-save-requested(root.credential-draft); }
                     }
                 }
-    }
-}
-
-component SettingsToast inherits Rectangle {
-    in property <string> message;
-    in property <bool> error: false;
-    callback dismissed();
-
-    width: Metrics.toast-width;
-    height: Metrics.toast-height;
-    border-radius: Spacing.small;
-    border-width: 1px;
-    border-color: Colors.outline;
-    background: Colors.surface;
-
-    Path {
-        x: Spacing.medium;
-        y: (parent.height - Metrics.icon-size) / 2;
-        width: Metrics.icon-size;
-        height: Metrics.icon-size;
-        viewbox-width: 24;
-        viewbox-height: 24;
-        commands: root.error
-            ? "M11 15h2v2h-2v-2zm0-8h2v6h-2V7zm1-5C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"
-            : "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z";
-        fill: root.error ? Colors.error : Colors.success;
-    }
-
-    Text {
-        x: Spacing.medium + Metrics.icon-size + Spacing.small;
-        width: parent.width - 2 * Spacing.medium - 2 * Metrics.icon-size - 2 * Spacing.small;
-        height: parent.height;
-        text: root.message;
-        color: Colors.foreground;
-        font-size: Typography.body-size;
-        font-weight: 700;
-        vertical-alignment: center;
-        wrap: word-wrap;
-        overflow: elide;
-    }
-
-    close-button := Rectangle {
-        x: parent.width - Spacing.small - Metrics.icon-button-size;
-        y: (parent.height - Metrics.icon-button-size) / 2;
-        width: Metrics.icon-button-size;
-        height: Metrics.icon-button-size;
-        border-radius: Metrics.icon-button-radius;
-        background: close-touch.pressed ? SettingsColors.pressed
-            : close-touch.has-hover ? SettingsColors.hover : transparent;
-
-        Path {
-            x: (parent.width - Metrics.icon-size) / 2;
-            y: (parent.height - Metrics.icon-size) / 2;
-            width: Metrics.icon-size;
-            height: Metrics.icon-size;
-            viewbox-width: 24;
-            viewbox-height: 24;
-            commands: "M18.3 5.71 16.89 4.29 12 9.17 7.11 4.29 5.7 5.71 10.59 10.59 5.7 15.48 7.11 16.89 12 12 16.89 16.89 18.3 15.48 13.41 10.59z";
-            fill: Colors.secondary-foreground;
-        }
-
-        close-touch := TouchArea {
-            clicked => { root.dismissed(); }
-        }
     }
 }
 
@@ -764,6 +708,7 @@ export component SettingsWindow inherits Window {
     in-out property <bool> llm-prompt-expanded: false;
     in-out property <bool> credential-delete-dialog: false;
     in-out property <bool> settings-close-dialog: false;
+    in-out property <bool> history-clear-dialog: false;
     private property <int> close-return-focus;
     private property <int> active-editor;
     private property <int> editor-focus-request;
@@ -794,6 +739,13 @@ export component SettingsWindow inherits Window {
     in property <string> annotation-hotkey-status: @tr("Unavailable");
     in property <string> provider-error-text: "";
     in-out property <bool> launch-at-login: false;
+    in property <bool> history-supported: true;
+    in property <string> history-error;
+    in-out property <bool> history-enabled: false;
+    in-out property <int> history-limit: 50;
+    callback history-enabled-changed(bool);
+    callback history-limit-changed(int);
+    callback history-clear-requested();
     in-out property <bool> selection-toolbar: true;
     in property <string> launch-at-login-error-text: "";
     in-out property <string> draft-hotkey-label: "Alt + X";
@@ -915,6 +867,8 @@ export component SettingsWindow inherits Window {
     in-out property <bool> credential-editing: false;
     in-out property <bool> credential-secret-visible: false;
     in-out property <bool> credential-reveal-dismiss-armed: false;
+    in-out property <bool> credential-copy-active: false;
+    in-out property <bool> credential-copied: false;
     in-out property <bool> credential-request-pending: false;
     in-out property <bool> settings-menu-open: false;
     in-out property <bool> settings-menu-dismiss-armed: false;
@@ -966,6 +920,19 @@ export component SettingsWindow inherits Window {
     callback settings-menu-selected(int);
     callback toast-dismiss-requested(int);
 
+    public function request-history-clear() {
+        if !root.history-supported || root.active-category != 0 || root.history-clear-dialog || root.settings-close-dialog { return; }
+        root.close-settings-menu(); root.close-app-language-menu(); SettingsHints.clear();
+        root.history-clear-dialog = true; cancel-clear-history.focus-button();
+    }
+    public function finish-history-clear(confirmed: bool) {
+        if !root.history-clear-dialog { return; }
+        let valid = root.history-supported && root.active-category == 0;
+        root.history-clear-dialog = false;
+        if confirmed && valid { root.history-clear-requested(); }
+        if root.active-category == 0 { clear-history-button.focus-button(); }
+    }
+
     public function request-credential-delete() {
         if root.credential-delete-dialog { return; }
         if root.credential-busy || root.credential-request-pending || root.credential-editing { return; }
@@ -1009,6 +976,7 @@ export component SettingsWindow inherits Window {
         else if root.close-return-focus == 2 { provider-address.focus-input(); }
         else if root.close-return-focus >= 4 { root.focus-settings-editor(root.close-return-focus); }
         else if root.llm-advanced || root.llm-model-dialog || root.llm-probe-dialog { provider-modal-focus.focus(); }
+        else if root.history-clear-dialog { cancel-clear-history.focus-button(); }
         else { root-content.focus(); }
     }
     // Focus requests preserve the existing TextInput and therefore its insertion point and selection.
@@ -1064,6 +1032,7 @@ export component SettingsWindow inherits Window {
     public function focus-app-language() { app-language-field.focus-field(); }
     public function close-app-language-menu() { app-language-menu-open = false; }
     public function reset-settings-view() {
+        root.history-clear-dialog = false;
         root.settings-close-dialog = false;
         root.credential-delete-dialog = false; root.prompt-reset-undo = false; root.prompt-before-reset = ""; root.prompt-reset-value = "";
         root.close-settings-menu(); root.close-app-language-menu(); root.hotkey-capturing = false; root.annotation-hotkey-capturing = false; root.active-category = 0; root.llm-page-left();
@@ -1089,13 +1058,14 @@ export component SettingsWindow inherits Window {
     changed translation-selector-open => { SettingsHints.clear(); }
     changed credential-delete-dialog => { SettingsHints.clear(); }
     changed settings-close-dialog => { SettingsHints.clear(); }
+    changed history-clear-dialog => { SettingsHints.clear(); }
     public function reset-button-visuals() { SettingsHints.clear(); SettingsInteraction.reset(); }
     public function reset-provider-filters() {
         root.llm-search-open = false; root.llm-filter-open = false;
         root.llm-model-search = ""; root.llm-model-filter = 0;
     }
     public function select-category(category: int) {
-        if root.settings-close-dialog || root.credential-delete-dialog || root.active-category == category { return; }
+        if root.settings-close-dialog || root.credential-delete-dialog || root.history-clear-dialog || root.active-category == category { return; }
         root.close-settings-menu(); root.close-app-language-menu(); root.hotkey-capturing = false; root.annotation-hotkey-capturing = false;
         if root.active-category == 5 { root.credential-edit-cancel-requested(); root.llm-page-left(); }
         SettingsInteraction.invalidate();
@@ -1105,7 +1075,7 @@ export component SettingsWindow inherits Window {
     }
 
     root-content := SettingsFocusScope {
-        enabled: !root.settings-close-dialog && !root.llm-advanced && !root.llm-model-dialog && !root.llm-probe-dialog && !root.credential-delete-dialog;
+        enabled: !root.settings-close-dialog && !root.llm-advanced && !root.llm-model-dialog && !root.llm-probe-dialog && !root.credential-delete-dialog && !root.history-clear-dialog;
         x: 0px; y: 0px; width: root.width; height: root.height;
 
     sidebar := Rectangle {
@@ -1189,7 +1159,7 @@ export component SettingsWindow inherits Window {
         visible: root.active-category == 0;
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
         content-width: self.visible-width;
-        content-height: max(self.visible-height, selection-assistant-card.y + selection-assistant-card.height + Metrics.settings-page-padding);
+        content-height: max(self.visible-height, history-card.y + history-card.height + Metrics.settings-page-padding);
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
         scrolled => { SettingsHints.clear();
             root.close-app-language-menu();
@@ -1244,9 +1214,32 @@ export component SettingsWindow inherits Window {
             width: general-scroll.visible-width - 2 * Metrics.settings-page-padding;
             title: @tr("Selection Assistant");
             SettingsToggleRow {
-                label: @tr("Enable selection assistant"); description: @tr("Show Translate and Copy after selecting text");
+                label: @tr("Enable selection assistant"); description: @tr("Show Translate, Copy and Clipboard after selecting text");
                 checked: root.selection-toolbar;
                 toggled(value) => { root.selection-toolbar = value; root.selection-toolbar-change-requested(value); }
+            }
+        }
+        history-card := SettingsCard {
+            x: Metrics.settings-page-padding; y: selection-assistant-card.y + selection-assistant-card.height + Metrics.settings-card-gap;
+            width: general-scroll.visible-width - 2 * Metrics.settings-page-padding;
+            title: @tr("Clipboard history");
+            VerticalLayout {
+                spacing: Spacing.medium;
+                SettingsToggleRow {
+                    label: @tr("Record clipboard history"); enabled: root.history-supported; description: root.history-supported ? @tr("Keep encrypted plain-text history on this device") : @tr("Clipboard history monitoring is unavailable"); checked: root.history-enabled;
+                    toggled(value) => { root.history-enabled-changed(value); }
+                }
+                SettingsControlRow {
+                    label: @tr("History limit");
+                    controls-height: 40px; controls-fraction: 0.72;
+                    Rectangle {
+                        width: 110px; height: 40px; horizontal-stretch: 0;
+                        SpinBox { width: parent.width; y: (parent.height - self.height) / 2; enabled: root.history-supported; value <=> root.history-limit; live-update: false; minimum: 10; maximum: 200; input-finished => { root.history-limit-changed(self.value); } input-confirmed => { root.history-limit-changed(self.value); } }
+                    }
+                    Rectangle { min-width: Spacing.medium; horizontal-stretch: 1; }
+                    clear-history-button := SettingsButton { available-width: max(0px, parent.width - 110px - Spacing.medium); enabled: root.history-supported; label: @tr("Clear clipboard history"); clicked => { root.request-history-clear(); } }
+                }
+                if root.history-error != "": Text { text: root.history-error; wrap: word-wrap; color: Colors.error; font-size: 13px; }
             }
         }
     }
@@ -1518,6 +1511,7 @@ export component SettingsWindow inherits Window {
                     credential-transient-secret: root.credential-transient-secret;
                     credential-error-text: root.credential-error-text;
                     credential-reveal-requested => { root.credential-reveal-requested(); }
+                    credential-copy-active: root.credential-copy-active; credential-copied: root.credential-copied;
                     credential-copy-requested => { root.credential-copy-requested(); }
                     credential-edit-requested => { root.credential-edit-requested(); }
                     credential-remove-requested => { root.request-credential-delete(); }
@@ -1643,7 +1637,7 @@ export component SettingsWindow inherits Window {
             root.dismiss-app-language-menu();
         }
     }
-    for toast[index] in root.toast-items: SettingsToast {
+    for toast[index] in root.toast-items: AppToast {
         x: root.sidebar-width + max(Spacing.medium, (root.page-width - self.width) / 2);
         y: Spacing.medium + index * (Metrics.toast-height + Spacing.small); z: 30;
         message: toast.message; error: toast.error;
@@ -1671,6 +1665,30 @@ export component SettingsWindow inherits Window {
                 x: 24px; y: parent.height - 64px; width: parent.width - 48px; height: 40px; spacing: Spacing.small; alignment: end;
                 keep-editing-button := SettingsButton { compact: true; label: @tr("Keep editing"); clicked => { root.finish-settings-close(false); } }
                 SettingsButton { compact: true; destructive: true; label: @tr("Discard and close"); clicked => { root.finish-settings-close(true); } }
+            }
+        }
+    }
+    clear-history-modal := SettingsFocusScope {
+        visible: root.history-clear-dialog; enabled: !root.settings-close-dialog;
+        x: 0px; y: 0px; width: root.width; height: root.height; z: 120;
+        capture-key-pressed(event) => { if event.text == Key.Escape { root.finish-history-clear(false); return accept; } return reject; }
+        Rectangle { width: parent.width; height: parent.height; background: SettingsColors.scrim; TouchArea { } }
+        ProviderDialog {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            width: min(480px, parent.width - 48px); height: min(parent.height - 48px, clear-history-copy.preferred-height + 140px);
+            title: @tr("Clear clipboard history"); dismissed => { root.finish-history-clear(false); }
+            SettingsScrollArea {
+                x: 24px; y: 64px; width: parent.width - 48px; height: parent.height - 140px;
+                content-width: self.visible-width; content-height: clear-history-copy.preferred-height;
+                clear-history-copy := Text {
+                    width: parent.width; height: self.preferred-height; wrap: word-wrap; font-size: Typography.body-size; color: Colors.secondary-foreground;
+                    text: @tr("Delete all saved clipboard history? This cannot be undone.");
+                }
+            }
+            HorizontalLayout {
+                x: 24px; y: parent.height - 64px; width: parent.width - 48px; height: 40px; spacing: Spacing.small; alignment: end;
+                cancel-clear-history := SettingsButton { compact: true; label: @tr("Cancel"); clicked => { root.finish-history-clear(false); } }
+                SettingsButton { compact: true; destructive: true; label: @tr("Clear clipboard history"); clicked => { root.finish-history-clear(true); } }
             }
         }
     }
@@ -1707,7 +1725,7 @@ export component SettingsWindow inherits Window {
         root.translation-selector-open = !root.translation-selector-open;
         if root.translation-selector-open { translation-search-input.focus-input(); }
     }
-    changed active-category => { SettingsHints.clear();
+    changed active-category => { SettingsHints.clear(); root.history-clear-dialog = false;
         if root.active-category != 1 {
             root.translation-selector-open = false;
             if root.translation-settings-open { root.llm-cancel-translation(); root.translation-settings-open = false; }

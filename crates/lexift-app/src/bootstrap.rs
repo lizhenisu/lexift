@@ -83,6 +83,10 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
     let screen_capture_for_annotation = lexift_platform::annotation_screen_capture_port();
     let renderer_for_annotation = lexift_platform::annotation_render_port();
     let tray_for_cancel = services.tray.clone();
+    let history_runtime = lexift_platform::clipboard_history_capabilities()
+        .ok()
+        .and_then(|ports| crate::clipboard_history::HistoryRuntime::new(ports).ok());
+    let history_supported = history_runtime.is_some();
     let ui = lexift_ui::Ui::new(
         &initial_state,
         cfg!(feature = "m1-demo"),
@@ -206,6 +210,8 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 }
             },
         )
+        .with_clipboard_history_support(history_supported)
+        .with_clipboard_history_dismissal(|window,enabled| lexift_platform::set_clipboard_history_dismissal(&window.window_handle(),enabled).is_ok())
         .with_about_links(|link| match lexift_platform::open_web_link(link.url()) {
             Ok(()) => true,
             Err(error) => { tracing::warn!(%error, "About link could not be opened"); false }
@@ -384,7 +390,8 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
             Arc::clone(&services.credential_reference),
             services.clipboard.clone(),
         )
-        .with_speech(services.speech.clone()),
+        .with_speech(services.speech.clone())
+        .with_history(history_runtime),
     );
     if let Some(speech) = &services.speech {
         use lexift_core::ports::speech::SpeechEventHandler;
@@ -424,6 +431,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
             }
         },
     );
+    controller.start_history();
     #[cfg(not(feature = "m1-demo"))]
     {
         let weak = Arc::downgrade(&controller);

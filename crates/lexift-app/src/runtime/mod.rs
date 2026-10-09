@@ -116,6 +116,8 @@ impl RuntimeManager {
         }
         match field {
             SettingsField::TargetLanguage
+            | SettingsField::ClipboardHistoryEnabled
+            | SettingsField::ClipboardHistoryLimit
             | SettingsField::SelectionToolbar
             | SettingsField::Theme
             | SettingsField::UiLanguage => {}
@@ -150,6 +152,8 @@ impl RuntimeManager {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         match field {
             SettingsField::TargetLanguage
+            | SettingsField::ClipboardHistoryEnabled
+            | SettingsField::ClipboardHistoryLimit
             | SettingsField::SelectionToolbar
             | SettingsField::Theme
             | SettingsField::UiLanguage => {}

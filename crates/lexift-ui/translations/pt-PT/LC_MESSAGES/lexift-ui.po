@@ -1350,3 +1350,96 @@ msgstr "Licença de código aberto"
 
 msgid "Could not open the browser. Please try again."
 msgstr "Não foi possível abrir o navegador. Tente novamente."
+
+msgid "Clear clipboard history"
+msgstr "Limpar histórico"
+
+msgid "Clipboard history"
+msgstr "Histórico da área de transferência"
+
+msgid "Clipboard history could not be loaded. Clear history to start again."
+msgstr "Não foi possível carregar o histórico. Limpe-o para recomeçar."
+
+msgid "Clipboard history could not be saved."
+msgstr "Não foi possível guardar o histórico."
+
+msgid "Clipboard paste could not be sent to this input."
+msgstr "Não foi possível colar neste campo."
+
+msgid "Clipboard paste was cancelled."
+msgstr "Colagem cancelada."
+
+msgid "Clipboard settings"
+msgstr "Definições da área de transferência"
+
+msgid "Enable and record"
+msgstr "Ativar e registar"
+
+msgid "History limit"
+msgstr "Limite do histórico"
+
+msgid "Keep encrypted plain-text history on this device"
+msgstr "Guardar o histórico de texto encriptado neste dispositivo"
+
+msgid "No clipboard history yet"
+msgstr "Ainda não há histórico"
+
+msgid "Pasting…"
+msgstr "A colar…"
+
+msgid "Record clipboard history"
+msgstr "Registar histórico da área de transferência"
+
+msgid "Recording"
+msgstr "A registar"
+
+msgid "Recording paused"
+msgstr "Registo em pausa"
+
+msgid "Release modifier keys and try again."
+msgstr "Solte as teclas modificadoras e tente novamente."
+
+msgid "Save recent plain text on this device. History is encrypted for your Windows account. Recording starts only after you enable it."
+msgstr "Guarde os textos copiados recentemente neste dispositivo, encriptados com a sua conta Windows. O registo começa após a ativação."
+
+msgid "Show Translate, Copy and Clipboard after selecting text"
+msgstr "Mostrar Traduzir, Copiar e Área de transferência após selecionar texto"
+
+msgid "The original input has changed. Select text again."
+msgstr "O campo original mudou. Selecione novamente o texto."
+
+msgid "The original selection is not a supported editable input."
+msgstr "A seleção original não é um campo editável confirmado."
+
+msgid "This clipboard text is too large to record."
+msgstr "Este texto é demasiado grande para ser registado."
+
+msgid "Clipboard history monitoring is unavailable"
+msgstr "Monitorização da área de transferência indisponível"
+
+msgid "Clipboard settings saved"
+msgstr "Definições da área de transferência guardadas"
+
+msgid "Could not save clipboard settings"
+msgstr "Não foi possível guardar as definições da área de transferência"
+
+msgid "Delete clipboard entry"
+msgstr "Eliminar entrada da área de transferência"
+
+msgid "Could not copy clipboard entry."
+msgstr "Não foi possível copiar o item da área de transferência."
+
+msgid "Delete"
+msgstr "Eliminar"
+
+msgid "Delete all saved clipboard history? This cannot be undone."
+msgstr "Eliminar todo o histórico guardado da área de transferência? Esta ação não pode ser anulada."
+
+msgid "Copying…"
+msgstr "A copiar…"
+
+msgid "Click to paste"
+msgstr "Clique para colar"
+
+msgid "Copied text appears here."
+msgstr "O texto copiado aparece aqui."

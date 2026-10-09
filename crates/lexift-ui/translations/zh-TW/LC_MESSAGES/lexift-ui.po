@@ -1350,3 +1350,96 @@ msgstr "開源授權"
 
 msgid "Could not open the browser. Please try again."
 msgstr "無法開啟瀏覽器，請重試。"
+
+msgid "Clear clipboard history"
+msgstr "清除剪貼簿歷史"
+
+msgid "Clipboard history"
+msgstr "剪貼簿歷史"
+
+msgid "Clipboard history could not be loaded. Clear history to start again."
+msgstr "無法讀取剪貼簿歷史。請清除歷史後重新開始。"
+
+msgid "Clipboard history could not be saved."
+msgstr "無法儲存剪貼簿歷史。"
+
+msgid "Clipboard paste could not be sent to this input."
+msgstr "無法向此輸入欄位傳送貼上操作。"
+
+msgid "Clipboard paste was cancelled."
+msgstr "已取消貼上。"
+
+msgid "Clipboard settings"
+msgstr "剪貼簿設定"
+
+msgid "Enable and record"
+msgstr "啟用並記錄"
+
+msgid "History limit"
+msgstr "歷史數量上限"
+
+msgid "Keep encrypted plain-text history on this device"
+msgstr "在本機儲存加密的純文字歷史"
+
+msgid "No clipboard history yet"
+msgstr "尚無剪貼簿歷史"
+
+msgid "Pasting…"
+msgstr "正在貼上…"
+
+msgid "Record clipboard history"
+msgstr "記錄剪貼簿歷史"
+
+msgid "Recording"
+msgstr "正在記錄"
+
+msgid "Recording paused"
+msgstr "已暫停記錄"
+
+msgid "Release modifier keys and try again."
+msgstr "請放開修飾鍵後重試。"
+
+msgid "Save recent plain text on this device. History is encrypted for your Windows account. Recording starts only after you enable it."
+msgstr "在本機儲存最近複製的純文字，並使用你的 Windows 帳戶加密。啟用後才會開始記錄。"
+
+msgid "Show Translate, Copy and Clipboard after selecting text"
+msgstr "選取文字後顯示翻譯、複製和剪貼簿"
+
+msgid "The original input has changed. Select text again."
+msgstr "原輸入目標已變更，請重新選取文字。"
+
+msgid "The original selection is not a supported editable input."
+msgstr "原選取範圍不是可確認的可編輯輸入欄位。"
+
+msgid "This clipboard text is too large to record."
+msgstr "此剪貼簿文字過大，無法記錄。"
+
+msgid "Clipboard history monitoring is unavailable"
+msgstr "剪貼簿歷史監聽無法使用"
+
+msgid "Clipboard settings saved"
+msgstr "剪貼簿設定已儲存"
+
+msgid "Could not save clipboard settings"
+msgstr "無法儲存剪貼簿設定"
+
+msgid "Delete clipboard entry"
+msgstr "刪除此剪貼簿記錄"
+
+msgid "Could not copy clipboard entry."
+msgstr "無法複製剪貼簿記錄。"
+
+msgid "Delete"
+msgstr "刪除"
+
+msgid "Delete all saved clipboard history? This cannot be undone."
+msgstr "確定清空所有已儲存的剪貼簿歷史嗎？此操作無法復原。"
+
+msgid "Copying…"
+msgstr "複製中…"
+
+msgid "Click to paste"
+msgstr "點擊項目貼上"
+
+msgid "Copied text appears here."
+msgstr "複製的文字會顯示在這裡。"

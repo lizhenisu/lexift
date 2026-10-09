@@ -1350,3 +1350,96 @@ msgstr "Licence libre"
 
 msgid "Could not open the browser. Please try again."
 msgstr "Impossible d’ouvrir le navigateur. Veuillez réessayer."
+
+msgid "Clear clipboard history"
+msgstr "Effacer l’historique"
+
+msgid "Clipboard history"
+msgstr "Historique du presse-papiers"
+
+msgid "Clipboard history could not be loaded. Clear history to start again."
+msgstr "Impossible de charger l’historique. Effacez-le pour recommencer."
+
+msgid "Clipboard history could not be saved."
+msgstr "Impossible d’enregistrer l’historique."
+
+msgid "Clipboard paste could not be sent to this input."
+msgstr "Impossible de coller dans ce champ."
+
+msgid "Clipboard paste was cancelled."
+msgstr "Collage annulé."
+
+msgid "Clipboard settings"
+msgstr "Réglages du presse-papiers"
+
+msgid "Enable and record"
+msgstr "Activer et enregistrer"
+
+msgid "History limit"
+msgstr "Limite de l’historique"
+
+msgid "Keep encrypted plain-text history on this device"
+msgstr "Conserver un historique de texte chiffré sur cet appareil"
+
+msgid "No clipboard history yet"
+msgstr "Aucun historique pour le moment"
+
+msgid "Pasting…"
+msgstr "Collage…"
+
+msgid "Record clipboard history"
+msgstr "Enregistrer l’historique du presse-papiers"
+
+msgid "Recording"
+msgstr "Enregistrement actif"
+
+msgid "Recording paused"
+msgstr "Enregistrement en pause"
+
+msgid "Release modifier keys and try again."
+msgstr "Relâchez les touches de modification et réessayez."
+
+msgid "Save recent plain text on this device. History is encrypted for your Windows account. Recording starts only after you enable it."
+msgstr "Conservez les textes récemment copiés sur cet appareil, chiffrés avec votre compte Windows. L’enregistrement commence après activation."
+
+msgid "Show Translate, Copy and Clipboard after selecting text"
+msgstr "Afficher Traduire, Copier et Presse-papiers après la sélection"
+
+msgid "The original input has changed. Select text again."
+msgstr "Le champ d’origine a changé. Sélectionnez à nouveau le texte."
+
+msgid "The original selection is not a supported editable input."
+msgstr "La sélection d’origine n’est pas un champ modifiable confirmé."
+
+msgid "This clipboard text is too large to record."
+msgstr "Ce texte est trop volumineux pour être enregistré."
+
+msgid "Clipboard history monitoring is unavailable"
+msgstr "Surveillance du presse-papiers indisponible"
+
+msgid "Clipboard settings saved"
+msgstr "Réglages du presse-papiers enregistrés"
+
+msgid "Could not save clipboard settings"
+msgstr "Impossible d’enregistrer les réglages du presse-papiers"
+
+msgid "Delete clipboard entry"
+msgstr "Supprimer cette entrée"
+
+msgid "Could not copy clipboard entry."
+msgstr "Impossible de copier cet élément du presse-papiers."
+
+msgid "Delete"
+msgstr "Supprimer"
+
+msgid "Delete all saved clipboard history? This cannot be undone."
+msgstr "Supprimer tout l'historique enregistré du presse-papiers ? Cette action est irréversible."
+
+msgid "Copying…"
+msgstr "Copie…"
+
+msgid "Click to paste"
+msgstr "Cliquer pour coller"
+
+msgid "Copied text appears here."
+msgstr "Le texte copié apparaît ici."

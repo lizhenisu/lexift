@@ -138,6 +138,116 @@ mod tests {
         );
     }
     #[test]
+    fn copy_feedback_timers_are_isolated_and_source_drafts_survive_copy_updates() {
+        use lexift_core::{AppEvent, AppState, domain::selection::Selection};
+        use slint::Model;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        };
+        let last = Rc::new(RefCell::new(None));
+        slint::platform::set_platform(Box::new(TestPlatform(last.clone()))).unwrap();
+        let settings = crate::SettingsWindow::new().unwrap();
+        let settings_adapter = last.borrow().as_ref().unwrap().clone();
+        settings.set_active_category(5);
+        settings.set_credential_configured(true);
+        settings.set_llm_key_configured(true);
+        let current = Arc::new(AtomicU64::new(1));
+        crate::bridge::complete_credential_copy(&settings, current.clone(), 1);
+        assert!(settings.get_credential_copied());
+        assert_eq!(settings.get_toast_items().row_count(), 0);
+        for provider in 0..4 {
+            settings.set_provider_detail_index(provider);
+            settings.set_llm_service_index((provider - 1).max(0));
+            for (scale, dark) in [(1.0, false), (1.25, false), (1.0, true), (1.25, true)] {
+                settings.window().dispatch_event(
+                    slint::platform::WindowEvent::ScaleFactorChanged {
+                        scale_factor: scale,
+                    },
+                );
+                settings
+                    .global::<crate::Colors>()
+                    .set_preference(if dark { 1 } else { 0 });
+                slint::platform::update_timers_and_animations();
+                settings.set_credential_copied(true);
+                snapshot(
+                    &settings_adapter,
+                    &format!("credential-copy-{provider}-{scale}-{dark}"),
+                    (960. * scale) as u32,
+                    (700. * scale) as u32,
+                );
+            }
+        }
+        // A second copy owns its own timeout; the old operation cannot clear it.
+        current.store(2, Ordering::SeqCst);
+        crate::bridge::complete_credential_copy(&settings, current.clone(), 2);
+        let popup = crate::TranslationPopup::new().unwrap();
+        let popup_adapter = last.borrow().as_ref().unwrap().clone();
+        let mut state = AppState::default();
+        state.reduce(AppEvent::SelectionTranslationRequested);
+        state.reduce(AppEvent::SelectionCaptured {
+            task_id: state.current_translation_task.unwrap(),
+            selection: Selection {
+                text: "source".into(),
+                bounds: vec![],
+                anchor: None,
+                gesture_start: None,
+            },
+        });
+        state.popup_sessions[0].translated_text = "result".into();
+        let mut view = crate::mapper::popup_states(&state).remove(0);
+        crate::binding::apply_popup_content(&popup, &view);
+        popup.set_source_text("edited source\n第二行".into());
+        view.copy[0].completed = 1;
+        view.copy_text[0] = "edited source\n第二行".into();
+        view.copy[1].completed = 2;
+        view.copy_text[1] = "result".into();
+        let expired = Rc::new(RefCell::new(Vec::new()));
+        let output = expired.clone();
+        let weak = popup.as_weak();
+        popup.on_copy_feedback_expired(move |source, request| {
+            output.borrow_mut().push((source, request.to_string()));
+            if let Some(w) = weak.upgrade() {
+                if source {
+                    w.set_copy_source_completed("".into());
+                } else {
+                    w.set_copy_result_completed("".into());
+                }
+            }
+        });
+        crate::binding::apply_popup_content(&popup, &view);
+        assert_eq!(popup.get_source_text(), "edited source\n第二行");
+        for (scale, dark) in [(1.0, false), (1.25, false), (1.0, true), (1.25, true)] {
+            popup
+                .window()
+                .dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged {
+                    scale_factor: scale,
+                });
+            popup
+                .global::<crate::Colors>()
+                .set_preference(if dark { 1 } else { 0 });
+            snapshot(
+                &popup_adapter,
+                &format!("popup-copy-{scale}-{dark}"),
+                (420. * scale) as u32,
+                (390. * scale) as u32,
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1550));
+        slint::platform::update_timers_and_animations();
+        assert_eq!(expired.borrow().len(), 2);
+        assert!(popup.get_copy_source_completed().is_empty());
+        assert!(popup.get_copy_result_completed().is_empty());
+        assert!(!settings.get_credential_copied());
+        current.store(3, Ordering::SeqCst);
+        crate::bridge::complete_credential_copy(&settings, current.clone(), 2);
+        assert!(!settings.get_credential_copied());
+        crate::bridge::complete_credential_copy(&settings, current, 3);
+        assert!(settings.get_credential_copied());
+        assert_eq!(settings.get_toast_items().row_count(), 0);
+    }
+
+    #[test]
     fn settings_toggle_targets_keyboard_and_collapsed_drafts_are_preserved() {
         use slint::platform::{PointerEventButton, WindowEvent};
         let last = Rc::new(RefCell::new(None));
@@ -719,7 +829,7 @@ mod tests {
                 .dispatch_event(WindowEvent::ScaleFactorChanged {
                     scale_factor: scale,
                 });
-            for (logical_height, overflow) in [(1000., false), (320., true)] {
+            for (logical_height, overflow) in [(1400., false), (320., true)] {
                 let width = (960. * scale) as u32;
                 let height = (logical_height * scale) as u32;
                 adapter.set_size(slint::PhysicalSize::new(width, height));
@@ -753,6 +863,83 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn settings_history_clear_requires_confirmation_and_defaults_to_cancel() {
+        use slint::platform::{Key, WindowEvent};
+        let last = Rc::new(RefCell::new(None));
+        slint::platform::set_platform(Box::new(TestPlatform(last.clone()))).unwrap();
+        let settings = crate::SettingsWindow::new().unwrap();
+        let adapter = last.borrow().as_ref().unwrap().clone();
+        adapter.set_size(slint::PhysicalSize::new(820, 680));
+        let cleared = Rc::new(Cell::new(0));
+        let count = cleared.clone();
+        settings.on_history_clear_requested(move || count.set(count.get() + 1));
+        let draw = || snapshot(&adapter, "history-clear-confirm", 820, 680);
+        let key = |text: slint::SharedString| {
+            settings
+                .window()
+                .dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+            settings
+                .window()
+                .dispatch_event(WindowEvent::KeyReleased { text });
+        };
+        settings.invoke_request_history_clear();
+        draw();
+        assert!(settings.get_history_clear_dialog());
+        assert_eq!(cleared.get(), 0);
+        key(Key::Return.into());
+        assert!(
+            !settings.get_history_clear_dialog(),
+            "Enter defaults to cancellation"
+        );
+        assert_eq!(cleared.get(), 0);
+        settings.invoke_request_history_clear();
+        draw();
+        key(Key::Escape.into());
+        assert!(!settings.get_history_clear_dialog());
+        assert_eq!(cleared.get(), 0);
+        settings.invoke_request_history_clear();
+        settings.invoke_finish_history_clear(false);
+        assert_eq!(cleared.get(), 0);
+        settings.invoke_request_history_clear();
+        for language in UiLanguage::ALL {
+            select(language);
+            for (scale, dark, logical_width) in [(1., false, 820.), (1.25, true, 520.)] {
+                settings
+                    .window()
+                    .dispatch_event(WindowEvent::ScaleFactorChanged {
+                        scale_factor: scale,
+                    });
+                settings
+                    .global::<crate::Colors>()
+                    .set_preference(if dark { 1 } else { 0 });
+                snapshot(
+                    &adapter,
+                    &format!("history-clear-{}-{scale}-{dark}", language.code()),
+                    (logical_width * scale) as u32,
+                    (680. * scale) as u32,
+                );
+            }
+        }
+        settings.invoke_finish_history_clear(true);
+        settings.invoke_finish_history_clear(true);
+        assert_eq!(
+            cleared.get(),
+            1,
+            "confirmation dispatches clear exactly once"
+        );
+        settings.invoke_request_history_clear();
+        settings.set_active_category(1);
+        slint::platform::update_timers_and_animations();
+        assert!(!settings.get_history_clear_dialog());
+        settings.invoke_finish_history_clear(true);
+        assert_eq!(cleared.get(), 1);
+        settings.set_active_category(0);
+        settings.set_history_supported(false);
+        settings.invoke_request_history_clear();
+        assert!(!settings.get_history_clear_dialog());
     }
 
     #[test]
@@ -1401,5 +1588,526 @@ mod tests {
         let reopened = crate::SettingsWindow::new().unwrap();
         apply();
         assert_eq!(reopened.get_active_category(), 0);
+    }
+    #[test]
+    fn history_visual_feedback_keeps_pending_actions_isolated() {
+        use slint::platform::{PointerEventButton, WindowEvent};
+        let last = Rc::new(RefCell::new(None));
+        slint::platform::set_platform(Box::new(TestPlatform(last.clone()))).unwrap();
+        let window = crate::ClipboardHistoryWindow::new().unwrap();
+        let adapter = last.borrow().as_ref().unwrap().clone();
+        adapter.set_size(slint::PhysicalSize::new(340, 420));
+        select(UiLanguage::SimplifiedChinese);
+        window.set_first_use(false);
+        window.set_ready(true);
+        window.set_recording(true);
+        let rows = Rc::new(slint::VecModel::from(vec![
+            crate::ClipboardHistoryRow {id: "0".into(), preview: "会议记录\n周五确认设计方案\n保持原始换行与完整内容".into(), copied: false, copy_pending: false},
+            crate::ClipboardHistoryRow {id: "1".into(), preview: "https://example.com/project/clipboard-history\nA long link with the complete text preserved.".into(), copied: false, copy_pending: false},
+        ]));
+        window.set_entries(slint::ModelRc::from(rows.clone()));
+        let copies = Rc::new(RefCell::new(Vec::new()));
+        let output = copies.clone();
+        window.on_copy_requested(move |id| output.borrow_mut().push(id.to_string()));
+        let pasted = Rc::new(RefCell::new(Vec::new()));
+        let output = pasted.clone();
+        window.on_paste_requested(move |id| output.borrow_mut().push(id.to_string()));
+        let closed = Rc::new(Cell::new(0));
+        let output = closed.clone();
+        window.on_close_requested(move || output.set(output.get() + 1));
+        let click = |x, y| {
+            let position = slint::LogicalPosition::new(x, y);
+            window.window().dispatch_event(WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Left,
+            });
+            window
+                .window()
+                .dispatch_event(WindowEvent::PointerReleased {
+                    position,
+                    button: PointerEventButton::Left,
+                });
+        };
+        let render = |name: &str| {
+            slint::platform::update_timers_and_animations();
+            std::thread::sleep(std::time::Duration::from_millis(140));
+            snapshot(&adapter, name, 340, 420);
+        };
+        render("history-polish-normal");
+        let mut first = slint::Model::row_data(&*rows, 0).unwrap();
+        first.copy_pending = true;
+        slint::Model::set_row_data(&*rows, 0, first.clone());
+        window.set_copying(true);
+        render("history-polish-copying");
+        click(273., 97.);
+        click(40., 110.);
+        assert!(copies.borrow().is_empty());
+        assert!(pasted.borrow().is_empty());
+        click(273., 185.);
+        assert_eq!(
+            *copies.borrow(),
+            vec!["1"],
+            "another entry retains its own copy action"
+        );
+        first.copy_pending = false;
+        first.copied = true;
+        slint::Model::set_row_data(&*rows, 0, first.clone());
+        window.set_copying(false);
+        render("history-polish-copied");
+        window.set_delete_confirmation("0".into());
+        render("history-polish-confirm");
+        window.set_delete_confirmation("".into());
+        window.set_error_text(tr("Could not copy clipboard entry.").into());
+        render("history-polish-error");
+        window.set_error_text("".into());
+        window.set_target_toast(
+            tr(lexift_core::domain::clipboard_history::UNSUPPORTED_TARGET_MESSAGE).into(),
+        );
+        render("history-target-toast");
+        click(50., 350.);
+        assert!(
+            pasted.borrow().is_empty(),
+            "toast body must not paste the row underneath"
+        );
+        for language in UiLanguage::ALL {
+            select(language);
+            window.set_target_toast(
+                tr(lexift_core::domain::clipboard_history::UNSUPPORTED_TARGET_MESSAGE).into(),
+            );
+            for (scale, dark, width) in [(1., false, 340.), (1.25, true, 200.)] {
+                window
+                    .window()
+                    .dispatch_event(WindowEvent::ScaleFactorChanged {
+                        scale_factor: scale,
+                    });
+                window
+                    .global::<crate::Colors>()
+                    .set_preference(if dark { 1 } else { 0 });
+                snapshot(
+                    &adapter,
+                    &format!("history-target-toast-{}-{scale}-{dark}", language.code()),
+                    (width * scale) as u32,
+                    (if width < 280. { 260. } else { 420. } * scale) as u32,
+                );
+                if width < 280. {
+                    window
+                        .window()
+                        .dispatch_event(WindowEvent::PointerScrolled {
+                            position: slint::LogicalPosition::new(100., 120.),
+                            delta_x: 0.,
+                            delta_y: -1200.,
+                        });
+                    snapshot(
+                        &adapter,
+                        &format!("history-target-toast-scroll-end-{}", language.code()),
+                        (width * scale) as u32,
+                        (260. * scale) as u32,
+                    );
+                }
+            }
+        }
+        window
+            .window()
+            .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1. });
+        window.global::<crate::Colors>().set_preference(0);
+        select(UiLanguage::SimplifiedChinese);
+        window.set_target_toast("".into());
+        render("history-target-toast-cleared");
+        click(40., 110.);
+        assert_eq!(*pasted.borrow(), vec!["0"]);
+        window.set_busy(true);
+        render("history-polish-pasting");
+        click(273., 185.);
+        assert_eq!(copies.borrow().len(), 1);
+        click(310., 25.);
+        assert_eq!(closed.get(), 1, "pending feedback must not prevent closing");
+        window.set_busy(false);
+        first.copied = false;
+        slint::Model::set_row_data(&*rows, 0, first);
+        for (scale, dark, width) in [
+            (1., false, 340.),
+            (1.25, false, 340.),
+            (1., true, 340.),
+            (1.25, true, 260.),
+        ] {
+            window
+                .window()
+                .dispatch_event(WindowEvent::ScaleFactorChanged {
+                    scale_factor: scale,
+                });
+            window
+                .global::<crate::Colors>()
+                .set_preference(if dark { 1 } else { 0 });
+            slint::platform::update_timers_and_animations();
+            std::thread::sleep(std::time::Duration::from_millis(140));
+            snapshot(
+                &adapter,
+                &format!("history-polish-panel-{scale}-{dark}"),
+                (width * scale) as u32,
+                (420. * scale) as u32,
+            );
+        }
+        window.set_entries(Default::default());
+        window
+            .window()
+            .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1. });
+        window.global::<crate::Colors>().set_preference(0);
+        render("history-polish-empty");
+        window.set_recording(false);
+        render("history-polish-paused");
+    }
+
+    #[test]
+    fn history_window_renders_locales_and_scrolls_without_activating_other_actions() {
+        use slint::platform::{PointerEventButton, WindowEvent};
+        let last = Rc::new(RefCell::new(None));
+        slint::platform::set_platform(Box::new(TestPlatform(last.clone()))).unwrap();
+        let window = crate::ClipboardHistoryWindow::new().unwrap();
+        let adapter = last.borrow().as_ref().unwrap().clone();
+        let clicked = Rc::new(RefCell::new(Vec::new()));
+        let output = clicked.clone();
+        window.on_paste_requested(move |id| output.borrow_mut().push(id.to_string()));
+        let rows=(0..12).map(|i|crate::ClipboardHistoryRow{copied:false,copy_pending:false,id:format!("{i}").into(),preview:format!("{i}: 多行文本 / Clipboard text\nSecond line preserved\nThird line\nFourth line remains in full content").into()}).collect::<Vec<_>>();
+        window.set_entries(slint::ModelRc::new(slint::VecModel::from(rows)));
+        window.set_recording(true);
+        window.set_first_use(false);
+        window.set_ready(true);
+        window.set_delete_confirmation("0".into());
+        for language in UiLanguage::ALL {
+            select(language);
+            for scale in [1.0, 1.25] {
+                window
+                    .window()
+                    .dispatch_event(WindowEvent::ScaleFactorChanged {
+                        scale_factor: scale,
+                    });
+                for dark in [false, true] {
+                    window
+                        .global::<crate::Colors>()
+                        .set_preference(if dark { 1 } else { 0 });
+                    snapshot(
+                        &adapter,
+                        &format!("history-{}-{scale}-{dark}", language.code()),
+                        (340. * scale) as u32,
+                        (420. * scale) as u32,
+                    );
+                    for (status, recording, busy) in
+                        [("paused", false, false), ("pasting", true, true)]
+                    {
+                        window.set_recording(recording);
+                        window.set_busy(busy);
+                        snapshot(
+                            &adapter,
+                            &format!("history-header-{status}-{}-{scale}-{dark}", language.code()),
+                            (340. * scale) as u32,
+                            (420. * scale) as u32,
+                        );
+                    }
+                    window.set_recording(true);
+                    window.set_busy(false);
+                }
+            }
+        }
+        window
+            .window()
+            .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
+        adapter.set_size(slint::PhysicalSize::new(340, 420));
+        select(UiLanguage::SimplifiedChinese);
+        window.set_delete_confirmation("".into());
+        let draw = || {
+            adapter.request_redraw();
+            adapter.draw_if_needed(|r| {
+                r.render(&mut vec![slint::Rgb8Pixel::default(); 340 * 420], 340);
+            });
+        };
+        draw();
+        let click = |x, y| {
+            let position = slint::LogicalPosition::new(x, y);
+            window.window().dispatch_event(WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Left,
+            });
+            window
+                .window()
+                .dispatch_event(WindowEvent::PointerReleased {
+                    position,
+                    button: PointerEventButton::Left,
+                });
+        };
+        let copies = Rc::new(RefCell::new(Vec::new()));
+        let drags = Rc::new(RefCell::new(Vec::new()));
+        let drag_output = drags.clone();
+        window.on_header_drag_requested(move |x, y| drag_output.borrow_mut().push((x, y)));
+        let drag_points = [
+            (40., 25.),  // Icon/title content.
+            (170., 1.),  // Top padding.
+            (1., 36.),   // Left edge.
+            (339., 36.), // Right edge.
+            (275., 25.), // Count badge.
+            (310., 6.),  // Above close.
+            (288., 30.), // Left of close.
+            (324., 30.), // Right of the 32px close hit area.
+            (310., 46.), // Below close.
+            (310., 47.), // Bottom padding above the compact header divider.
+        ];
+        for scale in [1., 1.25] {
+            window
+                .window()
+                .dispatch_event(WindowEvent::ScaleFactorChanged {
+                    scale_factor: scale,
+                });
+            adapter.set_size(slint::PhysicalSize::new(
+                (340. * scale) as u32,
+                (420. * scale) as u32,
+            ));
+            snapshot(
+                &adapter,
+                &format!("history-header-hit-{scale}"),
+                (340. * scale) as u32,
+                (420. * scale) as u32,
+            );
+            for &(x, y) in &drag_points {
+                click(x, y);
+            }
+        }
+        let expected_drags = drag_points.repeat(2);
+        assert_eq!(*drags.borrow(), expected_drags);
+        window
+            .window()
+            .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1. });
+        adapter.set_size(slint::PhysicalSize::new(340, 420));
+        draw();
+        assert!(clicked.borrow().is_empty());
+        let closes = Rc::new(Cell::new(0));
+        let close_output = closes.clone();
+        window.on_close_requested(move || close_output.set(close_output.get() + 1));
+        click(310., 25.);
+        assert_eq!(closes.get(), 1);
+        assert_eq!(
+            drags.borrow().len(),
+            expected_drags.len(),
+            "close button must not initiate dragging"
+        );
+        let copy_output = copies.clone();
+        window.on_copy_requested(move |id| copy_output.borrow_mut().push(id.to_string()));
+        let deletes = Rc::new(RefCell::new(Vec::new()));
+        let delete_output = deletes.clone();
+        window.on_delete_requested(move |id| delete_output.borrow_mut().push(id.to_string()));
+        click(273., 97.);
+        assert_eq!(
+            drags.borrow().len(),
+            expected_drags.len(),
+            "entry buttons must not initiate dragging"
+        );
+        assert_eq!(*copies.borrow(), vec!["0"]);
+        assert!(clicked.borrow().is_empty());
+        assert!(deletes.borrow().is_empty());
+        click(305., 97.);
+        assert!(
+            deletes.borrow().is_empty(),
+            "first click only requests confirmation"
+        );
+        assert_eq!(window.get_delete_confirmation(), "0");
+        for (scale, dark) in [(1.0, false), (1.25, false), (1.0, true), (1.25, true)] {
+            window
+                .window()
+                .dispatch_event(WindowEvent::ScaleFactorChanged {
+                    scale_factor: scale,
+                });
+            window
+                .global::<crate::Colors>()
+                .set_preference(if dark { 1 } else { 0 });
+            snapshot(
+                &adapter,
+                &format!("history-delete-confirm-{scale}-{dark}"),
+                (340. * scale) as u32,
+                (420. * scale) as u32,
+            );
+        }
+        window
+            .window()
+            .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
+        adapter.set_size(slint::PhysicalSize::new(340, 420));
+        window.global::<crate::Colors>().set_preference(0);
+        draw();
+        click(305., 185.);
+        assert_eq!(
+            window.get_delete_confirmation(),
+            "1",
+            "only one entry can be armed"
+        );
+        assert!(deletes.borrow().is_empty());
+        click(305., 97.);
+        assert!(
+            deletes.borrow().is_empty(),
+            "switching back requires confirmation again"
+        );
+        click(305., 97.);
+        assert_eq!(*deletes.borrow(), vec!["0"]);
+        assert_eq!(window.get_delete_confirmation(), "");
+        assert!(clicked.borrow().is_empty());
+        let row = crate::ClipboardHistoryRow {
+            id: "0".into(),
+            preview: "完整多行文本\n第二行\n第三行".into(),
+            copy_pending: false,
+            copied: true,
+        };
+        let old_rows = window.get_entries();
+        window.set_entries(slint::ModelRc::new(slint::VecModel::from(vec![row])));
+        for (scale, dark) in [(1.0, false), (1.25, false), (1.0, true), (1.25, true)] {
+            window
+                .window()
+                .dispatch_event(WindowEvent::ScaleFactorChanged {
+                    scale_factor: scale,
+                });
+            window
+                .global::<crate::Colors>()
+                .set_preference(if dark { 1 } else { 0 });
+            snapshot(
+                &adapter,
+                &format!("history-copy-success-{scale}-{dark}"),
+                (340. * scale) as u32,
+                (420. * scale) as u32,
+            );
+        }
+        window.set_entries(old_rows.clone());
+        window
+            .window()
+            .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
+        adapter.set_size(slint::PhysicalSize::new(340, 420));
+        window.global::<crate::Colors>().set_preference(0);
+        draw();
+        let stable_rows = Rc::new(slint::VecModel::from(vec![
+            crate::ClipboardHistoryRow {
+                id: "0".into(),
+                preview: "row zero".into(),
+                copied: false,
+                copy_pending: false,
+            },
+            crate::ClipboardHistoryRow {
+                id: "1".into(),
+                preview: "row one".into(),
+                copied: true,
+                copy_pending: false,
+            },
+        ]));
+        window.set_entries(slint::ModelRc::from(stable_rows.clone()));
+        draw();
+        let pos = slint::LogicalPosition::new(40., 95.);
+        window.window().dispatch_event(WindowEvent::PointerPressed {
+            position: pos,
+            button: PointerEventButton::Left,
+        });
+        slint::Model::set_row_data(
+            &*stable_rows,
+            1,
+            crate::ClipboardHistoryRow {
+                id: "1".into(),
+                preview: "row one".into(),
+                copied: false,
+                copy_pending: false,
+            },
+        );
+        draw();
+        window
+            .window()
+            .dispatch_event(WindowEvent::PointerReleased {
+                position: pos,
+                button: PointerEventButton::Left,
+            });
+        assert_eq!(
+            *clicked.borrow(),
+            vec!["0"],
+            "feedback updates must preserve an active row click"
+        );
+        window.window().dispatch_event(WindowEvent::PointerPressed {
+            position: pos,
+            button: PointerEventButton::Left,
+        });
+        slint::Model::set_row_data(
+            &*stable_rows,
+            0,
+            crate::ClipboardHistoryRow {
+                id: "replacement".into(),
+                preview: "newly copied text".into(),
+                copied: false,
+                copy_pending: false,
+            },
+        );
+        draw();
+        window
+            .window()
+            .dispatch_event(WindowEvent::PointerReleased {
+                position: pos,
+                button: PointerEventButton::Left,
+            });
+        assert_eq!(
+            *clicked.borrow(),
+            vec!["0"],
+            "reordering during a press must not paste a different entry"
+        );
+        clicked.borrow_mut().clear();
+        window.set_entries(old_rows);
+        draw();
+        click(40., 95.);
+        assert_eq!(*clicked.borrow(), vec!["0"]);
+        window
+            .window()
+            .dispatch_event(WindowEvent::PointerScrolled {
+                position: slint::LogicalPosition::new(40., 150.),
+                delta_x: 0.,
+                delta_y: -1200.,
+            });
+        draw();
+        snapshot(&adapter, "history-scrolled-last", 340, 420);
+        click(40., 330.);
+        assert_eq!(clicked.borrow().last().unwrap(), "11");
+        window.set_busy(true);
+        click(40., 330.);
+        assert_eq!(clicked.borrow().len(), 2);
+        window.set_busy(false);
+        window.set_first_use(true);
+        window.set_recording(false);
+        window.set_entries(Default::default());
+        snapshot(&adapter, "history-first-use", 340, 420);
+        let enabled = Rc::new(std::cell::Cell::new(0));
+        let result = enabled.clone();
+        window.on_enable_requested(move || result.set(result.get() + 1));
+        for (index, language) in UiLanguage::ALL.iter().enumerate() {
+            select(*language);
+            window
+                .window()
+                .dispatch_event(WindowEvent::PointerScrolled {
+                    position: slint::LogicalPosition::new(50., 120.),
+                    delta_x: 0.,
+                    delta_y: 2000.,
+                });
+            snapshot(
+                &adapter,
+                &format!("history-opt-in-narrow-{}", language.code()),
+                200,
+                260,
+            );
+            window
+                .window()
+                .dispatch_event(WindowEvent::PointerScrolled {
+                    position: slint::LogicalPosition::new(50., 120.),
+                    delta_x: 0.,
+                    delta_y: -2000.,
+                });
+            snapshot(
+                &adapter,
+                &format!("history-opt-in-narrow-end-{}", language.code()),
+                200,
+                260,
+            );
+            click(100., 170.);
+            assert_eq!(
+                enabled.get(),
+                index + 1,
+                "opt-in action remains reachable in {}",
+                language.code()
+            );
+        }
     }
 }

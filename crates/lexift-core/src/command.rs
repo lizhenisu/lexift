@@ -9,6 +9,7 @@ use crate::ports::credential::{CredentialAccessPurpose, CredentialSecret};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppCommand {
+    ClipboardHistory(crate::domain::clipboard_history::HistoryCommand),
     CaptureSelection {
         task_id: TranslationTaskId,
     },
@@ -39,6 +40,8 @@ pub enum AppCommand {
     },
     CopyPopupText {
         session_id: PopupSessionId,
+        source: bool,
+        request: u64,
         text: String,
     },
     SpeakPopupText {

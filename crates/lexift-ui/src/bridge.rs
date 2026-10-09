@@ -138,6 +138,8 @@ pub enum PassiveWindowPreparation {
 #[derive(Clone)]
 pub struct WindowLifecycleCallbacks {
     llm_query: Option<crate::llm_settings::LlmQuery>,
+    clipboard_history_supported: bool,
+    history_dismissal: SetPopupDismissal,
     pub(crate) complete_passive_window_show: CompletePassiveWindowShow,
     complete_toolbar_show: CompletePassiveWindowShow,
     toolbar_target_current: Rc<dyn Fn(lexift_core::domain::selection::SelectionTarget) -> bool>,
@@ -201,6 +203,8 @@ impl WindowLifecycleCallbacks {
     ) -> Self {
         Self {
             llm_query: None,
+            clipboard_history_supported: false,
+            history_dismissal: Rc::new(|_, _| false),
             complete_passive_window_show: Rc::new(complete_passive_window_show),
             complete_toolbar_show: Rc::new(|_, _| true),
             toolbar_target_current: Rc::new(|_| false),
@@ -235,6 +239,18 @@ impl WindowLifecycleCallbacks {
             prepare_app_window: Rc::new(|_, _| PassiveWindowPreparation::Ready),
             open_about_link: Rc::new(|_| false),
         }
+    }
+
+    pub fn with_clipboard_history_dismissal(
+        mut self,
+        callback: impl Fn(&slint::Window, bool) -> bool + 'static,
+    ) -> Self {
+        self.history_dismissal = Rc::new(callback);
+        self
+    }
+    pub fn with_clipboard_history_support(mut self, supported: bool) -> Self {
+        self.clipboard_history_supported = supported;
+        self
     }
 
     pub fn with_about_links(mut self, open: impl Fn(crate::AboutLink) -> bool + 'static) -> Self {
@@ -448,6 +464,9 @@ const LANGUAGE_MENU_GAP_PX: i32 = 4;
 const POPUP_MIN_WIDTH: f32 = 340.0;
 const POPUP_MIN_SOURCE_HEIGHT: f32 = 86.0;
 const NO_WINDOW_MEMORY_TRIM_DELAY: Duration = Duration::from_secs(120);
+#[path = "clipboard_history.rs"]
+mod clipboard_history;
+use clipboard_history::HISTORY;
 #[path = "selection_toolbar.rs"]
 mod selection_toolbar;
 #[cfg(test)]
@@ -508,6 +527,7 @@ fn has_live_window_instances() -> bool {
             .is_some_and(|registry| registry.main.is_some() || registry.settings.is_some())
     });
     app_window_exists
+        || HISTORY.with(|s| s.borrow().as_ref().is_some_and(|r| r.window.is_some()))
         || crate::annotation::is_open()
         || crate::tray_menu::is_open()
         || SELECTION_TOOLBAR_REGISTRY.with(|registry| {
@@ -2103,6 +2123,7 @@ pub struct Ui {
 
 struct AppWindowRegistry {
     llm_query: Option<crate::llm_settings::LlmQuery>,
+    history_supported: bool,
     main: Option<AppWindow>,
     settings: Option<SettingsWindow>,
     configure_resize_background: ConfigureResizeBackground,
@@ -2284,6 +2305,7 @@ fn ensure_settings_window(
         return Ok(settings.clone_strong());
     }
     let settings = SettingsWindow::new()?;
+    settings.set_history_supported(registry.history_supported);
     crate::about::wire(&settings, registry.open_about_link.clone());
     // Observe pointer input without consuming it; blank space and editors also
     // end keyboard-only button styling. The weak callback dies with this window.
@@ -2515,6 +2537,18 @@ fn wire_main_callbacks(
     main.on_settings_window_requested(move || handler(AppEvent::SettingsWindowRequested));
 }
 
+/// History controls from a retired Settings instance cannot clear or re-enable data.
+fn current_history_settings(weak: &slint::Weak<SettingsWindow>) -> bool {
+    weak.upgrade().is_some_and(|window| {
+        APP_WINDOW_REGISTRY.with(|r| {
+            r.borrow()
+                .as_ref()
+                .and_then(|r| r.settings.as_ref())
+                .is_some_and(|current| current.get_llm_page_token() == window.get_llm_page_token())
+        })
+    })
+}
+
 fn wire_settings_callbacks(
     settings: &SettingsWindow,
     handler: Rc<dyn Fn(AppEvent)>,
@@ -2590,6 +2624,33 @@ fn wire_settings_callbacks(
             change: SettingsChange::SelectionToolbar(enabled),
         });
     });
+    let h = handler.clone();
+    let weak = settings.as_weak();
+    settings.on_history_enabled_changed(move |value| {
+        if current_history_settings(&weak) {
+            h(AppEvent::SettingsChangeRequested {
+                change: SettingsChange::ClipboardHistoryEnabled(value),
+            });
+        }
+    });
+    let h = handler.clone();
+    let weak = settings.as_weak();
+    settings.on_history_limit_changed(move |value| {
+        if current_history_settings(&weak) {
+            h(AppEvent::SettingsChangeRequested {
+                change: SettingsChange::ClipboardHistoryLimit(value.clamp(10, 200) as u16),
+            });
+        }
+    });
+    let h = handler.clone();
+    let weak = settings.as_weak();
+    settings.on_history_clear_requested(move || {
+        if current_history_settings(&weak) {
+            h(AppEvent::ClipboardHistory(
+                lexift_core::domain::clipboard_history::HistoryEvent::Clear,
+            ));
+        }
+    });
     let credential_handler = Rc::clone(&handler);
     let weak = settings.as_weak();
     let generation = credential_generation.clone();
@@ -2637,6 +2698,7 @@ fn wire_settings_callbacks(
         let callback = move || {
             let current = begin_credential_access(&weak, &generation);
             if let Some(w) = weak.upgrade() {
+                w.set_credential_copy_active(purpose == CredentialAccessPurpose::Copy);
                 send(if let Some(provider) = credential_provider(&w) {
                     AppEvent::LlmCredentialAccessRequested {
                         provider,
@@ -2708,6 +2770,14 @@ impl Ui {
     ) -> Result<Self, slint::PlatformError> {
         crate::annotation::init(prepare_passive_window, window_lifecycle.clone());
         crate::tray_menu::init(prepare_passive_window, window_lifecycle.clone());
+        HISTORY.with(|s| {
+            *s.borrow_mut() = Some(clipboard_history::Registry::new(
+                prepare_passive_window,
+                window_lifecycle.complete_toolbar_show.clone(),
+                window_lifecycle.history_dismissal.clone(),
+                window_lifecycle.popup_work_area.clone(),
+            ))
+        });
         SELECTION_TOOLBAR_REGISTRY.with(|registry| {
             *registry.borrow_mut() = Some(SelectionToolbarRegistry {
                 window: None,
@@ -2723,6 +2793,9 @@ impl Ui {
                 cursor_position: Rc::clone(&window_lifecycle.toolbar_cursor_position),
                 fade_timer: slint::Timer::default(),
                 generation: 0,
+                core_generation: 0,
+                selection_generation: 0,
+                history_supported: window_lifecycle.clipboard_history_supported,
             });
         });
         IDLE_TRIM_CALLBACK.with(|callback| {
@@ -2738,6 +2811,7 @@ impl Ui {
         APP_WINDOW_REGISTRY.with(|registry| {
             *registry.borrow_mut() = Some(AppWindowRegistry {
                 llm_query: window_lifecycle.llm_query.clone(),
+                history_supported: window_lifecycle.clipboard_history_supported,
                 main: None,
                 settings: None,
                 configure_resize_background: Rc::clone(
@@ -2856,7 +2930,12 @@ impl Ui {
         });
         SELECTION_TOOLBAR_REGISTRY.with(|registry| {
             if let Some(registry) = registry.borrow_mut().as_mut() {
-                registry.handler = Some(handler);
+                registry.handler = Some(handler.clone());
+            }
+        });
+        HISTORY.with(|s| {
+            if let Some(r) = s.borrow_mut().as_mut() {
+                r.handler = Some(handler);
             }
         });
     }
@@ -2885,6 +2964,9 @@ impl Ui {
         slint::run_event_loop_until_quit()?;
         crate::tray_menu::close(false);
         crate::annotation::shutdown();
+        HISTORY.with(|s| {
+            s.borrow_mut().take();
+        });
         SELECTION_TOOLBAR_REGISTRY.with(|registry| {
             if let Some(mut registry) = registry.borrow_mut().take() {
                 registry.close();
@@ -3210,6 +3292,17 @@ fn wire_popup_callbacks(popup: &TranslationPopup, handler: Rc<dyn Fn(AppEvent)>)
     });
     let weak = popup.as_weak();
     let event_handler = Rc::clone(&handler);
+    let expired_weak = popup.as_weak();
+    let expired_handler = handler.clone();
+    popup.on_copy_feedback_expired(move |source, request| {
+        if let (Some(w), Ok(request)) = (expired_weak.upgrade(), request.parse()) {
+            expired_handler(AppEvent::PopupCopyFeedbackCleared {
+                session_id: popup_session_id(&w),
+                source,
+                request,
+            });
+        }
+    });
     popup.on_copy_requested(move |source| {
         if let Some(popup) = weak.upgrade() {
             let text = if source {
@@ -3219,6 +3312,7 @@ fn wire_popup_callbacks(popup: &TranslationPopup, handler: Rc<dyn Fn(AppEvent)>)
             };
             event_handler(AppEvent::PopupCopyRequested {
                 session_id: popup_session_id(&popup),
+                source,
                 text: text.to_string(),
             });
         }
@@ -3272,6 +3366,8 @@ fn reset_credential_view(settings: &SettingsWindow) {
     settings.set_credential_secret_visible(false);
     settings.set_credential_reveal_dismiss_armed(false);
     settings.set_credential_request_pending(false);
+    settings.set_credential_copy_active(false);
+    settings.set_credential_copied(false);
 }
 
 fn credential_provider(window: &SettingsWindow) -> Option<lexift_core::domain::llm::LlmProvider> {
@@ -3291,6 +3387,27 @@ fn begin_credential_access(settings: &slint::Weak<SettingsWindow>, generation: &
         settings.set_credential_request_pending(true);
     }
     generation
+}
+
+/// Copy feedback uses the same lifetime token as secret access, without retaining the window.
+pub(crate) fn complete_credential_copy(
+    settings: &SettingsWindow,
+    current: Arc<AtomicU64>,
+    generation: u64,
+) {
+    if !credential_session_is_current(&current, generation) {
+        return;
+    }
+    settings.set_credential_copy_active(false);
+    settings.set_credential_copied(true);
+    let weak = settings.as_weak();
+    slint::Timer::single_shot(Duration::from_millis(1500), move || {
+        if credential_session_is_current(&current, generation)
+            && let Some(w) = weak.upgrade()
+        {
+            w.set_credential_copied(false);
+        }
+    });
 }
 
 fn credential_session_is_current(generation: &AtomicU64, expected: u64) -> bool {
@@ -3397,6 +3514,9 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
         SettingsFeedback::SettingsSaved(SettingsField::LaunchAtLogin) => {
             ("Startup preference saved", false)
         }
+        SettingsFeedback::SettingsSaved(
+            SettingsField::ClipboardHistoryEnabled | SettingsField::ClipboardHistoryLimit,
+        ) => ("Clipboard settings saved", false),
         SettingsFeedback::SettingsSaved(SettingsField::SelectionToolbar) => {
             ("Selection toolbar preference saved", false)
         }
@@ -3420,6 +3540,9 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
         SettingsFeedback::SettingsSaveFailed(SettingsField::LaunchAtLogin) => {
             ("Startup preference wasn't saved", true)
         }
+        SettingsFeedback::SettingsSaveFailed(
+            SettingsField::ClipboardHistoryEnabled | SettingsField::ClipboardHistoryLimit,
+        ) => ("Could not save clipboard settings", true),
         SettingsFeedback::SettingsSaveFailed(SettingsField::SelectionToolbar) => {
             ("Selection toolbar preference wasn't saved", true)
         }
@@ -3433,7 +3556,7 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
         }
         SettingsFeedback::CredentialSaved => ("API key saved", false),
         SettingsFeedback::CredentialRemoved => ("API key removed", false),
-        SettingsFeedback::CredentialCopied => ("Copied", false),
+        SettingsFeedback::CredentialCopied { .. } => ("Copied", false),
         SettingsFeedback::CredentialOperationFailed => ("Credential operation failed", true),
     }
 }
@@ -3471,6 +3594,8 @@ impl UiHandle {
         let theme = state.desired_settings.theme;
         let toolbar_selection = state.toolbar_selection.clone();
         let toolbar_target = state.toolbar_target;
+        let core_generation = state.toolbar_generation;
+        let history_state = state.clone();
         let toast_records = Arc::clone(&self.toast_records);
         let _ = slint::invoke_from_event_loop(move || {
             let language_changed = crate::i18n::select(state.desired_settings.ui_language);
@@ -3508,9 +3633,16 @@ impl UiHandle {
             });
             SELECTION_TOOLBAR_REGISTRY.with(|registry| {
                 if let Some(registry) = registry.borrow_mut().as_mut() {
+                    registry.core_generation = core_generation;
                     registry.sync(toolbar_selection, toolbar_target);
                 }
             });
+            HISTORY.with(|s| {
+                if let Some(r) = s.borrow_mut().as_mut() {
+                    r.sync(&history_state);
+                }
+            });
+            schedule_idle_memory_trim();
         });
     }
 
@@ -3727,6 +3859,20 @@ impl UiHandle {
 
     /// Shows compact, independently dismissible feedback for the current Settings window.
     pub fn show_settings_feedback(&self, feedback: SettingsFeedback) {
+        if let SettingsFeedback::CredentialCopied { generation } = feedback {
+            let current = self.credential_generation.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if !credential_session_is_current(&current, generation) {
+                    return;
+                }
+                APP_WINDOW_REGISTRY.with(|r| {
+                    if let Some(w) = r.borrow().as_ref().and_then(|r| r.settings.as_ref()) {
+                        complete_credential_copy(w, current, generation);
+                    }
+                });
+            });
+            return;
+        }
         let toast_records = Arc::clone(&self.toast_records);
         let id = self
             .toast_next_id
@@ -3891,6 +4037,11 @@ fn apply_window_themes() {
     });
     SELECTION_TOOLBAR_REGISTRY.with(|slot| {
         if let Some(w) = slot.borrow().as_ref().and_then(|r| r.window.as_ref()) {
+            crate::theme::apply(w);
+        }
+    });
+    HISTORY.with(|s| {
+        if let Some(w) = s.borrow().as_ref().and_then(|r| r.window.as_ref()) {
             crate::theme::apply(w);
         }
     });

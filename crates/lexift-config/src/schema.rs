@@ -256,6 +256,10 @@ pub(crate) struct SettingsFile {
     launch_at_login: bool,
     #[serde(default = "default_selection_toolbar")]
     selection_toolbar: bool,
+    #[serde(default)]
+    clipboard_history_enabled: bool,
+    #[serde(default = "default_history_limit")]
+    clipboard_history_limit: u16,
     #[serde(default = "default_theme")]
     theme: String,
     #[serde(default = "default_ui_language")]
@@ -323,6 +327,10 @@ fn default_ui_language() -> String {
     "en-US".into()
 }
 
+fn default_history_limit() -> u16 {
+    50
+}
+
 fn default_theme() -> String {
     "light".into()
 }
@@ -358,6 +366,8 @@ impl ConfigFile {
                 llm: Some(LlmFile::from_domain(&settings.llm)),
                 launch_at_login: settings.launch_at_login,
                 selection_toolbar: settings.selection_toolbar,
+                clipboard_history_enabled: settings.clipboard_history_enabled,
+                clipboard_history_limit: settings.clipboard_history_limit,
                 theme: match settings.theme {
                     ThemePreference::Light => "light",
                     ThemePreference::Dark => "dark",
@@ -436,6 +446,8 @@ impl ConfigFile {
             llm,
             launch_at_login: self.settings.launch_at_login,
             selection_toolbar: self.settings.selection_toolbar,
+            clipboard_history_enabled: self.settings.clipboard_history_enabled,
+            clipboard_history_limit: self.settings.clipboard_history_limit.clamp(10, 200),
             theme: match self.settings.theme.as_str() {
                 "light" => ThemePreference::Light,
                 "dark" => ThemePreference::Dark,

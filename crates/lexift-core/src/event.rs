@@ -9,6 +9,7 @@ use crate::ports::credential::{CredentialAccessPurpose, CredentialSecret};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppEvent {
+    ClipboardHistory(crate::domain::clipboard_history::HistoryEvent),
     Started,
     SelectionTranslationRequested,
     SelectionInteractionStarted,
@@ -81,11 +82,20 @@ pub enum AppEvent {
     },
     PopupCopyRequested {
         session_id: PopupSessionId,
+        source: bool,
         text: String,
     },
     PopupCopyFinished {
         session_id: PopupSessionId,
+        source: bool,
+        request: u64,
+        text: String,
         error: Option<String>,
+    },
+    PopupCopyFeedbackCleared {
+        session_id: PopupSessionId,
+        source: bool,
+        request: u64,
     },
     PopupFeedbackCleared {
         session_id: PopupSessionId,
@@ -146,6 +156,7 @@ pub enum AppEvent {
     CredentialAccessCancelled,
     CredentialAccessSucceeded {
         purpose: CredentialAccessPurpose,
+        generation: u64,
     },
     CredentialAccessFailed {
         error: String,

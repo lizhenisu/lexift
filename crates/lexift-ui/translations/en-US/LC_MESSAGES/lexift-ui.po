@@ -1350,3 +1350,96 @@ msgstr "Open-source license"
 
 msgid "Could not open the browser. Please try again."
 msgstr "Could not open the browser. Please try again."
+
+msgid "Clear clipboard history"
+msgstr "Clear clipboard history"
+
+msgid "Clipboard history"
+msgstr "Clipboard history"
+
+msgid "Clipboard history could not be loaded. Clear history to start again."
+msgstr "Clipboard history could not be loaded. Clear history to start again."
+
+msgid "Clipboard history could not be saved."
+msgstr "Clipboard history could not be saved."
+
+msgid "Clipboard paste could not be sent to this input."
+msgstr "Clipboard paste could not be sent to this input."
+
+msgid "Clipboard paste was cancelled."
+msgstr "Clipboard paste was cancelled."
+
+msgid "Clipboard settings"
+msgstr "Clipboard settings"
+
+msgid "Enable and record"
+msgstr "Enable and record"
+
+msgid "History limit"
+msgstr "History limit"
+
+msgid "Keep encrypted plain-text history on this device"
+msgstr "Keep encrypted plain-text history on this device"
+
+msgid "No clipboard history yet"
+msgstr "No clipboard history yet"
+
+msgid "Pasting…"
+msgstr "Pasting…"
+
+msgid "Record clipboard history"
+msgstr "Record clipboard history"
+
+msgid "Recording"
+msgstr "Recording"
+
+msgid "Recording paused"
+msgstr "Recording paused"
+
+msgid "Release modifier keys and try again."
+msgstr "Release modifier keys and try again."
+
+msgid "Save recent plain text on this device. History is encrypted for your Windows account. Recording starts only after you enable it."
+msgstr "Save recent plain text on this device. History is encrypted for your Windows account. Recording starts only after you enable it."
+
+msgid "Show Translate, Copy and Clipboard after selecting text"
+msgstr "Show Translate, Copy and Clipboard after selecting text"
+
+msgid "The original input has changed. Select text again."
+msgstr "The original input has changed. Select text again."
+
+msgid "The original selection is not a supported editable input."
+msgstr "The original selection is not a supported editable input."
+
+msgid "This clipboard text is too large to record."
+msgstr "This clipboard text is too large to record."
+
+msgid "Clipboard history monitoring is unavailable"
+msgstr "Clipboard history monitoring is unavailable"
+
+msgid "Clipboard settings saved"
+msgstr "Clipboard settings saved"
+
+msgid "Could not save clipboard settings"
+msgstr "Could not save clipboard settings"
+
+msgid "Delete clipboard entry"
+msgstr "Delete clipboard entry"
+
+msgid "Could not copy clipboard entry."
+msgstr "Could not copy clipboard entry."
+
+msgid "Delete"
+msgstr "Delete"
+
+msgid "Delete all saved clipboard history? This cannot be undone."
+msgstr "Delete all saved clipboard history? This cannot be undone."
+
+msgid "Copying…"
+msgstr "Copying…"
+
+msgid "Click to paste"
+msgstr "Click to paste"
+
+msgid "Copied text appears here."
+msgstr "Copied text appears here."

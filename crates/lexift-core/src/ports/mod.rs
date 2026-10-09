@@ -15,3 +15,5 @@ pub mod settings;
 pub mod speech;
 pub mod translator;
 pub mod tray;
+
+pub mod clipboard_history;

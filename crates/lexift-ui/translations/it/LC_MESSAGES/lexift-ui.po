@@ -1350,3 +1350,96 @@ msgstr "Licenza open source"
 
 msgid "Could not open the browser. Please try again."
 msgstr "Impossibile aprire il browser. Riprova."
+
+msgid "Clear clipboard history"
+msgstr "Cancella cronologia"
+
+msgid "Clipboard history"
+msgstr "Cronologia degli appunti"
+
+msgid "Clipboard history could not be loaded. Clear history to start again."
+msgstr "Impossibile caricare la cronologia. Cancellala per ricominciare."
+
+msgid "Clipboard history could not be saved."
+msgstr "Impossibile salvare la cronologia."
+
+msgid "Clipboard paste could not be sent to this input."
+msgstr "Impossibile incollare in questo campo."
+
+msgid "Clipboard paste was cancelled."
+msgstr "Operazione annullata."
+
+msgid "Clipboard settings"
+msgstr "Impostazioni appunti"
+
+msgid "Enable and record"
+msgstr "Attiva e registra"
+
+msgid "History limit"
+msgstr "Limite cronologia"
+
+msgid "Keep encrypted plain-text history on this device"
+msgstr "Salva la cronologia di testo cifrata su questo dispositivo"
+
+msgid "No clipboard history yet"
+msgstr "Cronologia vuota"
+
+msgid "Pasting…"
+msgstr "Incollaggio…"
+
+msgid "Record clipboard history"
+msgstr "Registra la cronologia degli appunti"
+
+msgid "Recording"
+msgstr "Registrazione attiva"
+
+msgid "Recording paused"
+msgstr "Registrazione in pausa"
+
+msgid "Release modifier keys and try again."
+msgstr "Rilascia i tasti modificatori e riprova."
+
+msgid "Save recent plain text on this device. History is encrypted for your Windows account. Recording starts only after you enable it."
+msgstr "Salva il testo copiato di recente su questo dispositivo, cifrato con il tuo account Windows. La registrazione inizia dopo l’attivazione."
+
+msgid "Show Translate, Copy and Clipboard after selecting text"
+msgstr "Mostra Traduci, Copia e Appunti dopo la selezione"
+
+msgid "The original input has changed. Select text again."
+msgstr "Il campo originale è cambiato. Seleziona nuovamente il testo."
+
+msgid "The original selection is not a supported editable input."
+msgstr "La selezione originale non è un campo modificabile verificato."
+
+msgid "This clipboard text is too large to record."
+msgstr "Il testo è troppo grande per essere registrato."
+
+msgid "Clipboard history monitoring is unavailable"
+msgstr "Monitoraggio degli appunti non disponibile"
+
+msgid "Clipboard settings saved"
+msgstr "Impostazioni appunti salvate"
+
+msgid "Could not save clipboard settings"
+msgstr "Impossibile salvare le impostazioni degli appunti"
+
+msgid "Delete clipboard entry"
+msgstr "Elimina voce degli appunti"
+
+msgid "Could not copy clipboard entry."
+msgstr "Impossibile copiare la voce degli appunti."
+
+msgid "Delete"
+msgstr "Elimina"
+
+msgid "Delete all saved clipboard history? This cannot be undone."
+msgstr "Eliminare tutta la cronologia salvata degli appunti? Questa azione non può essere annullata."
+
+msgid "Copying…"
+msgstr "Copia…"
+
+msgid "Click to paste"
+msgstr "Fai clic per incollare"
+
+msgid "Copied text appears here."
+msgstr "Il testo copiato appare qui."

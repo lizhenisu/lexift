@@ -1,0 +1,9 @@
+import { Colors } from "colors.slint";
+import { AppAssets } from "assets.slint";
+export component CopyFeedbackIcon inherits Image {
+    in property <bool> copied: false;
+    in property <color> normal-color: Colors.foreground;
+    source: root.copied ? @image-url("../assets/icons/check.svg") : AppAssets.icon-copy;
+    colorize: root.copied ? Colors.primary : root.normal-color;
+    image-fit: contain;
+}

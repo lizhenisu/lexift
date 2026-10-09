@@ -6,15 +6,17 @@ export component SelectionToolbarWindow inherits Window {
     no-frame: true;
     always-on-top: true;
     background: transparent;
-    preferred-width: 96px;
+    preferred-width: 138px;
     preferred-height: 48px;
-    min-width: 96px;
+    min-width: 138px;
     min-height: 48px;
-    max-width: 96px;
+    max-width: 138px;
     max-height: 48px;
     in property <float> fade-opacity: 1;
     callback translate-requested();
     callback copy-requested();
+    in property <bool> history-supported: false;
+    callback history-requested();
 
     Rectangle {
         x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px;
@@ -41,6 +43,16 @@ export component SelectionToolbarWindow inherits Window {
             Image { x: 10px; y: 8px; width: 20px; height: 20px;
                 source: AppAssets.icon-copy; image-fit: contain; colorize: Colors.foreground; }
             copy-area := TouchArea { clicked => { root.copy-requested(); } }
+        }
+        Rectangle {
+            x: 91px; y: 5px; width: 40px; height: 36px;
+            border-radius: 18px;
+            opacity: root.history-supported ? 1 : 0.4;
+            background: history-area.pressed ? Colors.icon-button-pressed
+                : history-area.has-hover ? Colors.icon-button-hover : transparent;
+            Image { x: 10px; y: 8px; width: 20px; height: 20px;
+                source: AppAssets.icon-paste; image-fit: contain; colorize: Colors.foreground; }
+            history-area := TouchArea { accessible-role: button; accessible-label: @tr("Clipboard history"); enabled: root.history-supported; clicked => { root.history-requested(); } }
         }
     }
 }

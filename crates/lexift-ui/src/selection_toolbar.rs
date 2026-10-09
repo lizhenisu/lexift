@@ -102,6 +102,9 @@ pub(super) struct SelectionToolbarRegistry {
     pub(super) cursor_position: ToolbarCursorPosition,
     pub(super) fade_timer: slint::Timer,
     pub(super) generation: u64,
+    pub(super) core_generation: u64,
+    pub(super) selection_generation: u64,
+    pub(super) history_supported: bool,
     pub(super) target: Option<SelectionTarget>,
     pub(super) target_current: Rc<dyn Fn(SelectionTarget) -> bool>,
     pub(super) work: Option<Rc<Work>>,
@@ -128,7 +131,10 @@ impl SelectionToolbarRegistry {
     }
 
     pub(super) fn sync(&mut self, selection: Option<Selection>, target: Option<SelectionTarget>) {
-        if self.selection == selection && self.target == target {
+        if self.selection == selection
+            && self.target == target
+            && self.selection_generation == self.core_generation
+        {
             return;
         }
         self.close();
@@ -142,6 +148,9 @@ impl SelectionToolbarRegistry {
             return;
         };
         crate::theme::apply(&window);
+        window.set_history_supported(self.history_supported);
+        let core_generation = self.core_generation;
+        self.selection_generation = core_generation;
         if self.handler.is_none() {
             return;
         }
@@ -154,13 +163,30 @@ impl SelectionToolbarRegistry {
         let action = work.clone();
         window.on_copy_requested(move || action.post(AppEvent::SelectionToolbarCopyRequested));
         let action = work.clone();
+        let weak = window.as_weak();
+        window.on_history_requested(move || {
+            if let Some(window) = weak.upgrade() {
+                let p = window.window().position();
+                let size = window.window().size();
+                action.post(AppEvent::ClipboardHistory(
+                    lexift_core::domain::clipboard_history::HistoryEvent::Open {
+                        generation: core_generation,
+                        anchor: Point {
+                            x: p.x,
+                            y: p.y.saturating_add(size.height as i32),
+                        },
+                    },
+                ));
+            }
+        });
+        let action = work.clone();
         window.window().on_close_requested(move || {
             action.post(AppEvent::SelectionToolbarDismissRequested);
             slint::CloseRequestResponse::KeepWindowShown
         });
         window
             .window()
-            .set_size(slint::LogicalSize::new(96.0, 48.0));
+            .set_size(slint::LogicalSize::new(138.0, 48.0));
         self.selection = Some(selection);
         self.window = Some(window);
         self.generation = self.generation.wrapping_add(1);
@@ -386,7 +412,7 @@ mod tests {
             &self.window
         }
         fn size(&self) -> slint::PhysicalSize {
-            slint::PhysicalSize::new(96, 48)
+            slint::PhysicalSize::new(138, 48)
         }
         fn renderer(&self) -> &dyn slint::platform::Renderer {
             &self.renderer
@@ -465,6 +491,9 @@ mod tests {
                 cursor_position: Rc::new(|| Some(Point { x: 0, y: 0 })),
                 fade_timer: Default::default(),
                 generation: 0,
+                core_generation: 0,
+                selection_generation: 0,
+                history_supported: true,
                 target: None,
                 target_current: Rc::new(|_| true),
                 work: None,

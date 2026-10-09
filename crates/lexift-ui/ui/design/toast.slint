@@ -1,0 +1,87 @@
+import { Colors } from "colors.slint";
+import { Spacing } from "spacing.slint";
+import { Metrics } from "metrics.slint";
+import { Typography } from "typography.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export component AppToast inherits Rectangle {
+    in property <string> message;
+    in property <bool> error: false;
+    in property <bool> adaptive-height: false;
+    in property <length> height-limit: Metrics.toast-height;
+    callback dismissed();
+
+    width: Metrics.toast-width;
+    height: root.adaptive-height ? min(root.height-limit, max(Metrics.toast-height, scroll-message.preferred-height + 2 * Spacing.medium)) : Metrics.toast-height;
+    border-radius: Spacing.small;
+    border-width: 1px;
+    border-color: Colors.outline;
+    background: Colors.surface;
+
+    // An overlay must consume body clicks instead of pasting the row beneath it.
+    TouchArea { mouse-cursor: default; }
+
+    Path {
+        x: Spacing.medium;
+        y: (parent.height - Metrics.icon-size) / 2;
+        width: Metrics.icon-size;
+        height: Metrics.icon-size;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.error
+            ? "M11 15h2v2h-2v-2zm0-8h2v6h-2V7zm1-5C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"
+            : "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z";
+        fill: root.error ? Colors.error : Colors.success;
+    }
+
+    message-label := Text {
+        visible: !root.adaptive-height;
+        x: Spacing.medium + Metrics.icon-size + Spacing.small;
+        width: parent.width - 2 * Spacing.medium - 2 * Metrics.icon-size - 2 * Spacing.small;
+        height: parent.height;
+        text: root.message;
+        color: Colors.foreground;
+        font-size: Typography.body-size;
+        font-weight: 700;
+        vertical-alignment: center;
+        wrap: word-wrap;
+        overflow: elide;
+    }
+
+    ScrollView {
+        visible: root.adaptive-height;
+        x: message-label.x; y: Spacing.medium; width: message-label.width; height: max(0px, parent.height - 2 * Spacing.medium);
+        content-width: self.visible-width; content-height: scroll-message.preferred-height;
+        horizontal-scrollbar-policy: always-off;
+        scroll-message := Text {
+            x: 0px; y: 0px; width: parent.width; height: self.preferred-height;
+            text: root.message; color: Colors.foreground; font-size: Typography.body-size; font-weight: 700; wrap: word-wrap;
+        }
+    }
+
+    close-button := Rectangle {
+        x: parent.width - Spacing.small - Metrics.icon-button-size;
+        y: (parent.height - Metrics.icon-button-size) / 2;
+        width: Metrics.icon-button-size;
+        height: Metrics.icon-button-size;
+        border-radius: Metrics.icon-button-radius;
+        background: close-touch.pressed ? Colors.icon-button-pressed
+            : close-touch.has-hover ? Colors.icon-button-hover : transparent;
+
+        Path {
+            x: (parent.width - Metrics.icon-size) / 2;
+            y: (parent.height - Metrics.icon-size) / 2;
+            width: Metrics.icon-size;
+            height: Metrics.icon-size;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M18.3 5.71 16.89 4.29 12 9.17 7.11 4.29 5.7 5.71 10.59 10.59 5.7 15.48 7.11 16.89 12 12 16.89 16.89 18.3 15.48 13.41 10.59z";
+            fill: Colors.secondary-foreground;
+        }
+
+        close-touch := TouchArea {
+            accessible-role: button; accessible-label: @tr("Close"); mouse-cursor: pointer;
+            clicked => { root.dismissed(); }
+        }
+    }
+}

@@ -10,3 +10,7 @@ pub mod selection;
 pub mod settings;
 pub mod translation;
 pub mod ui_language;
+
+pub mod clipboard_history;
+
+pub mod copy_feedback;

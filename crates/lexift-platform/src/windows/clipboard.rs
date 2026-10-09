@@ -20,24 +20,51 @@ impl ClipboardPort for WindowsClipboardPort {
     }
 
     fn write_text(&self, text: &str) -> Result<()> {
-        let encoded = encode_unicode_clipboard_text(text);
-        let bytes = encoded.len() * mem::size_of::<u16>();
-        let memory = OwnedGlobal::allocate(bytes)?;
-        let destination = unsafe { GlobalLock(memory.handle()) } as *mut u16;
-        if destination.is_null() {
-            return Err(Error::new("Could not allocate clipboard text"));
-        }
-        unsafe { ptr::copy_nonoverlapping(encoded.as_ptr(), destination, encoded.len()) };
-        let _ = unsafe { GlobalUnlock(memory.handle()) };
-
-        let _clipboard = open_clipboard_with_retry()?;
-        unsafe { EmptyClipboard() }
-            .map_err(|_| Error::new("Could not clear the Windows clipboard"))?;
-        unsafe { SetClipboardData(u32::from(CF_UNICODETEXT.0), Some(HANDLE(memory.handle().0))) }
-            .map_err(|_| Error::new("Could not write text to the Windows clipboard"))?;
-        memory.transfer_to_clipboard();
-        Ok(())
+        write_text(text, false)
     }
+    fn write_sensitive_text(&self, text: &str) -> Result<()> {
+        write_text(text, true)
+    }
+}
+fn write_text(text: &str, sensitive: bool) -> Result<()> {
+    let encoded = encode_unicode_clipboard_text(text);
+    let bytes = encoded.len() * mem::size_of::<u16>();
+    let memory = OwnedGlobal::allocate(bytes)?;
+    let destination = unsafe { GlobalLock(memory.handle()) } as *mut u16;
+    if destination.is_null() {
+        return Err(Error::new("Could not allocate clipboard text"));
+    }
+    unsafe { ptr::copy_nonoverlapping(encoded.as_ptr(), destination, encoded.len()) };
+    let _ = unsafe { GlobalUnlock(memory.handle()) };
+
+    let _clipboard = open_clipboard_with_retry()?;
+    unsafe { EmptyClipboard() }.map_err(|_| Error::new("Could not clear the Windows clipboard"))?;
+    if sensitive {
+        let format = unsafe {
+            windows::Win32::System::DataExchange::RegisterClipboardFormatW(windows::core::w!(
+                "ExcludeClipboardContentFromMonitorProcessing"
+            ))
+        };
+        if format == 0 {
+            return Err(Error::new("Could not exclude sensitive clipboard text"));
+        }
+        let marker = OwnedGlobal::allocate(4)?;
+        let p = unsafe { GlobalLock(marker.handle()) } as *mut u32;
+        if p.is_null() {
+            return Err(Error::new("Could not exclude sensitive clipboard text"));
+        }
+        unsafe {
+            p.write(1);
+            let _ = GlobalUnlock(marker.handle());
+        }
+        unsafe { SetClipboardData(format, Some(HANDLE(marker.handle().0))) }
+            .map_err(|_| Error::new("Could not exclude sensitive clipboard text"))?;
+        marker.transfer_to_clipboard();
+    }
+    unsafe { SetClipboardData(u32::from(CF_UNICODETEXT.0), Some(HANDLE(memory.handle().0))) }
+        .map_err(|_| Error::new("Could not write text to the Windows clipboard"))?;
+    memory.transfer_to_clipboard();
+    Ok(())
 }
 
 fn encode_unicode_clipboard_text(text: &str) -> Vec<u16> {

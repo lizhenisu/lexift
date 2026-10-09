@@ -10,6 +10,7 @@ pub(super) mod app_icon;
 mod autostart;
 pub(super) mod browser;
 mod clipboard;
+pub(crate) mod clipboard_history;
 mod clipboard_selection;
 mod d3d_compare;
 mod d3d_query;

@@ -1,3 +1,4 @@
+import { CopyFeedbackIcon } from "design/copy-feedback.slint";
 import { ScrollView } from "std-widgets.slint";
 import { Colors } from "design/colors.slint";
 import { Spacing } from "design/spacing.slint";
@@ -9,11 +10,14 @@ import { Metrics } from "design/metrics.slint";
 export enum PopupCornerMode { native-dwm, opaque-square, slint-rounded }
 
 component IconButton inherits Rectangle {
+    in property <bool> copy-action: false;
+    in property <bool> copied: false;
     in property <image> icon;
     in property <length> icon-size: 20px;
     in property <bool> active: false;
     in property <bool> enabled: true;
     callback clicked();
+    accessible-role: AccessibleRole.button; accessible-label: root.copy-action ? @tr("Copy") : ""; accessible-enabled: root.enabled;
     width: 34px;
     height: 34px;
     border-radius: 10px;
@@ -21,7 +25,7 @@ component IconButton inherits Rectangle {
         : button.pressed ? Colors.icon-button-pressed
         : button.has-hover ? Colors.icon-button-hover : transparent;
     opacity: root.enabled ? 1 : 0.4;
-    Image {
+    if !root.copy-action: Image {
         x: (parent.width - root.icon-size) / 2;
         y: (parent.height - root.icon-size) / 2;
         width: root.icon-size;
@@ -30,6 +34,7 @@ component IconButton inherits Rectangle {
         image-fit: contain;
         colorize: root.active ? Colors.primary : Colors.foreground;
     }
+    if root.copy-action: CopyFeedbackIcon { x: (parent.width - root.icon-size) / 2; y: (parent.height - root.icon-size) / 2; width: root.icon-size; height: root.icon-size; copied: root.copied; }
     button := TouchArea {
         enabled: root.enabled;
         clicked => { root.clicked(); }
@@ -72,6 +77,14 @@ export component TranslationPopup inherits Window {
     max-height: root.max-popup-height;
 
     in property <int> session-id: 0;
+    in-out property <string> mapped-source-text;
+    in property <string> copy-source-value;
+    in property <string> copy-result-value;
+    in property <bool> copy-source-pending;
+    in property <bool> copy-result-pending;
+    in property <string> copy-source-completed;
+    in property <string> copy-result-completed;
+    callback copy-feedback-expired(bool, string);
     in-out property <length> popup-width: 420px;
     in-out property <length> popup-height: 390px;
     in-out property <PopupCornerMode> corner-mode: PopupCornerMode.slint-rounded;
@@ -311,7 +324,7 @@ export component TranslationPopup inherits Window {
                 HorizontalLayout {
                     x: 8px; y: parent.height - 42px; width: parent.width - 16px; height: 36px;
                     spacing: 2px;
-                    IconButton { icon: AppAssets.icon-copy; icon-size: 18px; clicked => { root.interaction-requested(); root.copy-requested(true); } }
+                    IconButton { copy-action: true; copied: root.copy-source-completed != "" && root.source-text == root.copy-source-value; enabled: !root.copy-source-pending; icon-size: 18px; clicked => { root.interaction-requested(); root.copy-requested(true); } }
                     IconButton { icon: AppAssets.icon-volume; icon-size: 18px; active: root.speaking-source; clicked => { root.interaction-requested(); root.speech-requested(true); } }
                     Rectangle { horizontal-stretch: 1; }
                     ActionButton {
@@ -430,7 +443,7 @@ export component TranslationPopup inherits Window {
                 HorizontalLayout {
                     x: 8px; y: parent.height - 40px; width: parent.width - 16px; height: 34px;
                     spacing: 2px;
-                    IconButton { icon: AppAssets.icon-copy; icon-size: 18px; enabled: root.translated-text != ""; clicked => { root.interaction-requested(); root.copy-requested(false); } }
+                    IconButton { copy-action: true; copied: root.copy-result-completed != "" && root.translated-text == root.copy-result-value; icon-size: 18px; enabled: root.translated-text != "" && !root.copy-result-pending; clicked => { root.interaction-requested(); root.copy-requested(false); } }
                     IconButton { icon: AppAssets.icon-volume; icon-size: 18px; active: root.speaking-translation; enabled: root.translated-text != ""; clicked => { root.interaction-requested(); root.speech-requested(false); } }
                     if root.error-text != "": IconButton { icon: AppAssets.icon-refresh; clicked => { root.translate-requested(root.source-text, root.source-index, root.target-index); } }
                     Rectangle { horizontal-stretch: 1; }

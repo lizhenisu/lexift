@@ -1350,3 +1350,96 @@ msgstr "Open-Source-Lizenz"
 
 msgid "Could not open the browser. Please try again."
 msgstr "Der Browser konnte nicht geöffnet werden. Bitte versuchen Sie es erneut."
+
+msgid "Clear clipboard history"
+msgstr "Verlauf löschen"
+
+msgid "Clipboard history"
+msgstr "Zwischenablageverlauf"
+
+msgid "Clipboard history could not be loaded. Clear history to start again."
+msgstr "Verlauf konnte nicht geladen werden. Löschen Sie ihn, um neu zu beginnen."
+
+msgid "Clipboard history could not be saved."
+msgstr "Verlauf konnte nicht gespeichert werden."
+
+msgid "Clipboard paste could not be sent to this input."
+msgstr "Einfügen in dieses Eingabefeld fehlgeschlagen."
+
+msgid "Clipboard paste was cancelled."
+msgstr "Einfügen wurde abgebrochen."
+
+msgid "Clipboard settings"
+msgstr "Zwischenablage-Einstellungen"
+
+msgid "Enable and record"
+msgstr "Aktivieren und aufzeichnen"
+
+msgid "History limit"
+msgstr "Verlaufslimit"
+
+msgid "Keep encrypted plain-text history on this device"
+msgstr "Verschlüsselten Textverlauf auf diesem Gerät speichern"
+
+msgid "No clipboard history yet"
+msgstr "Noch kein Zwischenablageverlauf"
+
+msgid "Pasting…"
+msgstr "Wird eingefügt…"
+
+msgid "Record clipboard history"
+msgstr "Zwischenablageverlauf aufzeichnen"
+
+msgid "Recording"
+msgstr "Aufzeichnung läuft"
+
+msgid "Recording paused"
+msgstr "Aufzeichnung pausiert"
+
+msgid "Release modifier keys and try again."
+msgstr "Lassen Sie die Zusatztasten los und versuchen Sie es erneut."
+
+msgid "Save recent plain text on this device. History is encrypted for your Windows account. Recording starts only after you enable it."
+msgstr "Speichert zuletzt kopierten Text auf diesem Gerät, verschlüsselt mit Ihrem Windows-Konto. Die Aufzeichnung beginnt erst nach der Aktivierung."
+
+msgid "Show Translate, Copy and Clipboard after selecting text"
+msgstr "Übersetzen, Kopieren und Zwischenablage nach Textauswahl anzeigen"
+
+msgid "The original input has changed. Select text again."
+msgstr "Das ursprüngliche Eingabefeld hat sich geändert. Wählen Sie den Text erneut aus."
+
+msgid "The original selection is not a supported editable input."
+msgstr "Die ursprüngliche Auswahl ist kein bestätigtes bearbeitbares Eingabefeld."
+
+msgid "This clipboard text is too large to record."
+msgstr "Dieser Text ist zu groß für den Verlauf."
+
+msgid "Clipboard history monitoring is unavailable"
+msgstr "Zwischenablageüberwachung nicht verfügbar"
+
+msgid "Clipboard settings saved"
+msgstr "Zwischenablage-Einstellungen gespeichert"
+
+msgid "Could not save clipboard settings"
+msgstr "Zwischenablage-Einstellungen konnten nicht gespeichert werden"
+
+msgid "Delete clipboard entry"
+msgstr "Zwischenablageeintrag löschen"
+
+msgid "Could not copy clipboard entry."
+msgstr "Der Zwischenablageeintrag konnte nicht kopiert werden."
+
+msgid "Delete"
+msgstr "Löschen"
+
+msgid "Delete all saved clipboard history? This cannot be undone."
+msgstr "Den gesamten gespeicherten Zwischenablageverlauf löschen? Dies kann nicht rückgängig gemacht werden."
+
+msgid "Copying…"
+msgstr "Kopieren…"
+
+msgid "Click to paste"
+msgstr "Zum Einfügen klicken"
+
+msgid "Copied text appears here."
+msgstr "Kopierter Text erscheint hier."

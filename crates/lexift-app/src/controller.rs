@@ -118,6 +118,7 @@ impl ViewPort for lexift_ui::UiHandle {
 
 /// Executes Core commands on background workers and returns events to Core.
 pub(crate) struct AppController {
+    history: Option<Arc<crate::clipboard_history::HistoryRuntime>>,
     runtime: Handle,
     state: Arc<Mutex<AppState>>,
     selection: Option<Arc<dyn SelectionPort>>,
@@ -153,6 +154,7 @@ impl AppController {
             .desired_settings
             .selection_toolbar;
         Self {
+            history: None,
             runtime,
             state,
             selection,
@@ -187,6 +189,22 @@ impl AppController {
         self.credential_reference = Some(credential_reference);
         self.clipboard = clipboard;
         self
+    }
+
+    pub(crate) fn with_history(
+        mut self,
+        history: Option<crate::clipboard_history::HistoryRuntime>,
+    ) -> Self {
+        self.history = history.map(Arc::new);
+        self
+    }
+    pub(crate) fn start_history(self: &Arc<Self>) {
+        if let Some(h) = &self.history {
+            h.start(self);
+        }
+    }
+    pub(crate) fn spawn_history(&self, work: impl FnOnce() + Send + 'static) {
+        self.runtime.spawn_blocking(work);
     }
 
     pub(crate) fn with_speech(mut self, speech: Option<Arc<dyn SpeechPort>>) -> Self {
@@ -225,7 +243,14 @@ impl AppController {
                 command_count = commands.len(),
                 "application transition completed"
             );
-            (state.clone(), commands)
+            let snapshot = state.clone();
+            if let Some(h) = &self.history {
+                h.sync(self, &snapshot);
+            }
+            // Queue snapshots in transition order. A notification arriving on another
+            // thread must not render an older session after its successor was closed.
+            self.ui.update(snapshot.clone());
+            (snapshot, commands)
         };
         #[cfg(not(feature = "m1-demo"))]
         self.selection_toolbar_enabled.store(
@@ -233,7 +258,6 @@ impl AppController {
             Ordering::Release,
         );
         self.state_changed.notify_waiters();
-        self.ui.update(snapshot);
 
         for command in commands {
             self.execute(command);
@@ -257,6 +281,11 @@ impl AppController {
 
     fn execute(self: &Arc<Self>, command: AppCommand) {
         match command {
+            AppCommand::ClipboardHistory(command) => {
+                if let Some(h) = &self.history {
+                    h.execute(self, command);
+                }
+            }
             AppCommand::CaptureSelection { task_id } => self.capture_selection(task_id),
             AppCommand::CaptureToolbarSelection {
                 start,
@@ -283,9 +312,12 @@ impl AppController {
             } => self.translate_popup(session_id, task_id, request),
             AppCommand::ShowPopup { session_id, anchor } => self.show_popup(session_id, anchor),
             AppCommand::HidePopup { session_id } => self.ui.hide_popup(session_id),
-            AppCommand::CopyPopupText { session_id, text } => {
-                self.copy_popup_text(session_id, text)
-            }
+            AppCommand::CopyPopupText {
+                session_id,
+                source,
+                request,
+                text,
+            } => self.copy_popup_text(session_id, source, request, text),
             AppCommand::SpeakPopupText {
                 session_id,
                 source,
@@ -366,7 +398,17 @@ impl AppController {
                 self.persist_llm_credential(provider, secret)
             }
             AppCommand::ClearCredentialDraft => self.ui.clear_credential_draft(),
-            AppCommand::Exit => self.ui.quit(),
+            AppCommand::Exit => {
+                if let Some(h) = self.history.clone() {
+                    let ui = self.ui.clone();
+                    self.runtime.spawn_blocking(move || {
+                        h.shutdown();
+                        ui.quit();
+                    });
+                } else {
+                    self.ui.quit();
+                }
+            }
         }
     }
 
@@ -399,7 +441,7 @@ impl AppController {
                     let clipboard =
                         clipboard.ok_or_else(|| "System clipboard is unavailable".to_owned())?;
                     clipboard
-                        .write_text(secret.expose())
+                        .write_sensitive_text(secret.expose())
                         .map_err(|error| format!("Could not copy DeepL API key: {error}"))?;
                     Ok(None)
                 } else {
@@ -416,10 +458,16 @@ impl AppController {
                     controller
                         .ui
                         .present_credential_secret(purpose, generation, secret);
-                    controller.dispatch(AppEvent::CredentialAccessSucceeded { purpose });
+                    controller.dispatch(AppEvent::CredentialAccessSucceeded {
+                        purpose,
+                        generation,
+                    });
                 }
                 Ok(Ok(None)) => {
-                    controller.dispatch(AppEvent::CredentialAccessSucceeded { purpose });
+                    controller.dispatch(AppEvent::CredentialAccessSucceeded {
+                        purpose,
+                        generation,
+                    });
                 }
                 Ok(Err(error)) => controller.dispatch(AppEvent::CredentialAccessFailed { error }),
                 Err(_) => controller.dispatch(AppEvent::CredentialAccessFailed {
@@ -455,7 +503,7 @@ impl AppController {
                     }
                     clipboard
                         .ok_or_else(|| "System clipboard is unavailable".to_owned())?
-                        .write_text(&secret)
+                        .write_sensitive_text(&secret)
                         .map_err(|_| "Could not copy API key".to_owned())?;
                     Ok(None)
                 } else {
@@ -474,7 +522,10 @@ impl AppController {
                             .ui
                             .present_credential_secret(purpose, generation, secret);
                     }
-                    controller.dispatch(AppEvent::CredentialAccessSucceeded { purpose });
+                    controller.dispatch(AppEvent::CredentialAccessSucceeded {
+                        purpose,
+                        generation,
+                    });
                 }
                 Ok(Err(error)) => controller.dispatch(AppEvent::CredentialAccessFailed { error }),
                 Err(_) => controller.dispatch(AppEvent::CredentialAccessFailed {
@@ -970,29 +1021,82 @@ impl AppController {
         });
     }
 
-    fn copy_popup_text(self: &Arc<Self>, session_id: PopupSessionId, text: String) {
+    pub(crate) fn copy_history_entry(
+        self: &Arc<Self>,
+        session: u64,
+        request: u64,
+        entry: lexift_core::domain::clipboard_history::HistoryEntry,
+    ) {
+        let controller = self.clone();
+        let clipboard = self.clipboard.clone();
+        self.runtime.spawn_blocking(move || {
+            let current = {
+                let state = controller.state.lock().unwrap_or_else(|p| p.into_inner());
+                state.clipboard_history.session.as_ref().is_some_and(|s| {
+                    s.id == session
+                        && s.copy
+                            .get(&entry.id)
+                            .is_some_and(|c| c.pending && c.request == request)
+                }) && state
+                    .clipboard_history
+                    .entries
+                    .iter()
+                    .any(|e| e.id == entry.id)
+            };
+            if !current {
+                return;
+            }
+            let success = clipboard.is_some_and(|c| c.write_text(&entry.text).is_ok());
+            controller.dispatch(AppEvent::ClipboardHistory(
+                lexift_core::domain::clipboard_history::HistoryEvent::CopyFinished {
+                    session,
+                    entry: entry.id,
+                    request,
+                    success,
+                },
+            ));
+        });
+    }
+    fn copy_popup_text(
+        self: &Arc<Self>,
+        session_id: PopupSessionId,
+        source: bool,
+        request: u64,
+        text: String,
+    ) {
         let Some(clipboard) = self.clipboard.clone() else {
             self.dispatch(AppEvent::PopupCopyFinished {
                 session_id,
+                source,
+                request,
+                text,
                 error: Some("System clipboard is unavailable".into()),
             });
             return;
         };
         let controller = Arc::clone(self);
         self.runtime.spawn(async move {
-            let result = tokio::task::spawn_blocking(move || clipboard.write_text(&text)).await;
+            let copied = text.clone();
+            let result = tokio::task::spawn_blocking(move || clipboard.write_text(&copied)).await;
             let error = match result {
                 Ok(Ok(())) => None,
                 Ok(Err(error)) => Some(format!("Could not copy text: {error}")),
                 Err(error) => Some(format!("Clipboard worker failed: {error}")),
             };
-            controller.dispatch(AppEvent::PopupCopyFinished { session_id, error });
+            controller.dispatch(AppEvent::PopupCopyFinished {
+                session_id,
+                source,
+                request,
+                text,
+                error,
+            });
         });
     }
 }
 
 fn event_name(event: &AppEvent) -> &'static str {
     match event {
+        AppEvent::ClipboardHistory(_) => "clipboard_history",
         AppEvent::Started => "started",
         AppEvent::SelectionTranslationRequested => "selection_translation_requested",
         AppEvent::SelectionInteractionStarted => "selection_interaction_started",
@@ -1016,6 +1120,7 @@ fn event_name(event: &AppEvent) -> &'static str {
         AppEvent::PopupPinChanged { .. } => "popup_pin_changed",
         AppEvent::PopupClosed { .. } => "popup_closed",
         AppEvent::PopupCopyRequested { .. } => "popup_copy_requested",
+        AppEvent::PopupCopyFeedbackCleared { .. } => "popup_copy_feedback_cleared",
         AppEvent::PopupCopyFinished { .. } => "popup_copy_finished",
         AppEvent::PopupFeedbackCleared { .. } => "popup_feedback_cleared",
         AppEvent::PopupSpeechRequested { .. } => "popup_speech_requested",
@@ -1045,7 +1150,7 @@ fn event_name(event: &AppEvent) -> &'static str {
             CredentialAccessPurpose::Copy => "credential_copy_requested",
         },
         AppEvent::CredentialAccessCancelled => "credential_access_cancelled",
-        AppEvent::CredentialAccessSucceeded { purpose } => match purpose {
+        AppEvent::CredentialAccessSucceeded { purpose, .. } => match purpose {
             CredentialAccessPurpose::Reveal => "credential_reveal_succeeded",
             CredentialAccessPurpose::Edit => "credential_edit_succeeded",
             CredentialAccessPurpose::Copy => "credential_copy_succeeded",
@@ -2422,6 +2527,107 @@ mod tests {
     }
 
     #[test]
+    fn history_copy_writes_full_text_and_reports_failure_without_pasting() {
+        use lexift_core::domain::{
+            clipboard_history::{HistoryEntry, HistoryEvent},
+            selection::{Selection, SelectionTarget},
+        };
+        use lexift_core::ports::magnifier::WindowToken;
+        for fails in [false, true] {
+            let runtime = Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .unwrap();
+            let mut initial = AppState::default();
+            initial.toolbar_selection = Some(Selection {
+                text: "original selection".into(),
+                bounds: vec![],
+                anchor: None,
+                gesture_start: None,
+            });
+            initial.toolbar_target = Some(SelectionTarget {
+                window: WindowToken(1),
+                focus: Some(WindowToken(2)),
+                process: 3,
+                thread: 4,
+            });
+            initial.reduce(AppEvent::ClipboardHistory(HistoryEvent::Open {
+                generation: 0,
+                anchor: Point { x: 0, y: 0 },
+            }));
+            let entry = HistoryEntry {
+                id: 5,
+                text: Arc::from("  完整内容\nsecond line\n"),
+            };
+            initial.clipboard_history.entries.push(entry.clone());
+            initial.reduce(AppEvent::ClipboardHistory(HistoryEvent::Copy {
+                session: 1,
+                entry: 5,
+            }));
+            let state = Arc::new(Mutex::new(initial));
+            let view = Arc::new(RecordingView::default());
+            let clipboard = Arc::new(RecordingClipboard::default());
+            clipboard.fail_write.store(fails, Ordering::SeqCst);
+            let controller = Arc::new(
+                AppController::new(
+                    runtime.handle().clone(),
+                    state.clone(),
+                    None,
+                    None,
+                    Arc::new(ReorderingTranslator),
+                    Arc::new(RecordingSettingsStore::default()),
+                    view.clone(),
+                )
+                .with_credential_management(
+                    Arc::new(RecordingCredentialStore::default()),
+                    Arc::new(RwLock::new(None)),
+                    Some(clipboard.clone()),
+                ),
+            );
+            controller.copy_history_entry(1, 1, entry.clone());
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                if !state
+                    .lock()
+                    .unwrap()
+                    .clipboard_history
+                    .session
+                    .as_ref()
+                    .unwrap()
+                    .copy[&5]
+                    .pending
+                {
+                    break;
+                }
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(5));
+            }
+            {
+                let state = state.lock().unwrap();
+                let session = state.clipboard_history.session.as_ref().unwrap();
+                assert_eq!(session.copy[&5].completed, if fails { 0 } else { 1 });
+                assert_eq!(!session.error.is_empty(), fails);
+                assert!(!session.busy);
+            }
+            if !fails {
+                assert_eq!(
+                    clipboard.text.lock().unwrap().as_deref(),
+                    Some("  完整内容\nsecond line\n")
+                );
+            }
+            assert!(view.settings_feedback.lock().unwrap().is_empty());
+            controller.dispatch(AppEvent::ClipboardHistory(HistoryEvent::Close {
+                session: 1,
+            }));
+            *clipboard.text.lock().unwrap() = None;
+            controller.copy_history_entry(1, 1, entry);
+            thread::sleep(Duration::from_millis(30));
+            assert!(clipboard.text.lock().unwrap().is_none());
+        }
+    }
+
+    #[test]
     fn credential_copy_bypasses_the_view_and_writes_the_clipboard() {
         let runtime = Builder::new_multi_thread()
             .worker_threads(1)
@@ -2465,7 +2671,8 @@ mod tests {
                 .settings_feedback
                 .lock()
                 .unwrap()
-                .contains(&SettingsFeedback::CredentialCopied)
+                .iter()
+                .any(|f| matches!(f, SettingsFeedback::CredentialCopied { generation: 23 }))
             {
                 break;
             }

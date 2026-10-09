@@ -613,3 +613,28 @@ pub fn open_web_link(url: &str) -> lexift_core::Result<()> {
         ))
     }
 }
+
+/// Independent Windows history capabilities; callers own their lifecycle.
+pub fn clipboard_history_capabilities()
+-> lexift_core::Result<lexift_core::ports::clipboard_history::HistoryCapabilities> {
+    #[cfg(target_os = "windows")]
+    return windows::clipboard_history::capabilities();
+    #[cfg(not(target_os = "windows"))]
+    Err(lexift_core::Error::new(
+        "Clipboard history is not supported",
+    ))
+}
+
+/// Watches outside clicks, foreground changes and Escape for the passive history window.
+pub fn set_clipboard_history_dismissal(
+    window: &impl raw_window_handle::HasWindowHandle,
+    enabled: bool,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::popup::set_history_dismissal(window, enabled)?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = (window, enabled);
+    Ok(())
+}

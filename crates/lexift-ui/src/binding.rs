@@ -1,4 +1,5 @@
 use crate::{AppWindow, SettingsWindow, TranslationPopup, mapper::UiState};
+use slint::ComponentHandle;
 
 pub(crate) fn apply_main(main: &AppWindow, state: &UiState) {
     main.set_status_text(state.status.clone().into());
@@ -37,6 +38,9 @@ pub(crate) fn apply_settings(settings: &SettingsWindow, state: &UiState) {
     if settings.get_launch_at_login() != state.launch_at_login {
         settings.set_launch_at_login(state.launch_at_login);
     }
+    settings.set_history_error(state.history_error.clone().into());
+    settings.set_history_enabled(state.history_enabled);
+    settings.set_history_limit(state.history_limit);
     if settings.get_selection_toolbar() != state.selection_toolbar {
         settings.set_selection_toolbar(state.selection_toolbar);
     }
@@ -70,9 +74,47 @@ pub(crate) fn apply_settings(settings: &SettingsWindow, state: &UiState) {
 }
 
 pub(crate) fn apply_popup_content(popup: &TranslationPopup, state: &crate::mapper::PopupUiState) {
+    for (index, copy) in state.copy.iter().enumerate() {
+        let source = index == 0;
+        let completed = if copy.completed == 0 {
+            String::new()
+        } else {
+            copy.completed.to_string()
+        };
+        let previous = if source {
+            popup.get_copy_source_completed()
+        } else {
+            popup.get_copy_result_completed()
+        };
+        if source {
+            popup.set_copy_source_pending(copy.pending);
+            popup.set_copy_source_completed(completed.clone().into());
+        } else {
+            popup.set_copy_result_pending(copy.pending);
+            popup.set_copy_result_completed(completed.clone().into());
+        }
+        if !completed.is_empty() && previous.as_str() != completed {
+            let weak = popup.as_weak();
+            let session = state.session_id;
+            slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || {
+                if let Some(w) = weak
+                    .upgrade()
+                    .filter(|w| w.get_session_id() as u64 == session)
+                {
+                    w.invoke_copy_feedback_expired(source, completed.into());
+                }
+            });
+        }
+    }
     popup.set_session_id(state.session_id as i32);
     popup.set_phase_text(state.status.clone().into());
-    popup.set_source_text(state.source.clone().into());
+    // Copy feedback updates must not replace an unsubmitted source editor draft.
+    if popup.get_mapped_source_text().as_str() != state.source {
+        popup.set_source_text(state.source.clone().into());
+        popup.set_mapped_source_text(state.source.clone().into());
+    }
+    popup.set_copy_source_value(state.copy_text[0].clone().into());
+    popup.set_copy_result_value(state.copy_text[1].clone().into());
     popup.set_translated_text(state.translated.clone().into());
     popup.set_error_text(state.error.clone().into());
     popup.set_source_index(state.source_index);

@@ -23,6 +23,9 @@ pub enum TranslationPhase {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PopupSessionState {
+    pub copy: [crate::domain::copy_feedback::CopyStatus; 2],
+    pub copy_text: [String; 2],
+    pub copy_context: [String; 2],
     pub id: PopupSessionId,
     pub phase: TranslationPhase,
     pub source_text: String,
@@ -41,6 +44,7 @@ pub struct PopupSessionState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppState {
+    pub clipboard_history: crate::domain::clipboard_history::HistoryState,
     pub phase: TranslationPhase,
     pub current_translation_task: Option<TranslationTaskId>,
     pub settings: Settings,
@@ -82,6 +86,7 @@ impl Default for AppState {
 impl AppState {
     pub fn new(settings: Settings) -> Self {
         Self {
+            clipboard_history: Default::default(),
             phase: TranslationPhase::Idle,
             current_translation_task: None,
             runtime_config: settings.runtime_config(),
@@ -124,9 +129,15 @@ impl AppState {
     /// Applies a domain event and returns the capabilities the app must execute.
     pub fn reduce(&mut self, event: AppEvent) -> Vec<AppCommand> {
         match event {
+            AppEvent::ClipboardHistory(event) => {
+                crate::domain::clipboard_history::reduce(self, event)
+            }
             AppEvent::Started => Vec::new(),
             AppEvent::SelectionTranslationRequested => self.request_selection_translation(),
             AppEvent::SelectionInteractionStarted | AppEvent::SelectionToolbarDismissRequested => {
+                if matches!(event, AppEvent::SelectionInteractionStarted) {
+                    self.clipboard_history.session = None;
+                }
                 self.toolbar_generation = self.toolbar_generation.wrapping_add(1);
                 self.toolbar_selection = None;
                 self.toolbar_target = None;
@@ -287,6 +298,8 @@ impl AppState {
                     .find(|session| session.current_translation_task == Some(task_id))
                 {
                     session.phase = TranslationPhase::Success;
+                    session.copy[1].pending = false;
+                    session.copy[1].completed = 0;
                     session.translated_text = result.text;
                     session.detected_source_language = result.detected_source_language;
                     session.error_message.clear();
@@ -341,6 +354,8 @@ impl AppState {
                     && session.current_translation_task == Some(task_id)
                 {
                     session.phase = TranslationPhase::Success;
+                    session.copy[1].pending = false;
+                    session.copy[1].completed = 0;
                     session.translated_text = result.text;
                     session.detected_source_language = result.detected_source_language;
                     session.error_message.clear();
@@ -394,20 +409,67 @@ impl AppState {
                 Vec::new()
             }
             AppEvent::PopupClosed { session_id } => self.close_popup_session(session_id),
-            AppEvent::PopupCopyRequested { session_id, text } => {
-                if self.popup_session_mut(session_id).is_none() || text.is_empty() {
-                    Vec::new()
+            AppEvent::PopupCopyRequested {
+                session_id,
+                source,
+                text,
+            } => {
+                let Some(session) = self.popup_session_mut(session_id) else {
+                    return vec![];
+                };
+                let current = if source {
+                    &session.source_text
                 } else {
-                    vec![AppCommand::CopyPopupText { session_id, text }]
+                    &session.translated_text
+                };
+                if text.is_empty() || (!source && current != &text) {
+                    return vec![];
                 }
+                let Some(request) = session.copy[usize::from(!source)].begin() else {
+                    return vec![];
+                };
+                session.copy_context[usize::from(!source)] = current.clone();
+                session.copy_text[usize::from(!source)] = text.clone();
+                vec![AppCommand::CopyPopupText {
+                    session_id,
+                    source,
+                    request,
+                    text,
+                }]
             }
-            AppEvent::PopupCopyFinished { session_id, error } => {
+            AppEvent::PopupCopyFinished {
+                session_id,
+                source,
+                request,
+                text,
+                error,
+            } => {
                 if let Some(session) = self.popup_session_mut(session_id) {
-                    session.feedback_error = error.is_some();
-                    session.feedback_message =
-                        error.unwrap_or_else(|| MessageId::Copied.id().into());
+                    let current = if source {
+                        &session.source_text
+                    } else {
+                        &session.translated_text
+                    };
+                    let valid = current == &session.copy_context[usize::from(!source)]
+                        && text == session.copy_text[usize::from(!source)];
+                    if session.copy[usize::from(!source)].finish(request, valid && error.is_none())
+                        && valid
+                    {
+                        session.feedback_error = error.is_some();
+                        session.feedback_message = error.unwrap_or_default();
+                    }
                 }
-                Vec::new()
+                vec![]
+            }
+            AppEvent::PopupCopyFeedbackCleared {
+                session_id,
+                source,
+                request,
+            } => {
+                if let Some(session) = self.popup_session_mut(session_id) {
+                    session.copy[usize::from(!source)].clear(request);
+                }
+                vec![]
             }
             AppEvent::PopupFeedbackCleared { session_id } => {
                 if let Some(session) = self.popup_session_mut(session_id) {
@@ -494,6 +556,10 @@ impl AppState {
                 let mut commands = vec![AppCommand::ShowSettingsFeedback {
                     feedback: change.feedback(true),
                 }];
+                commands.extend(
+                    self.clipboard_history
+                        .reconcile_limit(self.settings.clipboard_history_limit),
+                );
                 commands.extend(self.start_next_settings_change());
                 commands
             }
@@ -763,13 +829,16 @@ impl AppState {
                 self.credential_error_message.clear();
                 self.start_next_settings_change()
             }
-            AppEvent::CredentialAccessSucceeded { purpose } => {
+            AppEvent::CredentialAccessSucceeded {
+                purpose,
+                generation,
+            } => {
                 self.credential_busy = false;
                 self.credential_error_message.clear();
                 let mut commands = Vec::new();
                 if purpose == crate::ports::credential::CredentialAccessPurpose::Copy {
                     commands.push(AppCommand::ShowSettingsFeedback {
-                        feedback: SettingsFeedback::CredentialCopied,
+                        feedback: SettingsFeedback::CredentialCopied { generation },
                     });
                 }
                 commands.extend(self.start_next_settings_change());
@@ -897,7 +966,11 @@ impl AppState {
             | SettingsField::ProviderEnabled(_)
             | SettingsField::TranslationOptions => self.provider_settings_error.clear(),
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error.clear(),
-            SettingsField::SelectionToolbar | SettingsField::Theme | SettingsField::UiLanguage => {}
+            SettingsField::ClipboardHistoryEnabled
+            | SettingsField::ClipboardHistoryLimit
+            | SettingsField::SelectionToolbar
+            | SettingsField::Theme
+            | SettingsField::UiLanguage => {}
         }
     }
 
@@ -913,7 +986,11 @@ impl AppState {
             | SettingsField::ProviderEnabled(_)
             | SettingsField::TranslationOptions => self.provider_settings_error = error,
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error = error,
-            SettingsField::SelectionToolbar | SettingsField::Theme | SettingsField::UiLanguage => {
+            SettingsField::ClipboardHistoryEnabled
+            | SettingsField::ClipboardHistoryLimit
+            | SettingsField::SelectionToolbar
+            | SettingsField::Theme
+            | SettingsField::UiLanguage => {
                 self.settings_error_message = error;
             }
         }
@@ -954,6 +1031,14 @@ impl AppState {
             }
             SettingsField::LaunchAtLogin => {
                 self.desired_settings.launch_at_login = self.settings.launch_at_login;
+            }
+            SettingsField::ClipboardHistoryEnabled => {
+                self.desired_settings.clipboard_history_enabled =
+                    self.settings.clipboard_history_enabled;
+            }
+            SettingsField::ClipboardHistoryLimit => {
+                self.desired_settings.clipboard_history_limit =
+                    self.settings.clipboard_history_limit;
             }
             SettingsField::SelectionToolbar => {
                 self.desired_settings.selection_toolbar = self.settings.selection_toolbar;
@@ -1016,6 +1101,10 @@ impl AppState {
             .popup_session_mut(session_id)
             .expect("popup session was checked above");
         session.phase = TranslationPhase::Translating;
+        session.copy.iter_mut().for_each(|c| {
+            c.pending = false;
+            c.completed = 0;
+        });
         session.source_text = text.clone();
         session.source_language = source_language.clone();
         session.target_language = target_language.clone();
@@ -1095,6 +1184,9 @@ impl AppState {
             }
             let id = PopupSessionId::new(self.next_popup_session);
             self.popup_sessions.push(PopupSessionState {
+                copy: Default::default(),
+                copy_text: Default::default(),
+                copy_context: Default::default(),
                 id,
                 phase,
                 source_text: String::new(),
@@ -1117,6 +1209,10 @@ impl AppState {
             .popup_session_mut(session_id)
             .expect("active popup session must exist");
         session.phase = phase;
+        session.copy.iter_mut().for_each(|c| {
+            c.pending = false;
+            c.completed = 0;
+        });
         session.source_text = source_text;
         session.translated_text.clear();
         session.error_message.clear();
@@ -1178,6 +1274,69 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn popup_copy_feedback_is_per_button_and_rejects_old_content() {
+        let mut s = AppState::default();
+        let id = create_popup_session(&mut s, "source");
+        s.popup_sessions[0].translated_text = "result".into();
+        s.reduce(AppEvent::PopupCopyRequested {
+            session_id: id,
+            source: true,
+            text: "source".into(),
+        });
+        assert!(
+            s.reduce(AppEvent::PopupCopyRequested {
+                session_id: id,
+                source: true,
+                text: "source".into()
+            })
+            .is_empty()
+        );
+        s.reduce(AppEvent::PopupCopyRequested {
+            session_id: id,
+            source: false,
+            text: "result".into(),
+        });
+        s.reduce(AppEvent::PopupCopyFinished {
+            session_id: id,
+            source: true,
+            request: 1,
+            text: "source".into(),
+            error: None,
+        });
+        assert_eq!(s.popup_sessions[0].copy[0].completed, 1);
+        assert!(s.popup_sessions[0].copy[1].pending);
+        assert!(s.popup_sessions[0].feedback_message.is_empty());
+        s.popup_sessions[0].translated_text = "new result".into();
+        s.reduce(AppEvent::PopupCopyFinished {
+            session_id: id,
+            source: false,
+            request: 1,
+            text: "result".into(),
+            error: None,
+        });
+        assert_eq!(s.popup_sessions[0].copy[1].completed, 0);
+        s.reduce(AppEvent::PopupCopyFeedbackCleared {
+            session_id: id,
+            source: true,
+            request: 1,
+        });
+        assert_eq!(s.popup_sessions[0].copy[0].completed, 0);
+        s.reduce(AppEvent::PopupCopyRequested {
+            session_id: id,
+            source: true,
+            text: "source".into(),
+        });
+        s.reduce(AppEvent::PopupCopyFinished {
+            session_id: id,
+            source: true,
+            request: 2,
+            text: "source".into(),
+            error: Some("copy failed".into()),
+        });
+        assert!(s.popup_sessions[0].feedback_error);
+        assert_eq!(s.popup_sessions[0].copy[0].completed, 0);
+    }
     #[test]
     fn toolbar_target_tracks_only_the_current_request_and_clears_on_dismissal() {
         use crate::{domain::selection::SelectionTarget, ports::magnifier::WindowToken};
@@ -2246,6 +2405,7 @@ mod tests {
                 .is_empty()
         );
         let commands = state.reduce(AppEvent::CredentialAccessSucceeded {
+            generation: 1,
             purpose: crate::ports::credential::CredentialAccessPurpose::Reveal,
         });
 
@@ -2380,6 +2540,7 @@ mod tests {
         assert!(!format!("{state:?}").contains("secret"));
 
         state.reduce(AppEvent::CredentialAccessSucceeded {
+            generation: 1,
             purpose: CredentialAccessPurpose::Reveal,
         });
         assert!(!state.credential_busy);

@@ -136,11 +136,11 @@ mod tests {
     }
 
     #[test]
-    fn save_creates_parent_and_v8_file() {
+    fn save_creates_parent_and_v9_file() {
         let (_directory, store) = fixture();
         store.save(&settings("ja")).unwrap();
         let contents = fs::read_to_string(store.path()).unwrap();
-        assert!(contents.contains("schema_version = 8"));
+        assert!(contents.contains("schema_version = 9"));
         assert!(contents.contains("target_language = \"ja\""));
         assert!(contents.contains("provider = \"deepl\""));
         assert!(contents.contains("key = \"X\""));
@@ -195,7 +195,7 @@ mod tests {
         assert!(
             fs::read_to_string(store.path())
                 .unwrap()
-                .contains("schema_version = 8")
+                .contains("schema_version = 9")
         );
     }
 
@@ -271,7 +271,7 @@ mod tests {
         };
         store.save(&settings).unwrap();
         let contents = fs::read_to_string(store.path()).unwrap();
-        assert!(contents.contains("schema_version = 8"));
+        assert!(contents.contains("schema_version = 9"));
         assert!(contents.contains("[credentials]"));
         assert!(contents.contains("deepl = \"deepl-primary\""));
         assert!(!contents.contains("api_key"));
@@ -305,5 +305,25 @@ mod tests {
         store.save(&settings("en-US")).unwrap();
         store.save(&settings("pt-BR")).unwrap();
         assert_eq!(store.load().unwrap(), settings("pt-BR"));
+    }
+    #[test]
+    fn v8_history_is_opt_in_and_settings_round_trip_without_text() {
+        let (_directory, store) = fixture();
+        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+        fs::write(
+            store.path(),
+            "schema_version = 8\n[settings]\ntarget_language = \"de\"\n",
+        )
+        .unwrap();
+        let mut settings = store.load().unwrap();
+        assert!(!settings.clipboard_history_enabled);
+        assert_eq!(settings.clipboard_history_limit, 50);
+        settings.clipboard_history_enabled = true;
+        settings.clipboard_history_limit = 123;
+        store.save(&settings).unwrap();
+        assert_eq!(store.load().unwrap(), settings);
+        let text = fs::read_to_string(store.path()).unwrap();
+        assert!(!text.contains("entries"));
+        assert!(!text.contains("clipboard_text"));
     }
 }
