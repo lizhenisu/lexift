@@ -563,7 +563,7 @@ mod tests {
             };
             let pixels = render();
             snapshot(&adapter, &format!("sampling-probe-{scale}"), width, height);
-            // Find the two colored switch interiors; sliders end before this column.
+            // Find the streaming and two sampling switch interiors; sliders end before this column.
             let switch_x =
                 (logical_width as f32 + 620.0_f32.min(logical_width as f32 - 32.0)) / 2.0 - 76.0;
             let x = (switch_x * scale) as usize;
@@ -584,8 +584,8 @@ mod tests {
             }
             assert_eq!(
                 runs.len(),
-                2,
-                "both switches remain fully visible at scale {scale}"
+                3,
+                "all switches remain fully visible at scale {scale}"
             );
             let click = |y: usize| {
                 let position = slint::LogicalPosition::new(switch_x, y as f32 / scale);
@@ -603,6 +603,11 @@ mod tests {
                     });
             };
             click(runs[0]);
+            assert!(!settings.get_llm_streaming());
+            assert!(settings.get_llm_temperature_custom());
+            assert!(settings.get_llm_top_p_custom());
+            settings.set_llm_streaming(true);
+            click(runs[1]);
             assert!(!settings.get_llm_temperature_custom());
             assert!(
                 settings.get_llm_top_p_custom(),
@@ -610,7 +615,7 @@ mod tests {
             );
             settings.set_llm_temperature_available(false);
             render();
-            click(runs[0]);
+            click(runs[1]);
             assert!(
                 !settings.get_llm_temperature_custom(),
                 "disabled switch cannot toggle"

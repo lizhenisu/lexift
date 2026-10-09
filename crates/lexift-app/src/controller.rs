@@ -135,6 +135,7 @@ pub(crate) struct AppController {
     #[cfg(not(feature = "m1-demo"))]
     selection_toolbar_enabled: AtomicBool,
     state_changed: Arc<Notify>,
+    translation_tasks: Mutex<std::collections::BTreeMap<u64, tokio::task::AbortHandle>>,
 }
 
 impl AppController {
@@ -171,6 +172,7 @@ impl AppController {
             #[cfg(not(feature = "m1-demo"))]
             selection_toolbar_enabled: AtomicBool::new(selection_toolbar_enabled),
             state_changed: Arc::new(Notify::new()),
+            translation_tasks: Mutex::new(Default::default()),
         }
     }
 
@@ -230,19 +232,44 @@ impl AppController {
             self.selection_capture_in_flight
                 .store(false, Ordering::Release);
         }
-        tracing::debug!(event = event_name(&event), "dispatching application event");
+        let quitting = matches!(event, AppEvent::ExitRequested);
+        let progress_event = matches!(
+            event,
+            AppEvent::TranslationProgress { .. } | AppEvent::PopupTranslationProgress { .. }
+        );
+        if !progress_event {
+            tracing::debug!(event = event_name(&event), "dispatching application event");
+        }
         let (snapshot, commands) = {
             let mut state = self
                 .state
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             let commands = state.reduce(event);
-            tracing::debug!(
-                task_id = ?state.current_translation_task,
-                phase = ?state.phase,
-                command_count = commands.len(),
-                "application transition completed"
-            );
+            if !progress_event {
+                tracing::debug!(
+                    task_id = ?state.current_translation_task,
+                    phase = ?state.phase,
+                    command_count = commands.len(),
+                    "application transition completed"
+                );
+            }
+            self.translation_tasks
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .retain(|id, task| {
+                    let current = !quitting
+                        && (state
+                            .current_translation_task
+                            .is_some_and(|t| t.value() == *id)
+                            || state.popup_sessions.iter().any(|s| {
+                                s.current_translation_task.is_some_and(|t| t.value() == *id)
+                            }));
+                    if !current {
+                        task.abort();
+                    }
+                    current
+                });
             let snapshot = state.clone();
             if let Some(h) = &self.history {
                 h.sync(self, &snapshot);
@@ -958,6 +985,60 @@ impl AppController {
         });
     }
 
+    /// Coalesce ordered fragments independently for each translation task.
+    fn translation_progress(
+        self: &Arc<Self>,
+        task_id: TranslationTaskId,
+        session: Option<PopupSessionId>,
+    ) -> lexift_core::ports::translator::TranslationProgress {
+        let controller = Arc::downgrade(self);
+        let pending = Mutex::new((
+            String::new(),
+            std::time::Instant::now() - std::time::Duration::from_millis(33),
+        ));
+        Arc::new(move |text| {
+            let chunk = {
+                let mut pending = pending.lock().unwrap_or_else(|p| p.into_inner());
+                pending.0.push_str(&text);
+                if pending.1.elapsed() < std::time::Duration::from_millis(33) {
+                    return;
+                }
+                pending.1 = std::time::Instant::now();
+                std::mem::take(&mut pending.0)
+            };
+            if let Some(controller) = controller.upgrade() {
+                controller.dispatch(if let Some(session_id) = session {
+                    AppEvent::PopupTranslationProgress {
+                        session_id,
+                        task_id,
+                        text: chunk,
+                    }
+                } else {
+                    AppEvent::TranslationProgress {
+                        task_id,
+                        text: chunk,
+                    }
+                });
+            }
+        })
+    }
+    fn register_translation(&self, task_id: TranslationTaskId, task: tokio::task::JoinHandle<()>) {
+        let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let current = state.current_translation_task == Some(task_id)
+            || state
+                .popup_sessions
+                .iter()
+                .any(|s| s.current_translation_task == Some(task_id));
+        if current {
+            self.translation_tasks
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(task_id.value(), task.abort_handle());
+        } else {
+            task.abort();
+        }
+    }
+
     fn translate(
         self: &Arc<Self>,
         task_id: TranslationTaskId,
@@ -970,10 +1051,9 @@ impl AppController {
             || Arc::clone(&self.translator),
             |manager| manager.translation_snapshot(),
         );
-        self.runtime.spawn(async move {
-            match lexift_core::usecases::translate_input::execute(translator.as_ref(), request)
-                .await
-            {
+        let progress = self.translation_progress(task_id, None);
+        let task = self.runtime.spawn(async move {
+            match translator.translate_with_progress(request, progress).await {
                 Ok(result) => {
                     tracing::debug!(?task_id, "translation request finished");
                     controller.dispatch(AppEvent::TranslationFinished { task_id, result });
@@ -986,6 +1066,7 @@ impl AppController {
                 }
             }
         });
+        self.register_translation(task_id, task);
     }
 
     fn translate_popup(
@@ -1003,10 +1084,9 @@ impl AppController {
             || Arc::clone(&self.translator),
             |manager| manager.translation_snapshot(),
         );
-        self.runtime.spawn(async move {
-            match lexift_core::usecases::translate_input::execute(translator.as_ref(), request)
-                .await
-            {
+        let progress = self.translation_progress(task_id, Some(session_id));
+        let task = self.runtime.spawn(async move {
+            match translator.translate_with_progress(request, progress).await {
                 Ok(result) => controller.dispatch(AppEvent::PopupTranslationFinished {
                     session_id,
                     task_id,
@@ -1019,6 +1099,7 @@ impl AppController {
                 }),
             }
         });
+        self.register_translation(task_id, task);
     }
 
     pub(crate) fn copy_history_entry(
@@ -1106,15 +1187,18 @@ fn event_name(event: &AppEvent) -> &'static str {
         AppEvent::SelectionToolbarTranslateRequested => "selection_toolbar_translate_requested",
         AppEvent::SelectionToolbarCopyRequested => "selection_toolbar_copy_requested",
         AppEvent::SelectionToolbarDismissRequested => "selection_toolbar_dismiss_requested",
+        AppEvent::MainWindowClosed => "main_window_closed",
         AppEvent::InputTranslationRequested { .. } => "input_translation_requested",
         AppEvent::SelectionCaptured { .. } => "selection_captured",
         AppEvent::SelectionCaptureEmpty { .. } => "selection_capture_empty",
         AppEvent::SelectionCaptureFailed { .. } => "selection_capture_failed",
         AppEvent::TranslationStarted { .. } => "translation_started",
+        AppEvent::TranslationProgress { .. } => "translation_progress",
         AppEvent::TranslationFinished { .. } => "translation_finished",
         AppEvent::TranslationFailed { .. } => "translation_failed",
         AppEvent::PopupTranslationRequested { .. } => "popup_translation_requested",
         AppEvent::PopupTranslationStarted { .. } => "popup_translation_started",
+        AppEvent::PopupTranslationProgress { .. } => "popup_translation_progress",
         AppEvent::PopupTranslationFinished { .. } => "popup_translation_finished",
         AppEvent::PopupTranslationFailed { .. } => "popup_translation_failed",
         AppEvent::PopupPinChanged { .. } => "popup_pin_changed",
@@ -1550,6 +1634,69 @@ mod tests {
                 })
             })
         }
+    }
+
+    #[test]
+    fn streaming_fragments_coalesce_and_cancel_when_superseded() {
+        struct PendingTranslator(Arc<AtomicBool>);
+        struct Dropped(Arc<AtomicBool>);
+        impl Drop for Dropped {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        impl TranslatorPort for PendingTranslator {
+            fn translate(&self, _: TranslateRequest) -> TranslationFuture<'_> {
+                Box::pin(std::future::pending())
+            }
+            fn translate_with_progress(
+                &self,
+                _: TranslateRequest,
+                progress: lexift_core::ports::translator::TranslationProgress,
+            ) -> TranslationFuture<'_> {
+                Box::pin(async move {
+                    let _guard = Dropped(self.0.clone());
+                    progress("one".into());
+                    progress("two".into());
+                    progress("three".into());
+                    std::future::pending().await
+                })
+            }
+        }
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        let dropped = Arc::new(AtomicBool::new(false));
+        let state = Arc::new(Mutex::new(AppState::default()));
+        let view = Arc::new(RecordingView::default());
+        let controller = Arc::new(AppController::new(
+            runtime.handle().clone(),
+            state.clone(),
+            None,
+            None,
+            Arc::new(PendingTranslator(dropped.clone())),
+            Arc::new(RecordingSettingsStore::default()),
+            view.clone(),
+        ));
+        controller.dispatch(AppEvent::InputTranslationRequested {
+            text: "input".into(),
+        });
+        runtime.block_on(async {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        });
+        assert_eq!(
+            state.lock().unwrap().translated_text,
+            "one",
+            "rapid fragments are coalesced"
+        );
+        assert!(!dropped.load(Ordering::SeqCst));
+        controller.dispatch(AppEvent::InputTranslationRequested { text: "".into() });
+        runtime.block_on(async {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        });
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "superseded network futures are dropped"
+        );
+        assert!(controller.translation_tasks.lock().unwrap().is_empty());
     }
 
     #[test]

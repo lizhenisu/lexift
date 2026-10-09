@@ -1443,3 +1443,9 @@ msgstr "Clique para colar"
 
 msgid "Copied text appears here."
 msgstr "O texto copiado aparece aqui."
+
+msgid "Streaming"
+msgstr "Transmissão contínua"
+
+msgid "Show translation progressively as it is generated"
+msgstr "Mostrar a tradução progressivamente durante a geração"

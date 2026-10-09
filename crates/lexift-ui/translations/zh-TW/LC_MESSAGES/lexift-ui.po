@@ -1443,3 +1443,9 @@ msgstr "點擊項目貼上"
 
 msgid "Copied text appears here."
 msgstr "複製的文字會顯示在這裡。"
+
+msgid "Streaming"
+msgstr "串流傳輸"
+
+msgid "Show translation progressively as it is generated"
+msgstr "在生成過程中逐步顯示翻譯結果"

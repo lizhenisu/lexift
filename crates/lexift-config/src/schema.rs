@@ -61,11 +61,16 @@ struct CatalogFile {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct ModelFile {
+    #[serde(default = "default_streaming")]
+    streaming: bool,
     provider: String,
     model: String,
     reasoning: String,
     temperature: Option<u16>,
     top_p: Option<u16>,
+}
+fn default_streaming() -> bool {
+    true
 }
 impl LlmFile {
     fn from_domain(s: &lexift_core::domain::llm::LlmSettings) -> Self {
@@ -104,6 +109,7 @@ impl LlmFile {
                 .map(|m| ModelFile {
                     provider: m.provider.id().into(),
                     model: m.model.clone(),
+                    streaming: m.streaming,
                     reasoning: m.parameters.reasoning.clone(),
                     temperature: m.parameters.temperature,
                     top_p: m.parameters.top_p,
@@ -178,6 +184,7 @@ impl LlmFile {
                 .into_iter()
                 .map(|m| {
                     Ok(TranslationModel {
+                        streaming: m.streaming,
                         provider: LlmProvider::parse(&m.provider)?,
                         model: m.model,
                         parameters: GenerationParameters {
@@ -412,6 +419,7 @@ impl ConfigFile {
                     settings
                         .models
                         .push(lexift_core::domain::llm::TranslationModel {
+                            streaming: true,
                             provider: lexift_core::domain::llm::LlmProvider::Ollama,
                             model: ollama.model.clone(),
                             parameters: Default::default(),
@@ -565,5 +573,38 @@ mod tests {
         );
         let invalid: ConfigFile = toml::from_str(&text.replace("en-US", "unknown")).unwrap();
         assert!(invalid.into_settings().is_err());
+    }
+    #[test]
+    fn streaming_is_per_model_and_missing_legacy_field_defaults_on() {
+        let mut settings = Settings::default();
+        for (name, streaming) in [("one", false), ("two", true)] {
+            settings
+                .llm
+                .models
+                .push(lexift_core::domain::llm::TranslationModel {
+                    provider: lexift_core::domain::llm::LlmProvider::LmStudio,
+                    model: name.into(),
+                    streaming,
+                    parameters: Default::default(),
+                });
+        }
+        let text = toml::to_string(&ConfigFile::from_settings(&settings)).unwrap();
+        let file: ConfigFile = toml::from_str(&text).unwrap();
+        assert_eq!(file.into_settings().unwrap(), settings);
+        let legacy = text
+            .lines()
+            .filter(|line| !line.starts_with("streaming"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let loaded: ConfigFile = toml::from_str(&legacy).unwrap();
+        assert!(
+            loaded
+                .into_settings()
+                .unwrap()
+                .llm
+                .models
+                .iter()
+                .all(|m| m.streaming)
+        );
     }
 }

@@ -1443,3 +1443,9 @@ msgstr "클릭하여 붙여넣기"
 
 msgid "Copied text appears here."
 msgstr "복사한 텍스트가 여기에 표시됩니다."
+
+msgid "Streaming"
+msgstr "스트리밍"
+
+msgid "Show translation progressively as it is generated"
+msgstr "생성 중 번역 결과를 점진적으로 표시합니다"

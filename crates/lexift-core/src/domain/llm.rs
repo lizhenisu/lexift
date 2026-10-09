@@ -273,6 +273,7 @@ impl Default for GenerationParameters {
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranslationModel {
+    pub streaming: bool,
     pub provider: LlmProvider,
     pub model: String,
     pub parameters: GenerationParameters,

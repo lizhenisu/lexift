@@ -217,6 +217,19 @@ impl AppState {
                     text: selection.text,
                 }]
             }
+            AppEvent::MainWindowClosed => {
+                if self.current_translation_task.is_some()
+                    && !self
+                        .popup_sessions
+                        .iter()
+                        .any(|s| s.current_translation_task == self.current_translation_task)
+                {
+                    self.current_translation_task = None;
+                    self.phase = TranslationPhase::Idle;
+                    self.translated_text.clear();
+                }
+                Vec::new()
+            }
             AppEvent::InputTranslationRequested { text } => self.request_input_translation(text),
             AppEvent::SelectionCaptured { task_id, selection } if self.is_current_task(task_id) => {
                 let anchor = selection.anchor;
@@ -287,11 +300,26 @@ impl AppState {
                 }
                 Vec::new()
             }
-            AppEvent::TranslationFinished { task_id, result } if self.is_current_task(task_id) => {
-                self.phase = TranslationPhase::Success;
-                self.translated_text = result.text.clone();
-                self.error_message.clear();
-                self.current_translation_task = None;
+            AppEvent::TranslationProgress { task_id, text } => {
+                if self.is_current_task(task_id) {
+                    self.translated_text.push_str(&text);
+                }
+                if let Some(session) = self
+                    .popup_sessions
+                    .iter_mut()
+                    .find(|s| s.current_translation_task == Some(task_id))
+                {
+                    session.translated_text.push_str(&text);
+                }
+                Vec::new()
+            }
+            AppEvent::TranslationFinished { task_id, result } => {
+                if self.is_current_task(task_id) {
+                    self.phase = TranslationPhase::Success;
+                    self.translated_text = result.text.clone();
+                    self.error_message.clear();
+                    self.current_translation_task = None;
+                }
                 if let Some(session) = self
                     .popup_sessions
                     .iter_mut()
@@ -307,10 +335,12 @@ impl AppState {
                 }
                 Vec::new()
             }
-            AppEvent::TranslationFailed { task_id, error } if self.is_current_task(task_id) => {
-                self.phase = TranslationPhase::Error;
-                self.error_message = error.clone();
-                self.current_translation_task = None;
+            AppEvent::TranslationFailed { task_id, error } => {
+                if self.is_current_task(task_id) {
+                    self.phase = TranslationPhase::Error;
+                    self.error_message = error.clone();
+                    self.current_translation_task = None;
+                }
                 if let Some(session) = self
                     .popup_sessions
                     .iter_mut()
@@ -325,9 +355,7 @@ impl AppState {
             AppEvent::SelectionCaptured { .. }
             | AppEvent::SelectionCaptureEmpty { .. }
             | AppEvent::SelectionCaptureFailed { .. }
-            | AppEvent::TranslationStarted { .. }
-            | AppEvent::TranslationFinished { .. }
-            | AppEvent::TranslationFailed { .. } => Vec::new(),
+            | AppEvent::TranslationStarted { .. } => Vec::new(),
             AppEvent::PopupTranslationRequested {
                 session_id,
                 text,
@@ -342,6 +370,18 @@ impl AppState {
                     && session.current_translation_task == Some(task_id)
                 {
                     session.phase = TranslationPhase::Translating;
+                }
+                Vec::new()
+            }
+            AppEvent::PopupTranslationProgress {
+                session_id,
+                task_id,
+                text,
+            } => {
+                if let Some(session) = self.popup_session_mut(session_id)
+                    && session.current_translation_task == Some(task_id)
+                {
+                    session.translated_text.push_str(&text);
                 }
                 Vec::new()
             }
@@ -422,7 +462,9 @@ impl AppState {
                 } else {
                     &session.translated_text
                 };
-                if text.is_empty() || (!source && current != &text) {
+                if text.is_empty()
+                    || (!source && (current != &text || session.phase != TranslationPhase::Success))
+                {
                     return vec![];
                 }
                 let Some(request) = session.copy[usize::from(!source)].begin() else {
@@ -1134,6 +1176,9 @@ impl AppState {
         let Some(session) = self.popup_session_mut(session_id) else {
             return Vec::new();
         };
+        if !source && session.phase != TranslationPhase::Success {
+            return Vec::new();
+        }
         if text.is_empty() {
             session.feedback_message = MessageId::NothingToRead.id().into();
             session.feedback_error = true;
@@ -1235,6 +1280,12 @@ impl AppState {
         else {
             return Vec::new();
         };
+        let task = self.popup_sessions[index].current_translation_task;
+        if task.is_some() && task == self.current_translation_task {
+            self.current_translation_task = None;
+            self.phase = TranslationPhase::Idle;
+            self.translated_text.clear();
+        }
         self.popup_sessions.remove(index);
         if self.active_popup_session == Some(session_id) {
             self.active_popup_session = None;
@@ -1278,6 +1329,7 @@ mod tests {
     fn popup_copy_feedback_is_per_button_and_rejects_old_content() {
         let mut s = AppState::default();
         let id = create_popup_session(&mut s, "source");
+        s.popup_sessions[0].phase = TranslationPhase::Success;
         s.popup_sessions[0].translated_text = "result".into();
         s.reduce(AppEvent::PopupCopyRequested {
             session_id: id,
@@ -2012,6 +2064,119 @@ mod tests {
             .expect("new active session should exist");
         assert_eq!(pinned.source_language, Some(Language("de".into())));
         assert_eq!(active.source_language, None);
+    }
+
+    #[test]
+    fn pinned_stream_survives_new_selection_and_closed_stream_is_cancelled() {
+        let mut state = AppState::default();
+        let first = create_popup_session(&mut state, "first");
+        let task = state.current_translation_task.unwrap();
+        state.reduce(AppEvent::PopupPinChanged {
+            session_id: first,
+            pinned: true,
+        });
+        let second = create_popup_session(&mut state, "second");
+        let second_task = state.current_translation_task.unwrap();
+        state.reduce(AppEvent::TranslationProgress {
+            task_id: task,
+            text: "partial".into(),
+        });
+        assert_eq!(state.popup_sessions[0].translated_text, "partial");
+        assert!(state.translated_text.is_empty());
+        state.reduce(AppEvent::TranslationFinished {
+            task_id: task,
+            result: TranslateResult {
+                text: "final".into(),
+                detected_source_language: None,
+            },
+        });
+        assert_eq!(state.popup_sessions[0].phase, TranslationPhase::Success);
+        assert_eq!(state.current_translation_task, Some(second_task));
+        state.reduce(AppEvent::PopupClosed { session_id: second });
+        assert_eq!(state.current_translation_task, None);
+        state.reduce(AppEvent::TranslationProgress {
+            task_id: second_task,
+            text: "late".into(),
+        });
+        assert!(state.translated_text.is_empty());
+        state.reduce(AppEvent::InputTranslationRequested {
+            text: "main".into(),
+        });
+        state.reduce(AppEvent::MainWindowClosed);
+        assert!(state.current_translation_task.is_none());
+    }
+
+    #[test]
+    fn streaming_progress_is_scoped_to_the_current_task_and_session() {
+        let mut state = AppState::default();
+        let first = create_popup_session(&mut state, "hello");
+        state.reduce(AppEvent::PopupTranslationRequested {
+            session_id: first,
+            text: "hello".into(),
+            source_language: None,
+            target_language: Language("de".into()),
+        });
+        let task = state.popup_sessions[0].current_translation_task.unwrap();
+        state.reduce(AppEvent::PopupTranslationProgress {
+            session_id: first,
+            task_id: task,
+            text: "partial".into(),
+        });
+        assert_eq!(state.popup_sessions[0].translated_text, "partial");
+        assert_ne!(state.popup_sessions[0].phase, TranslationPhase::Success);
+        assert!(
+            state
+                .reduce(AppEvent::PopupCopyRequested {
+                    session_id: first,
+                    source: false,
+                    text: "partial".into()
+                })
+                .is_empty()
+        );
+        state.reduce(AppEvent::PopupTranslationRequested {
+            session_id: first,
+            text: "new".into(),
+            source_language: None,
+            target_language: Language("fr".into()),
+        });
+        state.reduce(AppEvent::PopupTranslationProgress {
+            session_id: first,
+            task_id: task,
+            text: "stale".into(),
+        });
+        assert!(state.popup_sessions[0].translated_text.is_empty());
+        state.reduce(AppEvent::PopupClosed { session_id: first });
+        state.reduce(AppEvent::PopupTranslationProgress {
+            session_id: first,
+            task_id: task,
+            text: "late".into(),
+        });
+        assert!(state.popup_sessions.is_empty());
+        state.reduce(AppEvent::InputTranslationRequested {
+            text: "input".into(),
+        });
+        let task = state.current_translation_task.unwrap();
+        state.reduce(AppEvent::TranslationProgress {
+            task_id: task,
+            text: "one".into(),
+        });
+        state.reduce(AppEvent::TranslationProgress {
+            task_id: task,
+            text: "two".into(),
+        });
+        assert_eq!(state.translated_text, "onetwo");
+        state.reduce(AppEvent::TranslationFinished {
+            task_id: task,
+            result: TranslateResult {
+                text: "complete".into(),
+                detected_source_language: None,
+            },
+        });
+        state.reduce(AppEvent::TranslationProgress {
+            task_id: task,
+            text: "late".into(),
+        });
+        assert_eq!(state.translated_text, "complete");
     }
 
     #[test]

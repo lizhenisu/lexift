@@ -1443,3 +1443,9 @@ msgstr "Clic para pegar"
 
 msgid "Copied text appears here."
 msgstr "El texto copiado aparece aquí."
+
+msgid "Streaming"
+msgstr "Transmisión en tiempo real"
+
+msgid "Show translation progressively as it is generated"
+msgstr "Mostrar la traducción progresivamente mientras se genera"

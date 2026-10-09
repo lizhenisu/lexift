@@ -28,6 +28,7 @@ pub enum AppEvent {
     SelectionToolbarTranslateRequested,
     SelectionToolbarCopyRequested,
     SelectionToolbarDismissRequested,
+    MainWindowClosed,
     InputTranslationRequested {
         text: String,
     },
@@ -44,6 +45,10 @@ pub enum AppEvent {
     },
     TranslationStarted {
         task_id: TranslationTaskId,
+    },
+    TranslationProgress {
+        task_id: TranslationTaskId,
+        text: String,
     },
     TranslationFinished {
         task_id: TranslationTaskId,
@@ -62,6 +67,11 @@ pub enum AppEvent {
     PopupTranslationStarted {
         session_id: PopupSessionId,
         task_id: TranslationTaskId,
+    },
+    PopupTranslationProgress {
+        session_id: PopupSessionId,
+        task_id: TranslationTaskId,
+        text: String,
     },
     PopupTranslationFinished {
         session_id: PopupSessionId,

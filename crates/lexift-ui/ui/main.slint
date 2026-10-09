@@ -53,7 +53,7 @@ export component AppWindow inherits Window {
     out property <length> translation-content-height: translation-scroll.content-height;
     out property <length> translation-viewport-height: translation-scroll.visible-height;
     in-out property <length> translation-scroll-y: 0px;
-    changed translated-text => { root.translation-scroll-y = 0px; }
+
     changed error-text => { root.translation-scroll-y = 0px; }
     in property <string> error-text: "";
     in property <bool> show-selection-demo: false;
@@ -178,7 +178,7 @@ export component AppWindow inherits Window {
                             vertical-alignment: TextVerticalAlignment.top;
                             text: root.error-text != ""
                                 ? root.error-text
-                                : root.translation-busy
+                                : root.translation-busy && root.translated-text == ""
                                     ? @tr("Translating…")
                                     : root.translated-text == ""
                                         ? @tr("Translation will appear here")

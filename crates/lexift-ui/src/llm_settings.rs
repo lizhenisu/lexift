@@ -463,6 +463,13 @@ fn load_translation(window: &SettingsWindow, page: &Page, model: Option<String>)
         .find(|m| m.provider == provider && m.model == selected)
         .map(|m| m.parameters.clone())
         .unwrap_or_default();
+    window.set_llm_streaming(
+        config
+            .models
+            .iter()
+            .find(|m| m.provider == provider && m.model == selected)
+            .is_none_or(|m| m.streaming),
+    );
     window.set_llm_selected_model(selected.into());
     window.set_llm_temperature_custom(p.temperature.is_some());
     window.set_llm_temperature(i32::from(p.temperature.unwrap_or(100)));
@@ -1092,6 +1099,7 @@ pub(crate) fn wire(
             return;
         }
         let model = TranslationModel {
+            streaming: w.get_llm_streaming(),
             provider,
             model: name.clone(),
             parameters: GenerationParameters {
@@ -1692,6 +1700,7 @@ mod tests {
             });
         }
         config.models.push(TranslationModel {
+            streaming: true,
             provider: LlmProvider::Ollama,
             model: "a".into(),
             parameters: GenerationParameters {
@@ -1780,6 +1789,7 @@ mod tests {
         window.invoke_translation_open_settings();
         window.set_translation_settings_open(true);
         window.set_llm_temperature_custom(true);
+        window.set_llm_streaming(false);
         window.set_llm_temperature(33);
         window.set_llm_prompt("Draft {target_language}".into());
         window.invoke_llm_translation_edited();
@@ -1788,16 +1798,18 @@ mod tests {
         window.invoke_finish_translation_settings();
         assert_eq!(window.get_llm_prompt(), DEFAULT_TRANSLATION_PROMPT);
         assert!(!window.get_llm_temperature_custom());
+        assert!(window.get_llm_streaming());
         assert!(!has_unsaved(&window));
         window.invoke_translation_open_settings();
         window.set_translation_settings_open(true);
         window.set_llm_temperature_custom(true);
+        window.set_llm_streaming(false);
         window.set_llm_temperature(47);
         window.set_llm_prompt("Saved {target_language}".into());
         window.invoke_llm_save_translation();
         assert!(window.get_llm_translation_saving());
         assert!(
-            matches!(last_change(), SettingsChange::TranslationOptions { ref model, .. } if model.model == "a2" && model.parameters.temperature == Some(47))
+            matches!(last_change(), SettingsChange::TranslationOptions { ref model, .. } if model.model == "a2" && !model.streaming && model.parameters.temperature == Some(47))
         );
         translation_save_failed(&window);
         assert!(window.get_translation_settings_open());
@@ -1828,6 +1840,7 @@ mod tests {
         acknowledge(last_change());
         translation_selection_saved(&window);
         assert_eq!(window.get_llm_temperature(), 47);
+        assert!(!window.get_llm_streaming());
         assert_eq!(window.get_llm_prompt(), "Saved {target_language}");
         window.set_translation_search("LM studio".into());
         window.invoke_translation_filter();
@@ -1900,6 +1913,7 @@ mod tests {
         let mut config = LlmSettings {
             models: vec![
                 TranslationModel {
+                    streaming: true,
                     provider: LlmProvider::Ollama,
                     model: "model-a".into(),
                     parameters: GenerationParameters {
@@ -1908,6 +1922,7 @@ mod tests {
                     },
                 },
                 TranslationModel {
+                    streaming: true,
                     provider: LlmProvider::LmStudio,
                     model: "model-b".into(),
                     parameters: GenerationParameters {
@@ -2182,6 +2197,7 @@ mod tests {
         assert_eq!(window.get_llm_headers().row_count(), 0);
         let mut saved = page.config.borrow().clone();
         saved.models.push(TranslationModel {
+            streaming: true,
             provider: LlmProvider::DeepSeek,
             model: "cloud".into(),
             parameters: GenerationParameters::default(),

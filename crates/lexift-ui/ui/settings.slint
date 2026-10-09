@@ -824,6 +824,8 @@ export component SettingsWindow inherits Window {
     in-out property <[string]> llm-reasoning-options;
     in-out property <int> llm-reasoning-index: -1;
     in-out property <string> llm-reasoning-note;
+    in-out property <bool> llm-streaming: true;
+    changed llm-streaming => { root.llm-translation-edited(); }
     in-out property <bool> llm-temperature-custom;
     in-out property <bool> llm-top-p-custom;
     in-out property <bool> llm-temperature-available: true;
@@ -1794,6 +1796,7 @@ export component SettingsWindow inherits Window {
                 translation-fields := VerticalLayout { x: 0px; y: 0px; width: max(0px, translation-settings-viewport.visible-width - 12px); height: self.preferred-height; spacing: 12px; alignment: start;
                     Text { text: "\{["DeepL", "Ollama", "LM Studio", "DeepSeek"][root.llm-translation-provider-index]} · \{root.llm-selected-model}"; color: Colors.secondary-foreground; font-size: 13px; wrap: word-wrap; }
                     Text { text: @tr("Model parameters"); color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; }
+                    SettingsToggleRow { label: @tr("Streaming"); description: @tr("Show translation progressively as it is generated"); checked: root.llm-streaming; enabled: !root.llm-translation-saving; toggled(value) => { root.llm-streaming = value; } }
                     SettingsControlRow { label: @tr("Thinking effort");
                         SettingsComboBox { model: root.llm-reasoning-options; placeholder: @tr("Unavailable"); current-index <=> root.llm-reasoning-index; enabled: root.llm-reasoning-options.length > 1; selected(index) => { root.llm-reasoning-selected(self.current-index); } }
                     }

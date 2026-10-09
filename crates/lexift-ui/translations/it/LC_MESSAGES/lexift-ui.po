@@ -1443,3 +1443,9 @@ msgstr "Fai clic per incollare"
 
 msgid "Copied text appears here."
 msgstr "Il testo copiato appare qui."
+
+msgid "Streaming"
+msgstr "Trasmissione in streaming"
+
+msgid "Show translation progressively as it is generated"
+msgstr "Mostra la traduzione progressivamente durante la generazione"

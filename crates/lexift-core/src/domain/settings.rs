@@ -203,6 +203,7 @@ impl SettingsChange {
                         .find(|m| m.provider == model.provider && m.model == model.model)
                     {
                         selected.parameters = saved.parameters.clone();
+                        selected.streaming = saved.streaming;
                     }
                     settings
                         .llm
@@ -219,6 +220,7 @@ impl SettingsChange {
                     .find(|m| m.provider == model.provider && m.model == model.model)
                 {
                     saved.parameters = model.parameters.clone();
+                    saved.streaming = model.streaming;
                 } else {
                     settings.llm.models.insert(0, model.clone());
                 }
@@ -339,6 +341,7 @@ mod translation_change_tests {
                 endpoint: settings.llm.connection(LlmProvider::Ollama).endpoint_key(),
             });
             settings.llm.models.push(TranslationModel {
+                streaming: true,
                 provider: LlmProvider::Ollama,
                 model: id.into(),
                 parameters: GenerationParameters {
@@ -359,6 +362,7 @@ mod translation_change_tests {
             request_id: 1,
             provider: ProviderConfig::Ollama,
             model: Some(TranslationModel {
+                streaming: true,
                 provider: LlmProvider::Ollama,
                 model: "first".into(),
                 parameters: GenerationParameters::default(),

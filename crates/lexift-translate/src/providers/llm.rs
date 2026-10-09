@@ -1,4 +1,5 @@
 //! Stateless model protocol adapters and the separate translation policy adapter.
+mod stream;
 use lexift_core::{
     Error, Result,
     domain::{
@@ -39,14 +40,14 @@ impl LlmService {
             cloud: build(false)?,
         })
     }
-    async fn request(
+    async fn request_response(
         &self,
         connection: &LlmConnection,
         auth: &LlmAuthorization,
         path: &str,
         body: Option<Value>,
         timeout: Duration,
-    ) -> Result<Value> {
+    ) -> Result<Response> {
         connection.validate()?;
         if connection.provider == LlmProvider::DeepSeek
             && connection.profile().authentication == Authentication::Automatic
@@ -96,7 +97,22 @@ impl LlmService {
             .send()
             .await
             .map_err(network_error)?;
-        decode(response).await
+        check_status(&response)?;
+        Ok(response)
+    }
+    async fn request(
+        &self,
+        connection: &LlmConnection,
+        auth: &LlmAuthorization,
+        path: &str,
+        body: Option<Value>,
+        timeout: Duration,
+    ) -> Result<Value> {
+        decode(
+            self.request_response(connection, auth, path, body, timeout)
+                .await?,
+        )
+        .await
     }
     pub fn translator(
         &self,
@@ -140,7 +156,7 @@ fn network_error(e: reqwest::Error) -> Error {
         "Invalid model service response"
     })
 }
-async fn decode(response: Response) -> Result<Value> {
+fn check_status(response: &Response) -> Result<()> {
     if !response.status().is_success() {
         return Err(Error::new(match response.status().as_u16() {
             401 | 403 => "Model service authentication failed",
@@ -150,6 +166,10 @@ async fn decode(response: Response) -> Result<Value> {
             _ => "Model service rejected the request",
         }));
     }
+    Ok(())
+}
+async fn decode(response: Response) -> Result<Value> {
+    check_status(&response)?;
     response.json().await.map_err(network_error)
 }
 fn strings(v: &Value) -> Vec<String> {
@@ -395,6 +415,27 @@ impl LlmServicePort for LlmService {
         auth: LlmAuthorization,
         request: GenerateRequest,
     ) -> GenerateFuture<'_> {
+        self.generate_inner(connection, auth, request, None)
+    }
+    fn generate_with_progress(
+        &self,
+        connection: LlmConnection,
+        auth: LlmAuthorization,
+        request: GenerateRequest,
+        progress: lexift_core::ports::translator::TranslationProgress,
+    ) -> GenerateFuture<'_> {
+        self.generate_inner(connection, auth, request, Some(progress))
+    }
+}
+
+impl LlmService {
+    fn generate_inner(
+        &self,
+        connection: LlmConnection,
+        auth: LlmAuthorization,
+        request: GenerateRequest,
+        progress: Option<lexift_core::ports::translator::TranslationProgress>,
+    ) -> GenerateFuture<'_> {
         Box::pin(async move {
             let work = async {
                 if !connection.enabled {
@@ -433,6 +474,19 @@ impl LlmServicePort for LlmService {
                 if model.reasoning.is_empty() {
                     payload.as_object_mut().unwrap().remove("think");
                     payload.as_object_mut().unwrap().remove("reasoning");
+                }
+                if let Some(progress) = progress {
+                    payload["stream"] = json!(true);
+                    let response = self
+                        .request_response(
+                            &connection,
+                            &auth,
+                            path,
+                            Some(payload),
+                            Duration::from_secs(120),
+                        )
+                        .await?;
+                    return stream::read(response, &connection, progress).await;
                 }
                 let result = self
                     .request(
@@ -640,6 +694,22 @@ struct LlmTranslator {
 }
 impl TranslatorPort for LlmTranslator {
     fn translate(&self, request: TranslateRequest) -> TranslationFuture<'_> {
+        self.translate_inner(request, None)
+    }
+    fn translate_with_progress(
+        &self,
+        request: TranslateRequest,
+        progress: lexift_core::ports::translator::TranslationProgress,
+    ) -> TranslationFuture<'_> {
+        self.translate_inner(request, self.model.streaming.then_some(progress))
+    }
+}
+impl LlmTranslator {
+    fn translate_inner(
+        &self,
+        request: TranslateRequest,
+        progress: Option<lexift_core::ports::translator::TranslationProgress>,
+    ) -> TranslationFuture<'_> {
         Box::pin(async move {
             if !self.prompt.contains("{target_language}") {
                 return Err(Error::new(
@@ -649,7 +719,7 @@ impl TranslatorPort for LlmTranslator {
             let language = target_language(&request.target_language.0);
             let text = self
                 .service
-                .generate_authenticated(
+                .generate_inner(
                     self.connection.clone(),
                     self.auth.clone(),
                     GenerateRequest {
@@ -658,6 +728,7 @@ impl TranslatorPort for LlmTranslator {
                         input: request.text,
                         parameters: self.model.parameters.clone(),
                     },
+                    progress,
                 )
                 .await?;
             Ok(TranslateResult {
@@ -728,6 +799,7 @@ mod tests {
                     connection,
                     credential,
                     TranslationModel {
+                        streaming: true,
                         provider,
                         model: model.id.clone(),
                         parameters: Default::default(),
@@ -792,7 +864,7 @@ mod tests {
     fn ollama_translation_uses_custom_prompt_and_boolean_thinking_metadata() {
         tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
             let (address,requests,task) = server(vec![ok(r#"{"models":[{"name":"model"}]}"#),ok(r#"{"capabilities":["completion"],"thinking":{"values":[false,true]}}"#),ok(r#"{"done":true,"done_reason":"stop","message":{"content":"你好","thinking":"private"}}"#)]);
-            let translator = LlmService::new().unwrap().translator(LlmConnection {provider:LlmProvider::Ollama,address,credential_id:None,..LlmConnection::new(LlmProvider::Ollama)},None,TranslationModel {provider:LlmProvider::Ollama,model:"model".into(),parameters:Default::default()},"Custom translation to {target_language}".into());
+            let translator = LlmService::new().unwrap().translator(LlmConnection {provider:LlmProvider::Ollama,address,credential_id:None,..LlmConnection::new(LlmProvider::Ollama)},None,TranslationModel { streaming: true,provider:LlmProvider::Ollama,model:"model".into(),parameters:Default::default()},"Custom translation to {target_language}".into());
             let result=translator.translate(TranslateRequest {text:"Hello\nworld".into(),source_language:None,target_language:lexift_core::domain::language::Language("zh-CN".into())}).await.unwrap();assert_eq!(result.text,"你好");
             requests.recv().unwrap();requests.recv().unwrap();let request=requests.recv().unwrap();let body:Value=serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
             assert_eq!(body["think"],false);assert_eq!(body["messages"][0]["content"],"Custom translation to Simplified Chinese");assert_eq!(body["messages"][1]["content"],"Hello\nworld");assert_eq!(body["options"],json!({}));task.join().unwrap();

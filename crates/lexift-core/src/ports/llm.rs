@@ -26,6 +26,15 @@ pub trait LlmServicePort: Send + Sync {
         auth: LlmAuthorization,
         request: GenerateRequest,
     ) -> GenerateFuture<'_>;
+    fn generate_with_progress(
+        &self,
+        connection: LlmConnection,
+        auth: LlmAuthorization,
+        request: GenerateRequest,
+        _progress: crate::ports::translator::TranslationProgress,
+    ) -> GenerateFuture<'_> {
+        self.generate_authenticated(connection, auth, request)
+    }
     fn models(&self, connection: LlmConnection, credential: Option<String>) -> ModelsFuture<'_> {
         self.models_authenticated(
             connection,

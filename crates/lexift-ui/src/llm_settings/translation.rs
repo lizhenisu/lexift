@@ -90,7 +90,13 @@ pub(super) fn refresh(window: &SettingsWindow, page: &Page) {
     };
     let key = (provider, window.get_llm_selected_model().to_string());
     let config = page.config.borrow();
-    let dirty = window.get_llm_prompt().as_str() != config.prompt
+    let dirty = window.get_llm_streaming()
+        != config
+            .models
+            .iter()
+            .find(|m| m.provider == key.0 && m.model == key.1)
+            .is_none_or(|m| m.streaming)
+        || window.get_llm_prompt().as_str() != config.prompt
         || comparable(window, read(window, page, &key))
             != comparable(window, saved_value(page, &key));
     let valid = !key.1.is_empty()
@@ -252,6 +258,13 @@ pub(super) fn select(window: &SettingsWindow, page: &Page, index: i32, name: Str
             return;
         }
         Some(TranslationModel {
+            streaming: page
+                .config
+                .borrow()
+                .models
+                .iter()
+                .find(|m| m.provider == kind && m.model == name)
+                .is_none_or(|m| m.streaming),
             provider: kind,
             parameters: saved_value(page, &(kind, name.clone())),
             model: name.clone(),

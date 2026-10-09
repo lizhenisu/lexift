@@ -2,11 +2,31 @@ use crate::{AppWindow, SettingsWindow, TranslationPopup, mapper::UiState};
 use slint::ComponentHandle;
 
 pub(crate) fn apply_main(main: &AppWindow, state: &UiState) {
+    let old_text = main.get_translated_text();
+    let old_scroll = main.get_translation_scroll_y();
+    let old_bottom =
+        -(main.get_translation_content_height() - main.get_translation_viewport_height()).max(0.);
+    let continuation = main.get_translation_busy()
+        && !state.translated.is_empty()
+        && state.translated.starts_with(old_text.as_str())
+        && state.error.is_empty();
     main.set_status_text(state.status.clone().into());
     main.set_translation_busy(state.busy);
     main.set_target_language(state.target_language.clone().into());
     main.set_translated_text(state.translated.clone().into());
     main.set_error_text(state.error.clone().into());
+    if continuation {
+        let bottom = -(main.get_translation_content_height()
+            - main.get_translation_viewport_height())
+        .max(0.);
+        main.set_translation_scroll_y(if (old_scroll - old_bottom).abs() <= 2. {
+            bottom
+        } else {
+            old_scroll.max(bottom)
+        });
+    } else if old_text.as_str() != state.translated {
+        main.set_translation_scroll_y(0.);
+    }
 }
 
 pub(crate) fn apply_settings(settings: &SettingsWindow, state: &UiState) {

@@ -118,3 +118,23 @@ Ollama、LM Studio、DeepSeek 标识来自 [Cherry Studio Provider SVG](https://
 - 软件渲染回归覆盖 12 种语言、100%／125% DPI、窄窗口、搜索、键盘选择、弹窗取消、失败及参数隔离；截图位于 `target/translation-picker-snapshots/`。原生验证使用隔离的测试配置，结束后恢复原配置，不进行模型发现、生成、安装或下载。
 
 验证记录：Core 100 项通过，UI 342 项通过（10 项现有性能测量默认忽略），App runtime 12 项通过；Core／UI／App Clippy（all-targets，-D warnings）、Slint 编译、格式及差异检查和 Windows Release 构建通过。原生 100%／125% 双屏验证了分组搜索、服务／模型切换立即写入配置、返回原服务、弹窗 Escape、切页返回及窄窗口；测试退出后恢复原配置并销毁测试进程。实际截图为 `target/translation-picker-native-{list,settings,selected,narrow}-{100,125}.png`，记录见 `target/translation-picker-native.log`。本轮未向真实服务发送生成请求；模型质量、服务离线后的生成及网络协议未重新实测，相关行为沿用原实现和已有回归。
+
+
+## 翻译流式传输
+
+- 翻译设置在“模型参数”下提供流式开关，按 Provider／模型保存，默认开启；旧配置缺少 `streaming` 时默认为开启。应用保存当前模型参数，取消丢弃草稿；选择其他模型不提交未应用草稿。
+- Core 在既有翻译与生成 Port 上提供正文增量回调；完整结果接口和模型检测保持非流式。App 冻结请求配置，按任务合并增量，最多每 33ms 发布一次，最终结果立即覆盖缓冲尾部。
+- Translate 支持 Ollama NDJSON、LM Studio 原生 SSE、Chat Completions SSE、Responses SSE，排除思考内容、工具调用和异常结束。UTF-8 字符可以跨网络分块；必须收到合法终止状态才成功。不自动回退或重新发送请求，沿用 120 秒总超时。
+- 主窗口和 Popup 在生成中显示部分译文；译文复制、朗读及后续输入操作等待完整成功结果。新任务重置滚动，持续输出保留用户滚动位置，仅在底部时跟随。固定 Popup 的任务与其他窗口独立；关闭和任务替换会取消关联请求，过期增量不能更新新内容。
+- 协议参考：[Ollama Streaming](https://docs.ollama.com/api/streaming)、[LM Studio Streaming events](https://lmstudio.ai/docs/developer/rest/streaming-events)、[DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)。
+
+### 验证记录
+
+- Core／Config／Translate／App 自动化覆盖模型隔离、旧配置、增量及最终结果、固定窗口、取消、超时、异常结束和 UTF-8 分块。测试日志为 `target/stream-tests-final.log`；严格 Clippy 日志为 `target/stream-clippy.log`。
+- UI 参数草稿、失败后保留、取消恢复、切换模型回填及三个开关命中检查通过；12 种语言、100%／125% 的布局渲染保存在 `target/stream-ui-snapshots`。
+- 既有 `history_window_renders_locales_and_scrolls_without_activating_other_actions` 在完整 UI 回归及单独重跑中均未命中窄窗口首次启用按钮，本轮未改动其布局和行为。其余 UI 回归通过，独立失败日志为 `target/stream-unrelated-history.log`。
+- 临时本机 LM Studio 服务使用已安装的 `hy-mt1.5-1.8b`：原生、Chat Completions、Responses 的流式生成均通过，增量拼接正文与最终结果一致。日志为 `target/stream-lmstudio-live.log`；不安装服务或下载模型。
+- Ollama、DeepSeek 未发送实际生成请求；其协议使用本地 HTTP 和分块解析回归。超时采用短时限网络夹具验证，未人工等待完整 120 秒；不将这些场景计为实网验证。
+
+- 实际新版 App 在 100%／125% 双屏验证流式开关的草稿、取消、应用及重新打开回填；原配置在测试结束恢复。截图为 `target/stream-settings-native-*-{100,125}.png`，记录为 `target/stream-settings-native.log`。浅／深色渲染均已检查；真实服务生成已单独实测，未将软件渲染截图当作原生交互证据。
+- 本轮窗口策略、其他设置及凭证逻辑保持原有路径。现有“恢复默认提示词”只恢复提示词，不连带修改模型开关；新模型和配置默认值的流式状态为开启。

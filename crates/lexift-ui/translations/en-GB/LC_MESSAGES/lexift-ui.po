@@ -1443,3 +1443,9 @@ msgstr "Click to paste"
 
 msgid "Copied text appears here."
 msgstr "Copied text appears here."
+
+msgid "Streaming"
+msgstr "Streaming"
+
+msgid "Show translation progressively as it is generated"
+msgstr "Show translation progressively as it is generated"

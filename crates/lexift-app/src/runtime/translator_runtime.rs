@@ -125,6 +125,22 @@ impl TranslatorRuntime {
 
 impl TranslatorPort for TranslatorRuntime {
     fn translate(&self, request: TranslateRequest) -> TranslationFuture<'_> {
+        self.translate_inner(request, None)
+    }
+    fn translate_with_progress(
+        &self,
+        request: TranslateRequest,
+        progress: lexift_core::ports::translator::TranslationProgress,
+    ) -> TranslationFuture<'_> {
+        self.translate_inner(request, Some(progress))
+    }
+}
+impl TranslatorRuntime {
+    fn translate_inner(
+        &self,
+        request: TranslateRequest,
+        progress: Option<lexift_core::ports::translator::TranslationProgress>,
+    ) -> TranslationFuture<'_> {
         let (provider, _ollama_config, llm_config) = self
             .config
             .read()
@@ -200,7 +216,10 @@ impl TranslatorPort for TranslatorRuntime {
         };
         Box::pin(async move {
             match translator {
-                Ok(translator) => translator.translate(request).await,
+                Ok(translator) => match progress {
+                    Some(progress) => translator.translate_with_progress(request, progress).await,
+                    None => translator.translate(request).await,
+                },
                 Err(error) => Err(error),
             }
         })

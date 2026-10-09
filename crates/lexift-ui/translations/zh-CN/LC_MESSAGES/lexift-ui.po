@@ -1443,3 +1443,9 @@ msgstr "点击条目粘贴"
 
 msgid "Copied text appears here."
 msgstr "复制的文本会显示在这里。"
+
+msgid "Streaming"
+msgstr "流式传输"
+
+msgid "Show translation progressively as it is generated"
+msgstr "生成过程中逐步显示翻译结果"

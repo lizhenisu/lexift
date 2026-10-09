@@ -1443,3 +1443,9 @@ msgstr "クリックして貼り付け"
 
 msgid "Copied text appears here."
 msgstr "コピーしたテキストがここに表示されます。"
+
+msgid "Streaming"
+msgstr "ストリーミング"
+
+msgid "Show translation progressively as it is generated"
+msgstr "生成中の翻訳結果を順次表示します"

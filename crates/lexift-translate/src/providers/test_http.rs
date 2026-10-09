@@ -9,12 +9,23 @@ use std::{
 pub(super) fn server(
     responses: Vec<(u16, String)>,
 ) -> (String, mpsc::Receiver<String>, thread::JoinHandle<()>) {
+    server_with_types(
+        responses
+            .into_iter()
+            .map(|(status, body)| (status, "application/json".into(), body))
+            .collect(),
+    )
+}
+/// Sends stream bodies in small writes to exercise incremental network framing.
+pub(super) fn server_with_types(
+    responses: Vec<(u16, String, String)>,
+) -> (String, mpsc::Receiver<String>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let address = format!("http://{}", listener.local_addr().unwrap());
     let (tx, rx) = mpsc::channel();
     let task = thread::spawn(move || {
-        for (status, body) in responses {
+        for (status, content_type, body) in responses {
             let deadline = Instant::now() + Duration::from_secs(5);
             let mut stream = loop {
                 match listener.accept() {
@@ -34,7 +45,15 @@ pub(super) fn server(
                 .unwrap();
             let request = read_request(&mut stream);
             tx.send(request).unwrap();
-            write!(stream, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nLocation: http://127.0.0.1:1/forbidden\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            write!(stream, "HTTP/1.1 {status} Test\r\nContent-Type: {content_type}\r\nLocation: http://127.0.0.1:1/forbidden\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+            if content_type == "application/json" {
+                stream.write_all(body.as_bytes()).unwrap();
+            } else {
+                for bytes in body.as_bytes().chunks(3) {
+                    stream.write_all(bytes).unwrap();
+                    stream.flush().unwrap();
+                }
+            }
         }
     });
     (address, rx, task)

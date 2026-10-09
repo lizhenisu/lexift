@@ -1756,6 +1756,17 @@ fn apply_popup_preserving_draft(
     work_area: Option<Rect>,
 ) {
     let draft = popup.get_source_text();
+    let old_scroll = popup.get_result_scroll_y();
+    let old_bottom =
+        -(popup.get_result_content_height() - popup.get_result_viewport_height()).max(0.);
+    let follow_bottom = (old_scroll - old_bottom).abs() <= 2.;
+    let continuation = previous.is_some_and(|old| {
+        old.busy
+            && old.source == state.source
+            && !state.translated.is_empty()
+            && state.translated.starts_with(&old.translated)
+            && state.error.is_empty()
+    });
     let result_changed = popup.get_translated_text().as_str() != state.translated
         || popup.get_error_text().as_str() != state.error;
     let preserve_draft = previous.is_some_and(|previous| {
@@ -1812,10 +1823,16 @@ fn apply_popup_preserving_draft(
             popup.get_max_popup_height(),
         ));
     }
-    let scroll = if result_changed {
+    let scroll = if continuation {
+        if follow_bottom {
+            -(popup.get_result_content_height() - popup.get_result_viewport_height()).max(0.)
+        } else {
+            old_scroll
+        }
+    } else if result_changed {
         0.
     } else {
-        popup.get_result_scroll_y()
+        old_scroll
     };
     popup.set_result_scroll_y(scroll.clamp(
         -(popup.get_result_content_height() - popup.get_result_viewport_height()).max(0.),
@@ -2518,6 +2535,7 @@ fn wire_main_callbacks(
     main.window().on_close_requested(move || {
         match close_policy(background_mode.get()) {
             MainWindowClosePolicy::HideToTray => {
+                main_close_handler(AppEvent::MainWindowClosed);
                 schedule_main_window_destruction();
             }
             MainWindowClosePolicy::Exit => main_close_handler(AppEvent::ExitRequested),
@@ -3013,7 +3031,6 @@ fn popup_session_id(popup: &TranslationPopup) -> lexift_core::domain::translatio
 fn reset_popup_transient_ui(popup: &TranslationPopup) {
     popup.set_source_menu_open(false);
     popup.set_target_menu_open(false);
-    popup.set_resize_hover(-1);
     popup.set_resize_active(false);
 }
 
