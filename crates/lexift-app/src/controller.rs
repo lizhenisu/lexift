@@ -240,7 +240,7 @@ impl AppController {
         if !progress_event {
             tracing::debug!(event = event_name(&event), "dispatching application event");
         }
-        let (snapshot, commands) = {
+        let commands = {
             let mut state = self
                 .state
                 .lock()
@@ -277,13 +277,13 @@ impl AppController {
             // Queue snapshots in transition order. A notification arriving on another
             // thread must not render an older session after its successor was closed.
             self.ui.update(snapshot.clone());
-            (snapshot, commands)
+            #[cfg(not(feature = "m1-demo"))]
+            self.selection_toolbar_enabled.store(
+                snapshot.desired_settings.selection_toolbar,
+                Ordering::Release,
+            );
+            commands
         };
-        #[cfg(not(feature = "m1-demo"))]
-        self.selection_toolbar_enabled.store(
-            snapshot.desired_settings.selection_toolbar,
-            Ordering::Release,
-        );
         self.state_changed.notify_waiters();
 
         for command in commands {
