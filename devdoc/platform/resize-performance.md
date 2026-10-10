@@ -6,7 +6,7 @@ The Task Manager capture from an Intel integrated GPU showed Lexift at 82.3% of 
 
 ## Resize paint policy
 
-The current build includes FemtoVG and Slint's software renderer. On Windows, startup selects software rendering by default. On a 125%/100% dual-monitor test machine, cold FemtoVG annotation toolbar construction took about 200 ms; software rendering removed that pause. `SLINT_BACKEND=winit-software` or `winit-femtovg` overrides the automatic choice before startup. A running window cannot switch renderers. Native move and resize remain under Windows/Winit control, with no app-side paint gate. The software path retains the opaque background-band fill and release-time paint repair described below; the FemtoVG path does not install them. The cross-DPI drag case on the software path still needs hardware validation. See `devdoc/translation-popup.md` for the current flow.
+The current build includes FemtoVG and Slint's software renderer. On Windows, startup selects software rendering by default. On a 125%/100% dual-monitor test machine, cold FemtoVG annotation toolbar construction took about 200 ms; software rendering removed that pause. `SLINT_BACKEND=winit-software` or `winit-femtovg` overrides the automatic choice before startup. A running window cannot switch renderers. Native move and resize remain under Windows/Winit control, with no app-side paint gate. The software path retains the opaque background-band fill and release-time paint repair described below; the FemtoVG path does not install them. The cross-DPI drag case on the software path still needs hardware validation. See `devdoc/features/translation-popup.md` for the current flow.
 
 ## Renderer comparison
 

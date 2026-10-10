@@ -64,12 +64,12 @@ Lexift V0.1 采用 **Virtual Cargo Workspace + Dependency Inversion**，固定 7
 - 平台条件编译应尽量收敛到 `lexift-platform`。
 - UI 不直接调用平台 API 或翻译 Provider；跨模块业务编排统一经过 Core。
 
-完整目录结构、Port/Adapter 设计、依赖 DAG、禁止依赖和 V0.1 架构验收标准见 [`workspace.md`](./workspace.md)。
+完整目录结构、Port/Adapter 设计、依赖 DAG、禁止依赖和 V0.1 架构验收标准见 [`workspace.md`](workspace.md)。
 
 ## 文档职责
 
-- [`architecture.md`](./architecture.md)：记录已经确定的高层技术与架构决策。
-- [`workspace.md`](./workspace.md)：记录 Cargo Workspace、crate 职责、依赖方向和代码边界。
-- [`capabilities-roadmap.md`](./capabilities-roadmap.md)：记录 Lexift 可实现能力、与 Pot 的功能映射和版本路线图。
+- [`architecture.md`](architecture.md)：记录已经确定的高层技术与架构决策。
+- [`workspace.md`](workspace.md)：记录 Cargo Workspace、crate 职责、依赖方向和代码边界。
+- [`capabilities-roadmap.md`](../planning/capabilities-roadmap.md)：记录 Lexift 可实现能力、与 Pot 的功能映射和版本路线图。
 
 > 尚未最终确定的技术选型（异步运行时、网络库、具体 OCR 实现、插件 Runtime、各平台 API 的具体绑定方案等）不应提前写死；待后续讨论形成明确决策后再更新对应文档。

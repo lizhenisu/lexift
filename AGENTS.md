@@ -35,17 +35,17 @@
 
 ### Cargo Workspace
 
-项目采用 Virtual Cargo Workspace，V0.1 固定为 7 个核心 crate：
+项目采用 Virtual Cargo Workspace，当前保持 7 个核心 crate：
 
 - `lexift-app`：程序入口与 Composition Root，只负责初始化、生命周期和模块组装，不承载领域业务逻辑。
 - `lexift-core`：核心领域模型、状态、事件、命令、用例和 Port 接口；是唯一业务核心。
 - `lexift-ui`：Slint UI、UI bridge、状态映射和交互事件转发。
-- `lexift-platform`：Windows/macOS/Linux 原生系统能力适配，包括划词、剪贴板、全局快捷键、屏幕、托盘、权限、安全凭证等。
+- `lexift-platform`：原生系统能力适配，包括划词、剪贴板、全局快捷键、屏幕、托盘、权限、安全凭证等；当前交付以 Windows 为主，macOS/Linux 为后续适配目标。
 - `lexift-translate`：翻译 Provider、网络调用、Provider Registry、请求/响应适配。
 - `lexift-config`：普通配置的读取、写入、默认值、Schema 与迁移；敏感凭证不直接明文存入普通配置文件。
 - `lexift-observability`：日志初始化、panic hook、崩溃诊断和性能观测。
 
-详细目录和职责见 `devdoc/workspace.md`。
+文档入口见 [开发文档索引](devdoc/README.md)，详细目录和职责见 [Workspace 设计](devdoc/architecture/workspace.md)。历史计划和验证记录不能替代当前源码状态。
 
 ### 依赖方向
 
@@ -60,20 +60,34 @@
 - **Core defines behavior**：业务行为、领域模型、状态机和能力接口由 `lexift-core` 定义。
 - **Platform provides capabilities**：操作系统能力由 `lexift-platform` 实现 Core 定义的 Port。
 - **Translate provides services**：翻译能力由 `lexift-translate` 实现 Core 定义的翻译 Port。
-- **UI renders state**：`lexift-ui` 只展示 Core 状态并把用户操作转为 Core 可理解的事件，不直接调用平台 API 或翻译 Provider。
-- **App wires everything together**：`lexift-app` 只负责创建具体实现并注入 Core。
+- **UI renders state**：`lexift-ui` 展示领域状态、管理视图与临时交互状态，并转发领域事件；业务规则由 Core 决定，不直接调用操作系统 API 或翻译 Provider。
+- **App wires everything together**：`lexift-app` 创建并注入具体实现，调度 Core 命令并回传完成事件；不能把领域规则放入 App。
+- 业务能力使用 Core 定义的 Port；原生窗口准备、定位、拖动、重绘等视图桥接可由 App 以回调注入 UI，具体平台实现仍在 Platform。不得为纯窗口接线强行新增 Core Port，也不得通过回调绕过 Core 执行业务。
+
+### 线程与异步结果
+
+- Slint 组件和属性在 UI 线程访问；网络、磁盘及可能阻塞的平台调用放在后台。具有消息循环、COM apartment 或线程亲和性的平台能力由 Platform 管理所属线程，不任意迁移到通用 worker。
+- 后台领域结果先转为 Core 事件，UI 更新投递到 Slint 事件循环；不在持有共享状态锁时调用 UI 或外部回调。
+- 窗口异步操作校验窗口实例、会话和请求版本；目标相关操作同时校验目标身份。关闭、切换目标、取消或替换任务后，旧结果不得更新新窗口或操作新目标。
 
 ### 平台代码约束
 
 - `#[cfg(target_os = "...")]` 等平台条件编译应尽量限制在 `lexift-platform` 内，禁止无必要地散落到 Core、UI 或 Translate。
-- Windows、macOS、Linux 的实现必须遵守同一组 Core Port；Linux 内部应明确区分 X11 与 Wayland。
+- 各平台实现遵守相同的 Core Port 契约；尚未支持的能力明确返回不可用，不能以空实现假报成功。实现 Linux 能力时区分 X11 与 Wayland。
 - 不允许在 `lexift-platform` 中实现翻译业务，在 `lexift-translate` 中实现系统剪贴板、快捷键、窗口等平台逻辑。
 
 ### UI 约束
 
 - `.slint` 文件归 `lexift-ui` 管理；Slint 的编译与 `build.rs` 也由 `lexift-ui` 自己负责。
-- UI 不得直接访问 `lexift-platform`、`lexift-translate` 或 Provider；所有业务动作必须经过 Core。
+- UI 不依赖 `lexift-platform`、`lexift-translate` 或具体 Provider；领域操作经过 Core，原生视图接线遵循上述 App 注入边界。
 - 公共视觉值使用统一 Design Tokens（颜色、字号、间距、圆角、阴影等），避免界面中散落无规则 magic numbers。
+- 新增或修改可见文案、提示及可访问名称时，同步现有 12 种界面语言；沿用已有国际化机制。
+
+### Windows 窗口策略
+
+- 仅 Settings 允许进入任务栏和 Alt+Tab；主窗口、Popup、工具条、编辑器、画布、各级菜单及软件发起的原生对话框均使用辅助窗口策略。
+- 按窗口实例和角色设置策略，隐藏准备完成后才显示；准备失败使用既有有界重试，耗尽后销毁未显示窗口。平台持续保护窗口角色，点击、固定、拖动、缩放或后端样式重写不得改变身份。
+- 任务栏排除与激活、输入能力独立；保留用户主动操作所需焦点，不通过事后抢焦点、显示后隐藏或持续轮询修补窗口身份。实现依据见 [Popup 与窗口策略](devdoc/features/translation-popup.md)。
 
 ### 窗口与内存生命周期
 
@@ -81,12 +95,21 @@
 - 窗口重开时从最新 Core 状态重建 UI。后台进程确需继续运行时，应保留托盘、快捷键和事件循环，不因关闭普通窗口退出。
 - 最后一个 UI 窗口销毁后，使用可取消的两分钟空闲计时；计时期间任一窗口重开都要取消计时。到期后的工作集修剪通过 `lexift-platform` 提供、由 `lexift-app` 注入 UI 生命周期，不允许 UI 直接调用平台 API。
 - 工作集修剪只回收驻留页，不等同于释放 PrivateBytes 或重建 Slint/Winit 后端。Renderer、surface、GPU 资源应随所属窗口销毁；新窗口按需创建并重建其 Renderer。新增窗口或后台能力时须遵循并验证这套生命周期，不能依赖工作集修剪替代资源所有权清理。
+- 托盘、快捷键、剪贴板监听等后台资源由运行时拥有；退出或关闭对应能力时撤销监听、取消任务并完成必要的持久化收尾，不绑定到已销毁的视图。
 
 ### 配置与安全
 
 - 普通设置由 `lexift-config` 管理。
 - API Key、Token 等敏感信息通过 Core 的 `CredentialStore` Port 抽象，由 `lexift-platform` 对接 Windows Credential Manager、macOS Keychain、Linux Secret Service 等系统安全存储。
 - 普通配置文件只保存 Provider 标识、credential id 等非敏感引用，不保存明文密钥。
+- 设置变更在最新配置上定向合并并持久化，避免旧页面快照覆盖其他已保存字段；草稿与已保存状态分离，失败保留可恢复状态并反馈。
+- 剪贴板历史正文属于敏感数据，使用现有独立加密存储，不写入普通配置、日志或 Debug 正文；凭证复制保留历史排除标记，解密失败不覆盖原文件或回退明文。
+
+### 验证与文档
+
+- 按改动影响运行相关 crate 回归、格式和 Clippy 检查；Slint 修改必须通过 UI 编译。涉及 Windows 原生窗口或输入时，补充对应实机验证，区分自动化、实机结果及未覆盖范围。
+- 涉及发布构建或跨 crate 接口时运行相应 Release 构建；纯文档整理检查链接、引用和脚本路径即可，无需无关全量构建。
+- 功能或架构变化同步对应主题文档；执行计划与历史证据分开维护，日志、截图和临时夹具放入忽略目录，不将测试正文或个人数据纳入提交。
 
 ### 扩展原则
 

@@ -20,7 +20,7 @@
                          +-> 尽快调用 CallNextHookEx
 ```
 
-Windows 平台的共用组件 [`hook_thread.rs`](../crates/lexift-platform/src/windows/hook_thread.rs) 启动独立消息循环，在线程内安装钩子，并在安装成功后才报告就绪。停止时发送 `WM_QUIT`，由同一线程卸载钩子后退出。[`selection_monitor.rs`](../crates/lexift-platform/src/windows/selection_monitor.rs) 的划词钩子只复制按下／松开的坐标和原始 Windows 时间戳，由单独的分发线程查询目标窗口、过滤本程序窗口并识别手势。[`popup.rs`](../crates/lexift-platform/src/windows/popup.rs) 中弹窗外点击和前台窗口事件也采用这条边界；最后一个被监听的弹窗关闭时，停止相应的钩子和分发线程。应用退出时停止划词监听。窗口仍按需创建，没有增加常驻的隐藏工具条。
+Windows 平台的共用组件 [`hook_thread.rs`](../../crates/lexift-platform/src/windows/hook_thread.rs) 启动独立消息循环，在线程内安装钩子，并在安装成功后才报告就绪。停止时发送 `WM_QUIT`，由同一线程卸载钩子后退出。[`selection_monitor.rs`](../../crates/lexift-platform/src/windows/selection_monitor.rs) 的划词钩子只复制按下／松开的坐标和原始 Windows 时间戳，由单独的分发线程查询目标窗口、过滤本程序窗口并识别手势。[`popup.rs`](../../crates/lexift-platform/src/windows/popup.rs) 中弹窗外点击和前台窗口事件也采用这条边界；最后一个被监听的弹窗关闭时，停止相应的钩子和分发线程。应用退出时停止划词监听。窗口仍按需创建，没有增加常驻的隐藏工具条。
 
 **后续 Windows 输入代码必须遵守的约束：**不要在 Slint 事件线程安装低级鼠标钩子；钩子回调内不要修改 Core 状态、执行 UI 工作、查询窗口、阻塞等待或逐事件写日志。回调只转发必要事件，尽快通过 `CallNextHookEx` 返回。手势处理和弹窗命中判断放在分发线程。即使 UI 正忙，钩子线程也必须持续处理消息。更快的渲染器不能代替这条线程边界。
 

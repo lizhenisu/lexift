@@ -1,5 +1,7 @@
 # Lexift 当前阶段实施计划
 
+> 阶段记录：本文混合了 M2／M3／M4 计划和当时的验收结果，“当前”表示各节记录时的状态。查找最新功能说明请从[开发文档索引](../README.md)进入；本文不作为完整的当前版本功能清单。
+
 ## 1. 当前状态
 
 Lexift 已完成 **M2 — Real Input Translation**。
@@ -630,7 +632,7 @@ Selection capture 现在记录 `uia_latency_ms`、`clipboard_latency_ms` 和
 对 Selection capture 实施单飞门控，捕获尚未结束时重复 `Alt+X` 不会启动第二个 UIA 或
 Clipboard transaction。
 
-兼容记录和复测步骤见 `devdoc/windows-selection-compatibility.md`。当前环境检测到 Chrome
+兼容记录和复测步骤见 `devdoc/platform/windows-selection-compatibility.md`。当前环境检测到 Chrome
 153.0.8010.37、Edge 153.0.4234.32、VS Code 1.137.0、Notepad 和 Word
 16.0.20326.20144；Telegram、Discord 和独立 PDF Reader 未发现。真实 DeepL Provider
 测试已通过。用户已验证上述已安装应用及浏览器 PDF 的划词、焦点保护与错误恢复；

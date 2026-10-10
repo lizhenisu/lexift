@@ -53,7 +53,7 @@ foreach ($variant in $SelectedVariants) {
     New-Item -ItemType Directory -Force -Path $variantDirectory | Out-Null
     $exe = Join-Path $variantDirectory 'lexift.exe'
     Copy-Item -LiteralPath (Join-Path $build 'release\lexift.exe') -Destination $exe -Force
-    Copy-Item -LiteralPath (Join-Path $root 'devdoc\resize-performance.md') -Destination (Join-Path $variantDirectory 'TESTING.md') -Force
+    Copy-Item -LiteralPath (Join-Path $root 'devdoc\platform\resize-performance.md') -Destination (Join-Path $variantDirectory 'TESTING.md') -Force
     Compress-Archive -LiteralPath $exe, (Join-Path $variantDirectory 'TESTING.md') -DestinationPath (Join-Path $output "lexift-$variant.zip") -Force
     Get-Item -LiteralPath $exe | Select-Object FullName, Length
 }

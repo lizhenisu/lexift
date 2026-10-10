@@ -62,12 +62,12 @@ Platform `window_shell_policy.rs` owns one policy/subclass per HWND. Before back
 
 Evidence in ignored local `target/` artifacts:
 
-- [Native operation log](../target/settings-only-native.log)
-- [Startup Main excluded / Alt+Tab](../target/settings-only-startup-alt-tab.png), [Main taskbar](../target/settings-only-main-taskbar.png)
-- [Only Settings / Alt+Tab](../target/settings-only-normal-alt-tab.png), [Settings taskbar](../target/settings-only-normal-taskbar.png)
-- [Settings closed / Alt+Tab](../target/settings-only-settings-closed-alt-tab.png), [Settings closed / taskbar](../target/settings-only-settings-closed-taskbar.png)
-- [Popup / Alt+Tab](../target/settings-only-popup-alt-tab.png), [annotation / taskbar](../target/settings-only-toolbar-taskbar.png)
-- [Native save / Alt+Tab](../target/settings-only-save-alt-tab.png), [overwrite / Alt+Tab](../target/settings-only-overwrite-alt-tab.png)
-- [Tests](../target/settings-only-tests-final.log), [Clippy](../target/settings-only-clippy-final.log), [Release](../target/settings-only-release-complete.log)
+- [Native operation log](../../target/settings-only-native.log)
+- [Startup Main excluded / Alt+Tab](../../target/settings-only-startup-alt-tab.png), [Main taskbar](../../target/settings-only-main-taskbar.png)
+- [Only Settings / Alt+Tab](../../target/settings-only-normal-alt-tab.png), [Settings taskbar](../../target/settings-only-normal-taskbar.png)
+- [Settings closed / Alt+Tab](../../target/settings-only-settings-closed-alt-tab.png), [Settings closed / taskbar](../../target/settings-only-settings-closed-taskbar.png)
+- [Popup / Alt+Tab](../../target/settings-only-popup-alt-tab.png), [annotation / taskbar](../../target/settings-only-toolbar-taskbar.png)
+- [Native save / Alt+Tab](../../target/settings-only-save-alt-tab.png), [overwrite / Alt+Tab](../../target/settings-only-overwrite-alt-tab.png)
+- [Tests](../../target/settings-only-tests-final.log), [Clippy](../../target/settings-only-clippy-final.log), [Release](../../target/settings-only-release-complete.log)
 
 Limits: Chinese IME composition, annotation text-editor focus, capture loss/Escape mid-drag, native edge snap, Explorer restart, a physical tray click and GPU device recovery were not separately exercised in this run. Tray and second-instance requests share the tested Main show path. GPU/magnifier hidden policy wiring and existing interaction tests cover their code paths, but no live magnifier or device-loss scene was created. This Windows-only change adds no Core Port, configuration schema, dependency or crate.

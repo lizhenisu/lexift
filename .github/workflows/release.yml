@@ -29,7 +29,7 @@ jobs:
           if ($env:GITHUB_REF_NAME -ne "v$version") {
             throw "Tag $env:GITHUB_REF_NAME does not match workspace version $version"
           }
-          if (-not (Test-Path "devdoc/release-notes-v$version.md")) {
+          if (-not (Test-Path "devdoc/releases/notes/release-notes-v$version.md")) {
             throw "Missing release notes for version $version"
           }
 
@@ -94,4 +94,4 @@ jobs:
           )
           gh release create $env:GITHUB_REF_NAME @($assets.FullName) `
             --title "Lexift $env:GITHUB_REF_NAME" `
-            --notes-file "devdoc/release-notes-v$($env:GITHUB_REF_NAME.TrimStart('v')).md"
+            --notes-file "devdoc/releases/notes/release-notes-v$($env:GITHUB_REF_NAME.TrimStart('v')).md"

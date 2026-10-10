@@ -22,7 +22,7 @@
 
 ## Intel 核显 A/B 后的正式渲染器（2026-09-24）
 
-同机、同尺寸的慢速大幅缩放中，Skia OpenGL 的 Settings GPU 0 3D 峰值为 85.7%，FemtoVG 为 80.4%；软件渲染版没有测到 Lexift 进程的 GPU Engine 非零样本，Settings CPU 峰值为整机的 0.38%。测试者确认软件版 popup 和 Settings 的外观及拖拽手感正常，因此正式构建改用软件渲染。详情、采样限制和未覆盖的跨 DPI 检查见 `devdoc/resize-performance.md`。
+同机、同尺寸的慢速大幅缩放中，Skia OpenGL 的 Settings GPU 0 3D 峰值为 85.7%，FemtoVG 为 80.4%；软件渲染版没有测到 Lexift 进程的 GPU Engine 非零样本，Settings CPU 峰值为整机的 0.38%。测试者确认软件版 popup 和 Settings 的外观及拖拽手感正常，因此正式构建改用软件渲染。详情、采样限制和未覆盖的跨 DPI 检查见 `devdoc/platform/resize-performance.md`。
 
 切换后的 `cargo build --release -p lexift-app` 生成 `lexift.exe` 为 **16,026,112 bytes**；同一构建通过 `cargo packager --formats nsis` 生成的安装器为 **7,533,474 bytes**。相比切换前 Skia 的 23,919,616-byte exe 和 10,237,463-byte NSIS 安装器，分别减少 **7,893,504 bytes** 和 **2,703,989 bytes**。这两个安装包均为本地未签名诊断产物；不要把历史表格中的 V0.1.0 数值当作本轮基线。
 

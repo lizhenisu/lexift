@@ -84,4 +84,4 @@ cargo test -p lexift-platform interactive_newer_clipboard_content_wins -- --igno
 ```
 
 这些剪贴板夹具的 M3.3.1 验收结果记录在
-`devdoc/implementation-plan.md` 中。未实测的应用和场景继续标记待定；已通过的用户实测与自动化结果分别记录。
+`devdoc/planning/implementation-plan.md` 中。未实测的应用和场景继续标记待定；已通过的用户实测与自动化结果分别记录。
