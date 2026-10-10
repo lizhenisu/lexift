@@ -44,6 +44,7 @@ pub struct PopupSessionState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppState {
+    pub ocr: crate::domain::ocr::OcrState,
     pub clipboard_history: crate::domain::clipboard_history::HistoryState,
     pub phase: TranslationPhase,
     pub current_translation_task: Option<TranslationTaskId>,
@@ -86,6 +87,7 @@ impl Default for AppState {
 impl AppState {
     pub fn new(settings: Settings) -> Self {
         Self {
+            ocr: Default::default(),
             clipboard_history: Default::default(),
             phase: TranslationPhase::Idle,
             current_translation_task: None,
@@ -129,6 +131,17 @@ impl AppState {
     /// Applies a domain event and returns the capabilities the app must execute.
     pub fn reduce(&mut self, event: AppEvent) -> Vec<AppCommand> {
         match event {
+            AppEvent::Ocr(event) => crate::domain::ocr::reduce(self, event),
+            AppEvent::SelectionGestureCompleted { .. }
+            | AppEvent::SelectionTranslationRequested
+                if matches!(
+                    self.ocr.phase,
+                    crate::domain::ocr::OcrPhase::Checking
+                        | crate::domain::ocr::OcrPhase::Capturing
+                ) =>
+            {
+                vec![]
+            }
             AppEvent::ClipboardHistory(event) => {
                 crate::domain::clipboard_history::reduce(self, event)
             }
@@ -367,7 +380,16 @@ impl AppState {
                 text,
                 source_language,
                 target_language,
-            } => self.request_popup_translation(session_id, text, source_language, target_language),
+            } => {
+                if self.ocr.popup == Some(session_id)
+                    && self.ocr.phase == crate::domain::ocr::OcrPhase::Recognizing
+                {
+                    self.ocr.generation = self.ocr.generation.wrapping_add(1);
+                    self.ocr.phase = crate::domain::ocr::OcrPhase::Idle;
+                    self.ocr.popup = None;
+                }
+                self.request_popup_translation(session_id, text, source_language, target_language)
+            }
             AppEvent::PopupTranslationStarted {
                 session_id,
                 task_id,
@@ -406,6 +428,11 @@ impl AppState {
                     session.detected_source_language = result.detected_source_language;
                     session.error_message.clear();
                     session.current_translation_task = None;
+                    if self.ocr.popup == Some(session_id)
+                        && self.ocr.phase == crate::domain::ocr::OcrPhase::Translating
+                    {
+                        self.ocr.phase = crate::domain::ocr::OcrPhase::Idle;
+                    }
                 }
                 Vec::new()
             }
@@ -420,6 +447,11 @@ impl AppState {
                     session.phase = TranslationPhase::Error;
                     session.error_message = error;
                     session.current_translation_task = None;
+                    if self.ocr.popup == Some(session_id)
+                        && self.ocr.phase == crate::domain::ocr::OcrPhase::Translating
+                    {
+                        self.ocr.phase = crate::domain::ocr::OcrPhase::Error;
+                    }
                 }
                 Vec::new()
             }
@@ -561,7 +593,12 @@ impl AppState {
                 self.provider_settings_error.clear();
                 self.launch_at_login_settings_error.clear();
                 self.credential_error_message.clear();
-                vec![AppCommand::ShowSettingsWindow]
+                vec![
+                    AppCommand::ShowSettingsWindow,
+                    AppCommand::Ocr(crate::domain::ocr::OcrCommand::Check {
+                        generation: self.ocr.generation,
+                    }),
+                ]
             }
             AppEvent::SettingsChangeRequested { change } => {
                 if matches!(change, SettingsChange::SelectionToolbar(false)) {
@@ -1014,7 +1051,9 @@ impl AppState {
             | SettingsField::ProviderEnabled(_)
             | SettingsField::TranslationOptions => self.provider_settings_error.clear(),
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error.clear(),
-            SettingsField::ClipboardHistoryEnabled
+            SettingsField::OcrLanguage
+            | SettingsField::OcrHotkey
+            | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
             | SettingsField::SelectionToolbar
             | SettingsField::Theme
@@ -1034,7 +1073,9 @@ impl AppState {
             | SettingsField::ProviderEnabled(_)
             | SettingsField::TranslationOptions => self.provider_settings_error = error,
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error = error,
-            SettingsField::ClipboardHistoryEnabled
+            SettingsField::OcrLanguage
+            | SettingsField::OcrHotkey
+            | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
             | SettingsField::SelectionToolbar
             | SettingsField::Theme
@@ -1088,6 +1129,10 @@ impl AppState {
                 self.desired_settings.clipboard_history_limit =
                     self.settings.clipboard_history_limit;
             }
+            SettingsField::OcrLanguage => {
+                self.desired_settings.ocr_language = self.settings.ocr_language.clone()
+            }
+            SettingsField::OcrHotkey => self.desired_settings.ocr_hotkey = self.settings.ocr_hotkey,
             SettingsField::SelectionToolbar => {
                 self.desired_settings.selection_toolbar = self.settings.selection_toolbar;
             }
@@ -1216,7 +1261,7 @@ impl AppState {
         }]
     }
 
-    fn prepare_active_popup_session(
+    pub(crate) fn prepare_active_popup_session(
         &mut self,
         source_text: String,
         target_language: Language,
@@ -1278,7 +1323,12 @@ impl AppState {
         session_id
     }
 
-    fn close_popup_session(&mut self, session_id: PopupSessionId) -> Vec<AppCommand> {
+    pub(crate) fn close_popup_session(&mut self, session_id: PopupSessionId) -> Vec<AppCommand> {
+        if self.ocr.popup == Some(session_id) {
+            self.ocr.generation = self.ocr.generation.wrapping_add(1);
+            self.ocr.popup = None;
+            self.ocr.phase = crate::domain::ocr::OcrPhase::Idle;
+        }
         let Some(index) = self
             .popup_sessions
             .iter()
@@ -1302,7 +1352,10 @@ impl AppState {
         ]
     }
 
-    fn popup_session_mut(&mut self, session_id: PopupSessionId) -> Option<&mut PopupSessionState> {
+    pub(crate) fn popup_session_mut(
+        &mut self,
+        session_id: PopupSessionId,
+    ) -> Option<&mut PopupSessionState> {
         self.popup_sessions
             .iter_mut()
             .find(|session| session.id == session_id)
@@ -2336,7 +2389,10 @@ mod tests {
         let mut state = AppState::default();
         assert_eq!(
             state.reduce(AppEvent::SettingsWindowRequested),
-            vec![AppCommand::ShowSettingsWindow]
+            vec![
+                AppCommand::ShowSettingsWindow,
+                AppCommand::Ocr(crate::domain::ocr::OcrCommand::Check { generation: 0 })
+            ]
         );
     }
 

@@ -1,4 +1,6 @@
 mod about;
+mod ocr;
+mod screen_interaction;
 pub use about::AboutLink;
 mod annotation;
 mod annotation_fingerprint;
@@ -32,3 +34,6 @@ pub use bridge::{
 
 #[cfg(test)]
 mod settings_hint_tests;
+
+#[cfg(test)]
+mod ocr_tests;

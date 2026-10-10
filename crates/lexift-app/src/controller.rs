@@ -40,6 +40,12 @@ pub(crate) trait ViewPort: Send + Sync {
         work_area: Option<Rect>,
     );
     fn hide_popup(&self, session_id: PopupSessionId);
+    fn show_ocr_capture(
+        &self,
+        _generation: u64,
+        _frames: Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>,
+    ) {
+    }
     fn show_main_window(&self);
     fn show_settings_window(&self, settings: Settings);
     fn hide_settings_window(&self);
@@ -58,6 +64,13 @@ pub(crate) trait ViewPort: Send + Sync {
 }
 
 impl ViewPort for lexift_ui::UiHandle {
+    fn show_ocr_capture(
+        &self,
+        generation: u64,
+        frames: Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>,
+    ) {
+        self.show_ocr_capture(generation, frames);
+    }
     fn credential_access_is_current(&self, generation: u64) -> bool {
         self.credential_access_is_current(generation)
     }
@@ -119,7 +132,7 @@ impl ViewPort for lexift_ui::UiHandle {
 /// Executes Core commands on background workers and returns events to Core.
 pub(crate) struct AppController {
     history: Option<Arc<crate::clipboard_history::HistoryRuntime>>,
-    runtime: Handle,
+    pub(crate) runtime: Handle,
     state: Arc<Mutex<AppState>>,
     selection: Option<Arc<dyn SelectionPort>>,
     screen: Option<Arc<dyn ScreenPort>>,
@@ -130,7 +143,8 @@ pub(crate) struct AppController {
     credential_reference: Option<Arc<RwLock<Option<String>>>>,
     clipboard: Option<Arc<dyn ClipboardPort>>,
     speech: Option<Arc<dyn SpeechPort>>,
-    ui: Arc<dyn ViewPort>,
+    pub(crate) ui: Arc<dyn ViewPort>,
+    ocr: Option<Arc<crate::ocr::OcrRuntime>>,
     selection_capture_in_flight: AtomicBool,
     #[cfg(not(feature = "m1-demo"))]
     selection_toolbar_enabled: AtomicBool,
@@ -156,6 +170,7 @@ impl AppController {
             .selection_toolbar;
         Self {
             history: None,
+            ocr: None,
             runtime,
             state,
             selection,
@@ -190,6 +205,11 @@ impl AppController {
         self.credential_store = Some(store);
         self.credential_reference = Some(credential_reference);
         self.clipboard = clipboard;
+        self
+    }
+
+    pub(crate) fn with_ocr(mut self, ocr: Option<Arc<crate::ocr::OcrRuntime>>) -> Self {
+        self.ocr = ocr;
         self
     }
 
@@ -271,6 +291,9 @@ impl AppController {
                     current
                 });
             let snapshot = state.clone();
+            if let Some(ocr) = &self.ocr {
+                ocr.sync(&snapshot);
+            }
             if let Some(h) = &self.history {
                 h.sync(self, &snapshot);
             }
@@ -308,6 +331,28 @@ impl AppController {
 
     fn execute(self: &Arc<Self>, command: AppCommand) {
         match command {
+            AppCommand::Ocr(command) => {
+                if let Some(ocr) = &self.ocr {
+                    ocr.execute(self, command);
+                } else if command != lexift_core::domain::ocr::OcrCommand::Cancel {
+                    let ocr = self
+                        .state
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .ocr
+                        .clone();
+                    if matches!(command, lexift_core::domain::ocr::OcrCommand::Check { .. })
+                        && ocr.phase == lexift_core::domain::ocr::OcrPhase::Idle
+                    {
+                        return;
+                    }
+                    let generation = ocr.generation;
+                    self.dispatch(AppEvent::Ocr(lexift_core::domain::ocr::OcrEvent::Failed {
+                        generation,
+                        error: "Local OCR is unavailable".into(),
+                    }));
+                }
+            }
             AppCommand::ClipboardHistory(command) => {
                 if let Some(h) = &self.history {
                     h.execute(self, command);
@@ -426,6 +471,9 @@ impl AppController {
             }
             AppCommand::ClearCredentialDraft => self.ui.clear_credential_draft(),
             AppCommand::Exit => {
+                if let Some(ocr) = &self.ocr {
+                    ocr.shutdown();
+                }
                 if let Some(h) = self.history.clone() {
                     let ui = self.ui.clone();
                     self.runtime.spawn_blocking(move || {
@@ -1178,6 +1226,7 @@ impl AppController {
 fn event_name(event: &AppEvent) -> &'static str {
     match event {
         AppEvent::ClipboardHistory(_) => "clipboard_history",
+        AppEvent::Ocr(_) => "ocr",
         AppEvent::Started => "started",
         AppEvent::SelectionTranslationRequested => "selection_translation_requested",
         AppEvent::SelectionInteractionStarted => "selection_interaction_started",

@@ -16,6 +16,8 @@ Lexift 使用 **Virtual Cargo Workspace + Dependency Inversion**。
 
 `lexift-core` 是唯一业务核心。平台、翻译、配置和 UI 都位于 Core 外围，通过 Core 定义的 Port/trait 协作。
 
+屏幕交互的公共边界见 [共用屏幕交互宿主](../features/screen-interaction.md)：UI 管理实例、输入队列及视图任务，Platform 提供隐藏创建和原生准备，App 注入窗口回调；Core 仅提供区域手势与快照裁切。标注与 OCR 保持独立业务会话和宿主实例。
+
 ## 2. 实际目录结构
 
 ```text

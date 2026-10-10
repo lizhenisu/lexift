@@ -253,6 +253,10 @@ pub(crate) struct SettingsFile {
     hotkey: HotkeyFile,
     #[serde(default = "default_annotation_hotkey")]
     annotation_hotkey: HotkeyFile,
+    #[serde(default = "default_ocr_hotkey")]
+    ocr_hotkey: HotkeyFile,
+    #[serde(default)]
+    ocr_language: Option<String>,
     #[serde(default = "default_provider")]
     provider: String,
     #[serde(default)]
@@ -314,6 +318,10 @@ impl Default for HotkeyFile {
     }
 }
 
+fn default_ocr_hotkey() -> HotkeyFile {
+    HotkeyConfig::ocr_default().into()
+}
+
 fn default_annotation_hotkey() -> HotkeyFile {
     HotkeyFile::from(HotkeyConfig::annotation_default())
 }
@@ -365,6 +373,8 @@ impl ConfigFile {
                 ui_language: settings.ui_language.code().into(),
                 hotkey: settings.hotkey.into(),
                 annotation_hotkey: settings.annotation_hotkey.into(),
+                ocr_hotkey: settings.ocr_hotkey.into(),
+                ocr_language: settings.ocr_language.clone(),
                 provider: settings.provider.id().into(),
                 ollama: OllamaFile {
                     address: settings.ollama.address.clone(),
@@ -449,6 +459,16 @@ impl ConfigFile {
             ui_language: self.settings.ui_language.parse()?,
             hotkey,
             annotation_hotkey,
+            ocr_hotkey: HotkeyConfig::new(
+                lexift_core::domain::runtime_config::HotkeyModifiers {
+                    control: self.settings.ocr_hotkey.control,
+                    alt: self.settings.ocr_hotkey.alt,
+                    shift: self.settings.ocr_hotkey.shift,
+                    meta: self.settings.ocr_hotkey.meta,
+                },
+                self.settings.ocr_hotkey.key.parse()?,
+            )?,
+            ocr_language: self.settings.ocr_language,
             provider: self.settings.provider.parse()?,
             ollama,
             llm,

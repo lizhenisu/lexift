@@ -1461,3 +1461,72 @@ msgstr "도구 모음 접기"
 
 msgid "Expand toolbar"
 msgstr "도구 모음 펼치기"
+
+msgid "OCR translation"
+msgstr "OCR 번역"
+
+msgid "Screen region translation"
+msgstr "화면 영역 번역"
+
+msgid "Drag a screen region to recognize and translate text"
+msgstr "화면 영역을 선택하여 텍스트 인식 및 번역"
+
+msgid "Recognition language"
+msgstr "인식 언어"
+
+msgid "Follow interface language"
+msgstr "인터페이스 언어 사용"
+
+msgid "Download OCR resources"
+msgstr "OCR 리소스 다운로드"
+
+msgid "Cancel download"
+msgstr "다운로드 취소"
+
+msgid "Download"
+msgstr "다운로드"
+
+msgid "Downloading OCR resources"
+msgstr "OCR 리소스 다운로드 중"
+
+msgid "OCR resources ready"
+msgstr "OCR 리소스 준비됨"
+
+msgid "OCR resources not installed"
+msgstr "OCR 리소스가 설치되지 않음"
+
+msgid "Recognizing text…"
+msgstr "텍스트 인식 중…"
+
+msgid "Exit annotation before starting OCR"
+msgstr "OCR 시작 전에 주석 모드를 종료하세요"
+
+msgid "No text recognized in the selected region"
+msgstr "선택 영역에서 텍스트를 찾지 못했습니다"
+
+msgid "OCR resources ready. Press the shortcut again"
+msgstr "OCR 준비 완료. 단축키를 다시 누르세요"
+
+msgid "Drag to select. Release to translate. Escape or right-click to cancel."
+msgstr "드래그로 선택하고 놓으면 번역합니다. Escape 또는 오른쪽 클릭으로 취소."
+
+msgid "Download all local recognition models and runtime. Recognition works offline after download."
+msgstr "모든 로컬 인식 모델과 런타임을 다운로드합니다. 이후 오프라인으로 인식할 수 있습니다."
+
+msgid "Recognition language saved"
+msgstr "인식 언어 저장됨"
+
+msgid "Recognition language wasn't saved"
+msgstr "인식 언어를 저장하지 못했습니다"
+
+msgid "Translation, annotation and OCR shortcuts must differ"
+msgstr "번역, 주석 및 OCR 단축키는 서로 달라야 합니다"
+
+msgid "Could not prepare OCR selection"
+msgstr "OCR 선택 화면을 준비하지 못했습니다"
+
+msgid "Local OCR is unavailable"
+msgstr "로컬 OCR을 사용할 수 없습니다"
+
+msgid "OCR selection is too large"
+msgstr "OCR 선택 영역이 너무 큽니다"

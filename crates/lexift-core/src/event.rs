@@ -9,6 +9,7 @@ use crate::ports::credential::{CredentialAccessPurpose, CredentialSecret};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppEvent {
+    Ocr(crate::domain::ocr::OcrEvent),
     ClipboardHistory(crate::domain::clipboard_history::HistoryEvent),
     Started,
     SelectionTranslationRequested,

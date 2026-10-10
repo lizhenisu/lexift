@@ -414,7 +414,7 @@ export component TranslationPopup inherits Window {
                 border-color: Colors.popup-result-edge;
                 Text {
                     x: 14px; y: 8px; width: parent.width - 28px; height: 24px;
-                    text: root.busy ? @tr("Translating…") : root.error-text != "" ? @tr("Translation failed") : @tr("Translation");
+                    text: root.busy ? root.phase-text : root.error-text != "" ? @tr("Translation failed") : @tr("Translation");
                     color: root.error-text != "" ? Colors.error : Colors.primary;
                     font-size: 13px;
                     font-weight: 600;

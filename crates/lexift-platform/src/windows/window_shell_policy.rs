@@ -141,6 +141,20 @@ unsafe extern "system" fn before_window_message(
     use windows::Win32::UI::WindowsAndMessaging::*;
     if code >= 0 && lparam.0 != 0 {
         let message = unsafe { &*(lparam.0 as *const CWPSTRUCT) };
+        if matches!(
+            message.message,
+            WM_CREATE | WM_SHOWWINDOW | WM_WINDOWPOSCHANGED | WM_STYLECHANGED
+        ) && unsafe { GetWindowLongPtrW(message.hwnd, GWL_STYLE) } & WS_CHILD.0 as isize == 0
+            && tracing::enabled!(tracing::Level::DEBUG)
+        {
+            let mut rect = windows::Win32::Foundation::RECT::default();
+            let _ = unsafe { GetWindowRect(message.hwnd, &mut rect) };
+            tracing::debug!(hwnd = ?message.hwnd, message = message.message,
+                style = unsafe { GetWindowLongPtrW(message.hwnd,GWL_STYLE) },
+                ex_style = unsafe { GetWindowLongPtrW(message.hwnd,GWL_EXSTYLE) },
+                left=rect.left, top=rect.top, width=rect.right-rect.left, height=rect.bottom-rect.top,
+                "Top-level window lifecycle");
+        }
         if message.message == WM_WINDOWPOSCHANGING && message.lParam.0 != 0 {
             let position = unsafe { &mut *(message.lParam.0 as *mut WINDOWPOS) };
             if position.flags.contains(SWP_SHOWWINDOW)

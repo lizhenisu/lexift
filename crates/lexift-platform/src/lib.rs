@@ -1,3 +1,20 @@
+#[cfg(target_os = "windows")]
+mod ocr;
+
+/// Local OCR capability; the downloaded runtime is loaded only on use.
+pub fn local_ocr_port() -> lexift_core::Result<std::sync::Arc<dyn lexift_core::ports::ocr::OcrPort>>
+{
+    #[cfg(target_os = "windows")]
+    {
+        Ok(std::sync::Arc::new(ocr::LocalOcr::new()?))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err(lexift_core::Error::new(
+            "Local OCR is only available on Windows",
+        ))
+    }
+}
 pub mod capabilities;
 mod credential;
 #[cfg(feature = "mock")]
@@ -131,6 +148,7 @@ pub enum PopupDismissCause {
 /// its logical coordinate system before dispatching them to the rendering backend.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PopupPointerEvent {
+    RightPressed,
     /// Native capture loss is not a user release; canvases must cancel pending placement.
     LeftCancelled {
         x: f32,
@@ -227,7 +245,25 @@ pub fn default_window_attributes(
     attributes: winit::window::WindowAttributes,
 ) -> winit::window::WindowAttributes {
     use winit::platform::windows::WindowAttributesExtWindows;
-    attributes.with_skip_taskbar(true)
+    windows::screen_interaction_window::attributes(attributes).with_skip_taskbar(true)
+}
+
+/// Capture screen-host creation attributes without leaking them to other views.
+#[cfg(target_os = "windows")]
+pub fn with_screen_interaction_creation(factory: &mut dyn FnMut()) {
+    windows::screen_interaction_window::creation_scope(factory);
+}
+#[cfg(not(target_os = "windows"))]
+pub fn with_screen_interaction_creation(factory: &mut dyn FnMut()) {
+    factory();
+}
+#[cfg(target_os = "windows")]
+pub fn prepare_screen_interaction_window(
+    window: &winit::window::Window,
+    bounds: lexift_core::domain::geometry::Rect,
+    frame: Option<&lexift_core::ports::screen_capture::CapturedRegion>,
+) -> lexift_core::Result<()> {
+    windows::screen_interaction_window::prepare_surface(window, bounds, frame)
 }
 
 /// Explicit Shell membership is granted only to the Settings window instance.
@@ -627,6 +663,21 @@ pub fn clipboard_history_capabilities()
 }
 
 /// Watches outside clicks, foreground changes and Escape for the passive history window.
+pub fn set_ocr_selection_dismissal(
+    window: &impl raw_window_handle::HasWindowHandle,
+    enabled: bool,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::popup::set_ocr_dismissal(window, enabled)?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, enabled);
+    }
+    Ok(())
+}
+
 pub fn set_clipboard_history_dismissal(
     window: &impl raw_window_handle::HasWindowHandle,
     enabled: bool,
@@ -638,4 +689,17 @@ pub fn set_clipboard_history_dismissal(
     #[cfg(not(target_os = "windows"))]
     let _ = (window, enabled);
     Ok(())
+}
+
+/// Queue the first-frame handoff only after the caller has returned from rendering.
+pub fn complete_screen_interaction_frame(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<bool> {
+    #[cfg(target_os = "windows")]
+    return windows::screen_interaction_window::complete(window);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+        Ok(false)
+    }
 }

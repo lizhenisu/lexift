@@ -94,6 +94,13 @@ pub struct HotkeyConfig {
 }
 
 impl HotkeyConfig {
+    pub const fn ocr_default() -> Self {
+        Self {
+            modifiers: HotkeyModifiers::alt(),
+            key: HotkeyKey::Letter('T'),
+        }
+    }
+
     pub const fn annotation_default() -> Self {
         Self {
             modifiers: HotkeyModifiers::alt(),
@@ -239,6 +246,7 @@ impl FromStr for ProviderConfig {
 pub struct RuntimeConfig {
     pub hotkey: HotkeyConfig,
     pub annotation_hotkey: HotkeyConfig,
+    pub ocr_hotkey: HotkeyConfig,
     pub provider: ProviderConfig,
     pub ollama: super::ollama::OllamaConfig,
     pub llm: super::llm::LlmSettings,
@@ -250,6 +258,7 @@ impl Default for RuntimeConfig {
         Self {
             hotkey: HotkeyConfig::default(),
             annotation_hotkey: HotkeyConfig::annotation_default(),
+            ocr_hotkey: HotkeyConfig::ocr_default(),
             provider: ProviderConfig::default(),
             ollama: super::ollama::OllamaConfig::default(),
             llm: super::llm::LlmSettings::default(),

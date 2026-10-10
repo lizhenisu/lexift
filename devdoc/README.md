@@ -37,6 +37,9 @@
 - [翻译 Popup 会话与窗口策略](features/translation-popup.md)
 - [长译文布局](features/translation-result-layout.md)
 - [Settings 使用体验](features/settings-ergonomics.md)
+- [本地 OCR 框选翻译](features/ocr-translation.md)
+- [屏幕区域选择基础](features/region-selection.md)
+- [共用屏幕交互宿主](features/screen-interaction.md)
 - [剪贴板历史](features/clipboard-history.md)
 - [复制按钮反馈](features/copy-feedback.md)
 - [界面国际化](features/i18n.md)
@@ -71,6 +74,8 @@
 
 ## 发布
 
+- [本地 OCR 实施验证](releases/ocr-validation.md)
+- [OCR 首次显示验证](releases/ocr-first-frame-validation.md)
 - [发布检查清单](releases/release-checklist.md)
 - [Release 测量](releases/release-performance.md)
 - [v0.1.0 候选验收记录](releases/release-validation-v0.1.0.md)

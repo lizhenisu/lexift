@@ -1,0 +1,26 @@
+import { Metrics } from "design/metrics.slint";
+import { RegionPreview, ScreenInteractionHint } from "screen-interaction.slint";
+export component OcrSelectionWindow inherits Window {
+    title: @tr("OCR translation");
+    no-frame: true; always-on-top: true;
+    background: #000;
+    in property <image> frozen-image;
+    in property <bool> selecting;
+    in property <length> selection-left;
+    in property <length> selection-top;
+    in property <length> selection-width;
+    in property <length> selection-height;
+    Image { source: root.frozen-image; width: parent.width; height: parent.height; image-fit: fill; }
+    RegionPreview {
+        width: parent.width; height: parent.height;
+        selecting: root.selecting; left: root.selection-left; top: root.selection-top;
+        selection-width: root.selection-width; selection-height: root.selection-height;
+    }
+    ScreenInteractionHint {
+        width: min(parent.width - 32px, Metrics.ocr-hint-max-width);
+        x: max(8px,(parent.width - self.width)/2); y: 24px;
+        text: @tr("Drag to select. Release to translate. Escape or right-click to cancel.");
+    }
+    callback cancelled();
+    TouchArea { mouse-cursor: crosshair; pointer-event(event) => { if event.button == PointerEventButton.right && event.kind == PointerEventKind.down { root.cancelled(); } } }
+}

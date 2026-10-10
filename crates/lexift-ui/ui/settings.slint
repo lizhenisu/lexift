@@ -708,6 +708,19 @@ export component SettingsWindow inherits Window {
     in-out property <bool> llm-prompt-expanded: false;
     in-out property <bool> credential-delete-dialog: false;
     in-out property <bool> settings-close-dialog: false;
+    in-out property <bool> ocr-download-dialog: false;
+    in-out property <int> ocr-confirm-generation: -1;
+    in property <bool> ocr-downloading: false;
+    in property <string> ocr-status;
+    in property <string> ocr-download-size;
+    in-out property <int> ocr-language-index: 0;
+    in-out property <string> draft-ocr-hotkey-label: "Alt + T";
+    in-out property <bool> ocr-hotkey-capturing: false;
+    callback ocr-language-selected(int);
+    callback ocr-download-requested();
+    callback ocr-download-cancelled();
+    callback ocr-hotkey-change-requested(string);
+    public function focus-ocr-hotkey-capture() { ocr-hotkey-capture.focus(); }
     in-out property <bool> history-clear-dialog: false;
     private property <int> close-return-focus;
     private property <int> active-editor;
@@ -1067,7 +1080,7 @@ export component SettingsWindow inherits Window {
         root.llm-model-search = ""; root.llm-model-filter = 0;
     }
     public function select-category(category: int) {
-        if root.settings-close-dialog || root.credential-delete-dialog || root.history-clear-dialog || root.active-category == category { return; }
+        if root.ocr-download-dialog || root.settings-close-dialog || root.credential-delete-dialog || root.history-clear-dialog || root.active-category == category { return; }
         root.close-settings-menu(); root.close-app-language-menu(); root.hotkey-capturing = false; root.annotation-hotkey-capturing = false;
         if root.active-category == 5 { root.credential-edit-cancel-requested(); root.llm-page-left(); }
         SettingsInteraction.invalidate();
@@ -1077,7 +1090,7 @@ export component SettingsWindow inherits Window {
     }
 
     root-content := SettingsFocusScope {
-        enabled: !root.settings-close-dialog && !root.llm-advanced && !root.llm-model-dialog && !root.llm-probe-dialog && !root.credential-delete-dialog && !root.history-clear-dialog;
+        enabled: !root.ocr-download-dialog && !root.settings-close-dialog && !root.llm-advanced && !root.llm-model-dialog && !root.llm-probe-dialog && !root.credential-delete-dialog && !root.history-clear-dialog;
         x: 0px; y: 0px; width: root.width; height: root.height;
 
     sidebar := Rectangle {
@@ -1161,7 +1174,7 @@ export component SettingsWindow inherits Window {
         visible: root.active-category == 0;
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
         content-width: self.visible-width;
-        content-height: max(self.visible-height, history-card.y + history-card.height + Metrics.settings-page-padding);
+        content-height: max(self.visible-height, ocr-card.y + ocr-card.height + Metrics.settings-page-padding);
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
         scrolled => { SettingsHints.clear();
             root.close-app-language-menu();
@@ -1244,6 +1257,18 @@ export component SettingsWindow inherits Window {
                 if root.history-error != "": Text { text: root.history-error; wrap: word-wrap; color: Colors.error; font-size: 13px; }
             }
         }
+        ocr-card := SettingsCard {
+            x: Metrics.settings-page-padding; y: history-card.y + history-card.height + Metrics.settings-card-gap;
+            width: general-scroll.visible-width - 2 * Metrics.settings-page-padding; title: @tr("OCR translation");
+            VerticalLayout {
+                spacing: Spacing.medium;
+                SettingsControlRow { label: @tr("Recognition language");
+                    SettingsComboBox { model: [@tr("Follow interface language"), "简体中文", "繁體中文", "English (US)", "English (UK)", "日本語", "한국어", "Deutsch", "Français", "Español", "Italiano", "Português (Portugal)", "Português (Brasil)"]; current-index <=> root.ocr-language-index; selected(index) => { root.ocr-language-selected(index); } }
+                }
+                Text { text: root.ocr-status; wrap: word-wrap; color: Colors.secondary-foreground; font-size: Typography.body-size; }
+                ocr-resource-button := SettingsButton { label: root.ocr-downloading ? @tr("Cancel download") : @tr("Download OCR resources"); clicked => { if root.ocr-downloading { root.ocr-download-cancelled(); } else { root.ocr-download-dialog = true; } } }
+            }
+        }
     }
     AppVerticalScrollBar {
         visible: root.active-category == 0 && general-scroll.content-height > general-scroll.visible-height + 1px;
@@ -1259,7 +1284,7 @@ export component SettingsWindow inherits Window {
         visible: root.active-category == 2;
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
         content-width: self.visible-width;
-        content-height: max(self.visible-height, annotation-hotkeys-card.y + annotation-hotkeys-card.height + Metrics.settings-page-padding);
+        content-height: max(self.visible-height, ocr-hotkeys-card.y + ocr-hotkeys-card.height + Metrics.settings-page-padding);
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
 
         selection-hotkeys-card := SettingsCard {
@@ -1362,6 +1387,58 @@ export component SettingsWindow inherits Window {
                             root.hotkey-capturing = false;
                             root.annotation-hotkey-capturing = !root.annotation-hotkey-capturing;
                             if root.annotation-hotkey-capturing { root.focus-annotation-hotkey-capture(); }
+                        }
+                    }
+                }
+            }
+        }
+        ocr-hotkeys-card := SettingsCard {
+            x: Metrics.settings-page-padding;
+            y: annotation-hotkeys-card.y + annotation-hotkeys-card.height + Metrics.settings-card-gap;
+            width: hotkeys-scroll.visible-width - 2 * Metrics.settings-page-padding; title: @tr("OCR translation");
+            VerticalLayout {
+                spacing: Spacing.small;
+                Rectangle {
+                    width: 100%; height: root.hotkeys-compact ? capture-label-2.height + 56px : max(92px, capture-label-2.height + 16px);
+                    capture-label-2 := SettingsTextBlock {
+                        height: self.preferred-height;
+                        x: 0px; y: root.hotkeys-compact ? 0px : (parent.height - self.height) / 2;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.45 - Spacing.small;
+                        label: @tr("Screen region translation");
+                        description: root.ocr-hotkey-capturing ? @tr("Press a key combination") : @tr("Drag a screen region to recognize and translate text");
+
+                    }
+                    Rectangle {
+                        x: root.hotkeys-compact ? 0px : parent.width * 0.45;
+                        y: root.hotkeys-compact ? capture-label-2.height + Spacing.small : (parent.height - 40px) / 2;
+                        width: root.hotkeys-compact ? parent.width - 96px : parent.width * 0.55 - 96px;
+                        height: 40px; border-radius: 6px;
+                        border-width: root.ocr-hotkey-capturing ? 2px : 1px;
+                        border-color: root.ocr-hotkey-capturing ? Colors.primary : Colors.outline;
+                        background: Colors.background;
+                        Text {
+                            x: Spacing.medium; width: parent.width - 2 * Spacing.medium; height: parent.height;
+                            text: root.ocr-hotkey-capturing ? @tr("Press shortcut…") : root.draft-ocr-hotkey-label;
+                            color: root.ocr-hotkey-capturing ? Colors.primary : Colors.foreground;
+                            font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
+                        }
+                        ocr-hotkey-capture := SettingsFocusScope {
+                            key-pressed(event) => {
+                                if !root.ocr-hotkey-capturing || root.active-category != 2 { return reject; }
+                                if event.text == Key.Escape { root.ocr-hotkey-capturing = false; return accept; }
+                                let captured = root.hotkey-key-pressed(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta);
+                                if captured != "" { root.ocr-hotkey-change-requested(captured); root.draft-ocr-hotkey-label = captured; root.ocr-hotkey-capturing = false; }
+                                return accept;
+                            }
+                        }
+                    }
+                    SettingsButton {
+                        x: parent.width - 84px; y: root.hotkeys-compact ? capture-label-2.height + Spacing.small : (parent.height - 40px) / 2;
+                        width: 84px; label: root.ocr-hotkey-capturing ? @tr("Cancel") : @tr("Change");
+                        clicked => {
+                            root.hotkey-capturing = false;
+                            root.ocr-hotkey-capturing = !root.ocr-hotkey-capturing;
+                            if root.ocr-hotkey-capturing { root.focus-ocr-hotkey-capture(); }
                         }
                     }
                 }
@@ -1670,6 +1747,23 @@ export component SettingsWindow inherits Window {
             }
         }
     }
+    ocr-download-modal := SettingsFocusScope {
+        visible: root.ocr-download-dialog; x: 0px; y: 0px; width: root.width; height: root.height; z: 121;
+        capture-key-pressed(event) => { if event.text == Key.Escape { root.ocr-download-dialog = false; return accept; } return reject; }
+        Rectangle { width: parent.width; height: parent.height; background: SettingsColors.scrim; TouchArea {} }
+        ProviderDialog {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: min(480px, parent.width - 48px); height: 240px;
+            title: @tr("Download OCR resources"); dismissed => { root.ocr-download-dialog = false; }
+            Text { x: 24px; y: 64px; width: parent.width - 48px; height: 100px; wrap: word-wrap; color: Colors.secondary-foreground; font-size: Typography.body-size;
+                text: @tr("Download all local recognition models and runtime. Recognition works offline after download.") + "\n" + root.ocr-download-size;
+            }
+            HorizontalLayout { x: 24px; y: parent.height - 64px; width: parent.width - 48px; height: 40px; spacing: Spacing.small; alignment: end;
+                cancel-ocr-download := SettingsButton { compact: true; label: @tr("Cancel"); clicked => { root.ocr-download-dialog = false; } }
+                SettingsButton { compact: true; label: @tr("Download"); clicked => { root.ocr-download-dialog = false; root.ocr-download-requested(); } }
+            }
+        }
+    }
+    changed ocr-download-dialog => { SettingsHints.clear(); if root.ocr-download-dialog { cancel-ocr-download.focus-button(); } else if root.active-category == 0 { ocr-resource-button.focus-button(); } }
     clear-history-modal := SettingsFocusScope {
         visible: root.history-clear-dialog; enabled: !root.settings-close-dialog;
         x: 0px; y: 0px; width: root.width; height: root.height; z: 120;

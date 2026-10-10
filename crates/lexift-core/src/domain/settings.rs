@@ -18,6 +18,8 @@ pub enum SettingsField {
     TargetLanguage,
     Hotkey,
     AnnotationHotkey,
+    OcrHotkey,
+    OcrLanguage,
     Provider,
     Ollama,
     Llm,
@@ -59,6 +61,8 @@ pub enum SettingsChange {
     TargetLanguage(Language),
     Hotkey(HotkeyConfig),
     AnnotationHotkey(HotkeyConfig),
+    OcrHotkey(HotkeyConfig),
+    OcrLanguage(Option<String>),
     Provider(ProviderConfig),
     Ollama(super::ollama::OllamaConfig),
     Llm(super::llm::LlmSettings),
@@ -94,6 +98,8 @@ impl SettingsChange {
             Self::TargetLanguage(_) => SettingsField::TargetLanguage,
             Self::Hotkey(_) => SettingsField::Hotkey,
             Self::AnnotationHotkey(_) => SettingsField::AnnotationHotkey,
+            Self::OcrHotkey(_) => SettingsField::OcrHotkey,
+            Self::OcrLanguage(_) => SettingsField::OcrLanguage,
             Self::Provider(_) => SettingsField::Provider,
             Self::Ollama(_) => SettingsField::Ollama,
             Self::Llm(_) => SettingsField::Llm,
@@ -111,6 +117,11 @@ impl SettingsChange {
 
     /// Validate targeted translation edits against the current configuration at dispatch time.
     pub fn validate_translation_change(&self, settings: &Settings) -> crate::Result<()> {
+        if let Self::OcrLanguage(Some(value)) = self
+            && !super::ocr::LANGUAGES.contains(&value.as_str())
+        {
+            return Err(crate::Error::new("Unsupported OCR language"));
+        }
         if let Self::ClipboardHistoryLimit(value) = self
             && !(10..=200).contains(value)
         {
@@ -177,6 +188,8 @@ impl SettingsChange {
             Self::TargetLanguage(value) => settings.target_language = value.clone(),
             Self::Hotkey(value) => settings.hotkey = *value,
             Self::AnnotationHotkey(value) => settings.annotation_hotkey = *value,
+            Self::OcrHotkey(value) => settings.ocr_hotkey = *value,
+            Self::OcrLanguage(value) => settings.ocr_language = value.clone(),
             Self::Provider(value) => settings.provider = *value,
             Self::Ollama(value) => settings.ollama = value.clone(),
             Self::Llm(value) => {
@@ -240,6 +253,8 @@ impl SettingsChange {
             Self::TargetLanguage(value) => settings.target_language == *value,
             Self::Hotkey(value) => settings.hotkey == *value,
             Self::AnnotationHotkey(value) => settings.annotation_hotkey == *value,
+            Self::OcrHotkey(value) => settings.ocr_hotkey == *value,
+            Self::OcrLanguage(value) => settings.ocr_language == *value,
             Self::Provider(value) => settings.provider == *value,
             Self::Ollama(value) => settings.ollama == *value,
             Self::Llm(value) => settings.llm == *value,
@@ -275,6 +290,8 @@ pub struct Settings {
     pub target_language: Language,
     pub hotkey: HotkeyConfig,
     pub annotation_hotkey: HotkeyConfig,
+    pub ocr_hotkey: HotkeyConfig,
+    pub ocr_language: Option<String>,
     pub provider: ProviderConfig,
     pub ollama: super::ollama::OllamaConfig,
     pub llm: super::llm::LlmSettings,
@@ -294,6 +311,8 @@ impl Default for Settings {
             target_language: Language("zh-CN".into()),
             hotkey: HotkeyConfig::default(),
             annotation_hotkey: HotkeyConfig::annotation_default(),
+            ocr_hotkey: HotkeyConfig::ocr_default(),
+            ocr_language: None,
             provider: ProviderConfig::default(),
             ollama: super::ollama::OllamaConfig::default(),
             llm: super::llm::LlmSettings::default(),
@@ -313,6 +332,7 @@ impl Settings {
         RuntimeConfig {
             hotkey: self.hotkey,
             annotation_hotkey: self.annotation_hotkey,
+            ocr_hotkey: self.ocr_hotkey,
             provider: self.provider,
             ollama: self.ollama.clone(),
             llm: self.llm.clone(),

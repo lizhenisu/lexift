@@ -136,16 +136,41 @@ mod tests {
     }
 
     #[test]
-    fn save_creates_parent_and_v9_file() {
+    fn save_creates_parent_and_v10_file() {
         let (_directory, store) = fixture();
         store.save(&settings("ja")).unwrap();
         let contents = fs::read_to_string(store.path()).unwrap();
-        assert!(contents.contains("schema_version = 9"));
+        assert!(contents.contains("schema_version = 10"));
         assert!(contents.contains("target_language = \"ja\""));
         assert!(contents.contains("provider = \"deepl\""));
         assert!(contents.contains("key = \"X\""));
         assert!(contents.contains("launch_at_login = false"));
         assert!(!contents.contains("deepl-primary"));
+    }
+
+    #[test]
+    fn ocr_migrates_defaults_and_roundtrips_independent_settings() {
+        let (_directory, store) = fixture();
+        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+        fs::write(
+            store.path(),
+            "schema_version = 9\n[settings]\ntarget_language = 'de'\nprovider = 'deepl'\n",
+        )
+        .unwrap();
+        let mut settings = store.load().unwrap();
+        assert_eq!(
+            settings.ocr_hotkey,
+            lexift_core::domain::runtime_config::HotkeyConfig::ocr_default()
+        );
+        assert_eq!(settings.ocr_language, None);
+        lexift_core::domain::settings::SettingsChange::OcrLanguage(Some("ja".into()))
+            .apply_to(&mut settings);
+        settings.ocr_hotkey = "Control + T".parse().unwrap();
+        store.save(&settings).unwrap();
+        let saved = store.load().unwrap();
+        assert_eq!(saved.ocr_language, Some("ja".into()));
+        assert_eq!(saved.ocr_hotkey, settings.ocr_hotkey);
+        assert_eq!(saved.target_language.0, "de");
     }
 
     #[test]
@@ -195,7 +220,7 @@ mod tests {
         assert!(
             fs::read_to_string(store.path())
                 .unwrap()
-                .contains("schema_version = 9")
+                .contains("schema_version = 10")
         );
     }
 
@@ -271,7 +296,7 @@ mod tests {
         };
         store.save(&settings).unwrap();
         let contents = fs::read_to_string(store.path()).unwrap();
-        assert!(contents.contains("schema_version = 9"));
+        assert!(contents.contains("schema_version = 10"));
         assert!(contents.contains("[credentials]"));
         assert!(contents.contains("deepl = \"deepl-primary\""));
         assert!(!contents.contains("api_key"));

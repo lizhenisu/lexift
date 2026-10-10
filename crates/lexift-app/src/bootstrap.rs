@@ -211,6 +211,23 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
             },
         )
         .with_clipboard_history_support(history_supported)
+        .with_screen_interaction(
+            lexift_platform::with_screen_interaction_creation,
+            |window, bounds, frame| {
+                match window.with_winit_window(|native| lexift_platform::prepare_screen_interaction_window(native,bounds,frame)) {
+                    Some(Ok(())) => lexift_ui::PassiveWindowPreparation::Ready,
+                    None => lexift_ui::PassiveWindowPreparation::Pending,
+                    Some(Err(error)) => { tracing::warn!(%error,"screen host preparation failed"); lexift_ui::PassiveWindowPreparation::Failed }
+                }
+            },
+        )
+        .with_screen_frame_handoff(
+            |window| match lexift_platform::complete_screen_interaction_frame(&window.window_handle()) {
+                Ok(ready) => ready,
+                Err(error) => { tracing::warn!(%error,"region surface handoff failed"); false }
+            },
+        )
+        .with_ocr_selection_dismissal(|window,enabled|lexift_platform::set_ocr_selection_dismissal(&window.window_handle(),enabled).is_ok())
         .with_clipboard_history_dismissal(|window,enabled| lexift_platform::set_clipboard_history_dismissal(&window.window_handle(),enabled).is_ok())
         .with_about_links(|link| match lexift_platform::open_web_link(link.url()) {
             Ok(()) => true,
@@ -391,7 +408,13 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
             services.clipboard.clone(),
         )
         .with_speech(services.speech.clone())
-        .with_history(history_runtime),
+        .with_history(history_runtime)
+        .with_ocr(
+            lexift_platform::local_ocr_port()
+                .ok()
+                .zip(lexift_platform::annotation_screen_capture_port())
+                .map(|(port, capture)| Arc::new(crate::ocr::OcrRuntime::new(port, capture))),
+        ),
     );
     if let Some(speech) = &services.speech {
         use lexift_core::ports::speech::SpeechEventHandler;
@@ -432,6 +455,9 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         },
     );
     controller.start_history();
+    controller.dispatch(lexift_core::AppEvent::Ocr(
+        lexift_core::domain::ocr::OcrEvent::RefreshResources,
+    ));
     #[cfg(not(feature = "m1-demo"))]
     {
         let weak = Arc::downgrade(&controller);
@@ -469,6 +495,13 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
     }
     if let Err(error) = services.runtime_manager.reconcile_autostart() {
         tracing::warn!(%error, "launch-at-login registration could not be reconciled");
+    }
+    let ocr_ui = ui.handle();
+    if let Err(error) = services
+        .runtime_manager
+        .start_ocr_hotkey(Arc::new(move || ocr_ui.request_ocr()))
+    {
+        tracing::warn!(%error,"OCR shortcut registration failed");
     }
     let annotation_ui = ui.handle();
     let annotation_result = services
@@ -514,6 +547,9 @@ fn map_pointer_event(event: lexift_platform::PopupPointerEvent) -> lexift_ui::Po
             lexift_ui::PopupPointerInput::Moved { x, y }
         }
         lexift_platform::PopupPointerEvent::Exited => lexift_ui::PopupPointerInput::Exited,
+        lexift_platform::PopupPointerEvent::RightPressed => {
+            lexift_ui::PopupPointerInput::RightPressed
+        }
         lexift_platform::PopupPointerEvent::LeftPressed { x, y } => {
             lexift_ui::PopupPointerInput::LeftPressed { x, y }
         }

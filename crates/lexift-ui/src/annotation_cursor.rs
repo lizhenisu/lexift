@@ -1,18 +1,12 @@
 //! Cursor feedback shares the canvas hit test and locks to an active drag's operation.
 use super::{Gesture, InteractionMode, Registry};
 use crate::AnnotationCursor;
-use lexift_core::domain::{
-    annotation::{Extra, Hit, Kind, Object, Session},
-    geometry::Rect,
-};
+use lexift_core::domain::annotation::{Extra, Hit, Kind, Object, Session};
+#[cfg(test)]
+use lexift_core::domain::geometry::Rect;
 use slint::ComponentHandle;
 
-pub(super) fn screen_point(bounds: Rect, point: (f32, f32), scale: f32) -> (f32, f32) {
-    (
-        bounds.left as f32 + point.0 * scale,
-        bounds.top as f32 + point.1 * scale,
-    )
-}
+pub(super) use crate::screen_interaction::screen_point;
 
 fn handle_cursor(handle: usize) -> AnnotationCursor {
     match handle % 8 {

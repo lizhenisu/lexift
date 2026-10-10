@@ -1461,3 +1461,72 @@ msgstr "ツールバーを折りたたむ"
 
 msgid "Expand toolbar"
 msgstr "ツールバーを展開"
+
+msgid "OCR translation"
+msgstr "OCR 翻訳"
+
+msgid "Screen region translation"
+msgstr "画面範囲の翻訳"
+
+msgid "Drag a screen region to recognize and translate text"
+msgstr "画面の範囲を選択して文字を認識・翻訳"
+
+msgid "Recognition language"
+msgstr "認識言語"
+
+msgid "Follow interface language"
+msgstr "表示言語に従う"
+
+msgid "Download OCR resources"
+msgstr "OCR リソースをダウンロード"
+
+msgid "Cancel download"
+msgstr "ダウンロードを中止"
+
+msgid "Download"
+msgstr "ダウンロード"
+
+msgid "Downloading OCR resources"
+msgstr "OCR リソースをダウンロード中"
+
+msgid "OCR resources ready"
+msgstr "OCR リソース準備完了"
+
+msgid "OCR resources not installed"
+msgstr "OCR リソース未インストール"
+
+msgid "Recognizing text…"
+msgstr "文字を認識中…"
+
+msgid "Exit annotation before starting OCR"
+msgstr "OCR の前に注釈を終了してください"
+
+msgid "No text recognized in the selected region"
+msgstr "選択範囲に文字が見つかりません"
+
+msgid "OCR resources ready. Press the shortcut again"
+msgstr "OCR の準備ができました。ショートカットを再度押してください"
+
+msgid "Drag to select. Release to translate. Escape or right-click to cancel."
+msgstr "ドラッグで選択、離して翻訳。Escape または右クリックで中止。"
+
+msgid "Download all local recognition models and runtime. Recognition works offline after download."
+msgstr "すべてのローカル認識モデルとランタイムをダウンロードします。以後はオフラインで認識できます。"
+
+msgid "Recognition language saved"
+msgstr "認識言語を保存しました"
+
+msgid "Recognition language wasn't saved"
+msgstr "認識言語を保存できませんでした"
+
+msgid "Translation, annotation and OCR shortcuts must differ"
+msgstr "翻訳・注釈・OCR のショートカットは別々に設定してください"
+
+msgid "Could not prepare OCR selection"
+msgstr "OCR 選択画面を準備できません"
+
+msgid "Local OCR is unavailable"
+msgstr "ローカル OCR を利用できません"
+
+msgid "OCR selection is too large"
+msgstr "OCR の選択範囲が大きすぎます"

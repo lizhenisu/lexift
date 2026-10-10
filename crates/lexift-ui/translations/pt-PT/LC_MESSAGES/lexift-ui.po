@@ -1461,3 +1461,72 @@ msgstr "Recolher barra de ferramentas"
 
 msgid "Expand toolbar"
 msgstr "Expandir barra de ferramentas"
+
+msgid "OCR translation"
+msgstr "Tradução OCR"
+
+msgid "Screen region translation"
+msgstr "Traduzir região do ecrã"
+
+msgid "Drag a screen region to recognize and translate text"
+msgstr "Selecione uma região para reconhecer e traduzir texto"
+
+msgid "Recognition language"
+msgstr "Idioma de reconhecimento"
+
+msgid "Follow interface language"
+msgstr "Usar idioma da interface"
+
+msgid "Download OCR resources"
+msgstr "Transferir recursos OCR"
+
+msgid "Cancel download"
+msgstr "Cancelar transferência"
+
+msgid "Download"
+msgstr "Transferir"
+
+msgid "Downloading OCR resources"
+msgstr "A transferir recursos OCR"
+
+msgid "OCR resources ready"
+msgstr "Recursos OCR prontos"
+
+msgid "OCR resources not installed"
+msgstr "Recursos OCR não instalados"
+
+msgid "Recognizing text…"
+msgstr "A reconhecer texto…"
+
+msgid "Exit annotation before starting OCR"
+msgstr "Saia da anotação antes de iniciar o OCR"
+
+msgid "No text recognized in the selected region"
+msgstr "Não foi reconhecido texto na região selecionada"
+
+msgid "OCR resources ready. Press the shortcut again"
+msgstr "OCR pronto. Prima novamente o atalho"
+
+msgid "Drag to select. Release to translate. Escape or right-click to cancel."
+msgstr "Arraste para selecionar, solte para traduzir. Escape ou botão direito para cancelar."
+
+msgid "Download all local recognition models and runtime. Recognition works offline after download."
+msgstr "Transfira os modelos locais e o motor. Depois pode reconhecer sem ligação."
+
+msgid "Recognition language saved"
+msgstr "Idioma de reconhecimento guardado"
+
+msgid "Recognition language wasn't saved"
+msgstr "Não foi guardado o idioma de reconhecimento"
+
+msgid "Translation, annotation and OCR shortcuts must differ"
+msgstr "Os atalhos de tradução, anotação e OCR devem ser diferentes"
+
+msgid "Could not prepare OCR selection"
+msgstr "Não foi possível preparar a seleção OCR"
+
+msgid "Local OCR is unavailable"
+msgstr "OCR local indisponível"
+
+msgid "OCR selection is too large"
+msgstr "A seleção OCR é demasiado grande"

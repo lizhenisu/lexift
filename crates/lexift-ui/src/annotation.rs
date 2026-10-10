@@ -723,13 +723,13 @@ impl Registry {
             let mut changed = Vec::new();
             for (index, layer) in self.canvases.iter().enumerate() {
                 if !(self.lifecycle.annotation_click_through)(
-                    layer.window.window(),
+                    layer.host.window.window(),
                     mode.is_mouse(),
                 ) {
                     for index in changed {
                         let layer: &CanvasLayer = &self.canvases[index];
                         (self.lifecycle.annotation_click_through)(
-                            layer.window.window(),
+                            layer.host.window.window(),
                             self.mode.is_mouse(),
                         );
                     }
@@ -1681,7 +1681,7 @@ fn bootstrap_action(
     let cursor = if created == 0 { 0 } else { cursor % created };
     let mut before_cursor = None;
     for (index, state) in states.enumerate() {
-        if state != CanvasBootstrap::Ready {
+        if !matches!(state, CanvasBootstrap::Ready | CanvasBootstrap::Prepared) {
             if index >= cursor {
                 return BootstrapAction::Advance(index);
             }
@@ -1716,15 +1716,29 @@ fn bootstrap_tick(generation: u64, revision: u64) {
                 match r.canvases[index].bootstrap {
                     CanvasBootstrap::Prepare(attempt) => show_canvas(r, index, attempt),
                     CanvasBootstrap::Present => render_initial_canvas(r, index),
-                    CanvasBootstrap::Ready => unreachable!(),
+                    CanvasBootstrap::Ready | CanvasBootstrap::Prepared => unreachable!(),
                 }
             }
             BootstrapAction::ShowToolbar => {
-                let revision = r.main.revision();
-                r.main.prepare_after(Duration::from_millis(16), move || {
-                    show_main(generation, revision, 0)
-                });
-                return;
+                if r.canvases
+                    .iter()
+                    .any(|layer| layer.bootstrap == CanvasBootstrap::Prepared)
+                {
+                    for index in 0..r.canvases.len() {
+                        if r.canvases[index].bootstrap == CanvasBootstrap::Prepared {
+                            show_prepared_canvas(r, index);
+                            if r.generation != generation {
+                                return;
+                            }
+                        }
+                    }
+                } else {
+                    let revision = r.main.revision();
+                    r.main.prepare_after(Duration::from_millis(16), move || {
+                        show_main(generation, revision, 0)
+                    });
+                    return;
+                }
             }
         }
         if r.generation == generation {
@@ -1741,7 +1755,7 @@ fn bootstrap_tick(generation: u64, revision: u64) {
 fn create_canvas(r: &mut Registry, index: usize) {
     let bounds = r.pending_displays[index];
     let start = Instant::now();
-    let Ok(window) = AnnotationCanvas::new() else {
+    let Ok(window) = crate::screen_interaction::create(&r.lifecycle, AnnotationCanvas::new) else {
         r.close();
         return;
     };
@@ -1813,7 +1827,10 @@ fn show_canvas(r: &mut Registry, index: usize, attempt: u8) {
         .window
         .window()
         .set_position(slint::PhysicalPosition::new(rect.left, rect.top));
-    let preparation = (r.prepare)(layer.window.window());
+    let preparation = match layer.prepare(&r.lifecycle, None) {
+        PassiveWindowPreparation::Ready => (r.prepare)(layer.window.window()),
+        status => status,
+    };
     if let Some(timing) = r.cold_open_timing.as_mut() {
         let elapsed = stage_start.elapsed();
         timing.canvas_prepare += elapsed;
@@ -1822,45 +1839,10 @@ fn show_canvas(r: &mut Registry, index: usize, attempt: u8) {
     }
     match preparation {
         PassiveWindowPreparation::Ready => {
-            let show_start = Instant::now();
-            if layer.window.show().is_err() {
-                r.close();
-                return;
-            }
-            if let Some(timing) = r.cold_open_timing.as_mut() {
-                let elapsed = show_start.elapsed();
-                timing.canvas_show += elapsed;
-                timing.largest_stage = timing.largest_stage.max(elapsed);
-                timing.per_screen[index].show += elapsed;
-            }
-            let native_start = Instant::now();
-            if !(r.lifecycle.complete_passive_window_show)(
-                layer.window.window(),
-                pointer_canvas(
-                    layer.window.as_weak(),
-                    r.generation,
-                    index,
-                    layer.revision(),
-                    layer.input(),
-                ),
-            ) {
-                r.close();
-                return;
-            }
-            if let Some(timing) = r.cold_open_timing.as_mut() {
-                let elapsed = native_start.elapsed();
-                timing.canvas_native_complete += elapsed;
-                timing.largest_stage = timing.largest_stage.max(elapsed);
-                timing.per_screen[index].native_complete += elapsed;
-            }
-            (r.lifecycle.annotation_click_through)(layer.window.window(), r.mode.is_mouse());
-            settle_canvas(r, index, layer.revision(), 2);
-            r.canvases[index].bootstrap = CanvasBootstrap::Present;
+            r.canvases[index].bootstrap = CanvasBootstrap::Prepared;
         }
         PassiveWindowPreparation::Pending if attempt < 20 => {
             let retry_start = Instant::now();
-            let _ = layer.window.show();
-            let _ = layer.window.hide();
             if let Some(timing) = r.cold_open_timing.as_mut() {
                 let elapsed = retry_start.elapsed();
                 timing.canvas_retry += elapsed;
@@ -1872,6 +1854,46 @@ fn show_canvas(r: &mut Registry, index: usize, attempt: u8) {
         }
         _ => r.close(),
     }
+}
+
+/// Reveal only after every screen passed hidden preparation.
+fn show_prepared_canvas(r: &mut Registry, index: usize) {
+    let layer = &r.canvases[index];
+
+    let show_start = Instant::now();
+    if layer.host.show().is_err() {
+        r.close();
+        return;
+    }
+    if let Some(timing) = r.cold_open_timing.as_mut() {
+        let elapsed = show_start.elapsed();
+        timing.canvas_show += elapsed;
+        timing.largest_stage = timing.largest_stage.max(elapsed);
+        timing.per_screen[index].show += elapsed;
+    }
+    let native_start = Instant::now();
+    if !(r.lifecycle.complete_passive_window_show)(
+        layer.host.window.window(),
+        pointer_canvas(
+            layer.window.as_weak(),
+            r.generation,
+            index,
+            layer.revision(),
+            layer.input(),
+        ),
+    ) {
+        r.close();
+        return;
+    }
+    if let Some(timing) = r.cold_open_timing.as_mut() {
+        let elapsed = native_start.elapsed();
+        timing.canvas_native_complete += elapsed;
+        timing.largest_stage = timing.largest_stage.max(elapsed);
+        timing.per_screen[index].native_complete += elapsed;
+    }
+    (r.lifecycle.annotation_click_through)(layer.window.window(), r.mode.is_mouse());
+    settle_canvas(r, index, layer.revision(), 2);
+    r.canvases[index].bootstrap = CanvasBootstrap::Present;
 }
 
 /// Present one complete blank monitor frame before its canvas accepts drawing.
@@ -1899,7 +1921,7 @@ fn render_initial_canvas(r: &mut Registry, index: usize) {
     let present_start = Instant::now();
     let presented = layer.presented.submit(frame, |frame| {
         (r.lifecycle.annotation_frame_presenter)(
-            layer.window.window(),
+            layer.host.window.window(),
             frame.data(),
             frame.width(),
             frame.height(),
@@ -1922,6 +1944,7 @@ fn render_initial_canvas(r: &mut Registry, index: usize) {
         None,
         None,
     ));
+    r.canvases[index].host.presented();
     r.canvases[index].bootstrap = CanvasBootstrap::Ready;
 }
 
@@ -3799,7 +3822,7 @@ fn render_canvases(generation: u64) {
                     let success = frame.is_some_and(|frame| {
                         layer.presented.submit(frame, |frame| {
                             (r.lifecycle.annotation_frame_presenter)(
-                                layer.window.window(),
+                                layer.host.window.window(),
                                 frame.data(),
                                 frame.width(),
                                 frame.height(),
@@ -3993,7 +4016,7 @@ fn render_canvases(generation: u64) {
                 let submit_timing = drag_timing::Span::new(drag_timing::Phase::Submit);
                 if !layer.presented.submit(frame, |frame| {
                     (r.lifecycle.annotation_frame_presenter)(
-                        layer.window.window(),
+                        layer.host.window.window(),
                         frame.data(),
                         frame.width(),
                         frame.height(),

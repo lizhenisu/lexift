@@ -5,6 +5,7 @@ mod clipboard_history;
 mod controller;
 mod lifecycle;
 mod llm_credentials;
+mod ocr;
 mod runtime;
 mod wiring;
 

@@ -35,6 +35,7 @@ pub enum PopupDismissCause {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PopupPointerInput {
+    RightPressed,
     /// Cancels the canvas gesture before clearing Slint's pressed pointer state.
     LeftCancelled {
         x: f32,
@@ -107,6 +108,15 @@ impl PopupResizeEdge {
 
 pub type PopupPointerSink = Rc<dyn Fn(PopupPointerInput)>;
 type CompletePassiveWindowShow = Rc<dyn Fn(&slint::Window, PopupPointerSink) -> bool>;
+type ScreenCreation = Rc<dyn Fn(&mut dyn FnMut())>;
+type PrepareScreenWindow = Rc<
+    dyn Fn(
+        &slint::Window,
+        lexift_core::domain::geometry::Rect,
+        Option<&lexift_core::ports::screen_capture::CapturedRegion>,
+    ) -> PassiveWindowPreparation,
+>;
+type CompleteRegionFrame = Rc<dyn Fn(&slint::Window) -> bool>;
 type SetPopupDismissal = Rc<dyn Fn(&slint::Window, bool) -> bool>;
 type AttachToolWindow = Rc<dyn Fn(&slint::Window, &slint::Window) -> bool>;
 type BeginWindowResize = Rc<dyn Fn(&slint::Window, PopupResizeEdge, bool) -> bool>;
@@ -140,7 +150,11 @@ pub enum PassiveWindowPreparation {
 pub struct WindowLifecycleCallbacks {
     llm_query: Option<crate::llm_settings::LlmQuery>,
     clipboard_history_supported: bool,
-    history_dismissal: SetPopupDismissal,
+    pub(crate) history_dismissal: SetPopupDismissal,
+    pub(crate) ocr_dismissal: SetPopupDismissal,
+    pub(crate) screen_creation: ScreenCreation,
+    pub(crate) prepare_screen_window: PrepareScreenWindow,
+    pub(crate) complete_region_frame: CompleteRegionFrame,
     pub(crate) complete_passive_window_show: CompletePassiveWindowShow,
     pub(crate) complete_toolbar_show: CompletePassiveWindowShow,
     toolbar_target_current: Rc<dyn Fn(lexift_core::domain::selection::SelectionTarget) -> bool>,
@@ -206,6 +220,10 @@ impl WindowLifecycleCallbacks {
             llm_query: None,
             clipboard_history_supported: false,
             history_dismissal: Rc::new(|_, _| false),
+            ocr_dismissal: Rc::new(|_, _| false),
+            screen_creation: Rc::new(|factory| factory()),
+            prepare_screen_window: Rc::new(|_, _, _| PassiveWindowPreparation::Ready),
+            complete_region_frame: Rc::new(|_| false),
             complete_passive_window_show: Rc::new(complete_passive_window_show),
             complete_toolbar_show: Rc::new(|_, _| true),
             toolbar_target_current: Rc::new(|_| false),
@@ -242,6 +260,37 @@ impl WindowLifecycleCallbacks {
         }
     }
 
+    /// Hidden native preparation and post-render handoff are separate from input dismissal.
+    pub fn with_screen_interaction(
+        mut self,
+        create: impl Fn(&mut dyn FnMut()) + 'static,
+        prepare: impl Fn(
+            &slint::Window,
+            lexift_core::domain::geometry::Rect,
+            Option<&lexift_core::ports::screen_capture::CapturedRegion>,
+        ) -> PassiveWindowPreparation
+        + 'static,
+    ) -> Self {
+        self.screen_creation = Rc::new(create);
+        self.prepare_screen_window = Rc::new(prepare);
+        self
+    }
+
+    pub fn with_screen_frame_handoff(
+        mut self,
+        complete_frame: impl Fn(&slint::Window) -> bool + 'static,
+    ) -> Self {
+        self.complete_region_frame = Rc::new(complete_frame);
+        self
+    }
+
+    pub fn with_ocr_selection_dismissal(
+        mut self,
+        callback: impl Fn(&slint::Window, bool) -> bool + 'static,
+    ) -> Self {
+        self.ocr_dismissal = Rc::new(callback);
+        self
+    }
     pub fn with_clipboard_history_dismissal(
         mut self,
         callback: impl Fn(&slint::Window, bool) -> bool + 'static,
@@ -529,6 +578,7 @@ fn has_live_window_instances() -> bool {
     });
     app_window_exists
         || HISTORY.with(|s| s.borrow().as_ref().is_some_and(|r| r.window.is_some()))
+        || crate::ocr::active()
         || crate::annotation::is_open()
         || crate::tray_menu::is_open()
         || SELECTION_TOOLBAR_REGISTRY.with(|registry| {
@@ -1906,6 +1956,7 @@ fn popup_pointer_sink(popup: slint::Weak<TranslationPopup>) -> PopupPointerSink 
         let position = |x: f32, y: f32| slint::LogicalPosition::new(x / scale, y / scale);
         use slint::platform::{PointerEventButton, WindowEvent};
         let event = match input {
+            PopupPointerInput::RightPressed => return,
             PopupPointerInput::NativeTopResizeRequested => {
                 let edge = PopupResizeEdge::Top;
                 if let Some(begin_resize) = prepare_popup_resize(&popup, edge)
@@ -2021,6 +2072,7 @@ fn language_menu_pointer_sink(menu: slint::Weak<PopupLanguageMenuWindow>) -> Pop
         let position = |x: f32, y: f32| slint::LogicalPosition::new(x / scale, y / scale);
         use slint::platform::{PointerEventButton, WindowEvent};
         let event = match input {
+            PopupPointerInput::RightPressed => return,
             PopupPointerInput::Moved { x, y } => WindowEvent::PointerMoved {
                 position: position(x, y),
             },
@@ -2174,7 +2226,7 @@ fn install_resize_background(
 }
 
 /// Invalidate all software-rendered pixels after Windows finishes a native move or resize.
-fn repair_window_paint(window: &slint::Window) {
+pub(crate) fn repair_window_paint(window: &slint::Window) {
     let scale = window.scale_factor().max(f32::EPSILON);
     let logical = window.size().to_logical(scale);
     if logical.width <= 0.0 || logical.height <= 0.0 {
@@ -2441,6 +2493,7 @@ fn ensure_settings_window(
         SETTINGS_DEFAULT_HEIGHT,
     ));
     binding::apply_settings(&settings, &mapper::view_state(&registry.latest_state));
+    crate::ocr::apply_settings(&settings, &registry.latest_state);
     if let Some(handler) = registry.handler.clone() {
         wire_settings_callbacks(
             &settings,
@@ -2608,6 +2661,38 @@ fn wire_settings_callbacks(
                 change: SettingsChange::Hotkey(hotkey),
             });
         }
+    });
+    let h = handler.clone();
+    settings.on_ocr_hotkey_change_requested(move |value| {
+        if let Ok(hotkey) = value.to_string().parse::<HotkeyConfig>() {
+            h(AppEvent::SettingsChangeRequested {
+                change: SettingsChange::OcrHotkey(hotkey),
+            });
+        }
+    });
+    let h = handler.clone();
+    settings.on_ocr_language_selected(move |index| {
+        h(AppEvent::SettingsChangeRequested {
+            change: SettingsChange::OcrLanguage(if index == 0 {
+                None
+            } else {
+                Some(
+                    lexift_core::domain::ui_language::UiLanguage::from_index(index - 1)
+                        .code()
+                        .into(),
+                )
+            }),
+        });
+    });
+    let h = handler.clone();
+    settings.on_ocr_download_requested(move || {
+        h(AppEvent::Ocr(
+            lexift_core::domain::ocr::OcrEvent::DownloadRequested,
+        ))
+    });
+    let h = handler.clone();
+    settings.on_ocr_download_cancelled(move || {
+        h(AppEvent::Ocr(lexift_core::domain::ocr::OcrEvent::Cancelled))
     });
     let annotation_settings_handler = Rc::clone(&handler);
     settings.on_annotation_hotkey_change_requested(move |hotkey| {
@@ -2788,6 +2873,7 @@ impl Ui {
         window_lifecycle: WindowLifecycleCallbacks,
     ) -> Result<Self, slint::PlatformError> {
         crate::annotation::init(prepare_passive_window, window_lifecycle.clone());
+        crate::ocr::init(prepare_passive_window, window_lifecycle.clone());
         crate::tray_menu::init(prepare_passive_window, window_lifecycle.clone());
         HISTORY.with(|s| {
             *s.borrow_mut() = Some(clipboard_history::Registry::new(
@@ -2924,6 +3010,7 @@ impl Ui {
     ) {
         let handler: Rc<dyn Fn(AppEvent)> = Rc::new(handler);
         crate::tray_menu::set_handler(Rc::clone(&handler));
+        crate::ocr::set_handler(handler.clone());
         APP_WINDOW_REGISTRY.with(|registry| {
             if let Some(registry) = registry.borrow_mut().as_mut() {
                 registry.handler = Some(Rc::clone(&handler));
@@ -2989,6 +3076,7 @@ impl Ui {
         slint::run_event_loop_until_quit()?;
         crate::tray_menu::close(false);
         crate::annotation::shutdown();
+        crate::ocr::close();
         HISTORY.with(|s| {
             s.borrow_mut().take();
         });
@@ -3516,6 +3604,12 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
         SettingsFeedback::SettingsSaveFailed(SettingsField::UiLanguage) => {
             ("Could not save interface language", true)
         }
+        SettingsFeedback::SettingsSaved(SettingsField::OcrLanguage) => {
+            ("Recognition language saved", false)
+        }
+        SettingsFeedback::SettingsSaveFailed(SettingsField::OcrLanguage) => {
+            ("Recognition language wasn't saved", true)
+        }
         SettingsFeedback::SettingsSaved(SettingsField::Theme) => ("Theme saved", false),
         SettingsFeedback::SettingsSaveFailed(SettingsField::Theme) => {
             ("Could not save theme", true)
@@ -3523,7 +3617,9 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
         SettingsFeedback::SettingsSaved(SettingsField::TargetLanguage) => {
             ("Target language saved", false)
         }
-        SettingsFeedback::SettingsSaved(SettingsField::Hotkey) => ("Shortcut saved", false),
+        SettingsFeedback::SettingsSaved(SettingsField::OcrHotkey | SettingsField::Hotkey) => {
+            ("Shortcut saved", false)
+        }
         SettingsFeedback::SettingsSaved(SettingsField::AnnotationHotkey) => {
             ("Shortcut saved", false)
         }
@@ -3547,7 +3643,7 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
         SettingsFeedback::SettingsSaveFailed(SettingsField::TargetLanguage) => {
             ("Target language wasn't saved", true)
         }
-        SettingsFeedback::SettingsSaveFailed(SettingsField::Hotkey) => {
+        SettingsFeedback::SettingsSaveFailed(SettingsField::OcrHotkey | SettingsField::Hotkey) => {
             ("Shortcut wasn't saved", true)
         }
         SettingsFeedback::SettingsSaveFailed(SettingsField::AnnotationHotkey) => {
@@ -3594,13 +3690,27 @@ pub struct UiHandle {
 }
 
 impl UiHandle {
+    pub fn request_ocr(&self) {
+        let _ = slint::invoke_from_event_loop(crate::ocr::request);
+    }
+    pub fn show_ocr_capture(
+        &self,
+        generation: u64,
+        frames: Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || crate::ocr::show(generation, frames));
+    }
     pub fn show_tray_menu(&self, request: lexift_core::ports::tray::TrayMenuRequest) {
         let _ = slint::invoke_from_event_loop(move || crate::tray_menu::show(request));
     }
 
     pub fn toggle_annotation_toolbar(&self) {
         let requested_at = Instant::now();
-        let _ = slint::invoke_from_event_loop(move || crate::annotation::toggle(requested_at));
+        let _ = slint::invoke_from_event_loop(move || {
+            if !crate::ocr::screen_busy() {
+                crate::annotation::toggle(requested_at);
+            }
+        });
     }
 
     pub fn set_annotation_hotkey_status(&self, status: String) {
@@ -3623,6 +3733,7 @@ impl UiHandle {
         let toast_records = Arc::clone(&self.toast_records);
         let _ = slint::invoke_from_event_loop(move || {
             let language_changed = crate::i18n::select(state.desired_settings.ui_language);
+            crate::ocr::sync(state.ocr.generation, state.ocr.phase);
             let view_state = mapper::view_state(&state);
             let popup_states = mapper::popup_states(&state);
             if language_changed {
@@ -3644,6 +3755,7 @@ impl UiHandle {
                     }
                     if let Some(settings) = registry.settings.as_ref() {
                         binding::apply_settings(settings, &view_state);
+                        crate::ocr::apply_settings(settings, &registry.latest_state);
                     }
                 }
             });
@@ -4078,6 +4190,7 @@ pub(crate) fn dispatch_pointer_input(window: &slint::Window, input: PopupPointer
     let scale = window.scale_factor().max(0.1);
     let pos = |x, y| slint::LogicalPosition::new(x / scale, y / scale);
     let event = match input {
+        PopupPointerInput::RightPressed => return,
         PopupPointerInput::Moved { x, y } => WindowEvent::PointerMoved {
             position: pos(x, y),
         },

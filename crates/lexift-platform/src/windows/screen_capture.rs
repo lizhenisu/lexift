@@ -97,6 +97,9 @@ impl WindowsScreenCapturePort {
 }
 
 impl ScreenCapturePort for WindowsScreenCapturePort {
+    fn freeze_desktop(&self) -> Result<Vec<lexift_core::ports::screen_capture::CapturedRegion>> {
+        super::ocr_capture::freeze()
+    }
     fn is_available(&self) -> bool {
         true
     }

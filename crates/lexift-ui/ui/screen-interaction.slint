@@ -1,0 +1,24 @@
+import { Metrics } from "design/metrics.slint";
+import { Colors } from "design/colors.slint";
+
+// Presentation only: the owner supplies normalized, display-local geometry.
+export component RegionPreview inherits Rectangle {
+    background: transparent;
+    in property <bool> selecting;
+    in property <length> left;
+    in property <length> top;
+    in property <length> selection-width;
+    in property <length> selection-height;
+    Rectangle { x:0px; y:0px; width: parent.width; height: root.selecting ? root.top : parent.height; background: #0008; }
+    if root.selecting: Rectangle { x:0px; y: root.top + root.selection-height; width: parent.width; height: max(0px,parent.height - self.y); background: #0008; }
+    if root.selecting: Rectangle { x:0px; y: root.top; height: root.selection-height; width: root.left; background: #0008; }
+    if root.selecting: Rectangle { x: root.left + root.selection-width; y: root.top; height: root.selection-height; width: max(0px,parent.width - self.x); background: #0008; }
+    if root.selecting: Rectangle { x: root.left; y: root.top; width: root.selection-width; height: root.selection-height; border-width: Metrics.screen-selection-border; border-color: Colors.primary; background: transparent; }
+}
+export component ScreenInteractionHint inherits Rectangle {
+    in property <string> text;
+    width: Metrics.ocr-hint-max-width;
+    height: hint.preferred-height + 20px;
+    border-radius: 6px; background: #202124;
+    hint := Text { x:16px; y:10px; width: parent.width - 32px; color: #fff; text: root.text; wrap:word-wrap; font-size:14px; }
+}

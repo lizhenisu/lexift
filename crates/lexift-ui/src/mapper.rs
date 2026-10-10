@@ -85,7 +85,19 @@ pub(crate) fn view_state(state: &AppState) -> UiState {
 }
 
 pub(crate) fn popup_states(state: &AppState) -> Vec<PopupUiState> {
-    state.popup_sessions.iter().map(popup_state).collect()
+    state
+        .popup_sessions
+        .iter()
+        .map(|session| {
+            let mut view = popup_state(session);
+            if state.ocr.popup == Some(session.id)
+                && state.ocr.phase == lexift_core::domain::ocr::OcrPhase::Recognizing
+            {
+                view.status = crate::i18n::tr("Recognizing text…");
+            }
+            view
+        })
+        .collect()
 }
 
 fn popup_state(session: &PopupSessionState) -> PopupUiState {

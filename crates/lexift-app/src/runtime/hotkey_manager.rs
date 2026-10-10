@@ -17,6 +17,8 @@ struct HotkeyState {
     handler: Option<HotkeyHandler>,
     annotation_current: Option<HotkeyConfig>,
     annotation_handler: Option<HotkeyHandler>,
+    ocr_current: Option<HotkeyConfig>,
+    ocr_handler: Option<HotkeyHandler>,
 }
 
 impl HotkeyRuntimeManager {
@@ -27,7 +29,7 @@ impl HotkeyRuntimeManager {
     ) -> Result<()> {
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         state.annotation_handler = Some(Arc::clone(&handler));
-        if state.current == Some(config) {
+        if state.current == Some(config) || state.ocr_current == Some(config) {
             return Err(lexift_core::Error::new(
                 "Shortcut is already used by translation",
             ));
@@ -52,7 +54,7 @@ impl HotkeyRuntimeManager {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.handler = Some(Arc::clone(&handler));
-        if state.annotation_current == Some(config) {
+        if state.annotation_current == Some(config) || state.ocr_current == Some(config) {
             return Err(lexift_core::Error::new(
                 "Shortcut is already used by annotation",
             ));
@@ -72,7 +74,7 @@ impl HotkeyRuntimeManager {
         if state.current == Some(config) {
             return Ok(());
         }
-        if state.annotation_current == Some(config) {
+        if state.annotation_current == Some(config) || state.ocr_current == Some(config) {
             return Err(lexift_core::Error::new(
                 "Shortcut is already used by annotation",
             ));
@@ -94,7 +96,7 @@ impl HotkeyRuntimeManager {
         if state.annotation_current == Some(config) {
             return Ok(());
         }
-        if state.current == Some(config) {
+        if state.current == Some(config) || state.ocr_current == Some(config) {
             return Err(lexift_core::Error::new(
                 "Shortcut is already used by translation",
             ));
@@ -115,12 +117,46 @@ impl HotkeyRuntimeManager {
         state.annotation_current = Some(config);
         Ok(())
     }
+    pub(crate) fn apply_ocr(&self, config: HotkeyConfig) -> Result<()> {
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if state.ocr_current == Some(config) {
+            return Ok(());
+        }
+        if state.current == Some(config) || state.annotation_current == Some(config) {
+            return Err(lexift_core::Error::new(
+                "Shortcut is already used by translation",
+            ));
+        }
+        let Some(handler) = state.ocr_handler.as_ref().map(Arc::clone) else {
+            state.ocr_current = Some(config);
+            return Ok(());
+        };
+        let port = self
+            .port
+            .as_ref()
+            .ok_or_else(|| lexift_core::Error::new("Global shortcuts are unavailable"))?;
+        if state.ocr_current.is_some() {
+            port.replace_ocr_hotkey(config, handler)?;
+        } else {
+            port.register_ocr_hotkey(config, handler)?;
+        }
+        state.ocr_current = Some(config);
+        Ok(())
+    }
+    pub(crate) fn start_ocr(&self, config: HotkeyConfig, handler: HotkeyHandler) -> Result<()> {
+        {
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            state.ocr_handler = Some(handler);
+        }
+        self.apply_ocr(config)
+    }
 }
 
 impl Drop for HotkeyRuntimeManager {
     fn drop(&mut self) {
         if let Some(port) = &self.port {
             let _ = port.unregister_annotation_hotkey();
+            let _ = port.unregister_ocr_hotkey();
         }
         if let Some(port) = &self.port
             && let Err(error) = port.unregister_translate_hotkey()
@@ -140,6 +176,7 @@ mod tests {
 
     #[derive(Default)]
     struct FakeHotkeyPort {
+        ocr_active: Mutex<Option<HotkeyConfig>>,
         active: Mutex<Option<HotkeyConfig>>,
         rejected: Mutex<Option<HotkeyConfig>>,
         annotation_active: Mutex<Option<HotkeyConfig>>,
@@ -148,6 +185,20 @@ mod tests {
     }
 
     impl HotkeyPort for FakeHotkeyPort {
+        fn register_ocr_hotkey(&self, config: HotkeyConfig, _handler: HotkeyHandler) -> Result<()> {
+            if config.key == lexift_core::domain::runtime_config::HotkeyKey::Function(12) {
+                return Err(Error::new("fixture registration failure"));
+            }
+            *self.ocr_active.lock().unwrap() = Some(config);
+            Ok(())
+        }
+        fn replace_ocr_hotkey(&self, config: HotkeyConfig, handler: HotkeyHandler) -> Result<()> {
+            self.register_ocr_hotkey(config, handler)
+        }
+        fn unregister_ocr_hotkey(&self) -> Result<()> {
+            *self.ocr_active.lock().unwrap() = None;
+            Ok(())
+        }
         fn register_annotation_hotkey(
             &self,
             config: HotkeyConfig,
@@ -203,6 +254,39 @@ mod tests {
             *self.active.lock().unwrap() = None;
             Ok(())
         }
+    }
+
+    #[test]
+    fn ocr_checks_both_shortcuts_and_failed_replacement_keeps_old_registration() {
+        let port = Arc::new(FakeHotkeyPort::default());
+        *port.annotation_available.lock().unwrap() = true;
+        let manager = HotkeyRuntimeManager::new(Some(port.clone()));
+        manager
+            .start(HotkeyConfig::default(), Arc::new(|| {}))
+            .unwrap();
+        manager
+            .start_annotation(HotkeyConfig::annotation_default(), Arc::new(|| {}))
+            .unwrap();
+        manager
+            .start_ocr(HotkeyConfig::ocr_default(), Arc::new(|| {}))
+            .unwrap();
+        assert!(manager.apply_ocr(HotkeyConfig::default()).is_err());
+        assert!(
+            manager
+                .apply_ocr(HotkeyConfig::annotation_default())
+                .is_err()
+        );
+        assert!(manager.apply(HotkeyConfig::ocr_default()).is_err());
+        assert!(
+            manager
+                .apply_annotation(HotkeyConfig::ocr_default())
+                .is_err()
+        );
+        assert!(manager.apply_ocr("Alt + F12".parse().unwrap()).is_err());
+        assert_eq!(
+            *port.ocr_active.lock().unwrap(),
+            Some(HotkeyConfig::ocr_default())
+        );
     }
 
     #[test]

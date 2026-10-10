@@ -29,6 +29,11 @@ pub struct ScreenCaptureFrame {
 }
 
 pub trait ScreenCapturePort: Send + Sync {
+    /// One-shot physical desktop capture, performed before selection overlays are shown.
+    /// Independent instances must not disturb annotation sampling.
+    fn freeze_desktop(&self) -> Result<Vec<CapturedRegion>> {
+        Err(crate::Error::new("Desktop capture is unavailable"))
+    }
     fn is_available(&self) -> bool;
     /// Replaces outstanding work; must not wait for GPU readback on the UI thread.
     fn request(&self, request: ScreenCaptureRequest) -> Result<()>;

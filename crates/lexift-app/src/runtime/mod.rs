@@ -26,6 +26,17 @@ pub(crate) struct RuntimeManager {
 }
 
 impl RuntimeManager {
+    pub(crate) fn start_ocr_hotkey(
+        &self,
+        handler: lexift_core::ports::hotkey::HotkeyHandler,
+    ) -> Result<()> {
+        let config = self
+            .current
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .ocr_hotkey;
+        self.hotkey.start_ocr(config, handler)
+    }
     pub(crate) fn start_annotation_hotkey(
         &self,
         handler: lexift_core::ports::hotkey::HotkeyHandler,
@@ -107,21 +118,25 @@ impl RuntimeManager {
     pub(crate) fn apply(&self, field: SettingsField, config: RuntimeConfig) -> Result<()> {
         if matches!(
             field,
-            SettingsField::Hotkey | SettingsField::AnnotationHotkey
-        ) && config.hotkey == config.annotation_hotkey
+            SettingsField::Hotkey | SettingsField::AnnotationHotkey | SettingsField::OcrHotkey
+        ) && (config.hotkey == config.annotation_hotkey
+            || config.hotkey == config.ocr_hotkey
+            || config.annotation_hotkey == config.ocr_hotkey)
         {
             return Err(lexift_core::Error::new(
-                "Translation and annotation shortcuts must differ",
+                "Translation, annotation and OCR shortcuts must differ",
             ));
         }
         match field {
-            SettingsField::TargetLanguage
+            SettingsField::OcrLanguage
+            | SettingsField::TargetLanguage
             | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
             | SettingsField::SelectionToolbar
             | SettingsField::Theme
             | SettingsField::UiLanguage => {}
             SettingsField::Hotkey => self.hotkey.apply(config.hotkey)?,
+            SettingsField::OcrHotkey => self.hotkey.apply_ocr(config.ocr_hotkey)?,
             SettingsField::AnnotationHotkey => {
                 self.hotkey.apply_annotation(config.annotation_hotkey)?
             }
@@ -151,13 +166,15 @@ impl RuntimeManager {
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         match field {
-            SettingsField::TargetLanguage
+            SettingsField::OcrLanguage
+            | SettingsField::TargetLanguage
             | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
             | SettingsField::SelectionToolbar
             | SettingsField::Theme
             | SettingsField::UiLanguage => {}
             SettingsField::Hotkey => current.hotkey = config.hotkey,
+            SettingsField::OcrHotkey => current.ocr_hotkey = config.ocr_hotkey,
             SettingsField::AnnotationHotkey => current.annotation_hotkey = config.annotation_hotkey,
             SettingsField::Provider => current.provider = config.provider,
             SettingsField::Ollama => current.ollama = config.ollama,

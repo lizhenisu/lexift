@@ -1461,3 +1461,72 @@ msgstr "收合工具列"
 
 msgid "Expand toolbar"
 msgstr "展開工具列"
+
+msgid "OCR translation"
+msgstr "OCR 框選翻譯"
+
+msgid "Screen region translation"
+msgstr "螢幕框選翻譯"
+
+msgid "Drag a screen region to recognize and translate text"
+msgstr "框選螢幕區域，辨識並翻譯文字"
+
+msgid "Recognition language"
+msgstr "辨識語言"
+
+msgid "Follow interface language"
+msgstr "跟隨介面語言"
+
+msgid "Download OCR resources"
+msgstr "下載 OCR 資源"
+
+msgid "Cancel download"
+msgstr "取消下載"
+
+msgid "Download"
+msgstr "下載"
+
+msgid "Downloading OCR resources"
+msgstr "正在下載 OCR 資源"
+
+msgid "OCR resources ready"
+msgstr "OCR 資源已就緒"
+
+msgid "OCR resources not installed"
+msgstr "尚未安裝 OCR 資源"
+
+msgid "Recognizing text…"
+msgstr "正在辨識文字…"
+
+msgid "Exit annotation before starting OCR"
+msgstr "請先結束標註，再開始 OCR"
+
+msgid "No text recognized in the selected region"
+msgstr "所選區域未辨識到文字"
+
+msgid "OCR resources ready. Press the shortcut again"
+msgstr "OCR 資源已就緒，請再次按快捷鍵"
+
+msgid "Drag to select. Release to translate. Escape or right-click to cancel."
+msgstr "拖曳框選，放開翻譯。按 Escape 或右鍵取消。"
+
+msgid "Download all local recognition models and runtime. Recognition works offline after download."
+msgstr "下載全部本機辨識模型與執行階段，完成後可離線辨識。"
+
+msgid "Recognition language saved"
+msgstr "辨識語言已儲存"
+
+msgid "Recognition language wasn't saved"
+msgstr "辨識語言未能儲存"
+
+msgid "Translation, annotation and OCR shortcuts must differ"
+msgstr "翻譯、標註與 OCR 快捷鍵不能相同"
+
+msgid "Could not prepare OCR selection"
+msgstr "無法準備 OCR 框選視窗"
+
+msgid "Local OCR is unavailable"
+msgstr "本機 OCR 無法使用"
+
+msgid "OCR selection is too large"
+msgstr "OCR 選區過大，請縮小選區"

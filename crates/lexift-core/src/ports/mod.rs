@@ -7,6 +7,7 @@ pub mod hotkey;
 pub mod instance;
 pub mod llm;
 pub mod magnifier;
+pub mod ocr;
 pub mod ollama;
 pub mod screen;
 pub mod screen_capture;

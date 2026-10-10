@@ -1461,3 +1461,72 @@ msgstr "收起工具条"
 
 msgid "Expand toolbar"
 msgstr "展开工具条"
+
+msgid "OCR translation"
+msgstr "OCR 框选翻译"
+
+msgid "Screen region translation"
+msgstr "屏幕框选翻译"
+
+msgid "Drag a screen region to recognize and translate text"
+msgstr "框选屏幕区域，识别并翻译文字"
+
+msgid "Recognition language"
+msgstr "识别语言"
+
+msgid "Follow interface language"
+msgstr "跟随界面语言"
+
+msgid "Download OCR resources"
+msgstr "下载 OCR 资源"
+
+msgid "Cancel download"
+msgstr "取消下载"
+
+msgid "Download"
+msgstr "下载"
+
+msgid "Downloading OCR resources"
+msgstr "正在下载 OCR 资源"
+
+msgid "OCR resources ready"
+msgstr "OCR 资源已就绪"
+
+msgid "OCR resources not installed"
+msgstr "尚未安装 OCR 资源"
+
+msgid "Recognizing text…"
+msgstr "正在识别文字…"
+
+msgid "Exit annotation before starting OCR"
+msgstr "请先退出标注，再开始 OCR"
+
+msgid "No text recognized in the selected region"
+msgstr "所选区域未识别到文字"
+
+msgid "OCR resources ready. Press the shortcut again"
+msgstr "OCR 资源已就绪，请再次按快捷键"
+
+msgid "Drag to select. Release to translate. Escape or right-click to cancel."
+msgstr "拖动框选，松手翻译。按 Escape 或右键取消。"
+
+msgid "Download all local recognition models and runtime. Recognition works offline after download."
+msgstr "下载全部本地识别模型和运行库，完成后可离线识别。"
+
+msgid "Recognition language saved"
+msgstr "识别语言已保存"
+
+msgid "Recognition language wasn't saved"
+msgstr "识别语言未能保存"
+
+msgid "Translation, annotation and OCR shortcuts must differ"
+msgstr "翻译、标注和 OCR 快捷键不能相同"
+
+msgid "Could not prepare OCR selection"
+msgstr "无法准备 OCR 框选窗口"
+
+msgid "Local OCR is unavailable"
+msgstr "本地 OCR 不可用"
+
+msgid "OCR selection is too large"
+msgstr "OCR 选区过大，请缩小选区"

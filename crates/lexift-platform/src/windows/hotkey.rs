@@ -27,6 +27,7 @@ const TRANSLATE_HOTKEY_ID: i32 = 1;
 pub(crate) struct WindowsHotkeyPort {
     listener: Mutex<Option<HotkeyListener>>,
     annotation_listener: Mutex<Option<HotkeyListener>>,
+    ocr_listener: Mutex<Option<HotkeyListener>>,
 }
 
 impl WindowsHotkeyPort {
@@ -34,11 +35,49 @@ impl WindowsHotkeyPort {
         Self {
             listener: Mutex::new(None),
             annotation_listener: Mutex::new(None),
+            ocr_listener: Mutex::new(None),
         }
     }
 }
 
 impl HotkeyPort for WindowsHotkeyPort {
+    fn register_ocr_hotkey(&self, config: HotkeyConfig, handler: HotkeyHandler) -> Result<()> {
+        let mut listener = self.ocr_listener.lock().unwrap_or_else(|p| p.into_inner());
+        if listener.is_some() {
+            return Err(Error::new("OCR shortcut is already registered"));
+        }
+        // Each listener owns its registration on a separate message-loop thread.
+        *listener = Some(start_listener(config, handler)?);
+        Ok(())
+    }
+
+    fn replace_ocr_hotkey(&self, config: HotkeyConfig, handler: HotkeyHandler) -> Result<()> {
+        let mut listener = self.ocr_listener.lock().unwrap_or_else(|p| p.into_inner());
+        if listener
+            .as_ref()
+            .is_some_and(|current| current.config == config)
+        {
+            return Ok(());
+        }
+        let replacement = start_listener(config, handler)?;
+        if let Some(previous) = listener.replace(replacement) {
+            previous.shutdown();
+        }
+        Ok(())
+    }
+
+    fn unregister_ocr_hotkey(&self) -> Result<()> {
+        if let Some(listener) = self
+            .ocr_listener
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+        {
+            listener.shutdown();
+        }
+        Ok(())
+    }
+
     fn register_annotation_hotkey(
         &self,
         config: HotkeyConfig,
@@ -168,6 +207,14 @@ fn start_listener(config: HotkeyConfig, handler: HotkeyHandler) -> Result<Hotkey
 
 impl Drop for WindowsHotkeyPort {
     fn drop(&mut self) {
+        if let Some(listener) = self
+            .ocr_listener
+            .get_mut()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+        {
+            listener.shutdown();
+        }
         if let Some(listener) = self
             .annotation_listener
             .get_mut()

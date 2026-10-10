@@ -305,7 +305,8 @@ fn start_dismissal() -> lexift_core::Result<PopupDismissHandle> {
                         });
                         for (key, watch) in &mut monitor.watches {
                             let hwnd = hwnd_from_key(*key);
-                            if root == watch.initial_foreground
+                            if !is_ocr_selection(hwnd)
+                                && root == watch.initial_foreground
                                 && sent_at >= watch.started_at
                                 && !watch.dismissal_posted
                                 && !unsafe {
@@ -577,6 +578,40 @@ pub(crate) fn set_history_dismissal(
     }
     set_dismissal(window, enabled)
 }
+
+/// Selection spans several unrelated monitor HWNDs. Only Escape dismisses the group.
+pub(crate) fn set_ocr_dismissal(
+    window: &impl raw_window_handle::HasWindowHandle,
+    enabled: bool,
+) -> lexift_core::Result<()> {
+    let hwnd = required_hwnd(window)?;
+    unsafe {
+        if enabled {
+            windows::Win32::UI::WindowsAndMessaging::SetPropW(
+                hwnd,
+                windows::core::w!("Lexift.OcrSelection"),
+                Some(windows::Win32::Foundation::HANDLE(1usize as _)),
+            )
+            .map_err(|_| lexift_core::Error::new("Could not prepare OCR cancellation"))?;
+        } else {
+            let _ = windows::Win32::UI::WindowsAndMessaging::RemovePropW(
+                hwnd,
+                windows::core::w!("Lexift.OcrSelection"),
+            );
+        }
+    }
+    set_history_dismissal(window, enabled)
+}
+fn is_ocr_selection(hwnd: windows::Win32::Foundation::HWND) -> bool {
+    !unsafe {
+        windows::Win32::UI::WindowsAndMessaging::GetPropW(
+            hwnd,
+            windows::core::w!("Lexift.OcrSelection"),
+        )
+    }
+    .0
+    .is_null()
+}
 unsafe extern "system" fn history_focus_hook(
     _hook: windows::Win32::UI::Accessibility::HWINEVENTHOOK,
     _event: u32,
@@ -699,6 +734,9 @@ fn post_dismissals_for_outside_point(
             continue;
         }
         let hwnd = hwnd_from_key(*key);
+        if is_ocr_selection(hwnd) {
+            continue;
+        }
         let mut rect = RECT::default();
         if unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok()
             && !point_inside_rect(x, y, rect.left, rect.top, rect.right, rect.bottom)
@@ -714,6 +752,9 @@ fn post_dismissals_for_foreground(
     sent_at: Instant,
 ) {
     for (key, watch) in &mut monitor.watches {
+        if is_ocr_selection(hwnd_from_key(*key)) {
+            continue;
+        }
         if sent_at < watch.started_at {
             continue;
         }
@@ -1122,6 +1163,9 @@ unsafe extern "system" fn popup_input_subclass(
             (bridge.handler)(PopupPointerEvent::Moved { x, y });
             (bridge.handler)(PopupPointerEvent::LeftPressed { x, y });
             return LRESULT(0);
+        }
+        windows::Win32::UI::WindowsAndMessaging::WM_RBUTTONDOWN => {
+            (bridge.handler)(PopupPointerEvent::RightPressed);
         }
         WM_LBUTTONUP => {
             let (x, y) = client_position(lparam.0);

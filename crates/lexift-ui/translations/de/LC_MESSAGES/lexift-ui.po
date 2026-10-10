@@ -1461,3 +1461,72 @@ msgstr "Werkzeugleiste einklappen"
 
 msgid "Expand toolbar"
 msgstr "Werkzeugleiste ausklappen"
+
+msgid "OCR translation"
+msgstr "OCR-Übersetzung"
+
+msgid "Screen region translation"
+msgstr "Bildschirmausschnitt übersetzen"
+
+msgid "Drag a screen region to recognize and translate text"
+msgstr "Bildschirmbereich zur Texterkennung und Übersetzung auswählen"
+
+msgid "Recognition language"
+msgstr "Erkennungssprache"
+
+msgid "Follow interface language"
+msgstr "Oberflächensprache verwenden"
+
+msgid "Download OCR resources"
+msgstr "OCR-Ressourcen herunterladen"
+
+msgid "Cancel download"
+msgstr "Download abbrechen"
+
+msgid "Download"
+msgstr "Herunterladen"
+
+msgid "Downloading OCR resources"
+msgstr "OCR-Ressourcen werden heruntergeladen"
+
+msgid "OCR resources ready"
+msgstr "OCR-Ressourcen bereit"
+
+msgid "OCR resources not installed"
+msgstr "OCR-Ressourcen nicht installiert"
+
+msgid "Recognizing text…"
+msgstr "Text wird erkannt…"
+
+msgid "Exit annotation before starting OCR"
+msgstr "Vor OCR den Anmerkungsmodus beenden"
+
+msgid "No text recognized in the selected region"
+msgstr "Kein Text im ausgewählten Bereich erkannt"
+
+msgid "OCR resources ready. Press the shortcut again"
+msgstr "OCR bereit. Tastenkürzel erneut drücken"
+
+msgid "Drag to select. Release to translate. Escape or right-click to cancel."
+msgstr "Ziehen zum Auswählen, loslassen zum Übersetzen. Escape oder Rechtsklick zum Abbrechen."
+
+msgid "Download all local recognition models and runtime. Recognition works offline after download."
+msgstr "Alle lokalen Modelle und Laufzeit herunterladen. Danach funktioniert die Erkennung offline."
+
+msgid "Recognition language saved"
+msgstr "Erkennungssprache gespeichert"
+
+msgid "Recognition language wasn't saved"
+msgstr "Erkennungssprache nicht gespeichert"
+
+msgid "Translation, annotation and OCR shortcuts must differ"
+msgstr "Übersetzung, Anmerkung und OCR benötigen verschiedene Tastenkürzel"
+
+msgid "Could not prepare OCR selection"
+msgstr "OCR-Auswahl konnte nicht vorbereitet werden"
+
+msgid "Local OCR is unavailable"
+msgstr "Lokales OCR ist nicht verfügbar"
+
+msgid "OCR selection is too large"
+msgstr "OCR-Auswahl ist zu groß"

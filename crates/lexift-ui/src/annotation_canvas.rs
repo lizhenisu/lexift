@@ -1,13 +1,16 @@
 //! Per-monitor input surface, presentation state and cancellable positioning work.
 use super::{frame::PresentedFrame, window};
 use crate::AnnotationCanvas;
+use crate::screen_interaction::Host;
 use lexift_core::domain::geometry::Rect;
+#[cfg(test)]
 use slint::ComponentHandle;
 use std::{cell::Cell, rc::Rc, time::Duration};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Bootstrap {
     Prepare(u8),
+    Prepared,
     Present,
     Ready,
 }
@@ -15,15 +18,11 @@ pub(super) enum Bootstrap {
 pub(super) struct Layer {
     pub last_pointer: Option<(f32, f32)>,
     pub corner_cursor_failed: Cell<bool>,
-    pub window: AnnotationCanvas,
-    pub bounds: Rect,
+    pub(super) host: Host<AnnotationCanvas>,
     pub signature: Option<u64>,
     pub presented: PresentedFrame,
     pub gpu_input_cleared: bool,
     pub bootstrap: Bootstrap,
-    input: Rc<window::InputWork>,
-    revision: u64,
-    placement: slint::Timer,
 }
 
 impl Layer {
@@ -31,41 +30,35 @@ impl Layer {
         Self {
             last_pointer: None,
             corner_cursor_failed: Cell::new(false),
-            window,
-            bounds,
+            host: Host::new(window, bounds),
             signature: None,
             presented: PresentedFrame::default(),
             gpu_input_cleared: false,
             bootstrap: Bootstrap::Prepare(0),
-            input: window::InputWork::new(),
-            revision: window::next_revision(),
-            placement: slint::Timer::default(),
         }
     }
 
     pub fn input(&self) -> Rc<window::InputWork> {
-        self.input.clone()
+        self.host.input()
     }
 
     pub fn revision(&self) -> u64 {
-        self.revision
+        self.host.revision()
     }
 
     pub fn retire_input(&self) {
-        self.input.retire();
-        self.placement.stop();
+        self.host.retire_input();
     }
 
     pub fn position_after(&self, delay: Duration, position: impl FnMut() + 'static) {
-        self.placement
-            .start(slint::TimerMode::SingleShot, delay, position);
+        self.host.position_after(delay, position);
     }
 }
 
-impl Drop for Layer {
-    fn drop(&mut self) {
-        self.retire_input();
-        let _ = self.window.hide();
+impl std::ops::Deref for Layer {
+    type Target = Host<AnnotationCanvas>;
+    fn deref(&self) -> &Self::Target {
+        &self.host
     }
 }
 
