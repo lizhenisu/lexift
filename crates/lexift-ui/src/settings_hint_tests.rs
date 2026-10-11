@@ -8,16 +8,81 @@ use slint::{
 };
 use std::{cell::RefCell, rc::Rc};
 slint::slint! {
-    import {SettingsHints, SettingsHintOverlay} from "ui/settings-hint.slint";
+    import {SettingsHints, SettingsHintOverlay, SettingsHelpIcon} from "ui/settings-hint.slint";
     export component HintProbe inherits Window {
         out property <length> hint-x: overlay.x;
         out property <length> hint-y: overlay.y;
         out property <length> hint-width: overlay.width;
         out property <length> hint-height: overlay.height;
+        out property <string> hint-text: SettingsHints.text;
         public function show-hint(text: string, x: length, y: length) { SettingsHints.show(text,x,y,32px); }
         public function clear-hint() { SettingsHints.clear(); }
+        SettingsHelpIcon { x: 40px; y: 60px; text: "Extra recognition takes more time."; accessible-name: "Recognition help"; }
+        FocusScope { x: 200px; y: 60px; width: 24px; height: 24px; }
         overlay := SettingsHintOverlay { window-width: root.width; window-height: root.height; }
     }
+}
+
+#[test]
+fn help_icon_shows_shared_hint_on_hover_and_keyboard_focus_and_clears() {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let slot = Rc::new(RefCell::new(None));
+    slint::platform::set_platform(Box::new(TestPlatform(slot.clone()))).unwrap();
+    let window = HintProbe::new().unwrap();
+    window.show().unwrap();
+    window
+        .window()
+        .set_size(slint::LogicalSize::new(400., 240.));
+    let adapter = slot.borrow().as_ref().unwrap().clone();
+    let mut pixels = vec![slint::Rgb8Pixel::default(); 400 * 240];
+    adapter.draw_if_needed(|r| {
+        r.render(&mut pixels, 400);
+    });
+    let position = slint::LogicalPosition::new(52., 72.);
+    window
+        .window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
+    assert_eq!(window.get_hint_text(), "Extra recognition takes more time.");
+    window.window().dispatch_event(WindowEvent::PointerMoved {
+        position: slint::LogicalPosition::new(300., 150.),
+    });
+    assert!(window.get_hint_text().is_empty());
+    window.window().dispatch_event(WindowEvent::PointerPressed {
+        position,
+        button: PointerEventButton::Left,
+    });
+    window
+        .window()
+        .dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
+    window.window().dispatch_event(WindowEvent::PointerMoved {
+        position: slint::LogicalPosition::new(300., 150.),
+    });
+    window
+        .window()
+        .dispatch_event(WindowEvent::KeyPressed { text: " ".into() });
+    window
+        .window()
+        .dispatch_event(WindowEvent::KeyReleased { text: " ".into() });
+    assert!(
+        !window.get_hint_text().is_empty(),
+        "keyboard focus exposes help"
+    );
+    window.window().dispatch_event(WindowEvent::KeyPressed {
+        text: slint::platform::Key::Tab.into(),
+    });
+    window.window().dispatch_event(WindowEvent::KeyReleased {
+        text: slint::platform::Key::Tab.into(),
+    });
+    assert!(
+        window.get_hint_text().is_empty(),
+        "leaving help clears the hint"
+    );
+    window.invoke_show_hint("obsolete".into(), 40., 60.);
+    window.invoke_clear_hint();
+    assert!(window.get_hint_text().is_empty());
 }
 struct TestPlatform(Rc<RefCell<Option<Rc<MinimalSoftwareWindow>>>>);
 impl Platform for TestPlatform {

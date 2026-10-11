@@ -19,3 +19,5 @@ pub mod copy_feedback;
 pub mod region_selection;
 
 pub mod screen_snapshot;
+
+pub mod service_provider;

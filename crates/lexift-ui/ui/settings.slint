@@ -1,3 +1,6 @@
+import { SettingsSwitch, SettingsButton, SettingsSelectMenu, SettingsCard, SettingsTextBlock, SettingsControlRow, SettingsSelectField, SettingsComboBox } from "settings-controls.slint";
+import { OcrProviderPage, OcrResourceRow } from "ocr-provider.slint";
+export { OcrResourceRow }
 import { AppToast } from "design/toast.slint";
 import { CopyFeedbackIcon } from "design/copy-feedback.slint";
 import { AboutPage } from "about.slint";
@@ -16,75 +19,9 @@ import { AppVerticalScrollBar } from "design/scrollbar.slint";
 import { Slider, SpinBox } from "annotation-fields.slint";
 import { ScrollView } from "std-widgets.slint";
 
-component SettingsButton inherits Rectangle {
-    in property <string> label;
-    in property <bool> primary: false;
-    in property <bool> destructive: false;
-    in property <bool> compact: false;
-    in property <bool> enabled: true;
-    in property <length> available-width: self.preferred-button-width;
-    private property <length> preferred-button-width: max(root.compact ? 72px : 104px, button-label.preferred-width + 2 * Spacing.medium);
-    callback clicked();
-    public function focus-button() { keyboard.focus-target(); }
+export struct ServiceProviderRow { provider-id: string, label: string, group-title: string, icon-index: int }
 
-    width: min(root.available-width, root.preferred-button-width);
-    height: 40px;
-    border-radius: 8px;
-    border-width: 1px;
-    border-color: keyboard.focus-visible ? Colors.primary : root.destructive ? Colors.error : root.primary ? transparent : Colors.outline;
-    background: !root.enabled ? Colors.background : root.destructive && (button-touch.pressed || button-touch.has-hover) ? Colors.error-container : root.primary ? (button-touch.pressed ? SettingsColors.primary-pressed : button-touch.has-hover ? SettingsColors.primary-hover : Colors.primary) : button-touch.pressed ? SettingsColors.pressed : button-touch.has-hover ? SettingsColors.hover : Colors.surface;
-    accessible-role: button; accessible-label: root.label;
 
-    button-label := Text {
-        x: 8px; width: parent.width - 16px; height: parent.height;
-        wrap: word-wrap;
-        text: root.label;
-        color: !root.enabled ? Colors.secondary-foreground : root.destructive ? Colors.error : root.primary ? Colors.on-primary : Colors.primary;
-        font-size: root.compact ? 14px : Typography.body-size;
-        font-weight: root.compact ? 500 : 700;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-
-    Rectangle { x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px;
-        border-radius: 11px; border-width: keyboard.focus-visible ? 1px : 0px;
-        border-color: Colors.primary; background: transparent;
-    }
-    keyboard := SettingsFocusScope { enabled: root.enabled; key-pressed(event) => { if event.text == " " || event.text == Key.Return { root.clicked(); return accept; } return reject; } }
-    button-touch := TouchArea {
-        enabled: root.enabled; mouse-cursor: pointer;
-        clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.clicked(); }
-    }
-}
-
-component SettingsSwitch inherits Rectangle {
-    in property <bool> checked;
-    in property <string> label;
-    in property <bool> enabled: true;
-    callback toggled(bool);
-    public function focus-switch() { keyboard.focus-target(); }
-    width: 52px; height: 32px; horizontal-stretch: 0; vertical-stretch: 0; border-radius: 16px;
-    opacity: root.enabled ? 1 : Metrics.disabled-opacity;
-    background: root.checked ? (switch-touch.pressed ? SettingsColors.primary-pressed : switch-touch.has-hover ? SettingsColors.primary-hover : SettingsColors.accent) : SettingsColors.switch-off;
-    accessible-role: switch; accessible-label: root.label;
-    accessible-checkable: true; accessible-checked: root.checked; accessible-enabled: root.enabled;
-    accessible-action-default => { if root.enabled { root.toggled(!root.checked); } }
-    Rectangle {
-        x: root.checked ? parent.width - self.width - 4px : 4px; y: 4px;
-        width: 24px; height: 24px; border-radius: 12px; background: root.checked ? SettingsColors.switch-thumb-on : SettingsColors.switch-thumb-off;
-    }
-    // Focus is separate from hover so keyboard navigation never looks like a held click.
-    Rectangle { x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px;
-        border-radius: 19px; border-width: keyboard.focus-visible ? 1px : 0px;
-        border-color: Colors.primary; background: transparent;
-    }
-    keyboard := SettingsFocusScope { enabled: root.enabled;
-        key-pressed(event) => { if event.text == " " || event.text == Key.Return { root.toggled(!root.checked); return accept; } return reject; }
-    }
-    switch-touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer;
-        clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.toggled(!root.checked); }
-    }
-}
 
 component CredentialActionButton inherits Rectangle {
     in property <bool> copied: false;
@@ -215,89 +152,7 @@ component ProviderCredentialField inherits Rectangle {
     }
 }
 
-component SettingsSelectMenu inherits Rectangle {
-    in property <[string]> options;
-    in property <int> selected-index: 0;
-    in-out property <length> scroll-y: 0px;
-    callback selected(int);
-    callback dismissed();
-    private property <int> active-index: -1;
-    callback focus-state-changed(bool);
-    forward-focus: keyboard;
-    public function focus-menu() {
-        root.active-index = root.selected-index;
-        root.keep-active-visible(); keyboard.focus-target();
-    }
-    function keep-active-visible() {
-        if root.active-index < 0 { return; }
-        root.scroll-y = min(0px, max(min(0px, root.height - root.options.length * 40px),
-            root.active-index * 40px + root.scroll-y < 0px ? -root.active-index * 40px
-            : (root.active-index + 1) * 40px + root.scroll-y > root.height ? root.height - (root.active-index + 1) * 40px : root.scroll-y));
-    }
-    keyboard := SettingsFocusScope {
-        focus-changed-event => { root.focus-state-changed(self.has-focus); if self.has-focus { root.active-index = root.selected-index; root.keep-active-visible(); } }
-        key-pressed(event) => {
-            if event.text == Key.Escape { root.dismissed(); return accept; }
-            if event.text == Key.Tab { root.dismissed(); return reject; }
-            if root.options.length == 0 { return reject; }
-            if event.text == Key.UpArrow { root.active-index = max(0, root.active-index - 1); }
-            else if event.text == Key.DownArrow { root.active-index = min(root.options.length - 1, root.active-index + 1); }
-            else if event.text == Key.Home { root.active-index = 0; }
-            else if event.text == Key.End { root.active-index = root.options.length - 1; }
-            else if event.text == Key.Return || event.text == " " { if root.active-index >= 0 { root.selected(root.active-index); } return accept; }
-            else { return reject; }
-            root.keep-active-visible(); return accept;
-        }
-    }
 
-    border-radius: 4px;
-    border-width: 1px;
-    border-color: Colors.outline;
-    background: Colors.surface;
-    clip: true;
-
-    menu-scroll := ScrollView {
-        width: parent.width - 10px;
-        height: parent.height;
-        content-width: self.visible-width;
-        content-height: root.options.length * 40px;
-        content-y <=> root.scroll-y;
-        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-        mouse-drag-pan-enabled: true;
-        scrolled => { SettingsHints.clear(); root.scroll-y = round(root.scroll-y / 4px) * 4px; }
-
-        for option[index] in root.options: option-row := Rectangle {
-            y: index * 40px;
-            width: menu-scroll.visible-width;
-            height: 40px;
-            background: SettingsColors.interactive(Colors.surface, option-touch.has-hover, option-touch.pressed, index == (root.active-index >= 0 ? root.active-index : root.selected-index));
-
-            Text {
-                x: Spacing.medium;
-                width: parent.width - 2 * Spacing.medium;
-                text: option;
-                color: index == (root.active-index >= 0 ? root.active-index : root.selected-index) ? SettingsColors.accent : Colors.foreground;
-                font-size: Typography.menu-size;
-                font-weight: Typography.menu-weight;
-                vertical-alignment: center;
-                overflow: elide;
-            }
-
-            option-touch := TouchArea {
-                clicked => { root.selected(index); }
-            }
-        }
-    }
-    AppVerticalScrollBar {
-        x: parent.width - 12px;
-        y: 2px;
-        height: parent.height - 4px;
-        viewport-height: menu-scroll.visible-height;
-        content-height: menu-scroll.content-height;
-        content-y <=> menu-scroll.content-y;
-    }
-}
 
 export struct SettingsToastData {
     id: int,
@@ -305,68 +160,13 @@ export struct SettingsToastData {
     error: bool,
 }
 
-component SettingsCard inherits Rectangle {
-    in property <string> title;
 
-    border-radius: Metrics.settings-card-radius;
-    background: Colors.surface;
-    height: card-layout.preferred-height;
-
-    card-layout := VerticalLayout {
-        x: 0px; y: 0px; width: parent.width;
-        padding: Metrics.settings-card-padding;
-        spacing: Spacing.medium;
-
-        Text {
-            height: 24px;
-            text: root.title;
-            color: Colors.foreground;
-            font-size: Typography.body-size;
-            font-weight: 700;
-            vertical-alignment: center;
-        }
-
-        @children
-    }
-}
 
 // Shared by settings rows so descriptions grow naturally with localized text.
-component SettingsTextBlock inherits VerticalLayout {
-    in property <string> label;
-    in property <string> description;
-    in property <string> error-text;
-    spacing: 4px;
-    Text { text: root.label; color: Colors.foreground; font-size: Typography.body-size; font-weight: 500; wrap: word-wrap; }
-    if root.description != "" || root.error-text != "": Text {
-        text: root.error-text != "" ? root.error-text : root.description;
-        color: root.error-text != "" ? Colors.error : Colors.secondary-foreground;
-        font-size: 13px; wrap: word-wrap;
-    }
-}
+
 
 // Fields share a responsive label/control row; text determines the row height.
-component SettingsControlRow inherits Rectangle {
-    in property <string> label;
-    in property <string> description;
-    in property <string> error-text;
-    in property <length> controls-height: 42px;
-    in property <float> controls-fraction: 0.55;
-    private property <bool> stacked: self.width < 440px;
-    height: self.stacked ? copy.height + Spacing.small + root.controls-height + Spacing.small : max(56px, copy.height + 16px, root.controls-height + 16px);
-    copy := SettingsTextBlock {
-        x: 0px; y: root.stacked ? 0px : (parent.height - self.height) / 2;
-        width: root.stacked ? parent.width : parent.width * (1 - root.controls-fraction) - Spacing.medium;
-        height: self.preferred-height;
-        label: root.label; description: root.description; error-text: root.error-text;
-    }
-    HorizontalLayout {
-        x: root.stacked ? 0px : parent.width * (1 - root.controls-fraction);
-        y: root.stacked ? copy.height + Spacing.small : (parent.height - self.height) / 2;
-        width: root.stacked ? parent.width : parent.width * root.controls-fraction;
-        height: root.controls-height;
-        @children
-    }
-}
+
 
 // A single target row keeps localized descriptions and the switch on the same center.
 component SettingsToggleRow inherits Rectangle {
@@ -491,96 +291,10 @@ component AppearanceThemeChoice inherits Rectangle {
         selected: root.selected; chosen => { root.chosen(); } }
 }
 
-component SettingsSelectField inherits Rectangle {
-    in property <string> value;
-    in property <bool> opened;
-    in property <bool> enabled: true;
-    callback clicked();
-    public function focus-field() { keyboard.focus-target(); }
-    forward-focus: keyboard;
-    accessible-role: combobox; accessible-enabled: root.enabled; accessible-value: root.value;
-    accessible-expandable: true; accessible-expanded: root.opened;
-    accessible-action-expand => { if root.enabled { root.clicked(); } }
-    keyboard := SettingsFocusScope { enabled: root.enabled;
-        key-pressed(event) => {
-            if event.text == Key.Return || event.text == " " || event.text == Key.DownArrow || event.text == Key.UpArrow { root.clicked(); return accept; }
-            return reject;
-        }
-    }
 
-    height: 42px;
-    border-radius: 6px;
-    border-width: root.opened ? 2px : 1px;
-    border-color: root.opened || keyboard.focus-visible ? Colors.primary : Colors.outline;
-    background: SettingsColors.interactive(SettingsColors.field, root.enabled && field-touch.has-hover, root.enabled && field-touch.pressed, root.opened);
-    Text {
-        x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 18px; height: parent.height;
-        text: root.value; color: Colors.foreground; font-size: Typography.body-size;
-        vertical-alignment: center; overflow: elide;
-    }
-    Path {
-        x: parent.width - Spacing.medium - 12px; y: (parent.height - 6px) / 2;
-        width: 12px; height: 6px; viewbox-width: 12; viewbox-height: 6;
-        stroke: Colors.secondary-foreground; stroke-width: 1.5px;
-        MoveTo { x: 1; y: root.opened ? 5 : 1; }
-        LineTo { x: 6; y: root.opened ? 1 : 5; }
-        LineTo { x: 11; y: root.opened ? 5 : 1; }
-    }
-    field-touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.clicked(); } }
-}
 
 // Unlike the standard ComboBox, refreshing choices must never select the first model.
-component SettingsComboBox inherits Rectangle {
-    in property <[string]> model;
-    in property <bool> enabled: true;
-    in property <string> placeholder: @tr("Select a model");
-    in-out property <int> current-index: -1;
-    callback selected(int);
-    private property <bool> popup-focused;
-    private property <length> menu-scroll-y;
-    height: 42px; min-width: 140px; horizontal-stretch: 1; vertical-stretch: 0;
-    opacity: root.enabled ? 1 : Metrics.disabled-opacity;
-    forward-focus: field-focus;
-    accessible-role: combobox; accessible-enabled: root.enabled;
-    accessible-value: root.current-index >= 0 && root.current-index < root.model.length ? root.model[root.current-index] : root.placeholder;
-    accessible-expandable: true; accessible-expanded: root.popup-focused;
-    accessible-action-expand => { root.open(); }
-    function open() {
-        if root.enabled && root.model.length > 0 {
-            root.menu-scroll-y = -max(0, root.current-index - 4) * 40px;
-            menu.show();
-        }
-    }
-    function choose(index: int) {
-        if root.enabled && index >= 0 && index < root.model.length {
-            root.current-index = index; root.selected(index);
-        }
-    }
-    field-focus := SettingsFocusScope { enabled: root.enabled;
-        visual-field := SettingsSelectField {
-            enabled: root.enabled;
-            width: parent.width; height: parent.height;
-            value: root.current-index >= 0 && root.current-index < root.model.length ? root.model[root.current-index] : root.placeholder;
-            opened: root.popup-focused;
-            clicked => { if root.enabled { field-focus.focus(); root.open(); } }
-        }
-        key-pressed(event) => {
-            if event.text == Key.Return || event.text == Key.Space || event.text == Key.DownArrow { root.open(); return accept; }
-            return reject;
-        }
-    }
-    menu := PopupWindow {
-        x: 0px; y: root.height + 2px; width: root.width; height: min(240px, root.model.length * 40px);
-        close-policy: close-on-click-outside; forward-focus: choices;
-        choices := SettingsSelectMenu {
-            focus-state-changed(focused) => { root.popup-focused = focused; }
-            width: parent.width; height: parent.height; options: root.model;
-            selected-index: root.current-index; scroll-y <=> root.menu-scroll-y;
-            selected(index) => { root.choose(index); menu.close(); visual-field.focus-field(); }
-            dismissed => { menu.close(); visual-field.focus-field(); }
-        }
-    }
-}
+
 
 
 // Unimplemented actions are status rows, not disabled copies of editable fields.
@@ -708,6 +422,51 @@ export component SettingsWindow inherits Window {
     in-out property <bool> llm-prompt-expanded: false;
     in-out property <bool> credential-delete-dialog: false;
     in-out property <bool> settings-close-dialog: false;
+    in property <[ServiceProviderRow]> provider-navigation: [
+        { provider-id: "deepl", label: "DeepL", group-title: @tr("Translation services"), icon-index: 0 },
+        { provider-id: "ollama", label: "Ollama", group-title: @tr("Large language models"), icon-index: 1 },
+        { provider-id: "lmstudio", label: "LM Studio", group-title: "", icon-index: 2 },
+        { provider-id: "deepseek", label: "DeepSeek", group-title: "", icon-index: 3 },
+        { provider-id: "paddleocr", label: @tr("Local OCR (PaddleOCR)"), group-title: "OCR", icon-index: 4 }
+    ];
+    out property <string> provider-detail-id: root.provider-navigation[root.provider-detail-index].provider-id;
+    in-out property <int> ocr-resource-target: 0;
+    in property <bool> ocr-korean-auto;
+    in property <bool> ocr-korean-auto-enabled;
+    callback ocr-korean-auto-toggled(bool);
+    callback ocr-korean-download-requested();
+    callback ocr-korean-remove-requested();
+    in property <string> ocr-korean-download-exact;
+    in property <string> ocr-korean-status;
+    in property <int> ocr-korean-status-kind;
+    in property <string> ocr-korean-version;
+    in property <string> ocr-korean-download-size;
+    in property <string> ocr-korean-installed-size;
+    in property <bool> ocr-korean-ready;
+    in property <bool> ocr-korean-downloading;
+    in property <float> ocr-korean-progress;
+    in property <bool> ocr-korean-can-download;
+    in property <bool> ocr-korean-can-remove;
+    in property <bool> ocr-korean-damaged;
+    in property <string> ocr-korean-note;
+    in property <bool> ocr-korean-note-error;
+    in-out property <bool> ocr-provider-enabled: true;
+    in property <bool> ocr-resource-busy: false;
+    in property <bool> ocr-can-download: false;
+    in property <bool> ocr-can-remove: false;
+    in property <bool> ocr-resource-damaged: false;
+    in property <string> ocr-resource-version;
+    in property <string> ocr-installed-size;
+    in property <[OcrResourceRow]> ocr-model-rows;
+    in property <string> ocr-download-size-compact;
+    in property <int> ocr-resource-status-kind;
+    in property <float> ocr-download-progress;
+    in property <bool> ocr-resource-ready;
+    in property <bool> ocr-resource-note-error;
+    in property <string> ocr-resource-note;
+    in-out property <bool> ocr-remove-dialog: false;
+    callback ocr-remove-requested();
+    callback ocr-refresh-requested();
     in-out property <bool> ocr-download-dialog: false;
     in-out property <int> ocr-confirm-generation: -1;
     in property <bool> ocr-downloading: false;
@@ -951,7 +710,7 @@ export component SettingsWindow inherits Window {
     public function request-credential-delete() {
         if root.credential-delete-dialog { return; }
         if root.credential-busy || root.credential-request-pending || root.credential-editing { return; }
-        if root.provider-detail-index == 0 ? !root.credential-configured : !root.llm-key-configured { return; }
+        if root.provider-detail-id == "deepl" ? !root.credential-configured : !root.llm-key-configured { return; }
         root.close-app-language-menu(); root.close-settings-menu(); root.credential-hide-requested();
         root.credential-delete-provider = root.provider-detail-index;
         root.credential-delete-dialog = true; cancel-delete-key.focus-button();
@@ -1080,7 +839,7 @@ export component SettingsWindow inherits Window {
         root.llm-model-search = ""; root.llm-model-filter = 0;
     }
     public function select-category(category: int) {
-        if root.ocr-download-dialog || root.settings-close-dialog || root.credential-delete-dialog || root.history-clear-dialog || root.active-category == category { return; }
+        if root.ocr-remove-dialog || root.ocr-download-dialog || root.settings-close-dialog || root.credential-delete-dialog || root.history-clear-dialog || root.active-category == category { return; }
         root.close-settings-menu(); root.close-app-language-menu(); root.hotkey-capturing = false; root.annotation-hotkey-capturing = false;
         if root.active-category == 5 { root.credential-edit-cancel-requested(); root.llm-page-left(); }
         SettingsInteraction.invalidate();
@@ -1090,7 +849,7 @@ export component SettingsWindow inherits Window {
     }
 
     root-content := SettingsFocusScope {
-        enabled: !root.ocr-download-dialog && !root.settings-close-dialog && !root.llm-advanced && !root.llm-model-dialog && !root.llm-probe-dialog && !root.credential-delete-dialog && !root.history-clear-dialog;
+        enabled: !root.ocr-remove-dialog && !root.ocr-download-dialog && !root.settings-close-dialog && !root.llm-advanced && !root.llm-model-dialog && !root.llm-probe-dialog && !root.credential-delete-dialog && !root.history-clear-dialog;
         x: 0px; y: 0px; width: root.width; height: root.height;
 
     sidebar := Rectangle {
@@ -1174,7 +933,7 @@ export component SettingsWindow inherits Window {
         visible: root.active-category == 0;
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
         content-width: self.visible-width;
-        content-height: max(self.visible-height, ocr-card.y + ocr-card.height + Metrics.settings-page-padding);
+        content-height: max(self.visible-height, history-card.y + history-card.height + Metrics.settings-page-padding);
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
         scrolled => { SettingsHints.clear();
             root.close-app-language-menu();
@@ -1229,7 +988,7 @@ export component SettingsWindow inherits Window {
             width: general-scroll.visible-width - 2 * Metrics.settings-page-padding;
             title: @tr("Selection Assistant");
             SettingsToggleRow {
-                label: @tr("Enable selection assistant"); description: @tr("Show Translate, Copy and Clipboard after selecting text");
+                label: @tr("Enable selection assistant");
                 checked: root.selection-toolbar;
                 toggled(value) => { root.selection-toolbar = value; root.selection-toolbar-change-requested(value); }
             }
@@ -1241,7 +1000,7 @@ export component SettingsWindow inherits Window {
             VerticalLayout {
                 spacing: Spacing.medium;
                 SettingsToggleRow {
-                    label: @tr("Record clipboard history"); enabled: root.history-supported; description: root.history-supported ? @tr("Keep encrypted plain-text history on this device") : @tr("Clipboard history monitoring is unavailable"); checked: root.history-enabled;
+                    label: @tr("Record clipboard history"); enabled: root.history-supported; description: root.history-supported ? "" : @tr("Clipboard history monitoring is unavailable"); checked: root.history-enabled;
                     toggled(value) => { root.history-enabled-changed(value); }
                 }
                 SettingsControlRow {
@@ -1257,18 +1016,7 @@ export component SettingsWindow inherits Window {
                 if root.history-error != "": Text { text: root.history-error; wrap: word-wrap; color: Colors.error; font-size: 13px; }
             }
         }
-        ocr-card := SettingsCard {
-            x: Metrics.settings-page-padding; y: history-card.y + history-card.height + Metrics.settings-card-gap;
-            width: general-scroll.visible-width - 2 * Metrics.settings-page-padding; title: @tr("OCR translation");
-            VerticalLayout {
-                spacing: Spacing.medium;
-                SettingsControlRow { label: @tr("Recognition language");
-                    SettingsComboBox { model: [@tr("Follow interface language"), "简体中文", "繁體中文", "English (US)", "English (UK)", "日本語", "한국어", "Deutsch", "Français", "Español", "Italiano", "Português (Portugal)", "Português (Brasil)"]; current-index <=> root.ocr-language-index; selected(index) => { root.ocr-language-selected(index); } }
-                }
-                Text { text: root.ocr-status; wrap: word-wrap; color: Colors.secondary-foreground; font-size: Typography.body-size; }
-                ocr-resource-button := SettingsButton { label: root.ocr-downloading ? @tr("Cancel download") : @tr("Download OCR resources"); clicked => { if root.ocr-downloading { root.ocr-download-cancelled(); } else { root.ocr-download-dialog = true; } } }
-            }
-        }
+
     }
     AppVerticalScrollBar {
         visible: root.active-category == 0 && general-scroll.content-height > general-scroll.visible-height + 1px;
@@ -1473,7 +1221,7 @@ export component SettingsWindow inherits Window {
                     default-language-label := SettingsTextBlock {
                         x: 0px; y: root.hotkeys-compact ? 0px : (parent.height - self.height) / 2;
                         width: root.hotkeys-compact ? parent.width : parent.width * 0.45 - Spacing.medium; height: self.preferred-height;
-                        label: @tr("Default target language"); description: @tr("Language used for new translations"); error-text: root.target-language-error-text;
+                        label: @tr("Default target language"); error-text: root.target-language-error-text;
                     }
                     language-selector := SettingsSelectField {
                         x: root.hotkeys-compact ? 0px : parent.width * 0.45;
@@ -1532,18 +1280,22 @@ export component SettingsWindow inherits Window {
         Rectangle { x: parent.width - 1px; width: 1px; height: parent.height; background: Colors.outline; }
         SettingsScrollArea {
             x: 8px; y: 16px; width: parent.width - 16px; height: parent.height - 32px;
-            content-width: self.visible-width; content-height: max(self.visible-height, 4 * 48px);
-            for name[index] in ["DeepL", "Ollama", "LM Studio", "DeepSeek"]: Rectangle {
-                y: index * 48px; width: parent.width; height: 40px; border-radius: 6px;
-                background: SettingsColors.interactive(transparent, choice.hovered, choice.pressed, root.provider-detail-index == index);
-                border-width: choice.focus-visible ? 1px : 0px; border-color: Colors.primary;
-                Rectangle { x: 8px; y: 6px; width: 28px; height: 28px; border-radius: 7px; background: SettingsColors.brand-surface; border-width: 1px; border-color: Colors.outline.with-alpha(0.5);
-                    Image { x: 4px; y: 4px; width: 20px; height: 20px; image-fit: contain;
-                        source: [@image-url("icons/provider-deepl.svg"), @image-url("icons/provider-ollama.svg"), @image-url("icons/provider-lmstudio.svg"), @image-url("icons/provider-deepseek.svg")][index]; }
+            content-width: self.visible-width; content-height: max(self.visible-height, provider-rows.preferred-height);
+            provider-rows := VerticalLayout { x: 0px; y: 0px; alignment: start; width: parent.width; height: self.preferred-height; spacing: 8px;
+                for row[index] in root.provider-navigation: Rectangle {
+                    height: row.group-title == "" ? 40px : 72px;
+                    if row.group-title != "": Text { x: 8px; y: 0px; width: parent.width - 16px; height: 24px; text: row.group-title; overflow: elide; color: Colors.secondary-foreground; font-size: 12px; vertical-alignment: center; }
+                    Rectangle { y: parent.height - 40px; width: parent.width; height: 40px; border-radius: 6px;
+                        background: SettingsColors.interactive(transparent, choice.hovered, choice.pressed, root.provider-detail-id == row.provider-id);
+                        border-width: choice.focus-visible ? 1px : 0px; border-color: Colors.primary;
+                        Rectangle { x: 8px; y: 6px; width: 28px; height: 28px; border-radius: 7px; background: SettingsColors.brand-surface; border-width: 1px; border-color: Colors.outline.with-alpha(0.5);
+                            Image { x: 4px; y: 4px; width: 20px; height: 20px; image-fit: contain; source: [@image-url("icons/provider-deepl.svg"), @image-url("icons/provider-ollama.svg"), @image-url("icons/provider-lmstudio.svg"), @image-url("icons/provider-deepseek.svg"), @image-url("icons/ocr-provider.svg")][row.icon-index]; }
+                        }
+                        Rectangle { x: parent.width - 15px; y: (parent.height - 6px) / 2; width: 6px; height: 6px; border-radius: 3px; background: Colors.success; visible: row.provider-id == "paddleocr" ? root.ocr-provider-enabled : index < root.provider-enabled-states.length && root.provider-enabled-states[index]; }
+                        Text { x: 44px; width: parent.width - 64px; height: parent.height; text: row.label; color: root.provider-detail-id == row.provider-id ? Colors.primary : Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; overflow: elide; }
+                        choice := SettingsChoiceTarget { label: row.label; selected: root.provider-detail-id == row.provider-id; chosen => { root.provider-detail-index = index; root.credential-hide-requested(); root.llm-service-selected(index); if row.provider-id == "paddleocr" { root.ocr-refresh-requested(); } providers-scroll.content-y = 0px; } }
+                    }
                 }
-                Rectangle { x: parent.width - 15px; y: (parent.height - 6px) / 2; width: 6px; height: 6px; border-radius: 3px; background: Colors.success; visible: index < root.provider-enabled-states.length && root.provider-enabled-states[index]; }
-                Text { x: 44px; width: parent.width - 64px; height: parent.height; text: name; color: root.provider-detail-index == index ? Colors.primary : Colors.foreground; font-size: Typography.body-size; vertical-alignment: center; overflow: elide; }
-                choice := SettingsChoiceTarget { label: name; selected: root.provider-detail-index == index; chosen => { root.provider-detail-index = index; if index > 0 { root.llm-service-index = index - 1; } root.credential-hide-requested(); root.llm-service-selected(index); providers-scroll.content-y = 0px; } }
             }
         }
     }
@@ -1553,9 +1305,9 @@ export component SettingsWindow inherits Window {
         visible: root.active-category == 5;
         x: provider-list.width; y: Metrics.settings-header-height;
         width: main-pane.width - self.x;
-        height: main-pane.height - self.y - (root.llm-connection-dirty ? 64px : 0px);
+        height: main-pane.height - self.y - (root.provider-detail-id != "paddleocr" && root.llm-connection-dirty ? 64px : 0px);
         content-width: self.visible-width;
-        content-height: max(self.visible-height, provider-content.y + provider-content.height + Metrics.settings-page-padding);
+        content-height: max(self.visible-height, (root.provider-detail-id == "paddleocr" ? ocr-provider-content.y + ocr-provider-content.height : provider-content.y + provider-content.height) + Metrics.settings-page-padding);
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off;
         scrolled => { SettingsHints.clear(); }
         provider-content := VerticalLayout {
@@ -1563,22 +1315,22 @@ export component SettingsWindow inherits Window {
             width: providers-scroll.visible-width - 2 * Metrics.settings-page-padding;
             height: self.preferred-height; spacing: 24px;
             HorizontalLayout { height: 32px; spacing: 8px;
-                Text { text: ["DeepL", "Ollama", "LM Studio", "DeepSeek"][root.provider-detail-index]; color: Colors.foreground; font-size: Typography.body-size; font-weight: 700; vertical-alignment: center; }
+                Text { text: root.provider-navigation[root.provider-detail-index].label; color: Colors.foreground; font-size: Typography.body-size; font-weight: 700; vertical-alignment: center; }
                 Text { text: root.llm-status; color: Colors.secondary-foreground; font-size: 12px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                SettingsSwitch { label: ["DeepL", "Ollama", "LM Studio", "DeepSeek"][root.provider-detail-index]; enabled: !root.llm-enable-saving; checked: root.llm-enabled; toggled(value) => { root.llm-enable-requested(value); } }
+                SettingsSwitch { label: root.provider-navigation[root.provider-detail-index].label; enabled: !root.llm-enable-saving; checked: root.llm-enabled; toggled(value) => { root.llm-enable-requested(value); } }
             }
-            VerticalLayout { spacing: 8px;
+            VerticalLayout { visible: root.provider-detail-id != "paddleocr"; height: self.visible ? self.preferred-height : 0px; spacing: 8px;
                 Text { height: 24px; text: @tr("API key"); font-size: Typography.body-size; color: Colors.foreground; vertical-alignment: center; }
                 credential-row := Rectangle {
-                    private property <length> action-width: root.provider-detail-index == 0 ? 0px : max(72px, check-measure.preferred-width + 32px);
+                    private property <length> action-width: root.provider-detail-id == "deepl" ? 0px : max(72px, check-measure.preferred-width + 32px);
                     private property <bool> wrapped: self.width < self.action-width + 188px;
                     height: provider-credential.height + (self.wrapped && self.action-width > 0px ? 48px : 0px);
                     check-measure := Text { visible: false; text: @tr("Test connection"); font-size: 14px; }
                 provider-credential := ProviderCredentialField {
                     x: 0px; y: 0px;
                     width: credential-row.width - (credential-row.wrapped || credential-row.action-width == 0px ? 0px : credential-row.action-width + 8px);
-                    credential-configured: root.provider-detail-index == 0 ? root.credential-configured : root.llm-key-configured || (root.llm-service-index == 2 && root.deepseek-environment-key);
-                    can-remove: root.provider-detail-index == 0 || root.llm-key-configured;
+                    credential-configured: root.provider-detail-id == "deepl" ? root.credential-configured : root.llm-key-configured || (root.provider-detail-id == "deepseek" && root.deepseek-environment-key);
+                    can-remove: root.provider-detail-id == "deepl" || root.llm-key-configured;
                     credential-busy: root.credential-busy && !root.llm-connection-pending;
                     operation-blocked: root.llm-connection-pending;
                     credential-editing: root.credential-editing;
@@ -1600,18 +1352,18 @@ export component SettingsWindow inherits Window {
                     credential-save-requested(value) => { root.credential-save-requested(value); }
                 }
 
-                    check-models-button := SettingsButton { visible: root.provider-detail-index > 0; compact: true; x: credential-row.width - self.width; y: credential-row.wrapped ? provider-credential.height + 8px : 0px; width: credential-row.action-width; label: @tr("Test connection"); enabled: !root.credential-busy; clicked => { root.open-provider-probe(); } }
+                    check-models-button := SettingsButton { visible: root.provider-detail-id != "deepl" && root.provider-detail-id != "paddleocr"; compact: true; x: credential-row.width - self.width; y: credential-row.wrapped ? provider-credential.height + 8px : 0px; width: credential-row.action-width; label: @tr("Test connection"); enabled: !root.credential-busy; clicked => { root.open-provider-probe(); } }
                 }
-                if root.provider-detail-index == 3: Text { text: root.llm-key-configured ? @tr("Credential source: system storage") : root.deepseek-environment-key ? @tr("Credential source: environment; manage it outside Lexift") : @tr("API key not configured"); color: Colors.secondary-foreground; font-size: 12px; wrap: word-wrap; }
+                if root.provider-detail-id == "deepseek" && !root.llm-key-configured: Text { text: root.deepseek-environment-key ? @tr("Credential source: environment; manage it outside Lexift") : @tr("API key not configured"); color: Colors.secondary-foreground; font-size: 12px; wrap: word-wrap; }
             }
-            VerticalLayout { visible: root.provider-detail-index > 0; height: self.visible ? self.preferred-height : 0px; spacing: 8px;
+            VerticalLayout { visible: root.provider-detail-id != "deepl" && root.provider-detail-id != "paddleocr"; height: self.visible ? self.preferred-height : 0px; spacing: 8px;
                 Text { height: 24px; text: @tr("API address"); font-size: Typography.body-size; color: Colors.foreground; vertical-alignment: center; }
                 Rectangle { height: 40px;
                     provider-address := ProviderInput { x: 0px; y: 0px; width: parent.width - 40px; height: 40px; text <=> root.llm-base-url; edited => { root.llm-base-edited(); } }
                     request-config-button := ProviderIconButton { x: parent.width - 32px; y: (parent.height - self.height) / 2; icon: @image-url("icons/provider-settings.svg"); tooltip: @tr("Request configuration"); selected: root.llm-advanced; clicked => { root.open-provider-request(); } }
                 }
             }
-            VerticalLayout { visible: root.provider-detail-index > 0; height: self.visible ? self.preferred-height : 0px; spacing: 12px;
+            VerticalLayout { visible: root.provider-detail-id != "deepl" && root.provider-detail-id != "paddleocr"; height: self.visible ? self.preferred-height : 0px; spacing: 12px;
                 Rectangle {
                     z: 5;
                     height: toolbar-left.preferred-width + sync-models-button.width + 8px > self.width ? 88px : 40px;
@@ -1646,12 +1398,38 @@ export component SettingsWindow inherits Window {
                 }
             }
         }
+            ocr-provider-content := OcrProviderPage {
+                x: provider-content.x; y: provider-content.y + 56px; width: provider-content.width;
+                visible: root.provider-detail-id == "paddleocr"; height: self.visible ? self.preferred-height : 0px;
+                selected-resource: root.ocr-resource-target;
+                korean-auto: root.ocr-korean-auto; korean-auto-enabled: root.ocr-korean-auto-enabled;
+                korean-auto-toggled(value) => { root.ocr-korean-auto-toggled(value); }
+                korean-status: root.ocr-korean-status; korean-status-kind: root.ocr-korean-status-kind;
+                korean-version: root.ocr-korean-version; korean-download-size: root.ocr-korean-download-size;
+                korean-installed-size: root.ocr-korean-installed-size; korean-ready: root.ocr-korean-ready;
+                korean-downloading: root.ocr-korean-downloading; korean-progress: root.ocr-korean-progress;
+                korean-can-download: root.ocr-korean-can-download; korean-can-remove: root.ocr-korean-can-remove;
+                korean-damaged: root.ocr-korean-damaged; korean-note: root.ocr-korean-note; korean-note-error: root.ocr-korean-note-error;
+                korean-download-clicked => { root.ocr-resource-target = 1; if root.ocr-korean-downloading { root.ocr-download-cancelled(); } else { root.ocr-download-dialog = true; } }
+                korean-remove-clicked => { root.ocr-resource-target = 1; root.ocr-remove-dialog = true; }
+                language-index <=> root.ocr-language-index;
+                status: root.ocr-status; status-kind: root.ocr-resource-status-kind;
+                version: root.ocr-resource-version; download-size: root.ocr-download-size-compact;
+                installed-size: root.ocr-installed-size; model-rows: root.ocr-model-rows;
+                ready: root.ocr-resource-ready; downloading: root.ocr-downloading; progress: root.ocr-download-progress;
+                can-download: root.ocr-can-download; can-remove: root.ocr-can-remove; damaged: root.ocr-resource-damaged;
+                note: root.ocr-resource-note; note-error: root.ocr-resource-note-error;
+                language-selected(index) => { root.ocr-language-selected(index); }
+                download-clicked => { root.ocr-resource-target = 0; if root.ocr-downloading { root.ocr-download-cancelled(); } else { root.ocr-download-dialog = true; } }
+                remove-clicked => { root.ocr-resource-target = 0; root.ocr-remove-dialog = true; }
+            }
+
     }
     AppVerticalScrollBar {
         visible: root.active-category == 5 && providers-scroll.content-height > providers-scroll.visible-height; x: main-pane.width - 14px; y: Metrics.settings-header-height + 4px;
         height: providers-scroll.height - 8px; viewport-height: providers-scroll.visible-height; content-height: providers-scroll.content-height; content-y <=> providers-scroll.content-y;
     }
-    if root.active-category == 5 && root.llm-connection-dirty: Rectangle {
+    if root.active-category == 5 && root.provider-detail-id != "paddleocr" && root.llm-connection-dirty: Rectangle {
         x: provider-list.width; y: main-pane.height - 64px; width: main-pane.width - self.x; height: 64px; background: Colors.surface;
         Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Colors.outline; }
         HorizontalLayout { padding: 12px; spacing: 8px; alignment: end;
@@ -1747,6 +1525,20 @@ export component SettingsWindow inherits Window {
             }
         }
     }
+    ocr-remove-modal := SettingsFocusScope {
+        visible: root.ocr-remove-dialog; x: 0px; y: 0px; width: root.width; height: root.height; z: 122;
+        capture-key-pressed(event) => { if event.text == Key.Escape { root.ocr-remove-dialog = false; return accept; } return reject; }
+        Rectangle { width: parent.width; height: parent.height; background: SettingsColors.scrim; TouchArea {} }
+        ProviderDialog { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: min(480px, parent.width - 48px); height: 260px;
+            title: @tr("Delete local resources"); dismissed => { root.ocr-remove-dialog = false; }
+            Text { x: 24px; y: 64px; width: parent.width - 48px; height: 120px; wrap: word-wrap; color: Colors.secondary-foreground; font-size: Typography.body-size; text: root.ocr-resource-target == 1 ? @tr("Delete the Korean extension? Basic OCR remains available.") : @tr("Delete the basic OCR resources and Korean extension? Loaded runtime files will be removed after restarting Lexift."); }
+            HorizontalLayout { x: 24px; y: parent.height - 64px; width: parent.width - 48px; height: 40px; spacing: Spacing.small; alignment: end;
+                cancel-ocr-remove := SettingsButton { compact: true; label: @tr("Cancel"); clicked => { root.ocr-remove-dialog = false; } }
+                SettingsButton { compact: true; destructive: true; label: @tr("Delete"); enabled: root.ocr-resource-target == 1 ? root.ocr-korean-can-remove : root.ocr-can-remove; clicked => { root.ocr-remove-dialog = false; if root.ocr-resource-target == 1 { root.ocr-korean-remove-requested(); } else { root.ocr-remove-requested(); } } }
+            }
+        }
+    }
+    changed ocr-remove-dialog => { SettingsHints.clear(); if root.ocr-remove-dialog { cancel-ocr-remove.focus-button(); } else if root.active-category == 5 && root.provider-detail-id == "paddleocr" { ocr-provider-content.focus-remove(); } }
     ocr-download-modal := SettingsFocusScope {
         visible: root.ocr-download-dialog; x: 0px; y: 0px; width: root.width; height: root.height; z: 121;
         capture-key-pressed(event) => { if event.text == Key.Escape { root.ocr-download-dialog = false; return accept; } return reject; }
@@ -1755,15 +1547,15 @@ export component SettingsWindow inherits Window {
             x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: min(480px, parent.width - 48px); height: 240px;
             title: @tr("Download OCR resources"); dismissed => { root.ocr-download-dialog = false; }
             Text { x: 24px; y: 64px; width: parent.width - 48px; height: 100px; wrap: word-wrap; color: Colors.secondary-foreground; font-size: Typography.body-size;
-                text: @tr("Download all local recognition models and runtime. Recognition works offline after download.") + "\n" + root.ocr-download-size;
+                text: root.ocr-resource-target == 1 ? @tr("Download Korean recognition resources. The basic runtime is shared.") + "\n" + root.ocr-korean-download-exact : @tr("Download basic recognition models and runtime. Korean is an optional extension.") + "\n" + root.ocr-download-size;
             }
             HorizontalLayout { x: 24px; y: parent.height - 64px; width: parent.width - 48px; height: 40px; spacing: Spacing.small; alignment: end;
                 cancel-ocr-download := SettingsButton { compact: true; label: @tr("Cancel"); clicked => { root.ocr-download-dialog = false; } }
-                SettingsButton { compact: true; label: @tr("Download"); clicked => { root.ocr-download-dialog = false; root.ocr-download-requested(); } }
+                SettingsButton { compact: true; label: @tr("Download"); clicked => { root.ocr-download-dialog = false; if root.ocr-resource-target == 1 { root.ocr-korean-download-requested(); } else { root.ocr-download-requested(); } } }
             }
         }
     }
-    changed ocr-download-dialog => { SettingsHints.clear(); if root.ocr-download-dialog { cancel-ocr-download.focus-button(); } else if root.active-category == 0 { ocr-resource-button.focus-button(); } }
+    changed ocr-download-dialog => { SettingsHints.clear(); if root.ocr-download-dialog { cancel-ocr-download.focus-button(); } else if root.active-category == 5 && root.provider-detail-id == "paddleocr" { ocr-provider-content.focus-download(); } }
     clear-history-modal := SettingsFocusScope {
         visible: root.history-clear-dialog; enabled: !root.settings-close-dialog;
         x: 0px; y: 0px; width: root.width; height: root.height; z: 120;
@@ -2006,7 +1798,6 @@ export component SettingsWindow inherits Window {
                             SettingsButton { compact: true; label: @tr("Save header"); enabled: root.llm-header-name != "" && root.llm-header-value != ""; clicked => { root.llm-header-save(); } }
                         }
                     }
-                    Text { text: @tr("Header values are stored securely when you apply. Cancel discards changes."); color: Colors.secondary-foreground; font-size: 12px; wrap: word-wrap; height: self.preferred-height; }
                     if root.llm-status != "": Text { text: root.llm-status; color: Colors.secondary-foreground; font-size: 12px; wrap: word-wrap; height: self.preferred-height; }
                 }
             }
@@ -2030,9 +1821,9 @@ export component SettingsWindow inherits Window {
                     if !root.llm-probe-all: SettingsComboBox { model: root.llm-probe-models; current-index <=> root.llm-probe-index; placeholder: @tr("No enabled models"); enabled: !root.llm-probe-running; selected(index) => { root.llm-probe-selected(); } }
                     Text { text: @tr("API key"); font-size: 13px; color: Colors.secondary-foreground; }
                     Rectangle { height: 40px; border-radius: 6px; border-width: 1px; border-color: Colors.outline; background: Colors.background;
-                        Text { x: 12px; width: parent.width - 24px; height: parent.height; text: root.llm-key-configured || (root.provider-detail-index == 3 && root.deepseek-environment-key) ? "••••••••••••" : @tr("No authentication configured"); font-size: 13px; color: Colors.secondary-foreground; vertical-alignment: center; }
+                        Text { x: 12px; width: parent.width - 24px; height: parent.height; text: root.llm-key-configured || (root.provider-detail-id == "deepseek" && root.deepseek-environment-key) ? "••••••••••••" : @tr("No authentication configured"); font-size: 13px; color: Colors.secondary-foreground; vertical-alignment: center; }
                     }
-                    if root.llm-key-configured || (root.provider-detail-index == 3 && root.deepseek-environment-key): Text { text: root.llm-key-configured ? @tr("Credential source: system storage") : @tr("Credential source: environment; manage it outside Lexift"); font-size: 12px; color: Colors.secondary-foreground; wrap: word-wrap; }
+                    if (root.llm-key-configured && root.provider-detail-id != "deepseek") || (root.provider-detail-id == "deepseek" && !root.llm-key-configured && root.deepseek-environment-key): Text { text: root.llm-key-configured ? @tr("Credential source: system storage") : @tr("Credential source: environment; manage it outside Lexift"); font-size: 12px; color: Colors.secondary-foreground; wrap: word-wrap; }
                     Text { text: @tr("Testing sends a short fixed message. It may load local models or incur API charges."); font-size: 12px; color: Colors.secondary-foreground; wrap: word-wrap; }
                     if root.llm-probe-all: Text { text: @tr("Enabled models") + ": " + root.llm-probe-models.length; font-size: Typography.body-size; color: Colors.foreground; }
                     if root.llm-probe-note != "": Text { text: root.llm-probe-note; font-size: 12px; color: Colors.secondary-foreground; wrap: word-wrap; }

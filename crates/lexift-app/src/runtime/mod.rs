@@ -128,7 +128,8 @@ impl RuntimeManager {
             ));
         }
         match field {
-            SettingsField::OcrLanguage
+            SettingsField::OcrKoreanAuto
+            | SettingsField::OcrLanguage
             | SettingsField::TargetLanguage
             | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
@@ -166,7 +167,8 @@ impl RuntimeManager {
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         match field {
-            SettingsField::OcrLanguage
+            SettingsField::OcrKoreanAuto
+            | SettingsField::OcrLanguage
             | SettingsField::TargetLanguage
             | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit

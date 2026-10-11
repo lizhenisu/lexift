@@ -2670,30 +2670,7 @@ fn wire_settings_callbacks(
             });
         }
     });
-    let h = handler.clone();
-    settings.on_ocr_language_selected(move |index| {
-        h(AppEvent::SettingsChangeRequested {
-            change: SettingsChange::OcrLanguage(if index == 0 {
-                None
-            } else {
-                Some(
-                    lexift_core::domain::ui_language::UiLanguage::from_index(index - 1)
-                        .code()
-                        .into(),
-                )
-            }),
-        });
-    });
-    let h = handler.clone();
-    settings.on_ocr_download_requested(move || {
-        h(AppEvent::Ocr(
-            lexift_core::domain::ocr::OcrEvent::DownloadRequested,
-        ))
-    });
-    let h = handler.clone();
-    settings.on_ocr_download_cancelled(move || {
-        h(AppEvent::Ocr(lexift_core::domain::ocr::OcrEvent::Cancelled))
-    });
+    crate::ocr::wire_settings(settings, handler.clone());
     let annotation_settings_handler = Rc::clone(&handler);
     settings.on_annotation_hotkey_change_requested(move |hotkey| {
         if let Ok(hotkey) = hotkey.to_string().parse::<HotkeyConfig>() {
@@ -2760,6 +2737,9 @@ fn wire_settings_callbacks(
     let generation = credential_generation.clone();
     settings.on_credential_save_requested(move |secret| {
         if let Some(w) = weak.upgrade() {
+            if w.get_provider_detail_id() == "paddleocr" {
+                return;
+            }
             let provider = credential_provider(&w);
             clear_credential_transient(&w, &generation);
             credential_handler(if let Some(provider) = provider {
@@ -2779,6 +2759,9 @@ fn wire_settings_callbacks(
     let generation = credential_generation.clone();
     settings.on_credential_remove_requested(move || {
         if let Some(w) = weak.upgrade() {
+            if w.get_provider_detail_id() == "paddleocr" {
+                return;
+            }
             let provider = credential_provider(&w);
             clear_credential_transient(&w, &generation);
             credential_handler(if let Some(provider) = provider {
@@ -2803,6 +2786,9 @@ fn wire_settings_callbacks(
             let current = begin_credential_access(&weak, &generation);
             if let Some(w) = weak.upgrade() {
                 w.set_credential_copy_active(purpose == CredentialAccessPurpose::Copy);
+                if w.get_provider_detail_id() == "paddleocr" {
+                    return;
+                }
                 send(if let Some(provider) = credential_provider(&w) {
                     AppEvent::LlmCredentialAccessRequested {
                         provider,
@@ -3483,9 +3469,9 @@ fn reset_credential_view(settings: &SettingsWindow) {
 }
 
 fn credential_provider(window: &SettingsWindow) -> Option<lexift_core::domain::llm::LlmProvider> {
-    usize::try_from(window.get_provider_detail_index() - 1)
-        .ok()
-        .and_then(|i| lexift_core::domain::llm::LlmProvider::ALL.get(i).copied())
+    lexift_core::domain::llm::LlmProvider::ALL
+        .into_iter()
+        .find(|provider| provider.id() == window.get_provider_detail_id().as_str())
 }
 fn clear_credential_transient(settings: &SettingsWindow, generation: &AtomicU64) {
     generation.fetch_add(1, Ordering::SeqCst);
@@ -3603,6 +3589,12 @@ fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool)
         }
         SettingsFeedback::SettingsSaveFailed(SettingsField::UiLanguage) => {
             ("Could not save interface language", true)
+        }
+        SettingsFeedback::SettingsSaved(SettingsField::OcrKoreanAuto) => {
+            ("Korean recognition setting saved", false)
+        }
+        SettingsFeedback::SettingsSaveFailed(SettingsField::OcrKoreanAuto) => {
+            ("Korean recognition setting wasn't saved", true)
         }
         SettingsFeedback::SettingsSaved(SettingsField::OcrLanguage) => {
             ("Recognition language saved", false)

@@ -257,6 +257,10 @@ pub(crate) struct SettingsFile {
     ocr_hotkey: HotkeyFile,
     #[serde(default)]
     ocr_language: Option<String>,
+    #[serde(default = "default_true")]
+    ocr_enabled: bool,
+    #[serde(default)]
+    ocr_korean_auto: bool,
     #[serde(default = "default_provider")]
     provider: String,
     #[serde(default)]
@@ -375,6 +379,8 @@ impl ConfigFile {
                 annotation_hotkey: settings.annotation_hotkey.into(),
                 ocr_hotkey: settings.ocr_hotkey.into(),
                 ocr_language: settings.ocr_language.clone(),
+                ocr_enabled: settings.ocr_enabled,
+                ocr_korean_auto: settings.ocr_korean_auto,
                 provider: settings.provider.id().into(),
                 ollama: OllamaFile {
                     address: settings.ollama.address.clone(),
@@ -454,6 +460,10 @@ impl ConfigFile {
                 settings
             }
         };
+        if let Some(language) = &self.settings.ocr_language {
+            lexift_core::domain::settings::SettingsChange::OcrLanguage(Some(language.clone()))
+                .validate_translation_change(&Settings::default())?;
+        }
         Ok(Settings {
             target_language: Language(self.settings.target_language),
             ui_language: self.settings.ui_language.parse()?,
@@ -469,6 +479,8 @@ impl ConfigFile {
                 self.settings.ocr_hotkey.key.parse()?,
             )?,
             ocr_language: self.settings.ocr_language,
+            ocr_enabled: self.settings.ocr_enabled,
+            ocr_korean_auto: self.settings.ocr_korean_auto,
             provider: self.settings.provider.parse()?,
             ollama,
             llm,
@@ -491,10 +503,32 @@ impl ConfigFile {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use lexift_core::domain::ui_language::UiLanguage;
+    #[test]
+    fn ocr_enablement_defaults_on_and_round_trips_without_moving_existing_fields() {
+        let legacy =
+            "schema_version = 8\n[settings]\ntarget_language = 'zh-CN'\nocr_language = 'ja'\n";
+        let mut settings = toml::from_str::<ConfigFile>(legacy)
+            .unwrap()
+            .into_settings()
+            .unwrap();
+        assert!(settings.ocr_enabled);
+        settings.ocr_enabled = false;
+        let serialized = toml::to_string(&ConfigFile::from_settings(&settings)).unwrap();
+        let restored = toml::from_str::<ConfigFile>(&serialized)
+            .unwrap()
+            .into_settings()
+            .unwrap();
+        assert!(!restored.ocr_enabled);
+        assert_eq!(restored.ocr_language.as_deref(), Some("ja"));
+    }
     #[test]
     fn v7_migration_enables_existing_choice_and_v8_catalog_round_trips() {
         let legacy = "schema_version = 7\n[settings]\ntarget_language = 'zh-CN'\nprovider = 'lmstudio'\n[settings.llm]\nprompt = 'Translate to {target_language}'\n[[settings.llm.connections]]\nprovider = 'lmstudio'\naddress = 'http://127.0.0.1:52341'\ncredential_id = 'key-reference'\n[[settings.llm.models]]\nprovider = 'lmstudio'\nmodel = 'service-real-id'\nreasoning = 'off'\ntemperature = 25\n";
@@ -626,5 +660,24 @@ mod tests {
                 .iter()
                 .all(|m| m.streaming)
         );
+    }
+    #[test]
+    fn korean_auto_defaults_off_and_round_trips_independently() {
+        let file = ConfigFile::from_settings(&Settings::default());
+        let text = toml::to_string(&file).unwrap();
+        let old = text
+            .lines()
+            .filter(|line| !line.starts_with("ocr_korean_auto"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let parsed: ConfigFile = toml::from_str(&old).unwrap();
+        assert!(!parsed.into_settings().unwrap().ocr_korean_auto);
+        let settings = Settings {
+            ocr_korean_auto: true,
+            ..Settings::default()
+        };
+        let encoded = toml::to_string(&ConfigFile::from_settings(&settings)).unwrap();
+        let decoded: ConfigFile = toml::from_str(&encoded).unwrap();
+        assert!(decoded.into_settings().unwrap().ocr_korean_auto);
     }
 }

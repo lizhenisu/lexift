@@ -1,0 +1,10 @@
+# Isolated development exporter only; the shipped application needs no Python.
+paddlepaddle==3.1.1
+paddle2onnx==2.0.2rc3
+onnx==1.17.0
+onnx_graphsurgeon==0.6.1
+onnxruntime==1.22.0
+numpy==2.5.3
+PyYAML==6.0.2
+Pillow==11.3.0
+setuptools==75.8.0

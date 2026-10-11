@@ -20,6 +20,9 @@ pub enum OcrPhase {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OcrState {
+    pub resources: ResourceState,
+    pub required_resource: crate::ports::ocr::OcrResourceKind,
+    pub strategy: OcrRecognitionStrategy,
     pub generation: u64,
     pub phase: OcrPhase,
     pub popup: Option<PopupSessionId>,
@@ -29,8 +32,58 @@ pub struct OcrState {
     pub error: String,
 }
 
+/// Resource operations have their own version and do not cancel capture or translation.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResourceState {
+    pub request_id: u64,
+    pub busy: Option<ResourceOperation>,
+    pub last_operation: Option<ResourceOperation>,
+    pub info: Option<crate::ports::ocr::OcrResources>,
+    pub error: String,
+    pub received: u64,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceOperation {
+    Check,
+    Download,
+    Remove,
+    DownloadKorean,
+    RemoveKorean,
+}
+impl ResourceOperation {
+    pub fn kind(self) -> crate::ports::ocr::OcrResourceKind {
+        use crate::ports::ocr::OcrResourceKind;
+        match self {
+            Self::DownloadKorean | Self::RemoveKorean => OcrResourceKind::Korean,
+            _ => OcrResourceKind::Base,
+        }
+    }
+    pub fn downloading(self) -> bool {
+        matches!(self, Self::Download | Self::DownloadKorean)
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub enum OcrEvent {
+    ManageResources(ResourceOperation),
+    CancelResourceDownload,
+    ResourceCompleted {
+        request_id: u64,
+        result: crate::Result<crate::ports::ocr::OcrResources>,
+    },
+    ResourceProgress {
+        request_id: u64,
+        received: u64,
+    },
+    ResourceFailed {
+        request_id: u64,
+        info: Option<crate::ports::ocr::OcrResources>,
+        error: String,
+    },
+    Checked {
+        generation: u64,
+        resources: crate::ports::ocr::OcrResources,
+    },
     RefreshResources,
     SelectionSubmitted {
         selection: super::region_selection::RegionSelectionResult,
@@ -77,11 +130,17 @@ impl std::fmt::Debug for OcrEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OcrCommand {
+    Resource {
+        request_id: u64,
+        operation: ResourceOperation,
+    },
+    CancelResourceDownload,
     Check {
         generation: u64,
     },
     Download {
         generation: u64,
+        kind: crate::ports::ocr::OcrResourceKind,
     },
     Capture {
         generation: u64,
@@ -90,20 +149,68 @@ pub enum OcrCommand {
         generation: u64,
         snapshot_id: u64,
         bounds: Rect,
-        language: String,
+        strategy: OcrRecognitionStrategy,
     },
     Cancel,
+    ReleaseKorean,
 }
 
 pub const LANGUAGES: &[&str] = &[
     "zh-CN", "zh-TW", "en-US", "en-GB", "ja", "ko", "de", "fr", "es", "it", "pt-BR", "pt-PT",
 ];
 
-pub fn model_for(language: &str) -> &'static str {
-    match language {
-        "ko" => "korean",
-        "de" | "fr" | "es" | "it" | "pt-BR" | "pt-PT" => "latin",
-        _ => "common",
+/// Recognition policy is frozen at shortcut dispatch, independently of translation language.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum OcrRecognitionStrategy {
+    #[default]
+    Automatic,
+    AutomaticKorean,
+    Language(String),
+}
+impl OcrRecognitionStrategy {
+    pub fn from_settings(value: Option<&str>, interface: &str) -> Self {
+        match value {
+            Some("auto") => Self::Automatic,
+            Some(language) => Self::Language(language.into()),
+            None => Self::Language(interface.into()),
+        }
+    }
+    pub fn requires_korean(&self) -> bool {
+        matches!(self, Self::AutomaticKorean)
+            || matches!(self, Self::Language(language) if language == "ko")
+    }
+    pub fn resource_versions(&self) -> (&'static str, Option<&'static str>) {
+        ("v1", self.requires_korean().then_some("korean-v1"))
+    }
+    pub fn manual_model(&self) -> Option<&'static str> {
+        match self {
+            Self::Automatic | Self::AutomaticKorean => None,
+            Self::Language(language) if language == "ko" => Some("korean"),
+            Self::Language(_) => Some("universal"),
+        }
+    }
+}
+
+/// Stable UI mapping: auto, follow interface, then the existing twelve languages.
+pub fn language_index(value: Option<&str>) -> i32 {
+    match value {
+        Some("auto") => 0,
+        None => 1,
+        Some(code) => code
+            .parse::<super::ui_language::UiLanguage>()
+            .map_or(1, |language| language.index() + 2),
+    }
+}
+pub fn language_at_index(index: i32) -> Option<Option<String>> {
+    match index {
+        0 => Some(Some("auto".into())),
+        1 => Some(None),
+        2..=13 => Some(Some(
+            super::ui_language::UiLanguage::from_index(index - 2)
+                .code()
+                .into(),
+        )),
+        _ => None,
     }
 }
 
@@ -113,6 +220,163 @@ pub(crate) fn reduce(state: &mut AppState, event: OcrEvent) -> Vec<AppCommand> {
     use OcrEvent::*;
     let cmd = |c| vec![AppCommand::Ocr(c)];
     match event {
+        ManageResources(operation) => {
+            let active = matches!(
+                state.ocr.phase,
+                OcrPhase::Checking | OcrPhase::Capturing | OcrPhase::Recognizing
+            );
+            let pending =
+                state.ocr.resources.info.as_ref().is_some_and(|r| {
+                    r.status == crate::ports::ocr::OcrResourceStatus::PendingRemoval
+                });
+            if state.ocr.resources.busy.is_some()
+                || (operation != ResourceOperation::Check && active)
+                || (operation.downloading() && pending)
+                || (operation == ResourceOperation::DownloadKorean
+                    && !state.ocr.resources.info.as_ref().is_some_and(|r| r.ready))
+            {
+                return vec![];
+            }
+            let r = &mut state.ocr.resources;
+            r.request_id = r.request_id.wrapping_add(1);
+            r.busy = Some(operation);
+            r.last_operation = Some(operation);
+            r.error.clear();
+            r.received = 0;
+            cmd(OcrCommand::Resource {
+                request_id: r.request_id,
+                operation,
+            })
+        }
+        CancelResourceDownload
+            if state
+                .ocr
+                .resources
+                .busy
+                .is_some_and(ResourceOperation::downloading) =>
+        {
+            let r = &mut state.ocr.resources;
+            r.request_id = r.request_id.wrapping_add(1);
+            r.busy = Some(ResourceOperation::Check);
+            vec![
+                AppCommand::Ocr(OcrCommand::CancelResourceDownload),
+                AppCommand::Ocr(OcrCommand::Resource {
+                    request_id: r.request_id,
+                    operation: ResourceOperation::Check,
+                }),
+            ]
+        }
+        ResourceCompleted { request_id, result }
+            if request_id == state.ocr.resources.request_id
+                && state.ocr.resources.busy.is_some() =>
+        {
+            let r = &mut state.ocr.resources;
+            let operation = r.busy.take();
+            match result {
+                Ok(info) => {
+                    state.ocr.resources_ready = info.ready;
+                    state.ocr.download_bytes = info.download_bytes;
+                    r.info = Some(info);
+                    r.error.clear();
+                    if operation.is_some_and(ResourceOperation::downloading) {
+                        state.ocr.error = "OCR resources ready. Press the shortcut again".into();
+                    } else if matches!(
+                        operation,
+                        Some(ResourceOperation::Remove | ResourceOperation::RemoveKorean)
+                    ) {
+                        state.ocr.error.clear();
+                    }
+                }
+                Err(error) => r.error = error.to_string(),
+            }
+            vec![]
+        }
+        ResourceFailed {
+            request_id,
+            info,
+            error,
+        } if request_id == state.ocr.resources.request_id && state.ocr.resources.busy.is_some() => {
+            let r = &mut state.ocr.resources;
+            r.busy = None;
+            r.error = error;
+            if let Some(info) = info {
+                state.ocr.resources_ready = info.ready;
+                r.info = Some(info);
+            } else {
+                state.ocr.resources_ready = false;
+                r.info = None;
+            }
+            vec![]
+        }
+        ResourceProgress {
+            request_id,
+            received,
+        } if request_id == state.ocr.resources.request_id
+            && state
+                .ocr
+                .resources
+                .busy
+                .is_some_and(ResourceOperation::downloading) =>
+        {
+            state.ocr.resources.received = received;
+            vec![]
+        }
+        Checked {
+            generation,
+            resources,
+        } if generation == state.ocr.generation && state.ocr.phase == OcrPhase::Checking => {
+            if state.ocr.resources.busy.is_none() {
+                state.ocr.resources.info = Some(resources.clone());
+            }
+            if resources.status == crate::ports::ocr::OcrResourceStatus::PendingRemoval {
+                return reduce(
+                    state,
+                    Failed {
+                        generation,
+                        error: "OCR resources will be removed after restart".into(),
+                    },
+                );
+            }
+            let required = if !resources.ready {
+                &resources
+            } else if state.ocr.strategy.requires_korean() {
+                state.ocr.required_resource = crate::ports::ocr::OcrResourceKind::Korean;
+                resources.korean.as_deref().unwrap_or(&resources)
+            } else {
+                &resources
+            };
+            let ready = required.ready
+                && (!state.ocr.strategy.requires_korean()
+                    || resources.korean.as_deref().is_some_and(|r| r.ready));
+            reduce(
+                state,
+                Resources {
+                    generation,
+                    ready,
+                    bytes: required.download_bytes,
+                },
+            )
+        }
+        Requested { .. }
+            if state.ocr.phase != OcrPhase::Capturing && !state.settings.ocr_enabled =>
+        {
+            let id = state.prepare_active_popup_session(
+                String::new(),
+                state.settings.target_language.clone(),
+                TranslationPhase::Error,
+                None,
+            );
+            if let Some(p) = state.popup_session_mut(id) {
+                p.error_message = "OCR provider is disabled".into();
+            }
+            vec![AppCommand::ShowPopup {
+                session_id: id,
+                anchor: None,
+            }]
+        }
+        Requested { .. } if state.ocr.resources.busy.is_some() => {
+            vec![AppCommand::ShowSettingsWindow]
+        }
         SelectionSubmitted { selection }
             if selection.context
                 == super::region_selection::SelectionContext::standalone(state.ocr.generation) =>
@@ -126,9 +390,7 @@ pub(crate) fn reduce(state: &mut AppState, event: OcrEvent) -> Vec<AppCommand> {
             )
         }
         RefreshResources if matches!(state.ocr.phase, OcrPhase::Idle | OcrPhase::Error) => {
-            cmd(OcrCommand::Check {
-                generation: state.ocr.generation,
-            })
+            reduce(state, ManageResources(ResourceOperation::Check))
         }
         Requested {
             annotation_active: true,
@@ -174,6 +436,16 @@ pub(crate) fn reduce(state: &mut AppState, event: OcrEvent) -> Vec<AppCommand> {
                 }
             }
             state.ocr.generation = state.ocr.generation.wrapping_add(1);
+            state.ocr.strategy = OcrRecognitionStrategy::from_settings(
+                state.settings.ocr_language.as_deref(),
+                state.settings.ui_language.code(),
+            );
+            if state.settings.ocr_korean_auto
+                && state.ocr.strategy == OcrRecognitionStrategy::Automatic
+            {
+                state.ocr.strategy = OcrRecognitionStrategy::AutomaticKorean;
+            }
+            state.ocr.required_resource = crate::ports::ocr::OcrResourceKind::Base;
             state.ocr.phase = OcrPhase::Checking;
             state.ocr.popup = None;
             state.ocr.error.clear();
@@ -228,6 +500,7 @@ pub(crate) fn reduce(state: &mut AppState, event: OcrEvent) -> Vec<AppCommand> {
             state.ocr.downloaded_bytes = 0;
             state.ocr.error.clear();
             cmd(OcrCommand::Download {
+                kind: state.ocr.required_resource,
                 generation: state.ocr.generation,
             })
         }
@@ -262,11 +535,6 @@ pub(crate) fn reduce(state: &mut AppState, event: OcrEvent) -> Vec<AppCommand> {
                 None,
             );
             state.ocr.popup = Some(popup);
-            let language = state
-                .settings
-                .ocr_language
-                .clone()
-                .unwrap_or_else(|| state.settings.ui_language.code().into());
             vec![
                 AppCommand::ShowPopup {
                     session_id: popup,
@@ -279,7 +547,7 @@ pub(crate) fn reduce(state: &mut AppState, event: OcrEvent) -> Vec<AppCommand> {
                     generation,
                     snapshot_id: generation,
                     bounds,
-                    language,
+                    strategy: state.ocr.strategy.clone(),
                 }),
             ]
         }
@@ -571,11 +839,77 @@ mod tests {
         );
     }
     #[test]
+    fn automatic_and_legacy_choices_have_stable_ui_mapping() {
+        for index in 0..14 {
+            let value = language_at_index(index).unwrap();
+            assert_eq!(language_index(value.as_deref()), index);
+        }
+        assert!(language_at_index(14).is_none());
+        assert_eq!(
+            OcrRecognitionStrategy::from_settings(Some("auto"), "ja"),
+            OcrRecognitionStrategy::Automatic
+        );
+        assert_eq!(
+            OcrRecognitionStrategy::from_settings(None, "ja"),
+            OcrRecognitionStrategy::Language("ja".into())
+        );
+    }
+    #[test]
+    fn settings_changes_during_selection_do_not_change_recognition_strategy() {
+        let mut state = AppState::default();
+        state.reduce(AppEvent::Ocr(OcrEvent::Requested {
+            annotation_active: false,
+        }));
+        let generation = state.ocr.generation;
+        state.reduce(AppEvent::Ocr(OcrEvent::Resources {
+            generation,
+            ready: true,
+            bytes: 0,
+        }));
+        state.settings.ocr_language = Some("ko".into());
+        let commands = state.reduce(AppEvent::Ocr(OcrEvent::Selected {
+            generation,
+            bounds: Rect {
+                left: 0,
+                top: 0,
+                right: 100,
+                bottom: 100,
+            },
+        }));
+        assert!(commands.iter().any(|c| matches!(
+            c,
+            AppCommand::Ocr(OcrCommand::Recognize {
+                strategy: OcrRecognitionStrategy::Automatic,
+                ..
+            })
+        )));
+    }
+    #[test]
     fn model_mapping_and_sensitive_debug() {
-        assert_eq!(model_for("ja"), "common");
-        assert_eq!(model_for("en-GB"), "common");
-        assert_eq!(model_for("pt-PT"), "latin");
-        assert_eq!(model_for("ko"), "korean");
+        assert_eq!(
+            OcrRecognitionStrategy::Language("ja".into())
+                .manual_model()
+                .unwrap(),
+            "universal"
+        );
+        assert_eq!(
+            OcrRecognitionStrategy::Language("en-GB".into())
+                .manual_model()
+                .unwrap(),
+            "universal"
+        );
+        assert_eq!(
+            OcrRecognitionStrategy::Language("pt-PT".into())
+                .manual_model()
+                .unwrap(),
+            "universal"
+        );
+        assert_eq!(
+            OcrRecognitionStrategy::Language("ko".into())
+                .manual_model()
+                .unwrap(),
+            "korean"
+        );
         assert!(
             !format!(
                 "{:?}",
@@ -586,5 +920,303 @@ mod tests {
             )
             .contains("secret")
         );
+    }
+}
+
+#[cfg(test)]
+mod provider_tests {
+    use super::*;
+    use crate::{
+        domain::{service_provider::ServiceProviderId, settings::SettingsChange},
+        ports::ocr::{OcrResourceStatus, OcrResources},
+    };
+    fn info(status: OcrResourceStatus) -> OcrResources {
+        OcrResources {
+            ready: status == OcrResourceStatus::Ready,
+            download_bytes: 100,
+            status,
+            version: "v1".into(),
+            installed_bytes: 50,
+            korean: None,
+            entries: vec![],
+        }
+    }
+    #[test]
+    fn disabled_provider_refuses_new_work_without_cancelling_frozen_task() {
+        let mut state = AppState::default();
+        state.settings.ocr_enabled = false;
+        let commands = state.reduce(AppEvent::Ocr(OcrEvent::Requested {
+            annotation_active: false,
+        }));
+        assert!(commands.iter().all(|c| !matches!(c, AppCommand::Ocr(_))));
+        assert!(matches!(
+            commands.as_slice(),
+            [AppCommand::ShowPopup { .. }]
+        ));
+        state.ocr.phase = OcrPhase::Capturing;
+        let commands = state.reduce(AppEvent::Ocr(OcrEvent::Requested {
+            annotation_active: false,
+        }));
+        assert_eq!(commands, vec![AppCommand::Ocr(OcrCommand::Cancel)]);
+    }
+    #[test]
+    fn resource_versions_are_independent_and_reject_late_progress_and_results() {
+        let mut state = AppState::default();
+        let generation = state.ocr.generation;
+        state.reduce(AppEvent::Ocr(OcrEvent::ManageResources(
+            ResourceOperation::Download,
+        )));
+        let id = state.ocr.resources.request_id;
+        assert_eq!(state.ocr.generation, generation);
+        state.reduce(AppEvent::Ocr(OcrEvent::CancelResourceDownload));
+        state.reduce(AppEvent::Ocr(OcrEvent::ManageResources(
+            ResourceOperation::Check,
+        )));
+        state.reduce(AppEvent::Ocr(OcrEvent::ResourceCompleted {
+            request_id: id,
+            result: Ok(info(OcrResourceStatus::Ready)),
+        }));
+        assert!(state.ocr.resources.info.is_none());
+        state.reduce(AppEvent::Ocr(OcrEvent::ResourceProgress {
+            request_id: id,
+            received: 100,
+        }));
+        assert_eq!(state.ocr.resources.received, 0);
+        let id = state.ocr.resources.request_id;
+        state.reduce(AppEvent::Ocr(OcrEvent::ResourceCompleted {
+            request_id: id,
+            result: Ok(info(OcrResourceStatus::PendingRemoval)),
+        }));
+        assert!(
+            state
+                .reduce(AppEvent::Ocr(OcrEvent::ManageResources(
+                    ResourceOperation::Download
+                )))
+                .is_empty()
+        );
+        state.ocr.phase = OcrPhase::Recognizing;
+        assert!(
+            state
+                .reduce(AppEvent::Ocr(OcrEvent::ManageResources(
+                    ResourceOperation::Remove
+                )))
+                .is_empty()
+        );
+    }
+    #[test]
+    fn startup_check_and_download_completion_use_resource_versions() {
+        let mut state = AppState::default();
+        let commands = state.reduce(AppEvent::Ocr(OcrEvent::RefreshResources));
+        let id = state.ocr.resources.request_id;
+        assert_eq!(
+            commands,
+            vec![AppCommand::Ocr(OcrCommand::Resource {
+                request_id: id,
+                operation: ResourceOperation::Check
+            })]
+        );
+        state.reduce(AppEvent::Ocr(OcrEvent::ResourceCompleted {
+            request_id: id,
+            result: Ok(info(OcrResourceStatus::NotInstalled)),
+        }));
+        state.reduce(AppEvent::Ocr(OcrEvent::ManageResources(
+            ResourceOperation::Download,
+        )));
+        let id = state.ocr.resources.request_id;
+        state.reduce(AppEvent::Ocr(OcrEvent::ResourceCompleted {
+            request_id: id,
+            result: Ok(info(OcrResourceStatus::Ready)),
+        }));
+        assert!(state.ocr.resources_ready);
+        assert_eq!(
+            state.ocr.error,
+            "OCR resources ready. Press the shortcut again"
+        );
+        state.reduce(AppEvent::Ocr(OcrEvent::ManageResources(
+            ResourceOperation::Remove,
+        )));
+        let id = state.ocr.resources.request_id;
+        state.reduce(AppEvent::Ocr(OcrEvent::ResourceFailed {
+            request_id: id,
+            info: None,
+            error: "inspection denied".into(),
+        }));
+        assert!(!state.ocr.resources_ready);
+        assert!(state.ocr.resources.info.is_none());
+        state.reduce(AppEvent::Ocr(OcrEvent::Checked {
+            generation: state.ocr.generation,
+            resources: info(OcrResourceStatus::Ready),
+        }));
+        assert!(
+            state.ocr.resources.info.is_none(),
+            "retired capture check cannot restore deleted resource state"
+        );
+    }
+    #[test]
+    fn ocr_enablement_is_a_targeted_change_and_failure_rolls_back() {
+        let mut state = AppState::default();
+        let before = state.settings.clone();
+        let change = SettingsChange::ProviderEnabled {
+            request_id: 9,
+            provider: ServiceProviderId::PaddleOcr,
+            enabled: false,
+        };
+        state.reduce(AppEvent::SettingsChangeRequested {
+            change: change.clone(),
+        });
+        assert!(!state.desired_settings.ocr_enabled);
+        assert_eq!(state.desired_settings.llm, before.llm);
+        state.reduce(AppEvent::SettingsSaveFailed {
+            change,
+            error: "fixture".into(),
+        });
+        assert!(state.desired_settings.ocr_enabled);
+        assert_eq!(state.settings, before);
+    }
+}
+
+#[cfg(test)]
+mod extension_tests {
+    use super::*;
+    use crate::domain::settings::{SettingsChange, SettingsField};
+    use crate::ports::ocr::{OcrResourceKind, OcrResourceStatus, OcrResources};
+    fn ready() -> OcrResources {
+        OcrResources {
+            ready: true,
+            status: OcrResourceStatus::Ready,
+            version: "v1".into(),
+            download_bytes: 10,
+            installed_bytes: 10,
+            entries: vec![],
+            korean: None,
+        }
+    }
+    fn request(state: &mut AppState) -> u64 {
+        state.reduce(AppEvent::Ocr(OcrEvent::Requested {
+            annotation_active: false,
+        }));
+        state.ocr.generation
+    }
+    #[test]
+    fn default_automatic_capture_needs_no_extension() {
+        let mut state = AppState::default();
+        let generation = request(&mut state);
+        let commands = state.reduce(AppEvent::Ocr(OcrEvent::Checked {
+            generation,
+            resources: ready(),
+        }));
+        assert_eq!(state.ocr.strategy, OcrRecognitionStrategy::Automatic);
+        assert!(matches!(
+            commands.as_slice(),
+            [AppCommand::Ocr(OcrCommand::Capture { .. })]
+        ));
+    }
+    #[test]
+    fn manual_and_automatic_korean_stop_before_capture_if_extension_missing() {
+        for selection in 0..3 {
+            let mut state = AppState::default();
+            if selection == 0 {
+                state.settings.ocr_language = Some("ko".into());
+            } else if selection == 1 {
+                state.settings.ocr_language = None;
+                state.settings.ui_language = crate::domain::ui_language::UiLanguage::Korean;
+            } else {
+                state.settings.ocr_korean_auto = true;
+            }
+            let generation = request(&mut state);
+            let commands = state.reduce(AppEvent::Ocr(OcrEvent::Checked {
+                generation,
+                resources: ready(),
+            }));
+            assert_eq!(state.ocr.phase, OcrPhase::DownloadRequired);
+            assert_eq!(state.ocr.required_resource, OcrResourceKind::Korean);
+            assert!(matches!(
+                commands.as_slice(),
+                [AppCommand::ShowSettingsWindow]
+            ));
+            state.settings.ocr_korean_auto = false;
+            assert!(state.ocr.strategy.requires_korean());
+        }
+    }
+    #[test]
+    fn korean_enable_requires_verified_extension_and_failed_save_rolls_back() {
+        let mut state = AppState::default();
+        state.ocr.resources.info = Some(ready());
+        let change = SettingsChange::OcrKoreanAuto(true);
+        let commands = state.reduce(AppEvent::SettingsChangeRequested {
+            change: change.clone(),
+        });
+        assert!(!state.desired_settings.ocr_korean_auto);
+        assert!(matches!(
+            commands.as_slice(),
+            [AppCommand::ShowSettingsFeedback { .. }]
+        ));
+        state.ocr.resources.info.as_mut().unwrap().korean = Some(Box::new(ready()));
+        state.reduce(AppEvent::SettingsChangeRequested {
+            change: change.clone(),
+        });
+        assert!(state.desired_settings.ocr_korean_auto);
+        state.reduce(AppEvent::RuntimeConfigUpdateFailed {
+            change,
+            error: "fixture failure".into(),
+        });
+        assert!(!state.settings.ocr_korean_auto);
+        assert!(!state.desired_settings.ocr_korean_auto);
+        assert_eq!(
+            state.settings_error_field,
+            Some(SettingsField::OcrKoreanAuto)
+        );
+    }
+    #[test]
+    fn queued_enable_is_rejected_if_extension_was_removed() {
+        let mut state = AppState::default();
+        let mut resources = ready();
+        resources.korean = Some(Box::new(ready()));
+        state.ocr.resources.info = Some(resources);
+        state.credential_busy = true;
+        assert!(
+            state
+                .reduce(AppEvent::SettingsChangeRequested {
+                    change: SettingsChange::OcrKoreanAuto(true),
+                })
+                .is_empty()
+        );
+        state.ocr.resources.info.as_mut().unwrap().korean = None;
+        let commands = state.reduce(AppEvent::CredentialAccessFailed {
+            error: "fixture".into(),
+        });
+        assert!(!state.desired_settings.ocr_korean_auto);
+        assert!(!state.settings_saving);
+        assert!(
+            !commands
+                .iter()
+                .any(|c| matches!(c, AppCommand::PersistSettings { .. }))
+        );
+    }
+    #[test]
+    fn extension_operations_require_base_and_reject_stale_results() {
+        let mut state = AppState::default();
+        assert!(
+            state
+                .reduce(AppEvent::Ocr(OcrEvent::ManageResources(
+                    ResourceOperation::DownloadKorean
+                )))
+                .is_empty()
+        );
+        state.ocr.resources.info = Some(ready());
+        state.reduce(AppEvent::Ocr(OcrEvent::ManageResources(
+            ResourceOperation::DownloadKorean,
+        )));
+        let request_id = state.ocr.resources.request_id;
+        assert_eq!(
+            state.ocr.resources.busy,
+            Some(ResourceOperation::DownloadKorean)
+        );
+        state.reduce(AppEvent::Ocr(OcrEvent::CancelResourceDownload));
+        state.reduce(AppEvent::Ocr(OcrEvent::ResourceCompleted {
+            request_id,
+            result: Ok(ready()),
+        }));
+        assert_eq!(state.ocr.resources.busy, Some(ResourceOperation::Check));
     }
 }

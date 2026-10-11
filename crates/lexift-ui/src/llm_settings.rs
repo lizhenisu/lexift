@@ -1,4 +1,5 @@
 //! Window-owned discovery and translation drafts. All service work is injected through Core ports.
+use lexift_core::domain::service_provider::ServiceProviderId;
 mod connection;
 mod detection;
 mod enable;
@@ -54,7 +55,8 @@ struct Page {
     status_source: RefCell<String>,
     probe: RefCell<Option<detection::Run>>,
     translations: RefCell<translation::Drafts>,
-    enables: RefCell<BTreeMap<i32, (u64, bool)>>,
+    enables: RefCell<BTreeMap<ServiceProviderId, (u64, bool)>>,
+    ocr_enabled: Cell<bool>,
 }
 thread_local! { static PAGES: RefCell<BTreeMap<u64, Weak<Page>>> = const { RefCell::new(BTreeMap::new()) }; }
 static NEXT_PAGE: AtomicU64 = AtomicU64::new(1);
@@ -294,7 +296,14 @@ fn draft_connection(window: &SettingsWindow, page: &Page) -> Result<LlmConnectio
     Ok(connection)
 }
 fn refresh_dirty(window: &SettingsWindow, page: &Page) {
-    let dirty = if window.get_provider_detail_index() == 0 {
+    let dirty = if selected_provider(window).is_none_or(|p| {
+        !matches!(
+            p,
+            ServiceProviderId::Translation(
+                ProviderConfig::Ollama | ProviderConfig::LmStudio | ProviderConfig::DeepSeek
+            )
+        )
+    }) {
         false
     } else {
         draft_connection(window, page).map_or(true, |draft| {
@@ -323,6 +332,14 @@ fn clear_dialogs(window: &SettingsWindow, page: &Page) {
     window.set_llm_header_value("".into());
 }
 fn load_service(window: &SettingsWindow, page: &Page) {
+    if selected_provider(window) == Some(ServiceProviderId::PaddleOcr) {
+        clear_dialogs(window, page);
+        page.service_index.set(window.get_provider_detail_index());
+        window.invoke_invalidate_button_focus();
+        window.set_llm_connection_dirty(false);
+        enable::refresh(window, page);
+        return;
+    }
     clear_dialogs(window, page);
     window.invoke_invalidate_button_focus();
     window.invoke_reset_provider_filters();
@@ -639,6 +656,18 @@ pub(crate) fn translation_completed(
     lookup_page(window)
         .is_some_and(|page| translation::completed(window, &page, request_id, field, saved))
 }
+
+fn selected_provider(window: &SettingsWindow) -> Option<ServiceProviderId> {
+    ServiceProviderId::from_id(window.get_provider_detail_id().as_str())
+}
+pub(crate) fn sync_ocr_enabled(window: &SettingsWindow, enabled: bool) {
+    window.set_ocr_provider_enabled(enabled);
+    if let Some(page) = lookup_page(window) {
+        page.ocr_enabled.set(enabled);
+        enable::refresh(window, &page);
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn translation_selection_saved(window: &SettingsWindow) {
     if let Some(page) = lookup_page(window) {
@@ -709,6 +738,7 @@ pub(crate) fn wire(
         probe: Default::default(),
         translations: Default::default(),
         enables: Default::default(),
+        ocr_enabled: Cell::new(window.get_ocr_provider_enabled()),
     });
     enable::wire(window, &page);
     populate_cache(&page);
@@ -723,6 +753,13 @@ pub(crate) fn wire(
         invalidate(&current);
         if let Some(w) = weak.upgrade() {
             connection::remember(&w, &current);
+            if let Some(ServiceProviderId::Translation(provider)) = selected_provider(&w)
+                && let Some(index) = LlmProvider::ALL
+                    .iter()
+                    .position(|p| p.id() == provider.id())
+            {
+                w.set_llm_service_index(index as i32);
+            }
             w.set_llm_syncing(false);
             status(&w, "");
             load_service(&w, &current);
@@ -1168,10 +1205,10 @@ pub(crate) fn wire(
 pub(crate) fn enable_completed(
     window: &SettingsWindow,
     request_id: u64,
-    provider: ProviderConfig,
+    provider: impl Into<ServiceProviderId>,
     saved: bool,
 ) -> bool {
-    enable::completed(window, request_id, provider, saved)
+    enable::completed(window, request_id, provider.into(), saved)
 }
 
 #[cfg(test)]
@@ -1459,16 +1496,22 @@ mod tests {
         window.set_llm_base_url("http://draft.example:5678".into());
         window.invoke_llm_base_edited();
         window.invoke_llm_enable_requested(false);
-        let (first, _) = page.enables.borrow()[&1];
+        let (first, _) =
+            page.enables.borrow()[&ServiceProviderId::Translation(ProviderConfig::Ollama)];
         assert!(window.get_llm_enable_saving());
         window.invoke_llm_enable_requested(true);
-        assert_eq!(page.enables.borrow()[&1].0, first, "pending repeat ignored");
+        assert_eq!(
+            page.enables.borrow()[&ServiceProviderId::Translation(ProviderConfig::Ollama)].0,
+            first,
+            "pending repeat ignored"
+        );
         window.set_provider_detail_index(3);
         window.set_llm_service_index(2);
         window.invoke_llm_service_selected(3);
         assert!(!window.get_llm_enable_saving());
         window.invoke_llm_enable_requested(false);
-        let (second, _) = page.enables.borrow()[&3];
+        let (second, _) =
+            page.enables.borrow()[&ServiceProviderId::Translation(ProviderConfig::DeepSeek)];
         assert_ne!(first, second);
         assert!(!enable_completed(
             &window,
@@ -1660,12 +1703,12 @@ mod tests {
         assert!(window.get_llm_enable_saving());
         assert!(!window.get_llm_connection_dirty());
         assert!(page.config.borrow().deepl_enabled);
-        let (id, _) = page.enables.borrow()[&0];
+        let (id, _) = page.enables.borrow()[&ServiceProviderId::Translation(ProviderConfig::DeepL)];
         assert!(enable_completed(&window, id, ProviderConfig::DeepL, false));
         assert!(!window.get_llm_enable_saving());
         assert!(window.get_llm_enabled());
         window.invoke_llm_enable_requested(false);
-        let (id, _) = page.enables.borrow()[&0];
+        let (id, _) = page.enables.borrow()[&ServiceProviderId::Translation(ProviderConfig::DeepL)];
         assert!(enable_completed(&window, id, ProviderConfig::DeepL, true));
         assert!(!window.get_llm_enable_saving());
         assert!(!window.get_llm_connection_dirty());
@@ -2253,7 +2296,8 @@ mod tests {
             "indicator follows saved state"
         );
         assert!(window.get_llm_enable_saving());
-        let (id, _) = page.enables.borrow()[&3];
+        let (id, _) =
+            page.enables.borrow()[&ServiceProviderId::Translation(ProviderConfig::DeepSeek)];
         assert!(enable_completed(
             &window,
             id,
@@ -2272,7 +2316,8 @@ mod tests {
                 .enabled
         );
         window.invoke_llm_enable_requested(true);
-        let (id, _) = page.enables.borrow()[&3];
+        let (id, _) =
+            page.enables.borrow()[&ServiceProviderId::Translation(ProviderConfig::DeepSeek)];
         assert!(enable_completed(
             &window,
             id,

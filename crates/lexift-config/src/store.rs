@@ -174,6 +174,27 @@ mod tests {
     }
 
     #[test]
+    fn ocr_auto_is_default_only_for_new_installations_and_round_trips() {
+        let (_directory, store) = fixture();
+        assert_eq!(store.load().unwrap().ocr_language.as_deref(), Some("auto"));
+        for choice in [None, Some("auto".into()), Some("ko".into())] {
+            let settings = Settings {
+                ocr_language: choice.clone(),
+                ..Settings::default()
+            };
+            store.save(&settings).unwrap();
+            assert_eq!(store.load().unwrap().ocr_language, choice);
+        }
+        fs::write(
+            store.path(),
+            "schema_version = 10\n[settings]\ntarget_language = 'en-US'\n",
+        )
+        .unwrap();
+        assert_eq!(store.load().unwrap().ocr_language, None);
+        fs::write(store.path(),"schema_version = 10\n[settings]\ntarget_language = 'en-US'\nocr_language = 'invalid'\n").unwrap();
+        assert!(store.load().is_err());
+    }
+    #[test]
     fn saved_settings_round_trip() {
         let (_directory, store) = fixture();
         let mut configured = settings("fr");
@@ -233,7 +254,13 @@ mod tests {
             "schema_version = 1\n\n[settings]\ntarget_language = \"de\"\n",
         )
         .unwrap();
-        assert_eq!(store.load().unwrap(), settings("de"));
+        assert_eq!(
+            store.load().unwrap(),
+            Settings {
+                ocr_language: None,
+                ..settings("de")
+            }
+        );
     }
 
     #[test]

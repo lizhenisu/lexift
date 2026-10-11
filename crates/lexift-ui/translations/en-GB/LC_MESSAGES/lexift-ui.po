@@ -1530,3 +1530,120 @@ msgstr "Local OCR is unavailable"
 
 msgid "OCR selection is too large"
 msgstr "OCR selection is too large"
+
+msgid "Translation services"
+msgstr "Translation services"
+
+msgid "Large language models"
+msgstr "Large language models"
+
+msgid "Local OCR (PaddleOCR)"
+msgstr "Local OCR (PaddleOCR)"
+
+msgid "Resource version"
+msgstr "Resource version"
+
+msgid "Download size"
+msgstr "Download size"
+
+msgid "Local storage"
+msgstr "Local storage"
+
+msgid "Retry"
+msgstr "Retry"
+
+msgid "Delete local resources"
+msgstr "Delete local resources"
+
+msgid "Delete all OCR models, dictionaries and runtime? Loaded resources will be removed after restarting Lexift."
+msgstr "Delete all OCR models, dictionaries and runtime? Loaded resources will be removed after restarting Lexift."
+
+msgid "Detection model"
+msgstr "Detection model"
+
+msgid "Chinese, Japanese and English recognition"
+msgstr "Chinese, Japanese and English recognition"
+
+msgid "Latin script recognition"
+msgstr "Latin script recognition"
+
+msgid "Korean recognition"
+msgstr "Korean recognition"
+
+msgid "Shared runtime and licenses"
+msgstr "Shared runtime and licenses"
+
+msgid "Checking OCR resources"
+msgstr "Checking OCR resources"
+
+msgid "Deleting OCR resources"
+msgstr "Deleting OCR resources"
+
+msgid "OCR resources will be removed after restart"
+msgstr "OCR resources will be removed after restart"
+
+msgid "OCR resources are damaged"
+msgstr "OCR resources are damaged"
+
+msgid "Finish the current OCR task before managing resources"
+msgstr "Finish the current OCR task before managing resources"
+
+msgid "Restart Lexift to finish deletion before downloading again"
+msgstr "Restart Lexift to finish deletion before downloading again"
+
+msgid "Cancel the download before deleting resources"
+msgstr "Cancel the download before deleting resources"
+
+msgid "OCR provider is disabled"
+msgstr "OCR provider is disabled"
+
+msgid "Multilingual recognition"
+msgstr "Multilingual recognition"
+
+
+msgid "Recognition settings"
+msgstr "Recognition settings"
+
+
+msgid "Local resources"
+msgstr "Local resources"
+
+
+msgid "Recognize text locally, then translate it with your current service."
+msgstr "Recognize text locally, then translate it with your current service."
+
+msgid "Korean extension"
+msgstr "Korean extension"
+
+msgid "Download Korean extension"
+msgstr "Download Korean extension"
+
+msgid "Include in auto detection"
+msgstr "Include in auto detection"
+
+msgid "Delete the Korean extension? Basic OCR remains available."
+msgstr "Delete the Korean extension? Basic OCR remains available."
+
+msgid "Delete the basic OCR resources and Korean extension? Loaded runtime files will be removed after restarting Lexift."
+msgstr "Delete the basic OCR resources and Korean extension? Loaded runtime files will be removed after restarting Lexift."
+
+msgid "Download Korean recognition resources. The basic runtime is shared."
+msgstr "Download Korean recognition resources. The basic runtime is shared."
+
+msgid "Download basic recognition models and runtime. Korean is an optional extension."
+msgstr "Download basic recognition models and runtime. Korean is an optional extension."
+
+msgid "Korean extension is unavailable"
+msgstr "Korean extension is unavailable"
+
+msgid "Korean recognition setting saved"
+msgstr "Korean recognition setting saved"
+
+msgid "Korean recognition setting wasn't saved"
+msgstr "Korean recognition setting wasn't saved"
+
+msgid "About inclusion in auto detection"
+msgstr "About inclusion in auto detection"
+
+msgid "When enabled, auto detection also runs Korean recognition and combines it with the base model results to improve Korean and mixed-text recognition. This increases recognition time and memory use. Manually selecting Korean is unaffected."
+msgstr "When enabled, auto detection also runs Korean recognition and combines it with the base model results to improve Korean and mixed-text recognition. This increases recognition time and memory use. Manually selecting Korean is unaffected."

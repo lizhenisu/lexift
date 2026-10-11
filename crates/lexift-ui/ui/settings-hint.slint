@@ -1,4 +1,6 @@
 import { Colors } from "design/colors.slint";
+import { SettingsInteraction, SettingsFocusScope } from "settings-interaction.slint";
+
 // One window-local overlay avoids clipping hints inside scroll viewports.
 export global SettingsHints {
     in-out property <string> text;
@@ -35,4 +37,30 @@ export component SettingsHintOverlay inherits Rectangle {
     border-radius: 4px; background: Colors.foreground;
     measure := Text { visible: false; text: SettingsHints.text; font-size: 12px; wrap: no-wrap; }
     hint := Text { x: 8px; y: 4px; width: parent.width - 16px; height: parent.height - 8px; text: SettingsHints.text; color: Colors.surface; font-size: 12px; wrap: word-wrap; vertical-alignment: center; }
+}
+
+// Help remains operable independently of the setting it explains.
+export component SettingsHelpIcon inherits Rectangle {
+    in property <string> text;
+    in property <string> accessible-name;
+    width: 24px; height: 24px; border-radius: 4px;
+    accessible-role: button; accessible-label: root.accessible-name;
+    border-width: keyboard.focus-visible ? 1px : 0px; border-color: Colors.primary;
+    accessible-action-default => { keyboard.focus-target(); }
+    Image {
+        x: 4px; y: 4px; width: 16px; height: 16px;
+        source: @image-url("icons/help-circle.svg");
+        colorize: touch.has-hover || keyboard.focus-visible ? Colors.primary : Colors.secondary-foreground;
+    }
+    keyboard := SettingsFocusScope {
+        key-pressed(event) => { if event.text == " " || event.text == Key.Return { return accept; } return reject; }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); }
+    }
+    SettingsHintTarget {
+        active: touch.has-hover || keyboard.focus-visible; text: root.text;
+        anchor-x: root.absolute-position.x; anchor-y: root.absolute-position.y; anchor-height: root.height;
+    }
 }

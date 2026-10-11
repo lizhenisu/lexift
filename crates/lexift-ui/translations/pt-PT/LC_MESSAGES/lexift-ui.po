@@ -1530,3 +1530,120 @@ msgstr "OCR local indisponível"
 
 msgid "OCR selection is too large"
 msgstr "A seleção OCR é demasiado grande"
+
+msgid "Translation services"
+msgstr "Serviços de tradução"
+
+msgid "Large language models"
+msgstr "Grandes modelos de linguagem"
+
+msgid "Local OCR (PaddleOCR)"
+msgstr "OCR local (PaddleOCR)"
+
+msgid "Resource version"
+msgstr "Versão dos recursos"
+
+msgid "Download size"
+msgstr "Tamanho da transferência"
+
+msgid "Local storage"
+msgstr "Espaço local"
+
+msgid "Retry"
+msgstr "Tentar novamente"
+
+msgid "Delete local resources"
+msgstr "Eliminar recursos locais"
+
+msgid "Delete all OCR models, dictionaries and runtime? Loaded resources will be removed after restarting Lexift."
+msgstr "Eliminar todos os modelos OCR, dicionários e ficheiros de execução? Os recursos carregados serão eliminados ao reiniciar o Lexift."
+
+msgid "Detection model"
+msgstr "Modelo de deteção"
+
+msgid "Chinese, Japanese and English recognition"
+msgstr "Reconhecimento de chinês, japonês e inglês"
+
+msgid "Latin script recognition"
+msgstr "Reconhecimento de escrita latina"
+
+msgid "Korean recognition"
+msgstr "Reconhecimento de coreano"
+
+msgid "Shared runtime and licenses"
+msgstr "Runtime partilhado e licenças"
+
+msgid "Checking OCR resources"
+msgstr "A verificar recursos OCR"
+
+msgid "Deleting OCR resources"
+msgstr "A eliminar recursos OCR"
+
+msgid "OCR resources will be removed after restart"
+msgstr "Os recursos OCR serão eliminados ao reiniciar"
+
+msgid "OCR resources are damaged"
+msgstr "Os recursos OCR estão danificados"
+
+msgid "Finish the current OCR task before managing resources"
+msgstr "Termine a tarefa OCR antes de gerir os recursos"
+
+msgid "Restart Lexift to finish deletion before downloading again"
+msgstr "Reinicie o Lexift para concluir a eliminação antes de transferir"
+
+msgid "Cancel the download before deleting resources"
+msgstr "Cancele a transferência antes de eliminar os recursos"
+
+msgid "OCR provider is disabled"
+msgstr "O serviço OCR está desativado"
+
+msgid "Multilingual recognition"
+msgstr "Reconhecimento multilingue"
+
+
+msgid "Recognition settings"
+msgstr "Definições de reconhecimento"
+
+
+msgid "Local resources"
+msgstr "Recursos locais"
+
+
+msgid "Recognize text locally, then translate it with your current service."
+msgstr "Reconheça o texto localmente e traduza-o com o serviço atual."
+
+msgid "Korean extension"
+msgstr "Extensão de coreano"
+
+msgid "Download Korean extension"
+msgstr "Transferir extensão de coreano"
+
+msgid "Include in auto detection"
+msgstr "Incluir na deteção automática"
+
+msgid "Delete the Korean extension? Basic OCR remains available."
+msgstr "Eliminar a extensão de coreano? O OCR básico continuará disponível."
+
+msgid "Delete the basic OCR resources and Korean extension? Loaded runtime files will be removed after restarting Lexift."
+msgstr "Eliminar os recursos básicos de OCR e a extensão de coreano? Os ficheiros de execução carregados serão eliminados após reiniciar o Lexift."
+
+msgid "Download Korean recognition resources. The basic runtime is shared."
+msgstr "Transfira os recursos de reconhecimento de coreano. O ambiente de execução básico é partilhado."
+
+msgid "Download basic recognition models and runtime. Korean is an optional extension."
+msgstr "Transfira os modelos básicos e o ambiente de execução. Coreano é uma extensão opcional."
+
+msgid "Korean extension is unavailable"
+msgstr "A extensão de coreano está indisponível"
+
+msgid "Korean recognition setting saved"
+msgstr "Definição de reconhecimento de coreano guardada"
+
+msgid "Korean recognition setting wasn't saved"
+msgstr "A definição de reconhecimento de coreano não foi guardada"
+
+msgid "About inclusion in auto detection"
+msgstr "Sobre a inclusão na deteção automática"
+
+msgid "When enabled, auto detection also runs Korean recognition and combines it with the base model results to improve Korean and mixed-text recognition. This increases recognition time and memory use. Manually selecting Korean is unaffected."
+msgstr "Quando ativada, a deteção automática também executa o reconhecimento de coreano e combina os resultados com os do modelo base para melhorar o reconhecimento de coreano e de textos mistos. Isto aumenta o tempo de reconhecimento e a utilização de memória. A seleção manual de coreano não é afetada."

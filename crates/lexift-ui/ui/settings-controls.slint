@@ -1,0 +1,318 @@
+import { Colors } from "design/colors.slint";
+import { Spacing } from "design/spacing.slint";
+import { Typography } from "design/typography.slint";
+import { Metrics } from "design/metrics.slint";
+import { SettingsColors } from "settings-colors.slint";
+import { SettingsInteraction, SettingsFocusScope } from "settings-interaction.slint";
+import { SettingsHints } from "settings-hint.slint";
+import { AppVerticalScrollBar } from "design/scrollbar.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export component SettingsButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> destructive: false;
+    in property <bool> compact: false;
+    in property <bool> quiet: false;
+    in property <image> icon;
+    in property <bool> enabled: true;
+    in property <length> available-width: self.preferred-button-width;
+    private property <length> preferred-button-width: max(root.compact ? 72px : 104px, button-label.preferred-width + 2 * Spacing.medium + (root.icon.width > 0 ? 24px : 0px));
+    callback clicked();
+    public function focus-button() { keyboard.focus-target(); }
+
+    width: min(root.available-width, root.preferred-button-width);
+    height: 40px;
+    border-radius: 8px;
+    border-width: root.quiet && !keyboard.focus-visible ? 0px : 1px;
+    border-color: keyboard.focus-visible ? Colors.primary : root.destructive ? Colors.error : root.primary ? transparent : Colors.outline;
+    background: root.quiet ? (root.enabled && (button-touch.has-hover || button-touch.pressed) ? Colors.error-container : transparent) : !root.enabled ? Colors.background : root.destructive && (button-touch.pressed || button-touch.has-hover) ? Colors.error-container : root.primary ? (button-touch.pressed ? SettingsColors.primary-pressed : button-touch.has-hover ? SettingsColors.primary-hover : Colors.primary) : button-touch.pressed ? SettingsColors.pressed : button-touch.has-hover ? SettingsColors.hover : Colors.surface;
+    opacity: root.quiet && !root.enabled ? Metrics.disabled-opacity : 1;
+    accessible-role: button; accessible-label: root.label; accessible-enabled: root.enabled;
+
+    if root.icon.width > 0: Image { x: 12px; y: (parent.height - 16px) / 2; width: 16px; height: 16px; source: root.icon; colorize: !root.enabled ? Colors.secondary-foreground : button-touch.has-hover ? Colors.error : Colors.secondary-foreground; }
+    button-label := Text {
+        x: root.icon.width > 0 ? 36px : 8px; width: parent.width - self.x - 8px; height: parent.height;
+        wrap: word-wrap;
+        text: root.label;
+        color: !root.enabled ? Colors.secondary-foreground : root.quiet ? (button-touch.has-hover ? Colors.error : Colors.secondary-foreground) : root.destructive ? Colors.error : root.primary ? Colors.on-primary : Colors.primary;
+        font-size: root.compact ? 14px : Typography.body-size;
+        font-weight: root.compact ? 500 : 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    Rectangle { x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px;
+        border-radius: 11px; border-width: keyboard.focus-visible ? 1px : 0px;
+        border-color: Colors.primary; background: transparent;
+    }
+    keyboard := SettingsFocusScope { enabled: root.enabled; key-pressed(event) => { if event.text == " " || event.text == Key.Return { root.clicked(); return accept; } return reject; } }
+    button-touch := TouchArea {
+        enabled: root.enabled; mouse-cursor: pointer;
+        clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.clicked(); }
+    }
+}
+
+export component SettingsSelectMenu inherits Rectangle {
+    in property <[string]> options;
+    in property <int> selected-index: 0;
+    in-out property <length> scroll-y: 0px;
+    callback selected(int);
+    callback dismissed();
+    private property <int> active-index: -1;
+    callback focus-state-changed(bool);
+    forward-focus: keyboard;
+    public function focus-menu() {
+        root.active-index = root.selected-index;
+        root.keep-active-visible(); keyboard.focus-target();
+    }
+    function keep-active-visible() {
+        if root.active-index < 0 { return; }
+        root.scroll-y = min(0px, max(min(0px, root.height - root.options.length * 40px),
+            root.active-index * 40px + root.scroll-y < 0px ? -root.active-index * 40px
+            : (root.active-index + 1) * 40px + root.scroll-y > root.height ? root.height - (root.active-index + 1) * 40px : root.scroll-y));
+    }
+    keyboard := SettingsFocusScope {
+        focus-changed-event => { root.focus-state-changed(self.has-focus); if self.has-focus { root.active-index = root.selected-index; root.keep-active-visible(); } }
+        key-pressed(event) => {
+            if event.text == Key.Escape { root.dismissed(); return accept; }
+            if event.text == Key.Tab { root.dismissed(); return reject; }
+            if root.options.length == 0 { return reject; }
+            if event.text == Key.UpArrow { root.active-index = max(0, root.active-index - 1); }
+            else if event.text == Key.DownArrow { root.active-index = min(root.options.length - 1, root.active-index + 1); }
+            else if event.text == Key.Home { root.active-index = 0; }
+            else if event.text == Key.End { root.active-index = root.options.length - 1; }
+            else if event.text == Key.Return || event.text == " " { if root.active-index >= 0 { root.selected(root.active-index); } return accept; }
+            else { return reject; }
+            root.keep-active-visible(); return accept;
+        }
+    }
+
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Colors.outline;
+    background: Colors.surface;
+    clip: true;
+
+    menu-scroll := ScrollView {
+        width: parent.width - 10px;
+        height: parent.height;
+        content-width: self.visible-width;
+        content-height: root.options.length * 40px;
+        content-y <=> root.scroll-y;
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+        mouse-drag-pan-enabled: true;
+        scrolled => { SettingsHints.clear(); root.scroll-y = round(root.scroll-y / 4px) * 4px; }
+
+        for option[index] in root.options: option-row := Rectangle {
+            y: index * 40px;
+            width: menu-scroll.visible-width;
+            height: 40px;
+            background: SettingsColors.interactive(Colors.surface, option-touch.has-hover, option-touch.pressed, index == (root.active-index >= 0 ? root.active-index : root.selected-index));
+
+            Text {
+                x: Spacing.medium;
+                width: parent.width - 2 * Spacing.medium;
+                text: option;
+                color: index == (root.active-index >= 0 ? root.active-index : root.selected-index) ? SettingsColors.accent : Colors.foreground;
+                font-size: Typography.menu-size;
+                font-weight: Typography.menu-weight;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            option-touch := TouchArea {
+                clicked => { root.selected(index); }
+            }
+        }
+    }
+    AppVerticalScrollBar {
+        x: parent.width - 12px;
+        y: 2px;
+        height: parent.height - 4px;
+        viewport-height: menu-scroll.visible-height;
+        content-height: menu-scroll.content-height;
+        content-y <=> menu-scroll.content-y;
+    }
+}
+
+export component SettingsCard inherits Rectangle {
+    in property <string> title;
+
+    border-radius: Metrics.settings-card-radius;
+    background: Colors.surface;
+    height: card-layout.preferred-height;
+
+    card-layout := VerticalLayout {
+        x: 0px; y: 0px; width: parent.width;
+        padding: Metrics.settings-card-padding;
+        spacing: Spacing.medium;
+
+        if root.title != "": Text {
+            height: 24px;
+            text: root.title;
+            color: Colors.foreground;
+            font-size: Typography.body-size;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+
+        @children
+    }
+}
+
+export component SettingsTextBlock inherits VerticalLayout {
+    in property <string> label;
+    in property <string> description;
+    in property <string> error-text;
+    spacing: 4px;
+    Text { text: root.label; color: Colors.foreground; font-size: Typography.body-size; font-weight: 500; wrap: word-wrap; }
+    if root.description != "" || root.error-text != "": Text {
+        text: root.error-text != "" ? root.error-text : root.description;
+        color: root.error-text != "" ? Colors.error : Colors.secondary-foreground;
+        font-size: 13px; wrap: word-wrap;
+    }
+}
+
+export component SettingsControlRow inherits Rectangle {
+    in property <string> label;
+    in property <string> description;
+    in property <string> error-text;
+    in property <length> controls-height: 42px;
+    in property <float> controls-fraction: 0.55;
+    private property <bool> stacked: self.width < 440px;
+    height: self.stacked ? copy.height + Spacing.small + root.controls-height + Spacing.small : max(56px, copy.height + 16px, root.controls-height + 16px);
+    copy := SettingsTextBlock {
+        x: 0px; y: root.stacked ? 0px : (parent.height - self.height) / 2;
+        width: root.stacked ? parent.width : parent.width * (1 - root.controls-fraction) - Spacing.medium;
+        height: self.preferred-height;
+        label: root.label; description: root.description; error-text: root.error-text;
+    }
+    HorizontalLayout {
+        x: root.stacked ? 0px : parent.width * (1 - root.controls-fraction);
+        y: root.stacked ? copy.height + Spacing.small : (parent.height - self.height) / 2;
+        width: root.stacked ? parent.width : parent.width * root.controls-fraction;
+        height: root.controls-height;
+        @children
+    }
+}
+
+export component SettingsSelectField inherits Rectangle {
+    in property <string> value;
+    in property <bool> opened;
+    in property <bool> enabled: true;
+    callback clicked();
+    public function focus-field() { keyboard.focus-target(); }
+    forward-focus: keyboard;
+    accessible-role: combobox; accessible-enabled: root.enabled; accessible-value: root.value;
+    accessible-expandable: true; accessible-expanded: root.opened;
+    accessible-action-expand => { if root.enabled { root.clicked(); } }
+    keyboard := SettingsFocusScope { enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " || event.text == Key.DownArrow || event.text == Key.UpArrow { root.clicked(); return accept; }
+            return reject;
+        }
+    }
+
+    height: 42px;
+    border-radius: 6px;
+    border-width: root.opened ? 2px : 1px;
+    border-color: root.opened || keyboard.focus-visible ? Colors.primary : Colors.outline;
+    background: SettingsColors.interactive(SettingsColors.field, root.enabled && field-touch.has-hover, root.enabled && field-touch.pressed, root.opened);
+    Text {
+        x: Spacing.medium; width: parent.width - 2 * Spacing.medium - 18px; height: parent.height;
+        text: root.value; color: Colors.foreground; font-size: Typography.body-size;
+        vertical-alignment: center; overflow: elide;
+    }
+    Path {
+        x: parent.width - Spacing.medium - 12px; y: (parent.height - 6px) / 2;
+        width: 12px; height: 6px; viewbox-width: 12; viewbox-height: 6;
+        stroke: Colors.secondary-foreground; stroke-width: 1.5px;
+        MoveTo { x: 1; y: root.opened ? 5 : 1; }
+        LineTo { x: 6; y: root.opened ? 1 : 5; }
+        LineTo { x: 11; y: root.opened ? 5 : 1; }
+    }
+    field-touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.clicked(); } }
+}
+
+export component SettingsComboBox inherits Rectangle {
+    in property <[string]> model;
+    in property <bool> enabled: true;
+    in property <string> placeholder: @tr("Select a model");
+    in-out property <int> current-index: -1;
+    callback selected(int);
+    private property <bool> popup-focused;
+    private property <length> menu-scroll-y;
+    height: 42px; min-width: 140px; horizontal-stretch: 1; vertical-stretch: 0;
+    opacity: root.enabled ? 1 : Metrics.disabled-opacity;
+    forward-focus: field-focus;
+    accessible-role: combobox; accessible-enabled: root.enabled;
+    accessible-value: root.current-index >= 0 && root.current-index < root.model.length ? root.model[root.current-index] : root.placeholder;
+    accessible-expandable: true; accessible-expanded: root.popup-focused;
+    accessible-action-expand => { root.open(); }
+    function open() {
+        if root.enabled && root.model.length > 0 {
+            root.menu-scroll-y = -max(0, root.current-index - 4) * 40px;
+            menu.show();
+        }
+    }
+    function choose(index: int) {
+        if root.enabled && index >= 0 && index < root.model.length {
+            root.current-index = index; root.selected(index);
+        }
+    }
+    field-focus := SettingsFocusScope { enabled: root.enabled;
+        visual-field := SettingsSelectField {
+            enabled: root.enabled;
+            width: parent.width; height: parent.height;
+            value: root.current-index >= 0 && root.current-index < root.model.length ? root.model[root.current-index] : root.placeholder;
+            opened: root.popup-focused;
+            clicked => { if root.enabled { field-focus.focus(); root.open(); } }
+        }
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == Key.Space || event.text == Key.DownArrow { root.open(); return accept; }
+            return reject;
+        }
+    }
+    menu := PopupWindow {
+        x: 0px; y: root.height + 2px; width: root.width; height: min(240px, root.model.length * 40px);
+        close-policy: close-on-click-outside; forward-focus: choices;
+        choices := SettingsSelectMenu {
+            focus-state-changed(focused) => { root.popup-focused = focused; }
+            width: parent.width; height: parent.height; options: root.model;
+            selected-index: root.current-index; scroll-y <=> root.menu-scroll-y;
+            selected(index) => { root.choose(index); menu.close(); visual-field.focus-field(); }
+            dismissed => { menu.close(); visual-field.focus-field(); }
+        }
+    }
+}
+
+export component SettingsSwitch inherits Rectangle {
+    in property <bool> checked;
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+    public function focus-switch() { keyboard.focus-target(); }
+    width: 52px; height: 32px; horizontal-stretch: 0; vertical-stretch: 0; border-radius: 16px;
+    opacity: root.enabled ? 1 : Metrics.disabled-opacity;
+    background: root.checked ? (switch-touch.pressed ? SettingsColors.primary-pressed : switch-touch.has-hover ? SettingsColors.primary-hover : SettingsColors.accent) : SettingsColors.switch-off;
+    accessible-role: switch; accessible-label: root.label;
+    accessible-checkable: true; accessible-checked: root.checked; accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.toggled(!root.checked); } }
+    Rectangle {
+        x: root.checked ? parent.width - self.width - 4px : 4px; y: 4px;
+        width: 24px; height: 24px; border-radius: 12px; background: root.checked ? SettingsColors.switch-thumb-on : SettingsColors.switch-thumb-off;
+    }
+    // Focus is separate from hover so keyboard navigation never looks like a held click.
+    Rectangle { x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px;
+        border-radius: 19px; border-width: keyboard.focus-visible ? 1px : 0px;
+        border-color: Colors.primary; background: transparent;
+    }
+    keyboard := SettingsFocusScope { enabled: root.enabled;
+        key-pressed(event) => { if event.text == " " || event.text == Key.Return { root.toggled(!root.checked); return accept; } return reject; }
+    }
+    switch-touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer;
+        clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.toggled(!root.checked); }
+    }
+}

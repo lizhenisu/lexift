@@ -68,6 +68,9 @@ pub(super) struct Draft {
 /// Capture the previous provider even though Slint has already selected the next row.
 pub(super) fn remember(window: &SettingsWindow, page: &Page) {
     let index = page.service_index.get();
+    if !(1..=3).contains(&index) {
+        return;
+    }
     let mut drafts = page.connections.borrow_mut();
     if !window.get_llm_connection_dirty() {
         drafts.remove(&index);

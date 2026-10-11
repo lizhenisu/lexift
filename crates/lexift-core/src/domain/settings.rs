@@ -1,3 +1,4 @@
+use super::service_provider::ServiceProviderId;
 use super::{
     language::Language,
     runtime_config::{HotkeyConfig, ProviderConfig, RuntimeConfig},
@@ -20,10 +21,11 @@ pub enum SettingsField {
     AnnotationHotkey,
     OcrHotkey,
     OcrLanguage,
+    OcrKoreanAuto,
     Provider,
     Ollama,
     Llm,
-    ProviderEnabled(ProviderConfig),
+    ProviderEnabled(ServiceProviderId),
     TranslationSelection,
     TranslationOptions,
     LaunchAtLogin,
@@ -45,7 +47,7 @@ pub enum SettingsFeedback {
     },
     ProviderEnabledCompleted {
         request_id: u64,
-        provider: ProviderConfig,
+        provider: ServiceProviderId,
         saved: bool,
     },
     CredentialSaved,
@@ -63,13 +65,14 @@ pub enum SettingsChange {
     AnnotationHotkey(HotkeyConfig),
     OcrHotkey(HotkeyConfig),
     OcrLanguage(Option<String>),
+    OcrKoreanAuto(bool),
     Provider(ProviderConfig),
     Ollama(super::ollama::OllamaConfig),
     Llm(super::llm::LlmSettings),
     /// Toggle one provider without applying connection drafts.
     ProviderEnabled {
         request_id: u64,
-        provider: ProviderConfig,
+        provider: ServiceProviderId,
         enabled: bool,
     },
     /// Select a service and model together without replacing connection/catalog state.
@@ -100,6 +103,7 @@ impl SettingsChange {
             Self::AnnotationHotkey(_) => SettingsField::AnnotationHotkey,
             Self::OcrHotkey(_) => SettingsField::OcrHotkey,
             Self::OcrLanguage(_) => SettingsField::OcrLanguage,
+            Self::OcrKoreanAuto(_) => SettingsField::OcrKoreanAuto,
             Self::Provider(_) => SettingsField::Provider,
             Self::Ollama(_) => SettingsField::Ollama,
             Self::Llm(_) => SettingsField::Llm,
@@ -118,6 +122,7 @@ impl SettingsChange {
     /// Validate targeted translation edits against the current configuration at dispatch time.
     pub fn validate_translation_change(&self, settings: &Settings) -> crate::Result<()> {
         if let Self::OcrLanguage(Some(value)) = self
+            && value != "auto"
             && !super::ocr::LANGUAGES.contains(&value.as_str())
         {
             return Err(crate::Error::new("Unsupported OCR language"));
@@ -190,6 +195,7 @@ impl SettingsChange {
             Self::AnnotationHotkey(value) => settings.annotation_hotkey = *value,
             Self::OcrHotkey(value) => settings.ocr_hotkey = *value,
             Self::OcrLanguage(value) => settings.ocr_language = value.clone(),
+            Self::OcrKoreanAuto(value) => settings.ocr_korean_auto = *value,
             Self::Provider(value) => settings.provider = *value,
             Self::Ollama(value) => settings.ollama = value.clone(),
             Self::Llm(value) => {
@@ -202,7 +208,7 @@ impl SettingsChange {
             }
             Self::ProviderEnabled {
                 provider, enabled, ..
-            } => settings.llm.set_provider_enabled(*provider, *enabled),
+            } => provider.set_enabled(settings, *enabled),
             Self::TranslationSelection {
                 provider, model, ..
             } => {
@@ -255,12 +261,13 @@ impl SettingsChange {
             Self::AnnotationHotkey(value) => settings.annotation_hotkey == *value,
             Self::OcrHotkey(value) => settings.ocr_hotkey == *value,
             Self::OcrLanguage(value) => settings.ocr_language == *value,
+            Self::OcrKoreanAuto(value) => settings.ocr_korean_auto == *value,
             Self::Provider(value) => settings.provider == *value,
             Self::Ollama(value) => settings.ollama == *value,
             Self::Llm(value) => settings.llm == *value,
             Self::ProviderEnabled {
                 provider, enabled, ..
-            } => settings.llm.provider_enabled(*provider) == *enabled,
+            } => provider.enabled(settings) == *enabled,
             Self::TranslationSelection {
                 provider, model, ..
             } => {
@@ -292,6 +299,8 @@ pub struct Settings {
     pub annotation_hotkey: HotkeyConfig,
     pub ocr_hotkey: HotkeyConfig,
     pub ocr_language: Option<String>,
+    pub ocr_enabled: bool,
+    pub ocr_korean_auto: bool,
     pub provider: ProviderConfig,
     pub ollama: super::ollama::OllamaConfig,
     pub llm: super::llm::LlmSettings,
@@ -312,7 +321,9 @@ impl Default for Settings {
             hotkey: HotkeyConfig::default(),
             annotation_hotkey: HotkeyConfig::annotation_default(),
             ocr_hotkey: HotkeyConfig::ocr_default(),
-            ocr_language: None,
+            ocr_language: Some("auto".into()),
+            ocr_enabled: true,
+            ocr_korean_auto: false,
             provider: ProviderConfig::default(),
             ollama: super::ollama::OllamaConfig::default(),
             llm: super::llm::LlmSettings::default(),

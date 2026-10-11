@@ -1,44 +1,9 @@
 {
   "version": "v1",
   "url": "https://github.com/lizhenisu/lexift/releases/download/ocr-v1/lexift-ocr-v1-windows-x86_64.zip",
-  "bytes": 39784517,
-  "sha256": "3104be8e91fc523d917b089cd640cd2cee4a85224f93b2d299d172738b3a6de9",
+  "bytes": 28579850,
+  "sha256": "4c1e92d507b1c4861d6612d1203758fefa3ea3f3934991a8d0031b2b4ec24ebb",
   "files": [
-    {
-      "name": "common.onnx",
-      "bytes": 16513197,
-      "sha256": "56b234def592534e2d73b86a219aa153fafafd7406f7eca8bb96aa6ef87bf68b"
-    },
-    {
-      "name": "common.txt",
-      "bytes": 92395,
-      "sha256": "1ea29636956177e400af712d9782e7693f3fb25f98617bed10479d2965a836fd"
-    },
-    {
-      "name": "det.onnx",
-      "bytes": 4748769,
-      "sha256": "9734166a465a7c391e00ef2adfa307f96044bb54d20f2442b45724ffc809dd47"
-    },
-    {
-      "name": "korean.onnx",
-      "bytes": 13397202,
-      "sha256": "58a924019e710b0aa4c81bd7759f8d7f9ce350f12f93218b198676782e0b3db8"
-    },
-    {
-      "name": "korean.txt",
-      "bytes": 59396,
-      "sha256": "2193f5dd0c62a4f268902b5d96dadfec3908d299afa9a6e5cad2c6a96c772828"
-    },
-    {
-      "name": "latin.onnx",
-      "bytes": 8020438,
-      "sha256": "e1a07ae33fee05377df895d3c6b9819355e3018063c44e2cb3933ae3c694b292"
-    },
-    {
-      "name": "latin.txt",
-      "bytes": 3452,
-      "sha256": "5ddc5c6086d61db3e1485f1237e059b89df9a228cebdac40a54406c6005bca67"
-    },
     {
       "name": "LICENSE-ONNXRuntime.txt",
       "bytes": 1073,
@@ -55,6 +20,11 @@
       "sha256": "e9e90971a8e75a9a8ac0c6412e29c1202d079998389915aa485f46c816c3b4cc"
     },
     {
+      "name": "det.onnx",
+      "bytes": 4748769,
+      "sha256": "9734166a465a7c391e00ef2adfa307f96044bb54d20f2442b45724ffc809dd47"
+    },
+    {
       "name": "onnxruntime.dll",
       "bytes": 14855240,
       "sha256": "013017fa3ce78faf9d7144b35fe5369668eacd39420f228dcdb1aae6195f47d0"
@@ -63,6 +33,16 @@
       "name": "onnxruntime_providers_shared.dll",
       "bytes": 22072,
       "sha256": "a59d755a2022981337dbd584bd02c030f08b8f9ce9b924440865f30d7a57e3de"
+    },
+    {
+      "name": "universal.onnx",
+      "bytes": 21154056,
+      "sha256": "dfa6c7c5bf4908348b90f7aec54e0e0ae95f73f838d237bb958f5cc763dad15a"
+    },
+    {
+      "name": "universal.txt",
+      "bytes": 93655,
+      "sha256": "769e7fa79bb297b5f18d8dbd149e364a45bc61f2b3f574e5ea836f0b261c23a6"
     }
   ],
   "models": {
@@ -70,18 +50,12 @@
       "PP-OCRv5_mobile_det",
       "0d63e78e2b680928f6b1747d76a08db6e645efb7"
     ],
-    "common": [
-      "PP-OCRv5_mobile_rec",
-      "682f20538d8c086cb2128e5cfac775e6c4904e85"
-    ],
-    "latin": [
-      "latin_PP-OCRv5_mobile_rec",
-      "ab2cd5cc5fa6309be2e5acdfe66eca2c2c127d57"
-    ],
-    "korean": [
-      "korean_PP-OCRv5_mobile_rec",
-      "c02ecaf1f22bfd1c618cce154fd19185b47e663a"
+    "universal": [
+      "PP-OCRv6_small_rec",
+      "bd619643acac4b9650c040234da8d944476ee3f1"
     ]
   },
-  "runtime_version": "1.22.0"
+  "runtime_version": "1.22.0",
+  "compatible_base": "v1",
+  "recognition_batch": 4
 }

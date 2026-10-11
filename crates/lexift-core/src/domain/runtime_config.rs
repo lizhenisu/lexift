@@ -197,7 +197,7 @@ impl FromStr for HotkeyConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ProviderConfig {
     #[default]
     DeepL,

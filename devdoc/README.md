@@ -74,6 +74,9 @@
 
 ## 发布
 
+- [OCR 基础包、韩文扩展与性能验证](releases/ocr-extension-validation.md)
+- [OCR 自动检测验证](releases/ocr-auto-validation.md)
+- [OCR Provider 与资源管理验证](releases/ocr-provider-validation.md)
 - [本地 OCR 实施验证](releases/ocr-validation.md)
 - [OCR 首次显示验证](releases/ocr-first-frame-validation.md)
 - [发布检查清单](releases/release-checklist.md)

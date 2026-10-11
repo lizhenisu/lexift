@@ -1,0 +1,212 @@
+import { SettingsSwitch, SettingsButton, SettingsCard, SettingsControlRow, SettingsComboBox } from "settings-controls.slint";
+import { Colors } from "design/colors.slint";
+import { Spacing } from "design/spacing.slint";
+import { Metrics } from "design/metrics.slint";
+import { Typography } from "design/typography.slint";
+import { SettingsHelpIcon } from "settings-hint.slint";
+
+export struct OcrResourceRow { label: string, size: string }
+
+// Values remain readable while localized names wrap instead of colliding.
+component ResourceInfoRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> divider: false;
+    height: max(40px, name.preferred-height + 16px, amount.preferred-height + 16px);
+    name := Text {
+        x: 0px; y: 8px; width: max(0px, parent.width - amount.width - Spacing.medium);
+        text: root.label; font-size: Typography.compact-size; color: Colors.secondary-foreground; wrap: word-wrap;
+    }
+    amount := Text {
+        x: parent.width - self.width; y: 8px; width: min(self.preferred-width, parent.width * 0.42);
+        text: root.value; font-size: Typography.compact-size; color: Colors.foreground; wrap: word-wrap; horizontal-alignment: right;
+    }
+    if root.divider: Rectangle { y: parent.height - 1px; height: 1px; background: Colors.outline.with-alpha(0.45); }
+}
+
+// Both packages share the same resource presentation and focus behavior.
+component OcrResourceCard inherits SettingsCard {
+    in property <string> heading-label;
+    in property <string> download-label;
+    in property <string> status;
+    in property <int> status-kind; // 0 absent, 1 ready, 2 busy, 3 damaged, 4 pending removal
+    in property <string> version;
+    in property <string> download-size;
+    in property <string> installed-size;
+    in property <[OcrResourceRow]> model-rows;
+    in property <bool> ready;
+    in property <bool> downloading;
+    in property <float> progress;
+    in property <bool> can-download;
+    in property <bool> can-remove;
+    in property <bool> damaged;
+    in property <string> note;
+    in property <bool> note-error;
+    in property <bool> show-auto-detect: false;
+    in property <bool> auto-detect;
+    in property <bool> auto-detect-enabled;
+    callback auto-detect-toggled(bool);
+    callback download-clicked();
+    callback remove-clicked();
+    public function focus-remove() { remove.focus-button(); }
+    public function focus-download() { if download.visible { download.focus-button(); } else { remove.focus-button(); } }
+
+        title: ""; border-width: 1px; border-color: Colors.outline.with-alpha(0.55);
+        Rectangle {
+            private property <bool> stacked: self.width < 360px || heading.preferred-width + badge.width + Spacing.medium > self.width;
+            height: self.stacked ? heading.height + Spacing.small + badge.height : max(heading.height, badge.height);
+            heading := Text {
+                x: 0px; y: parent.stacked ? 0px : (parent.height - self.height) / 2;
+                width: parent.stacked ? parent.width : max(0px, parent.width - badge.width - Spacing.medium);
+                height: self.preferred-height; text: root.heading-label; font-size: Typography.body-size; font-weight: 700; color: Colors.foreground; wrap: word-wrap;
+            }
+            badge := Rectangle {
+                x: parent.stacked ? 0px : parent.width - self.width;
+                y: parent.stacked ? heading.height + Spacing.small : (parent.height - self.height) / 2;
+                width: min(parent.width, status-text.preferred-width + 32px);
+                height: max(28px, status-text.preferred-height + 8px); border-radius: 8px;
+                background: root.status-kind == 1 ? Colors.success-container : root.status-kind == 3 ? Colors.error-container : root.status-kind == 2 || root.status-kind == 4 ? Colors.primary-container : Colors.background;
+                Rectangle { x: 10px; y: (parent.height - 6px) / 2; width: 6px; height: 6px; border-radius: 3px;
+                    background: root.status-kind == 1 ? Colors.success : root.status-kind == 3 ? Colors.error : root.status-kind == 2 || root.status-kind == 4 ? Colors.primary : Colors.secondary-foreground;
+                }
+                status-text := Text { x: 22px; y: 4px; width: parent.width - 32px; text: root.status; wrap: word-wrap; font-size: 12px;
+                    color: root.status-kind == 1 ? Colors.success : root.status-kind == 3 ? Colors.error : root.status-kind == 2 || root.status-kind == 4 ? Colors.primary : Colors.secondary-foreground;
+                }
+            }
+        }
+        if root.show-auto-detect: Rectangle {
+            height: max(56px, auto-label.preferred-height + Spacing.medium);
+            auto-label := Text {
+                x: 0px; y: (parent.height - self.height) / 2;
+                width: min(self.preferred-width, max(0px, parent.width - auto-switch.width - Spacing.medium - auto-help.width - 2px));
+                height: self.preferred-height;
+                text: @tr("Include in auto detection"); wrap: word-wrap;
+                font-size: Typography.body-size; color: Colors.foreground;
+            }
+            auto-help := SettingsHelpIcon {
+                // The SVG has a 4px inset: 2px here leaves 6px after the text.
+                x: auto-label.width + 2px; y: (parent.height - self.height) / 2;
+                accessible-name: @tr("About inclusion in auto detection");
+                text: @tr("When enabled, auto detection also runs Korean recognition and combines it with the base model results to improve Korean and mixed-text recognition. This increases recognition time and memory use. Manually selecting Korean is unaffected.");
+            }
+            auto-switch := SettingsSwitch {
+                x: parent.width - self.width; y: (parent.height - self.height) / 2;
+                checked: root.auto-detect; enabled: root.auto-detect-enabled;
+                label: @tr("Include in auto detection");
+                toggled(value) => { root.auto-detect-toggled(value); }
+            }
+        }
+        if root.show-auto-detect: Rectangle { height: 1px; background: Colors.outline.with-alpha(0.55); }
+        VerticalLayout { spacing: 0px;
+            ResourceInfoRow { label: @tr("Resource version"); value: root.version; }
+            ResourceInfoRow { label: @tr("Download size"); value: root.download-size; }
+            ResourceInfoRow { label: @tr("Local storage"); value: root.installed-size; }
+        }
+        Rectangle { height: 1px; background: Colors.outline.with-alpha(0.55); }
+        VerticalLayout { spacing: 0px;
+            for item[index] in root.model-rows: ResourceInfoRow { label: item.label; value: item.size; divider: index + 1 < root.model-rows.length; }
+        }
+        if root.downloading: Rectangle {
+            height: 4px; border-radius: 2px; background: Colors.primary-container;
+            Rectangle { width: parent.width * min(1, max(0, root.progress)); height: parent.height; border-radius: 2px; background: Colors.primary; }
+        }
+        Rectangle {
+            private property <bool> show-download: !root.ready && root.status-kind != 4;
+            private property <bool> wrapped: show-download && self.width < download.width + remove.width + Spacing.small;
+            height: self.wrapped ? 88px : 40px;
+            download := SettingsButton {
+                visible: parent.show-download; x: 0px; y: 0px; compact: true; primary: !root.downloading;
+                available-width: parent.width;
+                enabled: root.downloading || root.can-download;
+                label: root.downloading ? @tr("Cancel download") : root.damaged ? @tr("Retry") : root.download-label;
+                clicked => { root.download-clicked(); }
+            }
+            remove := SettingsButton {
+                x: parent.wrapped ? 0px : parent.width - self.width; y: parent.wrapped ? 48px : 0px;
+                available-width: parent.width; compact: true; quiet: true; destructive: true; icon: @image-url("icons/credential-delete.svg");
+                enabled: root.can-remove; label: @tr("Delete local resources"); clicked => { root.remove-clicked(); }
+            }
+        }
+        if root.note != "": Rectangle {
+            height: feedback.preferred-height + 24px; border-radius: Spacing.small;
+            background: root.note-error ? Colors.error-container : Colors.background;
+            feedback := Text { x: 12px; y: 12px; width: parent.width - 24px; text: root.note; font-size: 13px; wrap: word-wrap;
+                color: root.note-error ? Colors.error : Colors.secondary-foreground;
+            }
+        }
+
+}
+
+// This view owns presentation only; operations retain their existing Core callbacks.
+export component OcrProviderPage inherits VerticalLayout {
+    in-out property <int> language-index;
+    in property <string> status;
+    in property <int> status-kind; // 0 absent, 1 ready, 2 busy, 3 damaged, 4 pending removal
+    in property <string> version;
+    in property <string> download-size;
+    in property <string> installed-size;
+    in property <[OcrResourceRow]> model-rows;
+    in property <bool> ready;
+    in property <bool> downloading;
+    in property <float> progress;
+    in property <bool> can-download;
+    in property <bool> can-remove;
+    in property <bool> damaged;
+    in property <string> note;
+    in property <bool> note-error;
+    callback language-selected(int);
+    callback download-clicked();
+    callback remove-clicked();
+    public function focus-remove() { if root.selected-resource == 1 { korean.focus-remove(); } else { base.focus-remove(); } }
+    public function focus-download() { if root.selected-resource == 1 { korean.focus-download(); } else { base.focus-download(); } }
+    in property <int> selected-resource;
+    in property <bool> korean-auto;
+    in property <bool> korean-auto-enabled;
+    callback korean-auto-toggled(bool);
+    callback korean-download-clicked();
+    callback korean-remove-clicked();
+    in property <string> korean-status;
+    in property <int> korean-status-kind; // 0 absent, 1 ready, 2 busy, 3 damaged, 4 pending removal
+    in property <string> korean-version;
+    in property <string> korean-download-size;
+    in property <string> korean-installed-size;
+    in property <bool> korean-ready;
+    in property <bool> korean-downloading;
+    in property <float> korean-progress;
+    in property <bool> korean-can-download;
+    in property <bool> korean-can-remove;
+    in property <bool> korean-damaged;
+    in property <string> korean-note;
+    in property <bool> korean-note-error;
+    spacing: Metrics.settings-card-gap;
+
+    SettingsCard {
+        title: @tr("Recognition settings"); border-width: 1px; border-color: Colors.outline.with-alpha(0.55);
+        SettingsControlRow { label: @tr("Recognition language");
+            SettingsComboBox {
+                model: [@tr("Auto detect"), @tr("Follow interface language"), "简体中文", "繁體中文", "English (US)", "English (UK)", "日本語", "한국어", "Deutsch", "Français", "Español", "Italiano", "Português (Portugal)", "Português (Brasil)"];
+                current-index <=> root.language-index; selected(index) => { root.language-selected(index); }
+            }
+        }
+    }
+    base := OcrResourceCard {
+        heading-label: @tr("Local resources"); download-label: @tr("Download OCR resources");
+        status: root.status; status-kind: root.status-kind; version: root.version;
+        download-size: root.download-size; installed-size: root.installed-size; model-rows: root.model-rows;
+        ready: root.ready; downloading: root.downloading; progress: root.progress;
+        can-download: root.can-download; can-remove: root.can-remove; damaged: root.damaged;
+        note: root.note; note-error: root.note-error;
+        download-clicked => { root.download-clicked(); } remove-clicked => { root.remove-clicked(); }
+    }
+    korean := OcrResourceCard {
+        heading-label: @tr("Korean extension"); download-label: @tr("Download Korean extension");
+        show-auto-detect: true; auto-detect: root.korean-auto; auto-detect-enabled: root.korean-auto-enabled;
+        auto-detect-toggled(value) => { root.korean-auto-toggled(value); }
+        status: root.korean-status; status-kind: root.korean-status-kind; version: root.korean-version;
+        download-size: root.korean-download-size; installed-size: root.korean-installed-size;
+        ready: root.korean-ready; downloading: root.korean-downloading; progress: root.korean-progress;
+        can-download: root.korean-can-download; can-remove: root.korean-can-remove; damaged: root.korean-damaged;
+        note: root.korean-note; note-error: root.korean-note-error;
+        download-clicked => { root.korean-download-clicked(); } remove-clicked => { root.korean-remove-clicked(); }
+    }
+}

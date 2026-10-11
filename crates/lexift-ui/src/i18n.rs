@@ -415,7 +415,7 @@ mod tests {
         ])));
         settings.set_active_category(5);
         draw();
-        click(270., 115.);
+        click(270., 147.);
         key(Key::Tab.into());
         assert_eq!(settings.get_provider_detail_index(), 0);
         key(" ".into());

@@ -641,6 +641,11 @@ impl AppState {
                 let mut commands = vec![AppCommand::ShowSettingsFeedback {
                     feedback: change.feedback(true),
                 }];
+                if matches!(change, SettingsChange::OcrKoreanAuto(false)) {
+                    commands.push(AppCommand::Ocr(
+                        crate::domain::ocr::OcrCommand::ReleaseKorean,
+                    ));
+                }
                 commands.extend(
                     self.clipboard_history
                         .reconcile_limit(self.settings.clipboard_history_limit),
@@ -961,6 +966,13 @@ impl AppState {
                 feedback: SettingsFeedback::SettingsSaveFailed(SettingsField::Llm),
             }];
         }
+        if let Err(error) = self.validate_ocr_setting(&change) {
+            self.settings_error_field = Some(change.field());
+            self.set_settings_field_error(change.field(), error.to_string());
+            return vec![AppCommand::ShowSettingsFeedback {
+                feedback: change.feedback(false),
+            }];
+        }
         if let Err(error) = change.validate_translation_change(&self.desired_settings) {
             self.settings_error_field = Some(change.field());
             self.set_settings_field_error(change.field(), error.to_string());
@@ -979,6 +991,17 @@ impl AppState {
     }
 
     fn start_settings_change(&mut self, mut change: SettingsChange) -> Vec<AppCommand> {
+        // A queued enable can outlive removal of its required extension.
+        if let Err(error) = self.validate_ocr_setting(&change) {
+            self.settings_error_field = Some(change.field());
+            self.set_settings_field_error(change.field(), error.to_string());
+            self.restore_desired_field_after_failure(change.field());
+            let mut commands = vec![AppCommand::ShowSettingsFeedback {
+                feedback: change.feedback(false),
+            }];
+            commands.extend(self.start_next_settings_change());
+            return commands;
+        }
         if let SettingsChange::Llm(config) = &mut change {
             config.deepl_enabled = self.settings.llm.deepl_enabled;
             for c in &mut config.connections {
@@ -1031,6 +1054,21 @@ impl AppState {
         vec![AppCommand::PersistSettings { settings, change }]
     }
 
+    fn validate_ocr_setting(&self, change: &SettingsChange) -> crate::Result<()> {
+        if matches!(change, SettingsChange::OcrKoreanAuto(true))
+            && !self
+                .ocr
+                .resources
+                .info
+                .as_ref()
+                .and_then(|r| r.korean.as_deref())
+                .is_some_and(|r| r.ready)
+        {
+            return Err(crate::Error::new("Korean extension is unavailable"));
+        }
+        Ok(())
+    }
+
     fn start_next_settings_change(&mut self) -> Vec<AppCommand> {
         if self.credential_busy || self.queued_settings_changes.is_empty() {
             return Vec::new();
@@ -1052,6 +1090,7 @@ impl AppState {
             | SettingsField::TranslationOptions => self.provider_settings_error.clear(),
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error.clear(),
             SettingsField::OcrLanguage
+            | SettingsField::OcrKoreanAuto
             | SettingsField::OcrHotkey
             | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
@@ -1074,6 +1113,7 @@ impl AppState {
             | SettingsField::TranslationOptions => self.provider_settings_error = error,
             SettingsField::LaunchAtLogin => self.launch_at_login_settings_error = error,
             SettingsField::OcrLanguage
+            | SettingsField::OcrKoreanAuto
             | SettingsField::OcrHotkey
             | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
@@ -1094,10 +1134,9 @@ impl AppState {
             return;
         }
         match field {
-            SettingsField::ProviderEnabled(provider) => self
-                .desired_settings
-                .llm
-                .set_provider_enabled(provider, self.settings.llm.provider_enabled(provider)),
+            SettingsField::ProviderEnabled(provider) => {
+                provider.set_enabled(&mut self.desired_settings, provider.enabled(&self.settings))
+            }
             SettingsField::Theme => self.desired_settings.theme = self.settings.theme,
             SettingsField::UiLanguage => {
                 self.desired_settings.ui_language = self.settings.ui_language
@@ -1128,6 +1167,9 @@ impl AppState {
             SettingsField::ClipboardHistoryLimit => {
                 self.desired_settings.clipboard_history_limit =
                     self.settings.clipboard_history_limit;
+            }
+            SettingsField::OcrKoreanAuto => {
+                self.desired_settings.ocr_korean_auto = self.settings.ocr_korean_auto;
             }
             SettingsField::OcrLanguage => {
                 self.desired_settings.ocr_language = self.settings.ocr_language.clone()
@@ -2871,14 +2913,9 @@ mod tests {
         let mut next = state.reduce(AppEvent::SettingsChangeRequested {
             change: SettingsChange::TargetLanguage(Language("ja".into())),
         });
-        for (id, provider) in [
-            ProviderConfig::DeepL,
-            ProviderConfig::Ollama,
-            ProviderConfig::LmStudio,
-            ProviderConfig::DeepSeek,
-        ]
-        .into_iter()
-        .enumerate()
+        for (id, provider) in crate::domain::service_provider::ServiceProviderId::ALL
+            .into_iter()
+            .enumerate()
         {
             assert!(
                 state
@@ -2912,7 +2949,8 @@ mod tests {
                 change,
             });
         }
-        assert_eq!(completions, 6);
+        assert_eq!(completions, 7);
+        assert!(!state.settings.ocr_enabled);
         for provider in [
             ProviderConfig::DeepL,
             ProviderConfig::Ollama,
@@ -2930,7 +2968,7 @@ mod tests {
         let mut state = AppState::default();
         let change = SettingsChange::ProviderEnabled {
             request_id: 42,
-            provider: ProviderConfig::Ollama,
+            provider: ProviderConfig::Ollama.into(),
             enabled: false,
         };
         state.reduce(AppEvent::SettingsChangeRequested {
@@ -2953,7 +2991,7 @@ mod tests {
             vec![AppCommand::ShowSettingsFeedback {
                 feedback: SettingsFeedback::ProviderEnabledCompleted {
                     request_id: 42,
-                    provider: ProviderConfig::Ollama,
+                    provider: ProviderConfig::Ollama.into(),
                     saved: false
                 }
             }]

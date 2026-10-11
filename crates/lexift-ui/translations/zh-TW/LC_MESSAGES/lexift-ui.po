@@ -1530,3 +1530,120 @@ msgstr "本機 OCR 無法使用"
 
 msgid "OCR selection is too large"
 msgstr "OCR 選區過大，請縮小選區"
+
+msgid "Translation services"
+msgstr "翻譯服務"
+
+msgid "Large language models"
+msgstr "大型語言模型"
+
+msgid "Local OCR (PaddleOCR)"
+msgstr "本機 OCR（PaddleOCR）"
+
+msgid "Resource version"
+msgstr "資源版本"
+
+msgid "Download size"
+msgstr "下載大小"
+
+msgid "Local storage"
+msgstr "本機用量"
+
+msgid "Retry"
+msgstr "重試"
+
+msgid "Delete local resources"
+msgstr "刪除本機資源"
+
+msgid "Delete all OCR models, dictionaries and runtime? Loaded resources will be removed after restarting Lexift."
+msgstr "刪除全部 OCR 模型、字典及執行階段？已載入的資源將在重新啟動 Lexift 後刪除。"
+
+msgid "Detection model"
+msgstr "偵測模型"
+
+msgid "Chinese, Japanese and English recognition"
+msgstr "中日英辨識模型"
+
+msgid "Latin script recognition"
+msgstr "拉丁文字辨識模型"
+
+msgid "Korean recognition"
+msgstr "韓文辨識模型"
+
+msgid "Shared runtime and licenses"
+msgstr "共用執行階段及授權"
+
+msgid "Checking OCR resources"
+msgstr "正在檢查 OCR 資源"
+
+msgid "Deleting OCR resources"
+msgstr "正在刪除 OCR 資源"
+
+msgid "OCR resources will be removed after restart"
+msgstr "重新啟動後完成 OCR 資源刪除"
+
+msgid "OCR resources are damaged"
+msgstr "OCR 資源已損壞"
+
+msgid "Finish the current OCR task before managing resources"
+msgstr "請先結束目前 OCR 工作再管理資源"
+
+msgid "Restart Lexift to finish deletion before downloading again"
+msgstr "請重新啟動 Lexift 完成刪除後再下載"
+
+msgid "Cancel the download before deleting resources"
+msgstr "請先取消下載再刪除資源"
+
+msgid "OCR provider is disabled"
+msgstr "OCR 服務已停用"
+
+msgid "Multilingual recognition"
+msgstr "多語言辨識"
+
+
+msgid "Recognition settings"
+msgstr "辨識設定"
+
+
+msgid "Local resources"
+msgstr "本機資源"
+
+
+msgid "Recognize text locally, then translate it with your current service."
+msgstr "在本機辨識文字，再交由目前的翻譯服務翻譯。"
+
+msgid "Korean extension"
+msgstr "韓文擴充"
+
+msgid "Download Korean extension"
+msgstr "下載韓文擴充"
+
+msgid "Include in auto detection"
+msgstr "加入自動偵測"
+
+msgid "Delete the Korean extension? Basic OCR remains available."
+msgstr "刪除韓文擴充？基礎 OCR 仍可使用。"
+
+msgid "Delete the basic OCR resources and Korean extension? Loaded runtime files will be removed after restarting Lexift."
+msgstr "刪除基礎 OCR 資源及韓文擴充？已載入的執行階段檔案將在重新啟動 Lexift 後刪除。"
+
+msgid "Download Korean recognition resources. The basic runtime is shared."
+msgstr "下載韓文辨識資源，共用基礎執行階段。"
+
+msgid "Download basic recognition models and runtime. Korean is an optional extension."
+msgstr "下載基礎辨識模型及執行階段。韓文為選用擴充。"
+
+msgid "Korean extension is unavailable"
+msgstr "韓文擴充無法使用"
+
+msgid "Korean recognition setting saved"
+msgstr "韓文辨識設定已儲存"
+
+msgid "Korean recognition setting wasn't saved"
+msgstr "韓文辨識設定未儲存"
+
+msgid "About inclusion in auto detection"
+msgstr "加入自動偵測說明"
+
+msgid "When enabled, auto detection also runs Korean recognition and combines it with the base model results to improve Korean and mixed-text recognition. This increases recognition time and memory use. Manually selecting Korean is unaffected."
+msgstr "開啟後，自動偵測會額外執行韓文辨識，並結合基礎模型結果選擇文字，提高韓文及混合文字的辨識能力，但會增加辨識時間和記憶體用量。手動選擇韓文不受此開關影響。"

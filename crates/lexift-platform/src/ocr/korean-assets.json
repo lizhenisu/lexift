@@ -1,0 +1,32 @@
+{
+  "version": "korean-v1",
+  "url": "https://github.com/lizhenisu/lexift/releases/download/ocr-v1/lexift-ocr-korean-v1-windows-x86_64.zip",
+  "bytes": 8332170,
+  "sha256": "d5a647f2bd6f27e5fd7d8510172d08a43e9d9e7bbee09a27d74f6b1694399d2d",
+  "files": [
+    {
+      "name": "LICENSE-PaddleOCR.txt",
+      "bytes": 11376,
+      "sha256": "3840c5c0c61c294264d2dd77b8777be6ddd90121ef4e0e64abcd22edea581d6e"
+    },
+    {
+      "name": "korean.onnx",
+      "bytes": 13397202,
+      "sha256": "58a924019e710b0aa4c81bd7759f8d7f9ce350f12f93218b198676782e0b3db8"
+    },
+    {
+      "name": "korean.txt",
+      "bytes": 59396,
+      "sha256": "2193f5dd0c62a4f268902b5d96dadfec3908d299afa9a6e5cad2c6a96c772828"
+    }
+  ],
+  "models": {
+    "korean": [
+      "korean_PP-OCRv5_mobile_rec",
+      "c02ecaf1f22bfd1c618cce154fd19185b47e663a"
+    ]
+  },
+  "runtime_version": "1.22.0",
+  "compatible_base": "v1",
+  "recognition_batch": 4
+}
