@@ -268,12 +268,13 @@ pub(crate) fn reduce(state: &mut AppState, event: OcrEvent) -> Vec<AppCommand> {
                     state.ocr.download_bytes = info.download_bytes;
                     r.info = Some(info);
                     r.error.clear();
-                    if operation.is_some_and(ResourceOperation::downloading) {
-                        state.ocr.error = "OCR resources ready. Press the shortcut again".into();
-                    } else if matches!(
-                        operation,
-                        Some(ResourceOperation::Remove | ResourceOperation::RemoveKorean)
-                    ) {
+                    if operation.is_some_and(|operation| {
+                        operation.downloading()
+                            || matches!(
+                                operation,
+                                ResourceOperation::Remove | ResourceOperation::RemoveKorean
+                            )
+                    }) {
                         state.ocr.error.clear();
                     }
                 }
@@ -508,7 +509,7 @@ pub(crate) fn reduce(state: &mut AppState, event: OcrEvent) -> Vec<AppCommand> {
         {
             state.ocr.resources_ready = true;
             state.ocr.phase = OcrPhase::Idle;
-            state.ocr.error = "OCR resources ready. Press the shortcut again".into();
+            state.ocr.error.clear();
             vec![]
         }
         Selected { generation, bounds }
@@ -777,6 +778,7 @@ mod tests {
             .is_empty()
         );
         assert_eq!(s.ocr.phase, OcrPhase::Idle);
+        assert!(s.ocr.error.is_empty());
     }
     #[test]
     fn crop_combines_negative_monitor_coordinates_and_white_gaps() {
@@ -994,10 +996,7 @@ mod provider_tests {
             result: Ok(info(OcrResourceStatus::Ready)),
         }));
         assert!(state.ocr.resources_ready);
-        assert_eq!(
-            state.ocr.error,
-            "OCR resources ready. Press the shortcut again"
-        );
+        assert!(state.ocr.error.is_empty());
         state.reduce(AppEvent::Ocr(OcrEvent::ManageResources(
             ResourceOperation::Remove,
         )));

@@ -1504,9 +1504,6 @@ msgstr "Exit annotation before starting OCR"
 msgid "No text recognized in the selected region"
 msgstr "No text recognised in the selected region"
 
-msgid "OCR resources ready. Press the shortcut again"
-msgstr "OCR resources ready. Press the shortcut again"
-
 msgid "Drag to select. Release to translate. Escape or right-click to cancel."
 msgstr "Drag to select. Release to translate. Escape or right-click to cancel."
 

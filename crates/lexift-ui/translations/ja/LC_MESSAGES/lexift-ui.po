@@ -1504,9 +1504,6 @@ msgstr "OCR の前に注釈を終了してください"
 msgid "No text recognized in the selected region"
 msgstr "選択範囲に文字が見つかりません"
 
-msgid "OCR resources ready. Press the shortcut again"
-msgstr "OCR の準備ができました。ショートカットを再度押してください"
-
 msgid "Drag to select. Release to translate. Escape or right-click to cancel."
 msgstr "ドラッグで選択、離して翻訳。Escape または右クリックで中止。"
 

@@ -1504,9 +1504,6 @@ msgstr "Esci dall’annotazione prima di avviare OCR"
 msgid "No text recognized in the selected region"
 msgstr "Nessun testo riconosciuto nell’area selezionata"
 
-msgid "OCR resources ready. Press the shortcut again"
-msgstr "OCR pronto. Premi di nuovo la scorciatoia"
-
 msgid "Drag to select. Release to translate. Escape or right-click to cancel."
 msgstr "Trascina per selezionare, rilascia per tradurre. Escape o clic destro per annullare."
 

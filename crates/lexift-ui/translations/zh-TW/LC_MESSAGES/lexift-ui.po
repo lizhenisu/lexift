@@ -1504,9 +1504,6 @@ msgstr "請先結束標註，再開始 OCR"
 msgid "No text recognized in the selected region"
 msgstr "所選區域未辨識到文字"
 
-msgid "OCR resources ready. Press the shortcut again"
-msgstr "OCR 資源已就緒，請再次按快捷鍵"
-
 msgid "Drag to select. Release to translate. Escape or right-click to cancel."
 msgstr "拖曳框選，放開翻譯。按 Escape 或右鍵取消。"
 

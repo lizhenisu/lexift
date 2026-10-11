@@ -1504,9 +1504,6 @@ msgstr "Vor OCR den Anmerkungsmodus beenden"
 msgid "No text recognized in the selected region"
 msgstr "Kein Text im ausgewählten Bereich erkannt"
 
-msgid "OCR resources ready. Press the shortcut again"
-msgstr "OCR bereit. Tastenkürzel erneut drücken"
-
 msgid "Drag to select. Release to translate. Escape or right-click to cancel."
 msgstr "Ziehen zum Auswählen, loslassen zum Übersetzen. Escape oder Rechtsklick zum Abbrechen."
 

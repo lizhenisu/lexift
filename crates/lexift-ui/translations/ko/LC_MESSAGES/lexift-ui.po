@@ -1504,9 +1504,6 @@ msgstr "OCR 시작 전에 주석 모드를 종료하세요"
 msgid "No text recognized in the selected region"
 msgstr "선택 영역에서 텍스트를 찾지 못했습니다"
 
-msgid "OCR resources ready. Press the shortcut again"
-msgstr "OCR 준비 완료. 단축키를 다시 누르세요"
-
 msgid "Drag to select. Release to translate. Escape or right-click to cancel."
 msgstr "드래그로 선택하고 놓으면 번역합니다. Escape 또는 오른쪽 클릭으로 취소."
 

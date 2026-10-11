@@ -252,11 +252,7 @@ pub(crate) fn apply_settings(window: &crate::SettingsWindow, state: &lexift_core
     };
     window.set_ocr_resource_note_error(
         (!manager.error.is_empty() && !korean_error)
-            || (!active
-                && !pending
-                && !downloading
-                && !o.error.is_empty()
-                && o.error != "OCR resources ready. Press the shortcut again"),
+            || (!active && !pending && !downloading && !o.error.is_empty()),
     );
     window.set_ocr_resource_note(note.into());
     if o.phase == OcrPhase::DownloadRequired

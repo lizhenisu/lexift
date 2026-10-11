@@ -406,12 +406,10 @@ fn provider_resource_page_is_separate_and_renders_all_locales() {
         }
     }
     let mut completed = state.clone();
-    completed.ocr.error = "OCR resources ready. Press the shortcut again".into();
+    completed.ocr.error.clear();
     crate::ocr::provider::apply_settings(&view, &completed);
-    assert!(
-        !view.get_ocr_resource_note_error(),
-        "successful download feedback is informational"
-    );
+    assert!(view.get_ocr_resource_note().is_empty());
+    assert!(!view.get_ocr_resource_note_error());
     crate::ocr::provider::apply_settings(&view, &state);
     crate::i18n::select(UiLanguage::EnglishUs);
     view.global::<crate::Colors>().set_preference(0);
