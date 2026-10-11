@@ -27,3 +27,7 @@ Slint 的 `RegionPreview` 与 `ScreenInteractionHint` 只呈现选区、遮罩�
 ## 验证
 
 见 [共用宿主验证](../releases/screen-interaction-validation.md)。此前证据见 [OCR 首次显示验证](../releases/ocr-first-frame-validation.md)，历史采样未覆盖的边界不能当作当前验收结论。
+
+## 模块所有权
+
+标注实现集中在 UI 的 `annotation/`，OCR 独立宿主在 `ocr/selection`；设置桥接在 `ocr/provider`。这些目录调整不改变公共宿主、隐藏准备和首次呈现流程，也不合并两种业务会话。窗口 Bridge 的回调契约位于 `bridge/callbacks`，原生实现仍由 App 注入。

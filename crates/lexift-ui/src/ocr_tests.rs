@@ -75,7 +75,7 @@ fn provider_resource_page_is_separate_and_renders_all_locales() {
         Rc::new(move |e| sent.borrow_mut().push(e)),
     );
     let sent = events.clone();
-    crate::ocr::wire_settings(&view, Rc::new(move |event| sent.borrow_mut().push(event)));
+    crate::ocr::provider::wire_settings(&view, Rc::new(move |event| sent.borrow_mut().push(event)));
     view.set_provider_detail_index(1);
     view.set_llm_service_index(0);
     view.invoke_llm_service_selected(1);
@@ -88,13 +88,13 @@ fn provider_resource_page_is_separate_and_renders_all_locales() {
     state.reduce(AppEvent::Ocr(
         lexift_core::domain::ocr::OcrEvent::ManageResources(ResourceOperation::Check),
     ));
-    crate::ocr::apply_settings(&view, &state);
+    crate::ocr::provider::apply_settings(&view, &state);
     assert_eq!(view.get_ocr_language_index(), 0);
     state.desired_settings.ocr_language = None;
-    crate::ocr::apply_settings(&view, &state);
+    crate::ocr::provider::apply_settings(&view, &state);
     assert_eq!(view.get_ocr_language_index(), 1);
     state.desired_settings.ocr_language = Some("auto".into());
-    crate::ocr::apply_settings(&view, &state);
+    crate::ocr::provider::apply_settings(&view, &state);
     assert_eq!(view.get_provider_detail_id(), "paddleocr");
     assert!(!view.get_llm_connection_dirty());
     view.invoke_llm_enable_requested(false);
@@ -163,7 +163,7 @@ fn provider_resource_page_is_separate_and_renders_all_locales() {
             }),
         },
     ));
-    crate::ocr::apply_settings(&view, &state);
+    crate::ocr::provider::apply_settings(&view, &state);
     assert!(view.get_ocr_resource_ready());
     assert_eq!(view.get_ocr_download_size_compact(), "27.3 MiB");
     assert!(view.get_ocr_download_size().contains("28579850 bytes"));
@@ -201,7 +201,7 @@ fn provider_resource_page_is_separate_and_renders_all_locales() {
             surface.as_ref(),
             slint::LogicalSize::new(960., 1400.).into(),
         );
-        crate::ocr::apply_settings(&view, &state);
+        crate::ocr::provider::apply_settings(&view, &state);
         surface.request_redraw();
         let size = surface.size();
         let mut pixels = vec![slint::Rgb8Pixel::default(); (size.width * size.height) as usize];
@@ -269,7 +269,7 @@ fn provider_resource_page_is_separate_and_renders_all_locales() {
             pixels[(852. * scale) as usize * size.width as usize + (600. * scale) as usize];
         assert!(tooltip_background.r < 80, "disabled switch still has help");
     }
-    crate::ocr::apply_settings(&view, &state);
+    crate::ocr::provider::apply_settings(&view, &state);
     view.window()
         .dispatch_event(slint::platform::WindowEvent::PointerMoved {
             position: slint::LogicalPosition::new(200., 100.),
@@ -278,7 +278,7 @@ fn provider_resource_page_is_separate_and_renders_all_locales() {
     let directory = std::env::var("LEXIFT_OCR_PROVIDER_SNAPSHOT_DIR").ok();
     for language in UiLanguage::ALL {
         crate::i18n::select(language);
-        crate::ocr::apply_settings(&view, &state);
+        crate::ocr::provider::apply_settings(&view, &state);
         for (scale, width) in [(1., 960.), (1.25, 700.)] {
             view.window()
                 .dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged {
@@ -317,7 +317,7 @@ fn provider_resource_page_is_separate_and_renders_all_locales() {
     }
     // Render every management state, including a long download failure, without network access.
     crate::i18n::select(UiLanguage::SimplifiedChinese);
-    crate::ocr::apply_settings(&view, &state);
+    crate::ocr::provider::apply_settings(&view, &state);
     view.global::<crate::Colors>().set_preference(0);
     view.window()
         .dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: 1. });
@@ -384,7 +384,7 @@ fn provider_resource_page_is_separate_and_renders_all_locales() {
         sample.ocr.resources.busy = operation;
         sample.ocr.resources.received = 14289925;
         sample.ocr.resources.error = error.into();
-        crate::ocr::apply_settings(&view, &sample);
+        crate::ocr::provider::apply_settings(&view, &sample);
         if operation == Some(ResourceOperation::Download) {
             assert!((view.get_ocr_download_progress() - 0.5).abs() < 0.001);
         }
@@ -407,12 +407,12 @@ fn provider_resource_page_is_separate_and_renders_all_locales() {
     }
     let mut completed = state.clone();
     completed.ocr.error = "OCR resources ready. Press the shortcut again".into();
-    crate::ocr::apply_settings(&view, &completed);
+    crate::ocr::provider::apply_settings(&view, &completed);
     assert!(
         !view.get_ocr_resource_note_error(),
         "successful download feedback is informational"
     );
-    crate::ocr::apply_settings(&view, &state);
+    crate::ocr::provider::apply_settings(&view, &state);
     crate::i18n::select(UiLanguage::EnglishUs);
     view.global::<crate::Colors>().set_preference(0);
     view.set_provider_detail_index(1);

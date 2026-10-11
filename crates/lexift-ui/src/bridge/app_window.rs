@@ -231,3 +231,29 @@ mod tests {
         drop(ui);
     }
 }
+
+pub(super) struct AppWindowRegistry {
+    pub(super) llm_query: Option<crate::llm_settings::LlmQuery>,
+    pub(super) history_supported: bool,
+    pub(super) main: Option<AppWindow>,
+    pub(super) settings: Option<SettingsWindow>,
+    pub(super) configure_resize_background: ConfigureResizeBackground,
+    pub(super) configure_window_paint_repair: ConfigureWindowPaintRepair,
+    pub(super) configure_app_window_icon: fn(&slint::Window) -> bool,
+    pub(super) prepare_app_window: PrepareAppWindow,
+    pub(super) open_about_link: Rc<dyn Fn(crate::AboutLink) -> bool>,
+    pub(super) latest_state: AppState,
+    pub(super) show_selection_demo: bool,
+    pub(super) handler: Option<Rc<dyn Fn(AppEvent)>>,
+    pub(super) background_mode: Rc<Cell<bool>>,
+    pub(super) credential_generation: Arc<AtomicU64>,
+    pub(super) toast_records: Arc<Mutex<Vec<SettingsToastRecord>>>,
+    pub(super) main_show_timer: slint::Timer,
+    pub(super) settings_show_timer: slint::Timer,
+    pub(super) main_close_generation: u64,
+    pub(super) settings_close_generation: u64,
+}
+
+thread_local! {
+    pub(super) static APP_WINDOW_REGISTRY: RefCell<Option<AppWindowRegistry>> = const { RefCell::new(None) };
+}

@@ -44,6 +44,7 @@ pub struct PopupSessionState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppState {
+    pub annotation_export: crate::domain::annotation_export::ExportState,
     pub ocr: crate::domain::ocr::OcrState,
     pub clipboard_history: crate::domain::clipboard_history::HistoryState,
     pub phase: TranslationPhase,
@@ -87,6 +88,7 @@ impl Default for AppState {
 impl AppState {
     pub fn new(settings: Settings) -> Self {
         Self {
+            annotation_export: Default::default(),
             ocr: Default::default(),
             clipboard_history: Default::default(),
             phase: TranslationPhase::Idle,
@@ -131,6 +133,9 @@ impl AppState {
     /// Applies a domain event and returns the capabilities the app must execute.
     pub fn reduce(&mut self, event: AppEvent) -> Vec<AppCommand> {
         match event {
+            AppEvent::AnnotationExport(event) => {
+                crate::domain::annotation_export::reduce(self, event)
+            }
             AppEvent::Ocr(event) => crate::domain::ocr::reduce(self, event),
             AppEvent::SelectionGestureCompleted { .. }
             | AppEvent::SelectionTranslationRequested
@@ -943,7 +948,19 @@ impl AppState {
                 commands.extend(self.start_next_settings_change());
                 commands
             }
-            AppEvent::ExitRequested => vec![AppCommand::Exit],
+            AppEvent::ExitRequested => {
+                let mut commands =
+                    self.annotation_export
+                        .session
+                        .map_or_else(Vec::new, |session| {
+                            crate::domain::annotation_export::reduce(
+                                self,
+                                crate::domain::annotation_export::ExportEvent::Closed { session },
+                            )
+                        });
+                commands.push(AppCommand::Exit);
+                commands
+            }
         }
     }
 

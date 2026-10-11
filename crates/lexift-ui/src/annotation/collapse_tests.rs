@@ -33,8 +33,8 @@ fn collapse_preserves_tool_and_document_retires_panel_and_startup_placement() {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
-        r.main.open(AnnotationToolbar::new().unwrap());
-        r.panel.open(AnnotationPanel::new().unwrap());
+        r.toolbar_state.main.open(AnnotationToolbar::new().unwrap());
+        r.toolbar_state.panel.open(AnnotationPanel::new().unwrap());
         r.mode = InteractionMode::Tool(0);
         r.sync_mode_display();
         r.edit_values(0).size = 13;
@@ -47,9 +47,14 @@ fn collapse_preserves_tool_and_document_retires_panel_and_startup_placement() {
             style: Style::default(),
             extra: Extra::None,
         });
-        r.panel.get().unwrap().set_values(r.values(0).clone());
+        r.toolbar_state
+            .panel
+            .get()
+            .unwrap()
+            .set_values(r.values(0).clone());
         let output = placement_calls.clone();
-        r.main
+        r.toolbar_state
+            .main
             .position_after(Duration::ZERO, move || output.set(output.get() + 1));
     });
     toggle_toolbar_collapse();
@@ -58,26 +63,42 @@ fn collapse_preserves_tool_and_document_retires_panel_and_startup_placement() {
     REGISTRY.with(|slot| {
         let slot = slot.borrow();
         let r = slot.as_ref().unwrap();
-        assert!(r.main.get().unwrap().get_collapsed());
-        assert_eq!(r.main.get().unwrap().window().size().width, 80);
-        assert!(r.panel.get().is_none());
+        assert!(r.toolbar_state.main.get().unwrap().get_collapsed());
+        assert_eq!(
+            r.toolbar_state.main.get().unwrap().window().size().width,
+            80
+        );
+        assert!(r.toolbar_state.panel.get().is_none());
         assert_eq!(r.mode, InteractionMode::Tool(0));
         assert_eq!(r.values(0).size, 13);
         assert_eq!(r.session.objects.len(), 1);
         assert!(r.session.can_undo());
     });
     open_panel(0, false);
-    REGISTRY.with(|slot| assert!(slot.borrow().as_ref().unwrap().panel.get().is_none()));
+    REGISTRY.with(|slot| {
+        assert!(
+            slot.borrow()
+                .as_ref()
+                .unwrap()
+                .toolbar_state
+                .panel
+                .get()
+                .is_none()
+        )
+    });
     toggle_toolbar_collapse();
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
-        assert!(!r.main.get().unwrap().get_collapsed());
-        assert_eq!(r.main.get().unwrap().window().size().width, 695);
-        assert!(r.panel.get().is_none());
+        assert!(!r.toolbar_state.main.get().unwrap().get_collapsed());
+        assert_eq!(
+            r.toolbar_state.main.get().unwrap().window().size().width,
+            695
+        );
+        assert!(r.toolbar_state.panel.get().is_none());
         r.close();
-        r.main.open(AnnotationToolbar::new().unwrap());
-        assert!(!r.main.get().unwrap().get_collapsed());
+        r.toolbar_state.main.open(AnnotationToolbar::new().unwrap());
+        assert!(!r.toolbar_state.main.get().unwrap().get_collapsed());
     });
     REGISTRY.with(|slot| slot.borrow_mut().take());
 }

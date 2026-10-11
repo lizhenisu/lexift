@@ -138,6 +138,7 @@ fn target_matches(r: &Registry, menu: &Menu) -> bool {
 /// Refresh only the active numeric menu; assignments do not recreate its window.
 pub(super) fn sync_numeric(r: &Registry) {
     if let Some(menu) = r
+        .toolbar_state
         .menus
         .current
         .as_ref()
@@ -173,25 +174,27 @@ impl Drop for Menu {
 /// Resolve the menu's actual owner, including its current editor instance.
 fn owner<'a>(r: &'a Registry, menu: &Menu) -> Option<&'a slint::Window> {
     if let Some(revision) = menu.watermark_revision {
-        r.watermark
+        r.toolbar_state
+            .watermark
             .get()
-            .filter(|_| r.watermark.revision() == revision)
+            .filter(|_| r.toolbar_state.watermark.revision() == revision)
             .map(ComponentHandle::window)
     } else {
-        r.panel.get().map(ComponentHandle::window)
+        r.toolbar_state.panel.get().map(ComponentHandle::window)
     }
 }
 
 /// Passive style and color controls may coexist with the existing text editor.
 pub(super) fn allows_text_focus(r: &Registry) -> bool {
-    r.menus.current.as_ref().is_some_and(|m| {
+    r.toolbar_state.menus.current.as_ref().is_some_and(|m| {
         (text_style_mode(m.request.field) != 0 || is_color(m.request.field))
             && !m.return_pending
             && target_matches(r, m)
     })
 }
 pub(super) fn input_busy(r: &Registry) -> bool {
-    r.menus
+    r.toolbar_state
+        .menus
         .current
         .as_ref()
         .is_some_and(|m| m.dragging || m.window.get_parameter_input_active())
@@ -205,10 +208,10 @@ pub(super) fn toggle_style(
 ) {
     let enabled = REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
-        let r = slot
-            .as_mut()
-            .filter(|r| r.generation == generation && r.panel.revision() == panel_revision)?;
-        let tool = r.panel.get()?.get_tool();
+        let r = slot.as_mut().filter(|r| {
+            r.generation == generation && r.toolbar_state.panel.revision() == panel_revision
+        })?;
+        let tool = r.toolbar_state.panel.get()?.get_tool();
         if !r.parameter_entry_active(tool) {
             return None;
         }
@@ -227,7 +230,7 @@ pub(super) fn toggle_style(
         };
         let target = r.parameter_target(tool);
         super::apply_geometry_values(r, target, values.clone());
-        if let Some(panel) = r.panel.get() {
+        if let Some(panel) = r.toolbar_state.panel.get() {
             panel.set_values(values);
         }
         r.queue_render();
@@ -252,7 +255,11 @@ fn return_style_focus(generation: u64, panel: u64, revision: u64, origin: super:
 }
 
 pub(super) fn color_dragging(r: &Registry) -> bool {
-    r.menus.current.as_ref().is_some_and(|menu| menu.dragging)
+    r.toolbar_state
+        .menus
+        .current
+        .as_ref()
+        .is_some_and(|menu| menu.dragging)
 }
 
 /// Closing a popup does not always end the user's interaction with its controls.
@@ -291,14 +298,14 @@ pub(super) fn close(r: &mut Registry, reason: CloseReason) {
 
 fn close_from(r: &mut Registry, reason: CloseReason, origin: super::focus::Origin) {
     let _pointer_pauses = r.pause_native_pointer_inputs();
-    if let Some(menu) = r.menus.take() {
+    if let Some(menu) = r.toolbar_state.menus.take() {
         // Retire any older restoration before deciding the destination of this close.
         r.focus.cancel();
         let target_valid = target_matches(r, &menu);
         let restore_focus = reason.restores_input() && target_valid;
         let watermark = menu.watermark_revision;
-        if menu.watermark_revision == Some(r.watermark.revision())
-            && let Some(editor) = r.watermark.get()
+        if menu.watermark_revision == Some(r.toolbar_state.watermark.revision())
+            && let Some(editor) = r.toolbar_state.watermark.get()
         {
             editor.set_presets_open(false);
         }
@@ -308,7 +315,7 @@ fn close_from(r: &mut Registry, reason: CloseReason, origin: super::focus::Origi
         }
         drop(menu);
         if watermark.is_none()
-            && let Some(panel) = r.panel.get()
+            && let Some(panel) = r.toolbar_state.panel.get()
         {
             if restore_focus {
                 panel.invoke_release_parameter_input();
@@ -324,10 +331,11 @@ fn close_from(r: &mut Registry, reason: CloseReason, origin: super::focus::Origi
             }
         }
     }
-    if let Some(panel) = r.panel.get() {
+    if let Some(panel) = r.toolbar_state.panel.get() {
         panel.set_active_choice(-1);
     }
-    if r.native_presenter
+    if r.render_state
+        .native_presenter
         .exclusions_changed(&super::capture_exclusions(r))
     {
         r.queue_render();
@@ -343,8 +351,14 @@ pub(super) fn dismiss_from(origin: super::focus::Origin) -> bool {
     let current = REGISTRY.with(|slot| {
         slot.borrow()
             .as_ref()
-            .filter(|r| r.menus.current.is_some())
-            .map(|r| (r.generation, r.panel.revision(), r.menus.revision))
+            .filter(|r| r.toolbar_state.menus.current.is_some())
+            .map(|r| {
+                (
+                    r.generation,
+                    r.toolbar_state.panel.revision(),
+                    r.toolbar_state.menus.revision,
+                )
+            })
     });
     if let Some((generation, panel_revision, revision)) = current {
         finish_from(generation, panel_revision, revision, None, origin);
@@ -380,12 +394,13 @@ pub(super) fn open_watermark(
         let mut slot = slot.borrow_mut();
         let Some(r) = slot.as_mut().filter(|r| {
             r.generation == generation
-                && r.watermark.revision() == watermark_revision
-                && r.watermark.get().is_some()
+                && r.toolbar_state.watermark.revision() == watermark_revision
+                && r.toolbar_state.watermark.get().is_some()
         }) else {
             return;
         };
         let same = r
+            .toolbar_state
             .menus
             .current
             .as_ref()
@@ -401,7 +416,7 @@ pub(super) fn open_watermark(
         if same {
             return;
         }
-        let editor = r.watermark.get().unwrap();
+        let editor = r.toolbar_state.watermark.get().unwrap();
         let request = AnnotationChoiceRequest {
             field: WATERMARK_PRESET,
             options: editor.get_preset_labels(),
@@ -416,7 +431,10 @@ pub(super) fn open_watermark(
         let Some(window) = build_selection_window(&request) else {
             return;
         };
-        let (panel_revision, revision) = (r.panel.revision(), r.menus.revision);
+        let (panel_revision, revision) = (
+            r.toolbar_state.panel.revision(),
+            r.toolbar_state.menus.revision,
+        );
         let input = InputWork::new();
         let select_input = input.clone();
         let lifecycle = r.lifecycle.clone();
@@ -429,7 +447,7 @@ pub(super) fn open_watermark(
             }),
         );
         editor.set_presets_open(true);
-        r.menus.current = Some(Menu {
+        r.toolbar_state.menus.current = Some(Menu {
             input: input.clone(),
             window,
             dismissal: r.lifecycle.set_popup_dismissal.clone(),
@@ -447,7 +465,8 @@ pub(super) fn open_watermark(
 }
 
 pub(super) fn close_watermark(r: &mut Registry) {
-    if r.menus
+    if r.toolbar_state
+        .menus
         .current
         .as_ref()
         .is_some_and(|menu| menu.watermark_revision.is_some())
@@ -460,13 +479,22 @@ pub(super) fn dismiss_watermark(generation: u64, watermark_revision: u64) {
     let current = REGISTRY.with(|slot| {
         slot.borrow()
             .as_ref()
-            .filter(|r| r.generation == generation && r.watermark.revision() == watermark_revision)
+            .filter(|r| {
+                r.generation == generation
+                    && r.toolbar_state.watermark.revision() == watermark_revision
+            })
             .and_then(|r| {
-                r.menus
+                r.toolbar_state
+                    .menus
                     .current
                     .as_ref()
                     .filter(|m| m.watermark_revision == Some(watermark_revision))
-                    .map(|_| (r.panel.revision(), r.menus.revision))
+                    .map(|_| {
+                        (
+                            r.toolbar_state.panel.revision(),
+                            r.toolbar_state.menus.revision,
+                        )
+                    })
             })
     });
     if let Some((panel_revision, revision)) = current {
@@ -667,13 +695,13 @@ fn open_menu(
 ) {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
-        let Some(r) = slot
-            .as_mut()
-            .filter(|r| r.generation == generation && r.panel.revision() == panel_revision)
-        else {
+        let Some(r) = slot.as_mut().filter(|r| {
+            r.generation == generation && r.toolbar_state.panel.revision() == panel_revision
+        }) else {
             return;
         };
         let same = r
+            .toolbar_state
             .menus
             .current
             .as_ref()
@@ -681,6 +709,7 @@ fn open_menu(
         // The triggering click can still have a queued dismissal from the old window.
         // Keep its bounds until the new popup has settled, without keeping the window alive.
         let transition_region = r
+            .toolbar_state
             .menus
             .current
             .as_ref()
@@ -711,12 +740,14 @@ fn open_menu(
         if same || (!is_color(request.field) && mode == 0 && request.options.row_count() == 0) {
             return;
         }
-        let Some(panel) = r.panel.get() else { return };
+        let Some(panel) = r.toolbar_state.panel.get() else {
+            return;
+        };
         let values = r.values(panel.get_tool() as usize).clone();
         let Some(window) = build_window(&request, panel.get_tool(), &values) else {
             return;
         };
-        let revision = r.menus.revision;
+        let revision = r.toolbar_state.menus.revision;
         let input = InputWork::new();
         let lifecycle = r.lifecycle.clone();
         bind_parameter_input(
@@ -741,7 +772,7 @@ fn open_menu(
                             .as_mut()
                             .filter(|r| valid(r, generation, panel_revision, revision))
                         {
-                            let menu = r.menus.current.as_ref().unwrap();
+                            let menu = r.toolbar_state.menus.current.as_ref().unwrap();
                             if let Some(parent) = owner(r, menu)
                                 && !menu.place(
                                     parent,
@@ -760,11 +791,16 @@ fn open_menu(
                         if let Some(r) = slot
                             .as_mut()
                             .filter(|r| valid(r, generation, panel_revision, revision))
-                            && let Some(target) = r.menus.current.as_ref().and_then(|m| m.target)
+                            && let Some(target) = r
+                                .toolbar_state
+                                .menus
+                                .current
+                                .as_ref()
+                                .and_then(|m| m.target)
                         {
                             r.scroll_numeric(target, parameter, step as f32);
                             let values = r.pending_parameter_values(target).clone();
-                            if let Some(menu) = &r.menus.current {
+                            if let Some(menu) = &r.toolbar_state.menus.current {
                                 menu.window.set_style_values(values);
                             }
                         }
@@ -784,7 +820,7 @@ fn open_menu(
         );
         panel.set_active_choice(request.field);
         let target = r.parameter_target(panel.get_tool());
-        r.menus.current = Some(Menu {
+        r.toolbar_state.menus.current = Some(Menu {
             input: input.clone(),
             window,
             dismissal: r.lifecycle.set_popup_dismissal.clone(),
@@ -816,13 +852,13 @@ fn open_style_color(
         let r = slot
             .as_ref()
             .filter(|r| valid(r, generation, panel_revision, revision))?;
-        let menu = r.menus.current.as_ref()?;
+        let menu = r.toolbar_state.menus.current.as_ref()?;
         let field = match menu.request.field {
             TEXT_OUTLINE => OUTLINE_COLOR,
             TEXT_BACKGROUND => BACKGROUND_COLOR,
             _ => return None,
         };
-        let panel = r.panel.get()?;
+        let panel = r.toolbar_state.panel.get()?;
         let scale = panel.window().scale_factor().max(0.1);
         let popup_scale = menu.window.window().scale_factor().max(0.1);
         let p = menu.window.window().position();
@@ -856,7 +892,13 @@ fn edit_text_style(generation: u64, panel_revision: u64, revision: u64, edit: pa
         else {
             return;
         };
-        if let Some(target) = r.menus.current.as_ref().and_then(|menu| menu.target) {
+        if let Some(target) = r
+            .toolbar_state
+            .menus
+            .current
+            .as_ref()
+            .and_then(|menu| menu.target)
+        {
             r.apply_menu_edit(target, edit);
             sync_numeric(r);
         }
@@ -893,7 +935,7 @@ fn edit_color(generation: u64, panel_revision: u64, revision: u64, edit: ColorEd
         else {
             return;
         };
-        let menu = r.menus.current.as_ref().unwrap();
+        let menu = r.toolbar_state.menus.current.as_ref().unwrap();
         if let Some(edit) = menu.edit_color(edit)
             && let Some(target) = menu.target
         {
@@ -917,7 +959,7 @@ fn set_dragging(generation: u64, panel_revision: u64, revision: u64, active: boo
         if active {
             r.finish_style_edit();
         }
-        r.menus.current.as_mut().unwrap().dragging = active;
+        r.toolbar_state.menus.current.as_mut().unwrap().dragging = active;
     });
     if !active {
         let input = REGISTRY.with(|slot| {
@@ -925,7 +967,7 @@ fn set_dragging(generation: u64, panel_revision: u64, revision: u64, active: boo
             let r = slot
                 .as_ref()
                 .filter(|r| valid(r, generation, panel_revision, revision))?;
-            Some(r.menus.current.as_ref()?.input.clone())
+            Some(r.toolbar_state.menus.current.as_ref()?.input.clone())
         });
         if let Some(input) = input {
             input.after_inputs(move || {
@@ -1038,8 +1080,12 @@ fn finish_from(
         else {
             return;
         };
-        let menu = r.menus.current.as_ref().unwrap();
-        let tool = r.panel.get().map_or(0, |panel| panel.get_tool());
+        let menu = r.toolbar_state.menus.current.as_ref().unwrap();
+        let tool = r
+            .toolbar_state
+            .panel
+            .get()
+            .map_or(0, |panel| panel.get_tool());
         let Some(completion) = completion_plan(
             &menu.request,
             menu.return_request.as_ref(),
@@ -1056,9 +1102,12 @@ fn finish_from(
                     r.apply_menu_edit(target, edit);
                 }
             }
-            SelectionEffect::TimePreset(index) => {
-                r.watermark.get().unwrap().invoke_choose_preset(index)
-            }
+            SelectionEffect::TimePreset(index) => r
+                .toolbar_state
+                .watermark
+                .get()
+                .unwrap()
+                .invoke_choose_preset(index),
         }
         match completion.close {
             CloseAction::Immediate => {
@@ -1067,14 +1116,20 @@ fn finish_from(
             }
             CloseAction::Deferred(destination) => {
                 // Native and Slint can observe the same Escape: keep one-level guard until the next frame.
-                r.menus.current.as_mut().unwrap().return_pending = true;
+                r.toolbar_state
+                    .menus
+                    .current
+                    .as_mut()
+                    .unwrap()
+                    .return_pending = true;
                 let token = ReturnToken {
                     generation,
                     panel: panel_revision,
                     menu: revision,
                     origin,
                 };
-                r.menus
+                r.toolbar_state
+                    .menus
                     .return_after_frame(move || finish_return(token, destination));
             }
         }
@@ -1087,13 +1142,15 @@ fn finish_return(token: ReturnToken, destination: ReturnDestination) {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().filter(|r| {
             r.generation == token.generation
-                && r.menus.revision == token.menu
-                && r.menus.current.as_ref().is_some_and(|menu| {
+                && r.toolbar_state.menus.revision == token.menu
+                && r.toolbar_state.menus.current.as_ref().is_some_and(|menu| {
                     menu.return_pending && target_matches(r, menu) && owner(r, menu).is_some()
                 })
                 && match &destination {
-                    ReturnDestination::Watermark(revision) => r.watermark.revision() == *revision,
-                    _ => r.panel.revision() == token.panel,
+                    ReturnDestination::Watermark(revision) => {
+                        r.toolbar_state.watermark.revision() == *revision
+                    }
+                    _ => r.toolbar_state.panel.revision() == token.panel,
                 }
         })?;
         match destination {
@@ -1116,9 +1173,10 @@ fn finish_return(token: ReturnToken, destination: ReturnDestination) {
 
 fn valid(r: &Registry, generation: u64, panel_revision: u64, revision: u64) -> bool {
     r.generation == generation
-        && r.panel.revision() == panel_revision
-        && r.menus.matches(revision)
-        && r.menus
+        && r.toolbar_state.panel.revision() == panel_revision
+        && r.toolbar_state.menus.matches(revision)
+        && r.toolbar_state
+            .menus
             .current
             .as_ref()
             .is_some_and(|menu| owner(r, menu).is_some() && target_matches(r, menu))
@@ -1133,7 +1191,7 @@ fn show(generation: u64, panel_revision: u64, revision: u64, attempt: u8) {
         else {
             return;
         };
-        let menu = r.menus.current.as_ref().unwrap();
+        let menu = r.toolbar_state.menus.current.as_ref().unwrap();
         let Some(parent) = owner(r, menu) else { return };
         let weak = menu.window.as_weak();
         let input_work = menu.input.clone();
@@ -1162,7 +1220,8 @@ fn show(generation: u64, panel_revision: u64, revision: u64, attempt: u8) {
         };
         match menu.show(&services, sink) {
             ShowResult::Shown => {
-                if r.native_presenter
+                if r.render_state
+                    .native_presenter
                     .exclusions_changed(&super::capture_exclusions(r))
                 {
                     r.queue_render();
@@ -1177,7 +1236,7 @@ fn show(generation: u64, panel_revision: u64, revision: u64, attempt: u8) {
                 }
             }
             ShowResult::Pending if attempt < 20 => {
-                r.menus.preparation.start(
+                r.toolbar_state.menus.preparation.start(
                     slint::TimerMode::SingleShot,
                     Duration::from_millis(16),
                     move || show(generation, panel_revision, revision, attempt + 1),
@@ -1190,7 +1249,7 @@ fn show(generation: u64, panel_revision: u64, revision: u64, attempt: u8) {
 
 // Moving the native menu to a different-DPI monitor updates its scale asynchronously.
 fn settle(r: &Registry, generation: u64, panel_revision: u64, revision: u64, remaining: u8) {
-    r.menus.placement.start(
+    r.toolbar_state.menus.placement.start(
         slint::TimerMode::SingleShot,
         Duration::from_millis(16),
         move || {
@@ -1200,7 +1259,7 @@ fn settle(r: &Registry, generation: u64, panel_revision: u64, revision: u64, rem
                     .as_mut()
                     .filter(|r| valid(r, generation, panel_revision, revision))
                 {
-                    if let Some(menu) = &r.menus.current
+                    if let Some(menu) = &r.toolbar_state.menus.current
                         && let Some(parent) = owner(r, menu)
                         && !menu.place(parent, &*r.lifecycle.popup_work_area, &toolbar_rects(r))
                     {
@@ -1208,7 +1267,12 @@ fn settle(r: &Registry, generation: u64, panel_revision: u64, revision: u64, rem
                         return;
                     }
                     if remaining == 1 {
-                        r.menus.current.as_mut().unwrap().transition_region = None;
+                        r.toolbar_state
+                            .menus
+                            .current
+                            .as_mut()
+                            .unwrap()
+                            .transition_region = None;
                     }
                     if remaining > 1 {
                         settle(r, generation, panel_revision, revision, remaining - 1);
@@ -1346,8 +1410,8 @@ impl Menu {
 
 fn toolbar_rects(r: &Registry) -> Vec<Rect> {
     [
-        r.main.get().map(ComponentHandle::window),
-        r.panel.get().map(ComponentHandle::window),
+        r.toolbar_state.main.get().map(ComponentHandle::window),
+        r.toolbar_state.panel.get().map(ComponentHandle::window),
     ]
     .into_iter()
     .flatten()
@@ -1391,7 +1455,8 @@ fn contains(window: &slint::Window, p: Point) -> bool {
 }
 
 pub(super) fn cursor_inside(r: &Registry) -> bool {
-    r.menus
+    r.toolbar_state
+        .menus
         .current
         .as_ref()
         .zip((r.lifecycle.toolbar_cursor_position)())
@@ -1400,7 +1465,8 @@ pub(super) fn cursor_inside(r: &Registry) -> bool {
                 || menu.transition_region.is_some_and(|area| {
                     p.x >= area.left && p.x < area.right && p.y >= area.top && p.y < area.bottom
                 })
-                || r.panel
+                || r.toolbar_state
+                    .panel
                     .get()
                     .is_some_and(|panel| contains(panel.window(), p))
                 || (menu.watermark_revision.is_some()
@@ -1409,7 +1475,7 @@ pub(super) fn cursor_inside(r: &Registry) -> bool {
 }
 
 pub(super) fn rearm_panel(r: &Registry) {
-    if let Some(panel) = r.panel.get() {
+    if let Some(panel) = r.toolbar_state.panel.get() {
         (r.lifecycle.set_popup_dismissal)(panel.window(), false);
         (r.lifecycle.set_popup_dismissal)(panel.window(), panel.get_menu());
     }
@@ -1426,6 +1492,7 @@ fn outside(generation: u64, panel_revision: u64, revision: u64, cause: PopupDism
         };
         // A click on the trigger must reach its toggle callback before dismissal.
         let in_panel = r
+            .toolbar_state
             .panel
             .get()
             .zip((r.lifecycle.toolbar_cursor_position)())
@@ -1441,14 +1508,14 @@ fn outside(generation: u64, panel_revision: u64, revision: u64, cause: PopupDism
                             .and_then(|query| query())
             });
         if in_editor && cause != PopupDismissCause::PointerOutside {
-            if let Some(menu) = &r.menus.current {
+            if let Some(menu) = &r.toolbar_state.menus.current {
                 (r.lifecycle.set_popup_dismissal)(menu.window.window(), false);
                 (r.lifecycle.set_popup_dismissal)(menu.window.window(), true);
             }
             return;
         }
         if cause == PopupDismissCause::PointerOutside && (in_panel || cursor_inside(r)) {
-            if let Some(menu) = &r.menus.current {
+            if let Some(menu) = &r.toolbar_state.menus.current {
                 (r.lifecycle.set_popup_dismissal)(menu.window.window(), false);
                 (r.lifecycle.set_popup_dismissal)(menu.window.window(), true);
             }
@@ -1459,7 +1526,7 @@ fn outside(generation: u64, panel_revision: u64, revision: u64, cause: PopupDism
 }
 
 pub(super) fn close_if_context_changed(r: &mut Registry) {
-    if r.menus.current.as_ref().is_some_and(|m| {
+    if r.toolbar_state.menus.current.as_ref().is_some_and(|m| {
         !target_matches(r, m) || owner(r, m).is_none_or(|p| m.panel_position != p.position())
     }) {
         close(r, CloseReason::OwnerRetired);
@@ -1474,6 +1541,7 @@ pub(super) fn watermark_pointer(input: PopupPointerInput) {
         let mut slot = slot.borrow_mut();
         let Some(r) = slot.as_mut() else { return };
         let Some(menu) = r
+            .toolbar_state
             .menus
             .current
             .as_ref()
@@ -1498,8 +1566,11 @@ pub(super) fn panel_pointer(input: PopupPointerInput) {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let Some(r) = slot.as_mut() else { return };
-        let Some(menu) = &r.menus.current else { return };
+        let Some(menu) = &r.toolbar_state.menus.current else {
+            return;
+        };
         let scale = r
+            .toolbar_state
             .panel
             .get()
             .map_or(1., |p| p.window().scale_factor().max(0.1));
@@ -1841,8 +1912,8 @@ mod tests {
             let window = AnnotationPanel::new().unwrap();
             window.set_tool(8);
             window.set_values(defaults(8));
-            r.panel.open(window);
-            (r.generation, r.panel.revision())
+            r.toolbar_state.panel.open(window);
+            (r.generation, r.toolbar_state.panel.revision())
         });
         super::super::open_text_editor_object(generation, (-100., -100.), None, 1.25);
         let request = AnnotationChoiceRequest {
@@ -1864,11 +1935,24 @@ mod tests {
                 let slot = slot.borrow();
                 let r = slot.as_ref().unwrap();
                 assert!(r.values(8).text_background);
-                assert!(r.panel.get().unwrap().get_values().text_background);
+                assert!(
+                    r.toolbar_state
+                        .panel
+                        .get()
+                        .unwrap()
+                        .get_values()
+                        .text_background
+                );
                 assert!(allows_text_focus(r));
                 (
-                    r.menus.current.as_ref().unwrap().window.clone_strong(),
-                    r.menus.revision,
+                    r.toolbar_state
+                        .menus
+                        .current
+                        .as_ref()
+                        .unwrap()
+                        .window
+                        .clone_strong(),
+                    r.toolbar_state.menus.revision,
                     r.editor.edit().unwrap().id,
                 )
             });
@@ -1883,6 +1967,7 @@ mod tests {
                 slot.borrow()
                     .as_ref()
                     .unwrap()
+                    .toolbar_state
                     .menus
                     .current
                     .as_ref()
@@ -1895,6 +1980,7 @@ mod tests {
                 slot.borrow()
                     .as_ref()
                     .unwrap()
+                    .toolbar_state
                     .menus
                     .current
                     .as_ref()
@@ -1915,7 +2001,7 @@ mod tests {
                 let slot = slot.borrow();
                 let r = slot.as_ref().unwrap();
                 assert!(!r.values(8).text_background);
-                assert!(r.menus.current.is_none());
+                assert!(r.toolbar_state.menus.current.is_none());
                 assert_eq!(r.editor.edit().unwrap().id, editor);
             });
         }
@@ -1956,7 +2042,7 @@ mod tests {
         REGISTRY.with(|slot| {
             let slot = slot.borrow();
             let r = slot.as_ref().unwrap();
-            assert!(r.menus.current.is_none());
+            assert!(r.toolbar_state.menus.current.is_none());
             let editor = r.editor.window().unwrap();
             assert_eq!(editor.get_value(), "甲乙丙");
             assert_eq!(editor.get_cursor_offset(), 6);
@@ -1977,17 +2063,17 @@ mod tests {
             let slot = slot.borrow();
             let r = slot.as_ref().unwrap();
             assert!(allows_text_focus(r));
-            let menu = r.menus.current.as_ref().unwrap();
+            let menu = r.toolbar_state.menus.current.as_ref().unwrap();
             (
                 menu.window.clone_strong(),
-                r.menus.revision,
+                r.toolbar_state.menus.revision,
                 super::super::focus::Request {
                     session: generation,
                     target: super::super::focus::Target::Text {
                         editor: r.editor.edit().unwrap().id,
                         panel,
                     },
-                    menu: r.menus.revision,
+                    menu: r.toolbar_state.menus.revision,
                     activation: super::super::focus::Activation::Local,
                 },
             )
@@ -2715,8 +2801,8 @@ mod tests {
                 count.set(count.get() + 1);
                 weak.upgrade().unwrap().set_parameter_input_active(false);
             });
-            r.panel.open(panel.clone_strong());
-            (r.generation, r.panel.revision(), panel)
+            r.toolbar_state.panel.open(panel.clone_strong());
+            (r.generation, r.toolbar_state.panel.revision(), panel)
         });
         let request = AnnotationChoiceRequest {
             field: 1,
@@ -2726,7 +2812,14 @@ mod tests {
         open(generation, panel_revision, request.clone());
         let (old, work) = REGISTRY.with(|slot| {
             let slot = slot.borrow();
-            let menu = slot.as_ref().unwrap().menus.current.as_ref().unwrap();
+            let menu = slot
+                .as_ref()
+                .unwrap()
+                .toolbar_state
+                .menus
+                .current
+                .as_ref()
+                .unwrap();
             (menu.window.clone_strong(), menu.input.clone())
         });
         panel.set_parameter_input_active(true);
@@ -2742,14 +2835,23 @@ mod tests {
         assert!(panel.get_parameter_input_active());
         assert_eq!(released.get(), 0);
         panel_pointer(PopupPointerInput::LeftPressed { x: 100., y: 100. });
-        assert!(REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().menus.current.is_none()));
+        assert!(REGISTRY.with(|slot| {
+            slot.borrow()
+                .as_ref()
+                .unwrap()
+                .toolbar_state
+                .menus
+                .current
+                .is_none()
+        }));
         assert!(
             panel.get_parameter_input_active(),
             "the pressed control retains its input"
         );
         assert_eq!(released.get(), 0);
         open(generation, panel_revision, request.clone());
-        let revision = REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().menus.revision);
+        let revision =
+            REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().toolbar_state.menus.revision);
         finish(generation, panel_revision, revision, None);
         assert!(!panel.get_parameter_input_active());
         assert_eq!(released.get(), 1);
@@ -2769,7 +2871,9 @@ mod tests {
         REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_ref().unwrap();
-            assert!(r.panel.get().is_none() && r.menus.current.is_none());
+            assert!(
+                r.toolbar_state.panel.get().is_none() && r.toolbar_state.menus.current.is_none()
+            );
             slot.take();
         });
         assert_eq!(released.get(), 1);
@@ -2803,8 +2907,8 @@ mod tests {
         let (generation, panel_revision) = REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
-            r.panel.open(AnnotationPanel::new().unwrap());
-            (r.generation, r.panel.revision())
+            r.toolbar_state.panel.open(AnnotationPanel::new().unwrap());
+            (r.generation, r.toolbar_state.panel.revision())
         });
         let request = AnnotationChoiceRequest {
             field: 1,
@@ -2815,9 +2919,16 @@ mod tests {
         let (old_revision, retained) = REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
-            let old = r.menus.current.as_ref().unwrap().window.clone_strong();
-            let revision = r.menus.revision;
-            r.menus = State::default();
+            let old = r
+                .toolbar_state
+                .menus
+                .current
+                .as_ref()
+                .unwrap()
+                .window
+                .clone_strong();
+            let revision = r.toolbar_state.menus.revision;
+            r.toolbar_state.menus = State::default();
             (revision, old)
         });
         open(generation, panel_revision, request);
@@ -2832,11 +2943,20 @@ mod tests {
         REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
-            assert_ne!(r.menus.revision, old_revision);
-            assert!(r.menus.current.is_some());
-            assert_eq!(r.menus.current.as_ref().unwrap().window.get_selected(), 0);
+            assert_ne!(r.toolbar_state.menus.revision, old_revision);
+            assert!(r.toolbar_state.menus.current.is_some());
+            assert_eq!(
+                r.toolbar_state
+                    .menus
+                    .current
+                    .as_ref()
+                    .unwrap()
+                    .window
+                    .get_selected(),
+                0
+            );
             assert_eq!(r.generation, generation);
-            assert_eq!(r.panel.revision(), panel_revision);
+            assert_eq!(r.toolbar_state.panel.revision(), panel_revision);
             close(r, CloseReason::InteractionFinished);
             slot.take();
         });
@@ -2904,8 +3024,8 @@ mod tests {
             assert!(r.set_mode(super::super::InteractionMode::Tool(3)));
             panel.set_tool(8);
             panel.set_values(defaults(8));
-            r.panel.open(panel);
-            (r.generation, r.panel.revision())
+            r.toolbar_state.panel.open(panel);
+            (r.generation, r.toolbar_state.panel.revision())
         });
         let request = AnnotationChoiceRequest {
             field: -2,
@@ -2914,7 +3034,14 @@ mod tests {
         open(generation, panel_revision, request.clone());
         let (retained, input) = REGISTRY.with(|slot| {
             let slot = slot.borrow();
-            let menu = slot.as_ref().unwrap().menus.current.as_ref().unwrap();
+            let menu = slot
+                .as_ref()
+                .unwrap()
+                .toolbar_state
+                .menus
+                .current
+                .as_ref()
+                .unwrap();
             (menu.window.clone_strong(), menu.input.clone())
         });
         // Actual Slint callbacks must not borrow Registry while an input dispatch owns it.
@@ -2957,13 +3084,13 @@ mod tests {
             let r = slot.as_mut().unwrap();
             assert_eq!(r.values(8).custom_color.as_str(), "#654321");
             assert!(
-                r.menus.current.is_some(),
+                r.toolbar_state.menus.current.is_some(),
                 "old cancel cannot close the replacement popup"
             );
             close(r, CloseReason::InteractionFinished);
             assert!(r.set_mode(super::super::InteractionMode::Tool(0)));
-            r.panel.get().unwrap().set_tool(0);
-            r.panel.get().unwrap().set_values(defaults(0));
+            r.toolbar_state.panel.get().unwrap().set_tool(0);
+            r.toolbar_state.panel.get().unwrap().set_values(defaults(0));
             use lexift_core::domain::annotation::{Bounds, Extra, Kind, Object, Style};
             assert!(r.session.add(Object {
                 erased: Vec::new(),
@@ -2989,6 +3116,7 @@ mod tests {
             slot.borrow()
                 .as_ref()
                 .unwrap()
+                .toolbar_state
                 .menus
                 .current
                 .as_ref()
@@ -3314,8 +3442,8 @@ mod tests {
             values.text_background = true;
             r.replace_values(8, values.clone());
             panel.set_values(values);
-            r.panel.open(panel);
-            (r.generation, r.panel.revision())
+            r.toolbar_state.panel.open(panel);
+            (r.generation, r.toolbar_state.panel.revision())
         });
         open(
             generation,
@@ -3325,9 +3453,11 @@ mod tests {
                 ..Default::default()
             },
         );
-        let revision = REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().menus.revision);
+        let revision =
+            REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().toolbar_state.menus.revision);
         open_style_color(generation, panel_revision, revision, 250., 122., 27., 27.);
-        let child_revision = REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().menus.revision);
+        let child_revision =
+            REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().toolbar_state.menus.revision);
         finish(generation, panel_revision, child_revision, None);
         assert!(dismiss()); // Duplicate native Escape must not close the pending parent.
         std::thread::sleep(Duration::from_millis(20));
@@ -3336,15 +3466,30 @@ mod tests {
             let slot = slot.borrow();
             let r = slot.as_ref().unwrap();
             assert_eq!(
-                r.menus.current.as_ref().unwrap().request.field,
+                r.toolbar_state
+                    .menus
+                    .current
+                    .as_ref()
+                    .unwrap()
+                    .request
+                    .field,
                 TEXT_BACKGROUND
             );
-            assert!(r.panel.get().is_some());
-            assert!(r.panel.get().unwrap().get_values().text_background);
+            assert!(r.toolbar_state.panel.get().is_some());
+            assert!(
+                r.toolbar_state
+                    .panel
+                    .get()
+                    .unwrap()
+                    .get_values()
+                    .text_background
+            );
         });
-        let revision = REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().menus.revision);
+        let revision =
+            REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().toolbar_state.menus.revision);
         open_style_color(generation, panel_revision, revision, 250., 122., 27., 27.);
-        let child_revision = REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().menus.revision);
+        let child_revision =
+            REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().toolbar_state.menus.revision);
         finish(generation, panel_revision, child_revision, None);
         REGISTRY.with(|slot| {
             close(
@@ -3357,7 +3502,7 @@ mod tests {
         REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             assert!(
-                slot.as_ref().unwrap().menus.current.is_none(),
+                slot.as_ref().unwrap().toolbar_state.menus.current.is_none(),
                 "closed chain was resurrected"
             );
             slot.take();

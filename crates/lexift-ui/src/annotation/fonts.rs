@@ -277,7 +277,7 @@ mod tests {
             crate::annotation_sequence::layout(&mut object);
             assert!(r.set_mode(super::super::InteractionMode::Tool(4)));
             assert!(r.session.add(object));
-            r.pending_displays = vec![Rect {
+            r.canvas_state.pending_displays = vec![Rect {
                 left: -400,
                 top: -300,
                 right: 600,

@@ -20,20 +20,20 @@ use std::{
     sync::Arc,
 };
 use tiny_skia::{Pixmap, PixmapPaint, Transform};
-#[path = "annotation_scene_content.rs"]
+#[path = "scene_content.rs"]
 mod content;
 pub(crate) use content::same as same_content;
-#[path = "annotation_scene_interaction.rs"]
+#[path = "scene_interaction.rs"]
 mod interaction;
-#[path = "annotation_scene_mosaic.rs"]
+#[path = "scene_mosaic.rs"]
 mod mosaic_geometry;
 #[cfg(test)]
-#[path = "annotation_scene_preparation_tests.rs"]
+#[path = "scene_preparation_tests.rs"]
 mod preparation_tests;
-#[path = "annotation_scene_reuse.rs"]
+#[path = "scene_reuse.rs"]
 mod reuse;
 #[cfg(test)]
-#[path = "annotation_scene_reuse_tests.rs"]
+#[path = "scene_reuse_tests.rs"]
 mod reuse_tests;
 pub(crate) use interaction::EditorOverlay;
 

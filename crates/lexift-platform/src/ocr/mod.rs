@@ -1,5 +1,6 @@
 //! Verified local PaddleOCR resources and CPU inference; no UI or translation policy.
 mod inference;
+mod model_policy;
 mod recognition;
 mod resources;
 use lexift_core::{

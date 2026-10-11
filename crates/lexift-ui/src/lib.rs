@@ -1,16 +1,9 @@
+pub use annotation_export_render::SoftwareExportRenderer;
 mod about;
 mod ocr;
 mod screen_interaction;
 pub use about::AboutLink;
 mod annotation;
-mod annotation_fingerprint;
-mod annotation_path;
-mod annotation_render;
-mod annotation_scene;
-mod annotation_sequence;
-mod annotation_signature;
-mod annotation_sticker;
-mod annotation_text;
 mod binding;
 mod bridge;
 mod i18n;
@@ -37,3 +30,14 @@ mod settings_hint_tests;
 
 #[cfg(test)]
 mod ocr_tests;
+
+// Crate-private render aliases keep view adapters independent of the session coordinator.
+pub(crate) use annotation::export_render as annotation_export_render;
+pub(crate) use annotation::fingerprint as annotation_fingerprint;
+pub(crate) use annotation::path as annotation_path;
+pub(crate) use annotation::render as annotation_render;
+pub(crate) use annotation::scene as annotation_scene;
+pub(crate) use annotation::sequence as annotation_sequence;
+pub(crate) use annotation::signature as annotation_signature;
+pub(crate) use annotation::sticker as annotation_sticker;
+pub(crate) use annotation::text as annotation_text;

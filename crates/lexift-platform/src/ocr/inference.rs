@@ -171,7 +171,7 @@ impl Engine {
                 })
                 .collect();
             let refs: Vec<_> = crops.iter().collect();
-            let key = strategy.manual_model().unwrap_or("universal");
+            let key = super::model_policy::recognizer(strategy);
             let primary = self.read_batch(&refs, key, cancel)?;
             let korean = if matches!(
                 strategy,

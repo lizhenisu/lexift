@@ -20,132 +20,54 @@ Lexift 使用 **Virtual Cargo Workspace + Dependency Inversion**。
 
 ## 2. 实际目录结构
 
+以下列出当前职责入口；不是包含所有源文件的展开清单。
+
 ```text
 lexift/
-├── Cargo.toml
-├── Cargo.lock
-├── rust-toolchain.toml
-├── rustfmt.toml
-├── clippy.toml
-├── .gitignore
-├── README.md
-├── AGENTS.md
-│
+├── Cargo.toml / Cargo.lock / AGENTS.md
 ├── devdoc/
-│   ├── architecture.md
-│   ├── capabilities-roadmap.md
-│   ├── workspace.md
-│   └── decisions/
-│
-├── assets/
-│   ├── branding/
-│   └── app-icons/
-│
+│   ├── architecture/      # 架构及依赖约束
+│   ├── features/          # 当前功能说明
+│   ├── annotation/        # 标注功能及重构记录
+│   ├── platform/          # 原生能力和诊断
+│   ├── planning/          # 阶段计划
+│   └── releases/          # 验证与发布记录
+├── assets/ / packaging/ / scripts/
 └── crates/
-    ├── lexift-app/
-    │   ├── Cargo.toml
-    │   └── src/
-    │       ├── main.rs
-    │       ├── bootstrap.rs
-    │       ├── wiring.rs
-    │       ├── controller.rs
-    │       ├── runtime/
-    │       │   ├── mod.rs
-    │       │   ├── hotkey_manager.rs
-    │       │   └── translator_runtime.rs
-    │       └── lifecycle.rs
-    │
-    ├── lexift-core/
-    │   ├── Cargo.toml
-    │   └── src/
-    │       ├── lib.rs
-    │       ├── domain/
-    │       │   ├── mod.rs
-    │       │   ├── selection.rs
-    │       │   ├── translation.rs
-    │       │   ├── language.rs
-    │       │   ├── settings.rs
-    │       │   ├── runtime_config.rs
-    │       │   └── geometry.rs
-    │       ├── ports/
-    │       │   ├── mod.rs
-    │       │   ├── selection.rs
-    │       │   ├── clipboard.rs
-    │       │   ├── hotkey.rs
-    │       │   ├── translator.rs
-    │       │   ├── settings.rs
-    │       │   └── credential.rs
-    │       ├── usecases/
-    │       │   ├── mod.rs
-    │       │   ├── translate_selection.rs
-    │       │   ├── translate_input.rs
-    │       │   └── clipboard_translation.rs
-    │       ├── event.rs
-    │       ├── command.rs
-    │       ├── state.rs
-    │       └── error.rs
-    │
+    ├── lexift-app/src/
+    │   ├── bootstrap.rs / wiring.rs / controller.rs
+    │   ├── annotation_export.rs    # 导出采集、合成、保存后台任务
+    │   ├── ocr.rs / clipboard_history.rs
+    │   └── runtime/                # 快捷键与翻译能力生命周期
+    ├── lexift-core/src/
+    │   ├── domain/                 # 标注、导出、OCR、历史及翻译状态
+    │   ├── ports/                  # 能力契约，包括纯导出合成
+    │   └── event.rs / command.rs / state.rs
     ├── lexift-ui/
-    │   ├── Cargo.toml
-    │   ├── build.rs
-    │   ├── src/
-    │   │   ├── lib.rs
-    │   │   ├── bridge.rs
-    │   │   ├── binding.rs
-    │   │   └── mapper.rs
-    │   └── ui/
-    │       ├── main.slint
-    │       ├── popup.slint
-    │       ├── settings.slint
-    │       ├── components/
-    │       ├── design/
-    │       └── assets/
-    │
-    ├── lexift-platform/
-    │   ├── Cargo.toml
-    │   └── src/
-    │       ├── lib.rs
-    │       ├── capabilities.rs
-    │       ├── windows/
-    │       ├── macos/
-    │       └── linux/
-    │           ├── mod.rs
-    │           ├── x11/
-    │           └── wayland/
-    │
-    ├── lexift-translate/
-    │   ├── Cargo.toml
-    │   └── src/
-    │       ├── lib.rs
-    │       ├── registry.rs
-    │       ├── http.rs
-    │       └── providers/
-    │           ├── mod.rs
-    │           ├── google.rs
-    │           ├── deepl.rs
-    │           ├── openai.rs
-    │           ├── gemini.rs
-    │           └── ollama.rs
-    │
-    ├── lexift-config/
-    │   ├── Cargo.toml
-    │   └── src/
-    │       ├── lib.rs
-    │       ├── schema.rs
-    │       ├── store.rs
-    │       ├── migration.rs
-    │       └── paths.rs
-    │
-    └── lexift-observability/
-        ├── Cargo.toml
-        └── src/
-            ├── lib.rs
-            ├── tracing.rs
-            ├── panic.rs
-            └── performance.rs
+    │   ├── src/annotation/         # 会话、画布、输入、参数、编辑与渲染
+    │   ├── src/bridge/             # 按窗口拆分的 UI 接线及生命周期
+    │   ├── src/ocr/                # selection 框选与 provider 设置桥接
+    │   ├── src/screen_interaction/ # 共用屏幕交互宿主
+    │   ├── ui/ / translations/
+    │   └── build.rs
+    ├── lexift-platform/src/
+    │   ├── windows/ / macos/ / linux/
+    │   └── ocr/                    # 本地资源、模型路由、CPU 推理和候选评分
+    ├── lexift-translate/src/
+    │   ├── registry.rs
+    │   └── providers/              # DeepL、Ollama 及 LLM 协议适配等
+    ├── lexift-config/src/          # Schema、存储及迁移
+    └── lexift-observability/src/   # 日志、panic 与诊断初始化
 ```
 
-根目录同时包含 `packager.toml`、`packaging/windows/installer.nsi` 与 `scripts/package-release.ps1`，负责生成 Windows 当前用户 NSIS 安装器、portable ZIP 和 SHA256 校验文件；这些发布文件不改变 7 个核心 crate 的依赖方向。
+根目录 `packager.toml`、`packaging/windows/installer.nsi` 与 `scripts/package-release.ps1` 负责 Windows 安装器、portable ZIP 和校验文件。模型包、Python 环境、截图和临时验证产物放在忽略的 `target/`；发布产物放在 `dist/`，不作为源码提交。
+
+### 2.1 标注和窗口模块边界
+
+- 标注入口负责初始化、状态同步和生命周期入口，Registry 组合画布、工具条、渲染、编辑和参数状态。输入、文字／焦点、面板、参数和呈现工作流各自维护，测试按职责分组。
+- Bridge 保留稳定的 `Ui`／`UiHandle` 接口和公共窗口契约；Popup、语言菜单、主窗口、Settings、历史和划词工具条负责各自接线与清理。主窗口和 Settings 共用的隐藏准备由 `app_window` 协调。
+- 导出由 UI 冻结可见文档，Core 接受带会话／请求编号的事件并产生命令，App 使用独立采集实例执行后台合成及保存，完成结果再经过 Core。UI 的纯软件合成器实现 Core `AnnotationExportRenderPort`，不访问 Slint 组件或原生能力。
+- OCR `selection` 只管理屏幕宿主；`provider` 只负责设置和资源状态展示。Core 策略描述自动／含韩文／指定语言，具体模型名称、版本及兼容性归 Platform。当前仍保持 7 个 crate，不单独抽出 OCR crate。
 
 ## 3. 根 Workspace
 
@@ -172,7 +94,7 @@ default-members = [
 
 [workspace.package]
 edition = "2024"
-version = "0.1.0"
+version = "0.0.1-rc.9"
 ```
 
 内部 crate 和常用第三方依赖统一通过 `[workspace.dependencies]` 管理，成员 crate 使用 `.workspace = true` 继承，减少版本漂移和重复声明。
@@ -221,7 +143,7 @@ version = "0.1.0"
 
 - 不知道 Slint。
 - 不知道 Windows/macOS/Linux。
-- 不知道 Google/DeepL/OpenAI 等 Provider。
+- 不依赖具体 Provider 实现、协议客户端或推理 SDK；可定义稳定 Provider 身份及业务能力。
 - 不知道 TOML 或具体配置文件格式。
 - 不依赖任何其他 Lexift crate。
 
@@ -274,7 +196,7 @@ ui/
 - 开机启动。
 - 权限检查与引导。
 - 系统级安全凭证存储。
-- 后续系统 OCR 等平台能力。
+- 当前本地 PaddleOCR 资源下载、完整校验、删除、模型路由与 CPU 推理；与原生屏幕采集通过 Core 契约分隔。
 
 平台拆分：
 
@@ -305,18 +227,9 @@ Linux
 - Provider 响应解析。
 - 错误映射。
 - Provider Registry。
-- 多 Provider 并行调用能力。
-- 后续流式输出能力。
+- 以请求快照配置执行翻译，支持当前 LLM 的正文增量与完整结果。
 
-初期 Provider 可包含：
-
-```text
-Google
-DeepL
-OpenAI
-Gemini
-Ollama
-```
+当前设置中的翻译 Provider 为 DeepL、Ollama、LM Studio、DeepSeek。目录中的 Google、OpenAI、Gemini 实现或协议代码不等于设置中已开放的服务。OCR Provider 独立于翻译模型选择器。
 
 约束：
 

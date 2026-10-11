@@ -74,6 +74,8 @@
 
 ## 发布
 
+- [标注、窗口 Bridge 与 OCR 职责整理验证](releases/responsibility-refactor-validation.md)
+
 - [OCR 基础包、韩文扩展与性能验证](releases/ocr-extension-validation.md)
 - [OCR 自动检测验证](releases/ocr-auto-validation.md)
 - [OCR Provider 与资源管理验证](releases/ocr-provider-validation.md)

@@ -1,37 +1,15 @@
-//! One frozen document and one independent capture per download. Workers own
-//! their buffers; UI polling and cancellation belong to the annotation session.
+//! Freezes visible annotation state and presents Core-owned export results.
 use super::{REGISTRY, Registry};
-use crate::annotation_render::{self, mosaic_worker};
-use lexift_core::{
-    Error, Result,
-    domain::{
-        annotation::{Extra, Session},
-        geometry::Rect,
-    },
-    ports::{
-        annotation_save::{AnnotationSavePort, PngSaveRequest, SaveOutcome},
-        magnifier::WindowToken,
-        screen_capture::{
-            CapturedRegion, ScreenCaptureFrame, ScreenCapturePort, ScreenCaptureRequest,
-        },
-    },
+use lexift_core::domain::{
+    annotation::{Extra, Session},
+    annotation_export::{ExportEvent, ExportRequest, ExportSnapshot as Snapshot},
+    geometry::Rect,
 };
 use slint::ComponentHandle;
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver},
-    },
-    time::{Duration, Instant},
-};
-
-type CaptureFactory = fn() -> Option<Arc<dyn ScreenCapturePort>>;
+use std::sync::Arc;
 #[derive(Default)]
 pub(super) struct State {
-    cancelled: Option<Arc<AtomicBool>>,
-    result: Option<Receiver<Result<SaveOutcome>>>,
-    timer: slint::Timer,
+    pending: bool,
     editor: Option<u64>,
     request: u64,
     origin: Option<super::focus::Origin>,
@@ -39,44 +17,14 @@ pub(super) struct State {
 }
 impl State {
     pub fn cancel(&mut self) {
-        if let Some(cancelled) = self.cancelled.take() {
-            cancelled.store(true, Ordering::Release);
-        }
-        self.timer.stop();
-        self.result = None;
+        self.pending = false;
         self.editor = None;
         self.monitor = None;
     }
 }
-impl Drop for State {
-    fn drop(&mut self) {
-        self.cancel();
-    }
-}
-
 pub(super) fn available(r: &Registry) -> bool {
-    r.lifecycle.annotation_export_capture.is_some()
-        && r.lifecycle
-            .annotation_save
-            .as_ref()
-            .is_some_and(|p| p.is_available())
-        && r.lifecycle
-            .annotation_screen_capture
-            .as_ref()
-            .is_some_and(|p| p.is_available())
+    r.lifecycle.annotation_export_supported
 }
-
-struct Snapshot {
-    session: Arc<Session>,
-    monitor: Rect,
-    scale: f32,
-    monitors: Vec<(Rect, f32)>,
-    excluded: Vec<WindowToken>,
-    owner: Option<WindowToken>,
-    name: String,
-    title: String,
-}
-
 /// The toolbar center selects a complete display, never its work area.
 fn display_at(center: (i64, i64), displays: &[(Rect, f32)]) -> Option<(Rect, f32)> {
     displays.iter().copied().find(|(r, _)| {
@@ -88,10 +36,11 @@ fn display_at(center: (i64, i64), displays: &[(Rect, f32)]) -> Option<(Rect, f32
 }
 
 fn snapshot(r: &Registry) -> Option<Snapshot> {
-    let main = r.main.get()?;
+    let main = r.toolbar_state.main.get()?;
     let position = main.window().position();
     let size = main.window().size();
     let monitors: Vec<_> = r
+        .canvas_state
         .canvases
         .iter()
         .map(|c| (c.bounds, c.window.window().scale_factor()))
@@ -183,76 +132,47 @@ fn identify_draft_effects(session: &mut Session) -> Option<()> {
 }
 
 pub(super) fn start() {
-    REGISTRY.with(|slot| {
+    let request = REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
-        let Some(r) = slot
+        let r = slot
             .as_mut()
-            .filter(|r| r.annotation_ready && r.export.cancelled.is_none() && available(r))
-        else {
-            return;
-        };
-        let Some(snapshot) = snapshot(r) else { return };
-        let monitor = snapshot.monitor;
-        let factory = r.lifecycle.annotation_export_capture.unwrap();
-        let save = r.lifecycle.annotation_save.as_ref().unwrap().clone();
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = mpsc::channel();
-        let cancel = cancelled.clone();
-        let spawned = std::thread::Builder::new()
-            .name("annotation-export".into())
-            .spawn(move || {
-                let result = export(snapshot, factory, save.as_ref(), cancel);
-                let _ = tx.send(result);
-            });
-        if let Err(error) = spawned {
-            tracing::warn!(%error, "Could not start annotation export");
-            super::mosaic::notify_on(r, "Could not save screenshot. Try again.", Some(monitor));
-            r.queue_render();
-            return;
-        }
+            .filter(|r| r.canvas_state.annotation_ready && !r.export.pending && available(r))?;
+        let snapshot = snapshot(r)?;
         r.export.request = super::window::next_revision();
         r.focus.cancel();
         r.export.origin = Some(super::focus_origin(&r.lifecycle));
         r.export.editor = r.editor.edit().map(|edit| edit.id);
-        r.export.monitor = Some(monitor);
-        r.export.cancelled = Some(cancelled);
-        r.export.result = Some(rx);
-        let generation = r.generation;
-        let request = r.export.request;
-        r.main.get().unwrap().set_can_download(false);
-        r.export.timer.start(
-            slint::TimerMode::Repeated,
-            Duration::from_millis(25),
-            move || poll(generation, request),
-        );
+        r.export.monitor = Some(snapshot.monitor);
+        r.export.pending = true;
+        r.toolbar_state.main.get().unwrap().set_can_download(false);
+        Some(ExportRequest {
+            session: r.generation,
+            request: r.export.request,
+            snapshot: Arc::new(snapshot),
+        })
     });
+    if let Some(request) = request {
+        super::emit_export(ExportEvent::Requested(request));
+    }
 }
-
-fn poll(generation: u64, request: u64) {
+pub(crate) fn sync(state: &lexift_core::domain::annotation_export::ExportState) {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let Some(r) = slot.as_mut().filter(|r| {
-            r.generation == generation
-                && r.export.request == request
-                && r.export.cancelled.is_some()
+            state.session == Some(r.generation)
+                && state.completed == Some(r.export.request)
+                && r.export.pending
         }) else {
             return;
-        };
-        let result = match r.export.result.as_ref().unwrap().try_recv() {
-            Ok(result) => result,
-            Err(mpsc::TryRecvError::Empty) => return,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                Err(Error::new("Annotation export worker stopped"))
-            }
         };
         let editor = r.export.editor;
         let monitor = r.export.monitor;
         let origin = r.export.origin.unwrap_or(super::focus::Origin::Unobserved);
         r.export.cancel();
-        if let Some(main) = r.main.get() {
+        if let Some(main) = r.toolbar_state.main.get() {
             main.set_can_download(available(r));
         }
-        if let Err(error) = result {
+        if let Some(Err(error)) = &state.result {
             tracing::warn!(%error, "Annotation export failed");
             super::mosaic::notify_on(r, "Could not save screenshot. Try again.", monitor);
             r.queue_render();
@@ -263,203 +183,19 @@ fn poll(generation: u64, request: u64) {
     });
 }
 
-fn regions(snapshot: &Snapshot) -> Vec<Rect> {
-    let mut regions = vec![snapshot.monitor];
-    let monitors: Vec<_> = snapshot.monitors.iter().map(|(r, _)| *r).collect();
-    for object in &snapshot.session.objects {
-        for (_, roi) in annotation_render::mosaic::work_regions(object, &monitors) {
-            regions.push(roi);
-        }
-    }
-    let sources: Vec<_> = regions
-        .iter()
-        .flat_map(|&roi| annotation_render::mosaic_lens::sources(&snapshot.session.objects, roi))
-        .collect();
-    regions.extend(sources);
-    regions.sort_unstable_by_key(|r| (r.left, r.top, r.right, r.bottom));
-    regions.dedup();
-    // A containing sample already supplies a smaller ROI's pixels.
-    let all = regions.clone();
-    regions.retain(|r| !all.iter().any(|outer| outer != r && contains(*outer, *r)));
-    regions
-}
-fn contains(a: Rect, b: Rect) -> bool {
-    a.left <= b.left && a.top <= b.top && a.right >= b.right && a.bottom >= b.bottom
-}
-
-/// The new instance cannot publish a prior request's cache. Unchanged pixels
-/// still produce its first frame; no serial-increment test is needed.
-fn capture(
-    factory: CaptureFactory,
-    regions: Vec<Rect>,
-    excluded_windows: Vec<WindowToken>,
-    cancelled: &AtomicBool,
-) -> Result<Option<Arc<ScreenCaptureFrame>>> {
-    capture_with_timeout(
-        factory,
-        regions,
-        excluded_windows,
-        cancelled,
-        Duration::from_secs(5),
-    )
-}
-
-fn capture_with_timeout(
-    factory: CaptureFactory,
-    regions: Vec<Rect>,
-    excluded_windows: Vec<WindowToken>,
-    cancelled: &AtomicBool,
-    timeout: Duration,
-) -> Result<Option<Arc<ScreenCaptureFrame>>> {
-    let deadline = Instant::now() + timeout;
-    let port = factory().ok_or_else(|| Error::new("Screen capture unavailable"))?;
-    if !port.is_available() {
-        return Err(Error::new("Screen capture unavailable"));
-    }
-    let request = ScreenCaptureRequest {
-        revision: 1,
-        regions,
-        paused_regions: Vec::new(),
-        excluded_windows,
-    };
-    port.request(request.clone())?;
-    let mut last_error = None;
-    let result = loop {
-        if cancelled.load(Ordering::Acquire) {
-            break Ok(None);
-        }
-        match port.latest() {
-            Ok(Some(frame))
-                if frame.revision == request.revision
-                    && request.regions.iter().all(|r| {
-                        frame
-                            .regions
-                            .iter()
-                            .any(|source| contains(source.bounds, *r))
-                    }) =>
-            {
-                break Ok(Some(frame));
-            }
-            Err(error) => last_error = Some(error),
-            _ => {}
-        }
-        if Instant::now() >= deadline {
-            break Err(last_error.unwrap_or_else(|| Error::new("Screen capture timed out")));
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    };
-    port.clear();
-    result
-}
-
-fn export(
-    snapshot: Snapshot,
-    factory: CaptureFactory,
-    save: &dyn AnnotationSavePort,
-    cancelled: Arc<AtomicBool>,
-) -> Result<SaveOutcome> {
-    if cancelled.load(Ordering::Acquire) {
-        return Ok(SaveOutcome::Cancelled);
-    }
-    let Some(capture) = capture(
-        factory,
-        regions(&snapshot),
-        snapshot.excluded.clone(),
-        &cancelled,
-    )?
-    else {
-        return Ok(SaveOutcome::Cancelled);
-    };
-    if cancelled.load(Ordering::Acquire) {
-        return Ok(SaveOutcome::Cancelled);
-    }
-    let image = compose(&snapshot, capture, &cancelled)?;
-    if cancelled.load(Ordering::Acquire) {
-        return Ok(SaveOutcome::Cancelled);
-    }
-    save.save_png(
-        PngSaveRequest {
-            image,
-            owner: snapshot.owner,
-            default_name: snapshot.name,
-            title: snapshot.title,
-        },
-        cancelled,
-    )
-}
-
-fn compose(
-    snapshot: &Snapshot,
-    capture: Arc<ScreenCaptureFrame>,
-    cancelled: &AtomicBool,
-) -> Result<CapturedRegion> {
-    let cancelled = || cancelled.load(Ordering::Acquire);
-    let job = mosaic_worker::Job {
-        key: 1,
-        context: 1,
-        session: snapshot.session.clone(),
-        provisional_index: None,
-        monitors: snapshot.monitors.clone(),
-        capture: capture.clone(),
-    };
-    let effects = mosaic_worker::process_once(&job, &cancelled)
-        .ok_or_else(|| Error::new("Incomplete annotation effects"))?;
-    let overlay = annotation_render::render_export(
-        &snapshot.session,
-        snapshot.monitor,
-        snapshot.scale,
-        (&effects).into(),
-        &capture,
-    )
-    .ok_or_else(|| Error::new("Incomplete annotation image"))?;
-    let region = capture
-        .regions
-        .iter()
-        .find(|r| contains(r.bounds, snapshot.monitor))
-        .ok_or_else(|| Error::new("Missing screen pixels"))?;
-    let width = (snapshot.monitor.right - snapshot.monitor.left) as u32;
-    let height = (snapshot.monitor.bottom - snapshot.monitor.top) as u32;
-    let mut output =
-        tiny_skia::Pixmap::new(width, height).ok_or_else(|| Error::new("Image is too large"))?;
-    let stride = (region.bounds.right - region.bounds.left) as usize * 4;
-    for (y, row) in output
-        .data_mut()
-        .chunks_exact_mut(width as usize * 4)
-        .enumerate()
-    {
-        let start = (snapshot.monitor.top - region.bounds.top) as usize * stride
-            + y * stride
-            + (snapshot.monitor.left - region.bounds.left) as usize * 4;
-        row.copy_from_slice(
-            region
-                .pixels
-                .get(start..start + row.len())
-                .ok_or_else(|| Error::new("Incomplete screen pixels"))?,
-        );
-    }
-    output.draw_pixmap(
-        0,
-        0,
-        overlay.as_ref(),
-        &tiny_skia::PixmapPaint::default(),
-        tiny_skia::Transform::identity(),
-        None,
-    );
-    Ok(CapturedRegion {
-        bounds: snapshot.monitor,
-        pixels: output.take(),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::annotation_export_render::{compose, regions};
     use lexift_core::domain::{
         annotation::{
             Bounds, Kind, MagnifierConnector, MosaicAnnotation, MosaicEffect, Object, Style,
         },
         annotation_erase::{EraseRegion, ErasedCoverage},
     };
+    use lexift_core::ports::magnifier::WindowToken;
+    use lexift_core::ports::screen_capture::{CapturedRegion, ScreenCaptureFrame};
+    use std::sync::atomic::AtomicBool;
     fn fixture() -> Snapshot {
         let monitor = Rect {
             left: -16,
@@ -688,117 +424,6 @@ mod tests {
         assert!(display_at((3000, 0), &displays).is_none());
     }
     #[test]
-    fn cancelled_export_never_opens_save_dialog() {
-        struct Save;
-        impl AnnotationSavePort for Save {
-            fn is_available(&self) -> bool {
-                true
-            }
-            fn save_png(&self, _: PngSaveRequest, _: Arc<AtomicBool>) -> Result<SaveOutcome> {
-                panic!("cancelled job opened dialog")
-            }
-        }
-        struct Capture;
-        impl ScreenCapturePort for Capture {
-            fn is_available(&self) -> bool {
-                true
-            }
-            fn request(&self, _: ScreenCaptureRequest) -> Result<()> {
-                Ok(())
-            }
-            fn latest(&self) -> Result<Option<Arc<ScreenCaptureFrame>>> {
-                panic!("cancelled job read frame")
-            }
-            fn clear(&self) {}
-        }
-        let result = export(
-            fixture(),
-            || Some(Arc::new(Capture)),
-            &Save,
-            Arc::new(AtomicBool::new(true)),
-        )
-        .unwrap();
-        assert_eq!(result, SaveOutcome::Cancelled);
-    }
-    #[test]
-    fn single_capture_waits_for_request_and_all_sources_not_a_serial_change() {
-        use std::sync::atomic::AtomicUsize;
-        struct Capture {
-            calls: AtomicUsize,
-        }
-        impl ScreenCapturePort for Capture {
-            fn is_available(&self) -> bool {
-                true
-            }
-            fn request(&self, request: ScreenCaptureRequest) -> Result<()> {
-                assert_eq!(request.regions, vec![fixture().monitor]);
-                assert_eq!(request.excluded_windows, vec![WindowToken(100)]);
-                assert!(request.paused_regions.is_empty());
-                Ok(())
-            }
-            fn latest(&self) -> Result<Option<Arc<ScreenCaptureFrame>>> {
-                let calls = self.calls.fetch_add(1, Ordering::Relaxed);
-                let mut result = ScreenCaptureFrame {
-                    revision: 1,
-                    serial: 41,
-                    regions: frame(fixture().monitor, [20, 30, 40, 255]).regions.clone(),
-                };
-                if calls == 0 {
-                    result.revision = 0;
-                }
-                if calls == 1 {
-                    result.regions.clear();
-                }
-                Ok(Some(Arc::new(result)))
-            }
-            fn clear(&self) {
-                assert_eq!(self.calls.load(Ordering::Relaxed), 3);
-            }
-        }
-        let frame = capture(
-            || {
-                Some(Arc::new(Capture {
-                    calls: AtomicUsize::new(0),
-                }))
-            },
-            vec![fixture().monitor],
-            vec![WindowToken(100)],
-            &AtomicBool::new(false),
-        )
-        .unwrap()
-        .unwrap();
-        assert_eq!(
-            frame.serial, 41,
-            "unchanged serial must not stall a new independent capture"
-        );
-    }
-
-    #[test]
-    fn capture_timeout_releases_the_job_without_opening_a_dialog() {
-        struct Capture;
-        impl ScreenCapturePort for Capture {
-            fn is_available(&self) -> bool {
-                true
-            }
-            fn request(&self, _: ScreenCaptureRequest) -> Result<()> {
-                Ok(())
-            }
-            fn latest(&self) -> Result<Option<Arc<ScreenCaptureFrame>>> {
-                Ok(None)
-            }
-            fn clear(&self) {}
-        }
-        let result = capture_with_timeout(
-            || Some(Arc::new(Capture)),
-            vec![fixture().monitor],
-            Vec::new(),
-            &AtomicBool::new(false),
-            Duration::from_millis(1),
-        );
-        assert!(result.is_err_and(|e| e.to_string().contains("timed out")));
-    }
-
-    #[test]
     fn snapshot_preserves_text_draft_and_does_not_commit_it() {
         use slint::platform::{
             Platform, WindowAdapter,
@@ -829,8 +454,11 @@ mod tests {
         REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
-            r.main.open(crate::AnnotationToolbar::new().unwrap());
-            r.main
+            r.toolbar_state
+                .main
+                .open(crate::AnnotationToolbar::new().unwrap());
+            r.toolbar_state
+                .main
                 .get()
                 .unwrap()
                 .window()
@@ -841,7 +469,7 @@ mod tests {
                 right: 1024,
                 bottom: 768,
             };
-            r.canvases.push(super::super::CanvasLayer::new(
+            r.canvas_state.canvases.push(super::super::CanvasLayer::new(
                 crate::AnnotationCanvas::new().unwrap(),
                 monitor,
             ));
@@ -885,26 +513,29 @@ mod tests {
             assert!(
                 matches!(&frozen.session.objects[0].extra,Extra::Text(t) if t.content=="draft 中文")
             );
-            r.export.cancelled = Some(Arc::new(AtomicBool::new(false)));
-            let cancelled = r.export.cancelled.as_ref().unwrap().clone();
+            r.export.pending = true;
             r.export.cancel();
-            assert!(cancelled.load(Ordering::Acquire));
+            assert!(!r.export.pending);
             r.close();
         });
         // A delayed completion from a retired request must leave the next job busy.
         let generation = REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
-            let (tx, rx) = mpsc::channel();
-            tx.send(Ok(SaveOutcome::Saved)).unwrap();
-            r.export.cancelled = Some(Arc::new(AtomicBool::new(false)));
+            r.export.pending = true;
             r.export.request = 42;
-            r.export.result = Some(rx);
             r.generation
         });
-        poll(generation, 41);
-        REGISTRY.with(|slot| assert!(slot.borrow().as_ref().unwrap().export.cancelled.is_some()));
-        poll(generation, 42);
-        REGISTRY.with(|slot| assert!(slot.borrow().as_ref().unwrap().export.cancelled.is_none()));
+        let mut state = lexift_core::domain::annotation_export::ExportState {
+            session: Some(generation),
+            completed: Some(41),
+            result: Some(Ok(lexift_core::ports::annotation_save::SaveOutcome::Saved)),
+            ..Default::default()
+        };
+        sync(&state);
+        REGISTRY.with(|slot| assert!(slot.borrow().as_ref().unwrap().export.pending));
+        state.completed = Some(42);
+        sync(&state);
+        REGISTRY.with(|slot| assert!(!slot.borrow().as_ref().unwrap().export.pending));
     }
 }

@@ -9,6 +9,7 @@ use crate::ports::credential::{CredentialAccessPurpose, CredentialSecret};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppCommand {
+    AnnotationExport(crate::domain::annotation_export::ExportCommand),
     Ocr(crate::domain::ocr::OcrCommand),
     ClipboardHistory(crate::domain::clipboard_history::HistoryCommand),
     CaptureSelection {

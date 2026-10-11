@@ -1,9 +1,9 @@
 //! Rasterizes the transient annotation document into a transparent monitor surface.
-#[path = "annotation_mosaic.rs"]
+#[path = "mosaic.rs"]
 pub(crate) mod mosaic;
-#[path = "annotation_mosaic_lens.rs"]
+#[path = "mosaic_lens.rs"]
 pub(crate) mod mosaic_lens;
-#[path = "annotation_mosaic_worker.rs"]
+#[path = "mosaic_worker.rs"]
 pub(crate) mod mosaic_worker;
 use crate::annotation_scene::Document;
 use lexift_core::domain::{
@@ -24,14 +24,14 @@ thread_local! {
 
 fn draw_text_control_icon(pixmap: &mut Pixmap, handle: usize, center: (f32, f32), scale: f32) {
     let svg = match handle {
-        0 => include_str!("../ui/icons/text-rotate.svg"),
-        2 => include_str!("../ui/icons/text-link-arrow.svg"),
-        3 => include_str!("../ui/icons/text-resize.svg"),
-        8 => include_str!("../ui/icons/sequence-plus.svg"),
-        9 => include_str!("../ui/icons/sequence-minus.svg"),
-        10 => include_str!("../ui/icons/sequence-delete.svg"),
-        11 => include_str!("../ui/icons/text-link-arrow.svg"),
-        12 => include_str!("../ui/icons/sequence-caption.svg"),
+        0 => include_str!("../../ui/icons/text-rotate.svg"),
+        2 => include_str!("../../ui/icons/text-link-arrow.svg"),
+        3 => include_str!("../../ui/icons/text-resize.svg"),
+        8 => include_str!("../../ui/icons/sequence-plus.svg"),
+        9 => include_str!("../../ui/icons/sequence-minus.svg"),
+        10 => include_str!("../../ui/icons/sequence-delete.svg"),
+        11 => include_str!("../../ui/icons/text-link-arrow.svg"),
+        12 => include_str!("../../ui/icons/sequence-caption.svg"),
         _ => return,
     };
     let size = (18. * scale).round().max(1.) as u32;

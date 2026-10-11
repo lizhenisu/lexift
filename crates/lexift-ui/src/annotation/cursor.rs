@@ -131,7 +131,7 @@ pub(super) fn refresh(r: &Registry) {
     } else {
         None
     };
-    for (index, layer) in r.canvases.iter().enumerate() {
+    for (index, layer) in r.canvas_state.canvases.iter().enumerate() {
         let editing_control = editing
             .as_ref()
             .filter(|_| !super::editing_sequence(r))
@@ -256,6 +256,7 @@ fn refresh_stationary_pointer(generation: u64, index: usize, revision: u64, poin
             .as_ref()
             .filter(|r| r.generation == generation && !r.mode.is_mouse())?;
         let layer = r
+            .canvas_state
             .canvases
             .get(index)
             .filter(|layer| layer.revision() == revision)?;
@@ -275,9 +276,16 @@ fn refresh_stationary_pointer(generation: u64, index: usize, revision: u64, poin
                 && cursor.x < p.x + size.width as i32
                 && cursor.y < p.y + size.height as i32
         };
-        if r.main.get().is_some_and(|w| over_window(w.window()))
-            || r.panel.get().is_some_and(|w| over_window(w.window()))
-            || r.menus
+        if r.toolbar_state
+            .main
+            .get()
+            .is_some_and(|w| over_window(w.window()))
+            || r.toolbar_state
+                .panel
+                .get()
+                .is_some_and(|w| over_window(w.window()))
+            || r.toolbar_state
+                .menus
                 .current
                 .as_ref()
                 .is_some_and(|m| over_window(m.window.window()))

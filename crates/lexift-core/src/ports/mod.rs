@@ -1,3 +1,4 @@
+pub mod annotation_export;
 pub mod annotation_render;
 pub mod annotation_save;
 pub mod autostart;

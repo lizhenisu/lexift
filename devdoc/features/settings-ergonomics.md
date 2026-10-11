@@ -166,7 +166,7 @@
 
 ## 2026-10-08：真实设置接线审计与常规页精简
 
-依据 `bridge.rs::wire_settings_callbacks`、`binding.rs` 及 Core `SettingsChange` 核对，而非根据控件名称推断功能。下表记录当前任务边界；未接通项目不通过新增配置或业务能力来伪装完成。
+依据 `bridge/settings_window.rs::wire_settings_callbacks`、`binding.rs` 及 Core `SettingsChange` 核对，而非根据控件名称推断功能。下表记录当前任务边界；未接通项目不通过新增配置或业务能力来伪装完成。
 
 | 页面 | 已接通的设置 | 仍需处理的预览／无效表达 |
 | --- | --- | --- |

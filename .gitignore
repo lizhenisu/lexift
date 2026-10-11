@@ -6,3 +6,8 @@
 *.log
 .env
 .env.*
+
+# Python build and validation caches
+__pycache__/
+*.pyc
+*.pyo

@@ -1,5 +1,6 @@
 pub mod annotation;
 pub mod annotation_erase;
+pub mod annotation_export;
 pub mod geometry;
 pub mod language;
 pub mod llm;

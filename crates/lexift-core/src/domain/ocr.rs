@@ -179,16 +179,6 @@ impl OcrRecognitionStrategy {
         matches!(self, Self::AutomaticKorean)
             || matches!(self, Self::Language(language) if language == "ko")
     }
-    pub fn resource_versions(&self) -> (&'static str, Option<&'static str>) {
-        ("v1", self.requires_korean().then_some("korean-v1"))
-    }
-    pub fn manual_model(&self) -> Option<&'static str> {
-        match self {
-            Self::Automatic | Self::AutomaticKorean => None,
-            Self::Language(language) if language == "ko" => Some("korean"),
-            Self::Language(_) => Some("universal"),
-        }
-    }
 }
 
 /// Stable UI mapping: auto, follow interface, then the existing twelve languages.
@@ -885,31 +875,7 @@ mod tests {
         )));
     }
     #[test]
-    fn model_mapping_and_sensitive_debug() {
-        assert_eq!(
-            OcrRecognitionStrategy::Language("ja".into())
-                .manual_model()
-                .unwrap(),
-            "universal"
-        );
-        assert_eq!(
-            OcrRecognitionStrategy::Language("en-GB".into())
-                .manual_model()
-                .unwrap(),
-            "universal"
-        );
-        assert_eq!(
-            OcrRecognitionStrategy::Language("pt-PT".into())
-                .manual_model()
-                .unwrap(),
-            "universal"
-        );
-        assert_eq!(
-            OcrRecognitionStrategy::Language("ko".into())
-                .manual_model()
-                .unwrap(),
-            "korean"
-        );
+    fn recognized_text_is_not_debugged() {
         assert!(
             !format!(
                 "{:?}",

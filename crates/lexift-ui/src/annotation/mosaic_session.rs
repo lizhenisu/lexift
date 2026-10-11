@@ -205,14 +205,14 @@ pub(super) fn sync(r: &mut Registry) {
     let Some(port) = &r.lifecycle.annotation_screen_capture else {
         return;
     };
-    let monitors: Vec<_> = r.canvases.iter().map(|c| c.bounds).collect();
+    let monitors: Vec<_> = r.canvas_state.canvases.iter().map(|c| c.bounds).collect();
     let regions = capture_regions(
         &r.session.objects,
         super::gestures::display_draft(&r.gesture, &r.pending_drawing),
         &monitors,
     );
     let excluded_windows = capture_exclusions(r);
-    if let Err(error) = r.mosaic.sync(
+    if let Err(error) = r.render_state.mosaic.sync(
         port,
         r.generation,
         CapturePolicy {
@@ -288,16 +288,16 @@ fn poll(generation: u64, token: PollToken) {
     let changed = REGISTRY
         .with(|registry| {
             let mut slot = registry.borrow_mut();
-            let r = slot
-                .as_mut()
-                .filter(|r| r.generation == generation && r.mosaic.poll_token() == token)?;
-            r.mosaic.polling = false;
+            let r = slot.as_mut().filter(|r| {
+                r.generation == generation && r.render_state.mosaic.poll_token() == token
+            })?;
+            r.render_state.mosaic.polling = false;
             sync(r);
             let port = r.lifecycle.annotation_screen_capture.as_ref()?;
-            if r.mosaic.regions.is_empty() {
+            if r.render_state.mosaic.regions.is_empty() {
                 return None;
             }
-            let result = r.mosaic.poll_capture(port);
+            let result = r.render_state.mosaic.poll_capture(port);
             if let Some(failure) = result.failure {
                 fail(r, &failure);
             }
@@ -611,7 +611,7 @@ pub(super) struct Notice {
 
 /// Remove unvalidated masks without leaving a gesture pointing at a deleted index.
 pub(super) fn cancel_pending(r: &mut Registry) {
-    if r.mosaic.pending.is_empty() {
+    if r.render_state.mosaic.pending.is_empty() {
         return;
     }
     let editing_pending = r.geometry_drag().is_some_and(|drag| {
@@ -619,7 +619,7 @@ pub(super) fn cancel_pending(r: &mut Registry) {
             .object_index(drag.target())
             .and_then(|index| r.session.objects.get(index))
             .is_some_and(
-                |o| matches!(&o.extra, Extra::Mosaic(m) if r.mosaic.pending.contains(&m.id)),
+                |o| matches!(&o.extra, Extra::Mosaic(m) if r.render_state.mosaic.pending.contains(&m.id)),
             )
     });
     if editing_pending {
@@ -628,9 +628,9 @@ pub(super) fn cancel_pending(r: &mut Registry) {
     // Gesture rollback can replay accepted parameter input. Complete it before
     // removing provisional objects from every Core history snapshot.
     r.finish_style_edit();
-    r.mosaic.cancel_pending(&mut r.session);
+    r.render_state.mosaic.cancel_pending(&mut r.session);
     r.hovered = None;
-    if let Some(main) = r.main.get() {
+    if let Some(main) = r.toolbar_state.main.get() {
         main.set_can_undo(r.session.can_undo());
     }
 }
@@ -646,7 +646,7 @@ fn fail(r: &mut Registry, detail: &str) {
         // capture failure cannot leave a transaction or deferred input behind.
         super::cancel_active_gesture(r);
     }
-    r.mosaic.waiting_since = None;
+    r.render_state.mosaic.waiting_since = None;
     notify(r, "Screen capture unavailable. Try again.");
 }
 
@@ -656,22 +656,23 @@ pub(super) fn notify(r: &mut Registry, message: &str) {
 }
 
 pub(super) fn notify_on(r: &mut Registry, message: &str, monitor: Option<Rect>) {
-    r.mosaic.notice_revision = r.mosaic.notice_revision.wrapping_add(1);
-    let revision = r.mosaic.notice_revision;
+    r.render_state.mosaic.notice_revision = r.render_state.mosaic.notice_revision.wrapping_add(1);
+    let revision = r.render_state.mosaic.notice_revision;
     let generation = r.generation;
-    let instance = r.mosaic.instance;
+    let instance = r.render_state.mosaic.instance;
     if let Some(canvas) = r
+        .canvas_state
         .canvases
         .iter()
         .find(|c| monitor.map_or(c.last_pointer.is_some(), |bounds| c.bounds == bounds))
-        .or_else(|| r.canvases.first())
+        .or_else(|| r.canvas_state.canvases.first())
     {
-        r.mosaic.notice = Some(Notice {
+        r.render_state.mosaic.notice = Some(Notice {
             revision,
             bounds: canvas.bounds,
             message: crate::i18n::tr(message),
         });
-        r.mosaic.tasks.notice_timer.start(
+        r.render_state.mosaic.tasks.notice_timer.start(
             slint::TimerMode::SingleShot,
             Duration::from_secs(4),
             move || {
@@ -689,17 +690,18 @@ fn clear_notice(generation: u64, instance: Instance, revision: u64) -> bool {
         let mut slot = slot.borrow_mut();
         let Some(r) = slot
             .as_mut()
-            .filter(|r| r.generation == generation && r.mosaic.instance == instance)
+            .filter(|r| r.generation == generation && r.render_state.mosaic.instance == instance)
         else {
             return false;
         };
-        if r.mosaic
+        if r.render_state
+            .mosaic
             .notice
             .as_ref()
             .is_some_and(|n| n.revision == revision)
         {
-            r.mosaic.notice = None;
-            r.mosaic.tasks.notice_timer.stop();
+            r.render_state.mosaic.notice = None;
+            r.render_state.mosaic.tasks.notice_timer.stop();
             true
         } else {
             false
@@ -1145,7 +1147,7 @@ mod tests {
         let generation = REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
-            r.main.open(AnnotationToolbar::new().unwrap());
+            r.toolbar_state.main.open(AnnotationToolbar::new().unwrap());
             let mut canvas = CanvasLayer::new(
                 AnnotationCanvas::new().unwrap(),
                 Rect {
@@ -1156,7 +1158,7 @@ mod tests {
                 },
             );
             canvas.last_pointer = Some((10., 10.));
-            r.canvases.push(canvas);
+            r.canvas_state.canvases.push(canvas);
             let draft = Object {
                 erased: Vec::new(),
                 id: Default::default(),
@@ -1166,7 +1168,7 @@ mod tests {
                 points: Vec::new(),
                 extra: settings(&defaults(11), 1.25),
             };
-            r.mosaic.stage(&mut r.session, draft.clone());
+            r.render_state.mosaic.stage(&mut r.session, draft.clone());
             let values = defaults(11);
             let mut press = super::super::drawing::Press::begin(
                 (-900., -400.),
@@ -1178,26 +1180,39 @@ mod tests {
             press.update((-800., -300.), 1.25);
             r.gesture = Some(Active::Drawing(press));
             sync(r);
-            r.mosaic.waiting_since = Some(Instant::now() - Duration::from_secs(6));
+            r.render_state.mosaic.waiting_since = Some(Instant::now() - Duration::from_secs(6));
             r.generation
         });
-        let instance = REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().mosaic.instance);
-        let token = REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().mosaic.poll_token());
+        let instance =
+            REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().render_state.mosaic.instance);
+        let token = REGISTRY.with(|slot| {
+            slot.borrow()
+                .as_ref()
+                .unwrap()
+                .render_state
+                .mosaic
+                .poll_token()
+        });
         poll(generation, token);
         let revision = REGISTRY.with(|slot| {
             let slot = slot.borrow();
             let r = slot.as_ref().unwrap();
             assert!(
-                r.mosaic.pending.is_empty()
+                r.render_state.mosaic.pending.is_empty()
                     && super::super::gestures::display_draft(&r.gesture, &r.pending_drawing)
                         .is_none()
                     && r.gesture().is_none()
             );
             assert!(r.session.objects.is_empty() && !r.session.can_undo());
-            let notice = r.mosaic.notice.as_ref().expect("visible failure feedback");
+            let notice = r
+                .render_state
+                .mosaic
+                .notice
+                .as_ref()
+                .expect("visible failure feedback");
             for scale in [1., 1.25] {
                 for dark in [false, true] {
-                    let toolbar = r.main.get().unwrap();
+                    let toolbar = r.toolbar_state.main.get().unwrap();
                     toolbar
                         .global::<crate::Colors>()
                         .set_preference(i32::from(dark));
@@ -1263,33 +1278,36 @@ mod tests {
                     pixels: [40, 50, 60, 255].repeat(40000),
                 }],
             });
-            r.mosaic.frame = Some(last_good.clone());
+            r.render_state.mosaic.frame = Some(last_good.clone());
             let mut next = original;
             next.bounds = next.bounds.moved(200., 0.);
-            r.mosaic.stage(&mut r.session, next);
+            r.render_state.mosaic.stage(&mut r.session, next);
             sync(r);
-            r.mosaic.waiting_since = Some(Instant::now() - Duration::from_secs(6));
+            r.render_state.mosaic.waiting_since = Some(Instant::now() - Duration::from_secs(6));
             last_good
         });
         poll(generation, token);
         REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
-            assert!(r.mosaic.pending.is_empty());
-            assert!(Arc::ptr_eq(r.mosaic.frame.as_ref().unwrap(), &last_good));
+            assert!(r.render_state.mosaic.pending.is_empty());
+            assert!(Arc::ptr_eq(
+                r.render_state.mosaic.frame.as_ref().unwrap(),
+                &last_good
+            ));
             assert_eq!(r.session.objects.len(), 1);
-            assert!(r.mosaic.notice.is_some());
+            assert!(r.render_state.mosaic.notice.is_some());
             assert!(r.session.undo());
             assert!(r.session.objects.is_empty());
             assert!(
                 !r.session.can_undo(),
                 "failed stroke must not add a second undo"
             );
-            r.mosaic = State::default();
-            r.mosaic.polling = true;
-            r.mosaic.notice = Some(Notice {
+            r.render_state.mosaic = State::default();
+            r.render_state.mosaic.polling = true;
+            r.render_state.mosaic.notice = Some(Notice {
                 revision,
-                bounds: r.canvases[0].bounds,
+                bounds: r.canvas_state.canvases[0].bounds,
                 message: "replacement owner".into(),
             });
         });
@@ -1299,14 +1317,14 @@ mod tests {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
             assert!(
-                r.mosaic.polling,
+                r.render_state.mosaic.polling,
                 "old poll must not modify the replacement owner"
             );
             assert_eq!(
-                r.mosaic.notice.as_ref().unwrap().message,
+                r.render_state.mosaic.notice.as_ref().unwrap().message,
                 "replacement owner"
             );
-            assert!(r.mosaic.instance != instance);
+            assert!(r.render_state.mosaic.instance != instance);
             r.close();
             slot.take();
         });

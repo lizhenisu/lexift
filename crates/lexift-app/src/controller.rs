@@ -131,9 +131,10 @@ impl ViewPort for lexift_ui::UiHandle {
 
 /// Executes Core commands on background workers and returns events to Core.
 pub(crate) struct AppController {
+    annotation_export: Option<Arc<crate::annotation_export::ExportRuntime>>,
     history: Option<Arc<crate::clipboard_history::HistoryRuntime>>,
     pub(crate) runtime: Handle,
-    state: Arc<Mutex<AppState>>,
+    pub(crate) state: Arc<Mutex<AppState>>,
     selection: Option<Arc<dyn SelectionPort>>,
     screen: Option<Arc<dyn ScreenPort>>,
     translator: Arc<dyn TranslatorPort>,
@@ -169,6 +170,7 @@ impl AppController {
             .desired_settings
             .selection_toolbar;
         Self {
+            annotation_export: None,
             history: None,
             ocr: None,
             runtime,
@@ -208,6 +210,13 @@ impl AppController {
         self
     }
 
+    pub(crate) fn with_annotation_export(
+        mut self,
+        runtime: Option<Arc<crate::annotation_export::ExportRuntime>>,
+    ) -> Self {
+        self.annotation_export = runtime;
+        self
+    }
     pub(crate) fn with_ocr(mut self, ocr: Option<Arc<crate::ocr::OcrRuntime>>) -> Self {
         self.ocr = ocr;
         self
@@ -291,6 +300,9 @@ impl AppController {
                     current
                 });
             let snapshot = state.clone();
+            if let Some(export) = &self.annotation_export {
+                export.sync(&snapshot.annotation_export, quitting);
+            }
             if let Some(ocr) = &self.ocr {
                 ocr.sync(&snapshot);
             }
@@ -331,6 +343,21 @@ impl AppController {
 
     fn execute(self: &Arc<Self>, command: AppCommand) {
         match command {
+            AppCommand::AnnotationExport(command) => {
+                if let Some(export) = &self.annotation_export {
+                    export.execute(self, command);
+                } else if let lexift_core::domain::annotation_export::ExportCommand::Run(request) =
+                    command
+                {
+                    self.dispatch(AppEvent::AnnotationExport(
+                        lexift_core::domain::annotation_export::ExportEvent::Completed {
+                            session: request.session,
+                            request: request.request,
+                            result: Err(lexift_core::Error::new("Annotation export unavailable")),
+                        },
+                    ));
+                }
+            }
             AppCommand::Ocr(command) => {
                 if let Some(ocr) = &self.ocr {
                     ocr.execute(self, command);
@@ -1226,6 +1253,7 @@ impl AppController {
 fn event_name(event: &AppEvent) -> &'static str {
     match event {
         AppEvent::ClipboardHistory(_) => "clipboard_history",
+        AppEvent::AnnotationExport(_) => "annotation_export",
         AppEvent::Ocr(_) => "ocr",
         AppEvent::Started => "started",
         AppEvent::SelectionTranslationRequested => "selection_translation_requested",

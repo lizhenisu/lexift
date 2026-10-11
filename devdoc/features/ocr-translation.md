@@ -88,3 +88,9 @@ cargo test -p lexift-platform real_paddle_models -- --ignored --nocapture
 本地 OCR 的详情视图独立为 `ocr-provider.slint`，复用 `settings-controls.slint` 中的设置卡片、语言选择器和按钮。页面分为 Provider 标题、识别设置、本地资源；资源状态使用徽标，版本与大小使用对齐信息行，模型名称与大小由 UI bridge 的结构化行模型传入。
 
 主页面显示 MiB，下载确认保留精确字节数。资源就绪时隐藏下载操作；未安装或损坏显示下载或重试，下载中显示进度及取消。删除使用低强调 SVG 文字按钮，并保留原有二次确认和资源生命周期规则。错误在资源卡片内换行显示，不产生新的网络请求或修改下载地址。
+
+## 职责整理（2026-10-11）
+
+Core 的识别策略保留自动、自动加入韩文和指定语言，不携带具体模型名称或固定资源版本。Platform 的模型路由选择对应识别器，资源管理以清单验证版本及兼容性；配置和识别结果不变。
+
+UI 的 OCR 框选宿主与 Provider 设置桥接拆为 `ocr/selection` 和 `ocr/provider`。设置接线不经过框选 Registry；后台识别、资源管理和翻译仍走既有 Core／App 路径。验证见 [职责整理验证](../releases/responsibility-refactor-validation.md)。
