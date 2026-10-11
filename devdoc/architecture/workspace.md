@@ -94,7 +94,7 @@ default-members = [
 
 [workspace.package]
 edition = "2024"
-version = "0.0.1-rc.9"
+version = "0.0.1-rc.10"
 ```
 
 内部 crate 和常用第三方依赖统一通过 `[workspace.dependencies]` 管理，成员 crate 使用 `.workspace = true` 继承，减少版本漂移和重复声明。

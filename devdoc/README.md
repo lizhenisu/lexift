@@ -84,7 +84,7 @@
 - [发布检查清单](releases/release-checklist.md)
 - [Release 测量](releases/release-performance.md)
 - [v0.1.0 候选验收记录](releases/release-validation-v0.1.0.md)
-- 发布说明：[v0.1.0](releases/notes/release-notes-v0.1.0.md)、[rc.9](releases/notes/release-notes-v0.0.1-rc.9.md)、[rc.8](releases/notes/release-notes-v0.0.1-rc.8.md)、[rc.7](releases/notes/release-notes-v0.0.1-rc.7.md)、[rc.6](releases/notes/release-notes-v0.0.1-rc.6.md)、[rc.5](releases/notes/release-notes-v0.0.1-rc.5.md)、[rc.4](releases/notes/release-notes-v0.0.1-rc.4.md)、[rc.3](releases/notes/release-notes-v0.0.1-rc.3.md)、[rc.2](releases/notes/release-notes-v0.0.1-rc.2.md)、[rc.1](releases/notes/release-notes-v0.0.1-rc.1.md)。
+- 发布说明：[v0.1.0](releases/notes/release-notes-v0.1.0.md)、[rc.10](releases/notes/release-notes-v0.0.1-rc.10.md)、[rc.9](releases/notes/release-notes-v0.0.1-rc.9.md)、[rc.8](releases/notes/release-notes-v0.0.1-rc.8.md)、[rc.7](releases/notes/release-notes-v0.0.1-rc.7.md)、[rc.6](releases/notes/release-notes-v0.0.1-rc.6.md)、[rc.5](releases/notes/release-notes-v0.0.1-rc.5.md)、[rc.4](releases/notes/release-notes-v0.0.1-rc.4.md)、[rc.3](releases/notes/release-notes-v0.0.1-rc.3.md)、[rc.2](releases/notes/release-notes-v0.0.1-rc.2.md)、[rc.1](releases/notes/release-notes-v0.0.1-rc.1.md)。
 
 ## 维护约定
 

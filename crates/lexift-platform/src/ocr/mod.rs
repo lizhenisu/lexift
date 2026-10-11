@@ -237,7 +237,7 @@ mod cache_tests {
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    #[ignore = "requires verified split resource fixture"]
+    #[ignore = "requires verified split resources and LEXIFT_OCR_TEST_IMAGES fixtures"]
     fn real_cache_and_optional_reader_lifetimes() {
         use lexift_core::{
             domain::{geometry::Rect, ocr::OcrRecognitionStrategy},
@@ -252,7 +252,10 @@ mod cache_tests {
             full_checks: std::sync::atomic::AtomicUsize::new(0),
         };
         let rgba = image::open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ocr/common.png"),
+            PathBuf::from(
+                std::env::var_os("LEXIFT_OCR_TEST_IMAGES").expect("OCR test image directory"),
+            )
+            .join("common.png"),
         )
         .unwrap()
         .into_rgba8();

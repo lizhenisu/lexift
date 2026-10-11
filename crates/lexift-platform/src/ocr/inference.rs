@@ -466,12 +466,14 @@ mod tests {
         );
     }
     #[test]
-    #[ignore = "requires the integrity-checked OCR resource build; run with LEXIFT_OCR_TEST_RESOURCES"]
+    #[ignore = "requires verified resources and LEXIFT_OCR_TEST_IMAGES fixtures"]
     fn real_paddle_models_recognize_supported_scripts() {
         let folder =
             PathBuf::from(std::env::var_os("LEXIFT_OCR_TEST_RESOURCES").expect("resource path"));
         let mut engine = Engine::new(&folder).unwrap();
-        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ocr");
+        let fixtures = PathBuf::from(
+            std::env::var_os("LEXIFT_OCR_TEST_IMAGES").expect("OCR test image directory"),
+        );
         for (file, language, expected) in [
             ("common", "zh-CN", "你好世界"),
             ("common", "zh-TW", "繁體中文"),

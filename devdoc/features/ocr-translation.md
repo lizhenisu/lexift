@@ -54,14 +54,15 @@ python scripts/build-ocr-resources.py --runtime-dir <Windows onnxruntime/capi �
 
 ## 验证记录
 
-本轮记录见 [OCR 实施验证](../releases/ocr-validation.md)。固定识别图在 `crates/lexift-platform/tests/fixtures/ocr/`；真实推理测试需先构建资源：
+本轮记录见 [OCR 实施验证](../releases/ocr-validation.md)。识别测试图片不随源码保存。真实推理测试需先构建资源，并在本地忽略目录（例如 `target/ocr-test-images/`）准备 `common.png`、`latin.png` 和 `korean.png`，通过 `LEXIFT_OCR_TEST_IMAGES` 指定目录。图片需覆盖测试断言中的中／日／英、拉丁文字及韩文内容；缓存生命周期测试仅使用 `common.png`：
 
 ```powershell
 $env:LEXIFT_OCR_TEST_RESOURCES = (Resolve-Path target/ocr-resources-v1/installed/v1).Path
+$env:LEXIFT_OCR_TEST_IMAGES = (Resolve-Path target/ocr-test-images).Path
 cargo test -p lexift-platform real_paddle_models -- --ignored --nocapture
 ```
 
-该环境变量仅由测试读取，不是客户端资源路径或下载地址覆盖机制。
+上述环境变量仅由测试读取，不是客户端资源路径或下载地址覆盖机制。
 
 ## 自动检测
 
