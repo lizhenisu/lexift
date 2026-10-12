@@ -700,6 +700,9 @@ fn open_menu(
         }) else {
             return;
         };
+        if request.field == 12 && !r.fonts.is_loaded() {
+            return;
+        }
         let same = r
             .toolbar_state
             .menus

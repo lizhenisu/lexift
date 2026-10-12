@@ -58,6 +58,8 @@ use std::cell::Cell;
 mod gestures;
 use gestures::{Action, Active, Gesture};
 mod focus;
+mod font_service;
+mod font_workflow;
 mod fonts;
 mod frame;
 #[path = "mosaic_session.rs"]

@@ -229,6 +229,7 @@ pub(super) fn settle_main_position(
 }
 
 pub(super) fn open_panel(group: usize, menu: bool) {
+    let requested_at = Instant::now();
     if group >= GROUPS.len() {
         return;
     }
@@ -254,39 +255,57 @@ pub(super) fn open_panel(group: usize, menu: bool) {
         if same {
             return;
         }
+        let create_at = Instant::now();
         let Ok(panel) = AnnotationPanel::new() else {
             return;
         };
+        let create = create_at.elapsed();
         crate::theme::apply(&panel);
         let tool = r.selected[group];
-        if matches!(tool, 8..=10) {
-            r.ensure_fonts();
+        let fonts_at = Instant::now();
+        // A tool picker has no font controls or parameter transaction. Keep the
+        // installed-font scan on the paths that actually need editable text.
+        if !menu {
+            if matches!(tool, 8..=10) {
+                r.ensure_fonts();
+            }
+            if tool == 9 {
+                adopt_watermark_style(r);
+            }
+            panel.set_font_families(ModelRc::new(VecModel::from(
+                r.fonts
+                    .names()
+                    .iter()
+                    .cloned()
+                    .map(Into::into)
+                    .collect::<Vec<_>>(),
+            )));
         }
-        if tool == 9 {
-            adopt_watermark_style(r);
+        let fonts = if menu {
+            Duration::ZERO
+        } else {
+            fonts_at.elapsed()
+        };
+        if !menu {
+            panel.set_can_clear(r.session.has_content());
         }
-        panel.set_font_families(ModelRc::new(VecModel::from(
-            r.fonts
-                .names()
-                .iter()
-                .cloned()
-                .map(Into::into)
-                .collect::<Vec<_>>(),
-        )));
-        panel.set_can_clear(r.session.has_content());
         panel.set_tool(tool);
         panel.set_menu(menu);
         panel.set_heading(crate::i18n::tr(NAMES[tool as usize]).into());
-        panel.set_values(r.values(tool as usize).clone());
-        panel.set_mosaic_available(
-            r.lifecycle
-                .annotation_screen_capture
-                .as_ref()
-                .is_some_and(|p| p.is_available()),
-        );
-        let [red, green, blue] = current_style(r, tool).color;
-        panel.set_custom_preview(slint::Color::from_rgb_u8(red, green, blue));
-        panel.set_fields(ModelRc::new(VecModel::from(fields(tool))));
+        if !menu {
+            panel.set_values(r.values(tool as usize).clone());
+        }
+        if !menu {
+            panel.set_mosaic_available(
+                r.lifecycle
+                    .annotation_screen_capture
+                    .as_ref()
+                    .is_some_and(|p| p.is_available()),
+            );
+            let [red, green, blue] = current_style(r, tool).color;
+            panel.set_custom_preview(slint::Color::from_rgb_u8(red, green, blue));
+            panel.set_fields(ModelRc::new(VecModel::from(fields(tool))));
+        }
         panel.set_menu_tools(ModelRc::new(VecModel::from(GROUPS[group].to_vec())));
         panel.set_menu_labels(ModelRc::new(VecModel::from(
             GROUPS[group]
@@ -302,7 +321,9 @@ pub(super) fn open_panel(group: usize, menu: bool) {
             .open_with_retirement(panel, move |window| {
                 dismissal(window, false);
             });
-        r.parameter_values.bind(r.parameter_object(tool as usize));
+        if !menu {
+            r.parameter_values.bind(r.parameter_object(tool as usize));
+        }
         let panel = r.toolbar_state.panel.get().unwrap();
         if !menu && group <= 6 {
             panel.on_numeric_scrolled(move |field, delta| {
@@ -362,6 +383,23 @@ pub(super) fn open_panel(group: usize, menu: bool) {
             Rc::new(move || focus_origin(&lifecycle)),
             Rc::new(move |event| apply_panel_input(generation, panel_revision, group, event)),
         );
+        r.toolbar_state.panel_preparation.timing = Some(toolbar::PanelTiming::new(
+            requested_at,
+            create,
+            fonts,
+            menu,
+            generation,
+            panel_revision,
+        ));
+        if !menu && matches!(tool, 8..=10) {
+            r.ensure_fonts();
+            font_workflow::sync_panel(r);
+            r.toolbar_state
+                .panel
+                .get()
+                .unwrap()
+                .on_font_retry_requested(move || font_workflow::retry(generation, panel_revision));
+        }
         r.toolbar_state.group = Some(group);
         r.toolbar_state
             .panel
@@ -494,7 +532,9 @@ pub(super) fn open_watermark_input_from(generation: u64, request_origin: focus::
         let Some(r) = slot.as_mut().filter(|r| r.generation == generation) else {
             return;
         };
-        r.ensure_fonts();
+        if !r.ensure_fonts() {
+            return;
+        }
         r.close_watermark_input();
         let Some(main) = r.toolbar_state.main.get() else {
             return;
@@ -760,13 +800,23 @@ pub(super) fn show_panel(generation: u64, panel_revision: u64, attempt: u8) {
         if r.toolbar_state.panel_preparation.ready {
             return;
         }
-        match (r.prepare)(panel.window()) {
+        let prepare_at = Instant::now();
+        let preparation = (r.prepare)(panel.window());
+        if let Some(timing) = &mut r.toolbar_state.panel_preparation.timing {
+            timing.native += prepare_at.elapsed();
+            timing.retries = attempt;
+        }
+        match preparation {
             PassiveWindowPreparation::Ready => {
-                if !r.toolbar_state.panel_preparation.measured {
+                if !panel.get_menu() && !r.toolbar_state.panel_preparation.measured {
                     // Evaluate the hidden component with its actual renderer.
                     // Text/layout caches may otherwise acquire their final metrics
                     // only during show(), after our width measurement has finished.
+                    let render_at = Instant::now();
                     let _ = panel.window().take_snapshot();
+                    if let Some(timing) = &mut r.toolbar_state.panel_preparation.timing {
+                        timing.hidden_render += render_at.elapsed();
+                    }
                     r.toolbar_state.panel_preparation.measured = true;
                 }
                 if !position_panel(r) {
@@ -774,9 +824,13 @@ pub(super) fn show_panel(generation: u64, panel_revision: u64, attempt: u8) {
                     return;
                 }
                 let panel = r.toolbar_state.panel.get().unwrap();
-                // Solve the final-width layout before observing its height.
-                // A renderer evaluation can invalidate lazy Flexbox measurements.
+                // Parameter panels need final-width Flexbox evaluation; pickers
+                // have fixed dimensions and need only this final-size hidden render.
+                let render_at = Instant::now();
                 let _ = panel.window().take_snapshot();
+                if let Some(timing) = &mut r.toolbar_state.panel_preparation.timing {
+                    timing.hidden_render += render_at.elapsed();
+                }
                 if !r.toolbar_state.main.get().is_some_and(|main| {
                     (r.lifecycle.attach_tool_window)(panel.window(), main.window())
                 }) {
@@ -791,10 +845,22 @@ pub(super) fn show_panel(generation: u64, panel_revision: u64, attempt: u8) {
                     content: (
                         panel.get_tool(),
                         panel.get_menu(),
-                        panel.get_numeric_content_width(),
-                        panel.get_numeric_content_height(),
+                        if panel.get_menu() {
+                            220.
+                        } else {
+                            panel.get_numeric_content_width()
+                        },
+                        if panel.get_menu() {
+                            46. + GROUPS[r.toolbar_state.group.unwrap_or(0)].len() as f32 * 42.
+                        } else {
+                            panel.get_numeric_content_height()
+                        },
                     ),
-                    values: panel.get_values(),
+                    values: if panel.get_menu() {
+                        Default::default()
+                    } else {
+                        panel.get_values()
+                    },
                     language: panel.get_language_revision(),
                 };
                 if !r.toolbar_state.panel_preparation.observe(layout) {
@@ -816,9 +882,32 @@ pub(super) fn show_panel(generation: u64, panel_revision: u64, attempt: u8) {
                     return;
                 }
                 (r.lifecycle.set_popup_dismissal)(panel.window(), panel.get_menu());
+                // Snapshot renders happened while hidden. Observe only the first
+                // render after mapping; the queued report runs after render returns.
+                let requested_at = r.toolbar_state.panel_preparation.timing.as_ref()
+                    .map(|timing| timing.requested_at());
+                let rendered = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let _ = panel.window().set_rendering_notifier(move |state, _| {
+                    if matches!(state, slint::RenderingState::AfterRendering)
+                        && !rendered.swap(true, std::sync::atomic::Ordering::Relaxed)
+                        && let Some(requested_at) = requested_at
+                    {
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if panel_current(generation, panel_revision) {
+                                tracing::debug!(generation, revision = panel_revision,
+                                    total_ms = requested_at.elapsed().as_secs_f64() * 1000.,
+                                    "Annotation panel first render returned (not compositor presentation)");
+                            }
+                        });
+                    }
+                });
+                let show_at = Instant::now();
                 if panel.show().is_err() {
                     r.close_panel();
                     return;
+                }
+                if let Some(timing) = r.toolbar_state.panel_preparation.timing.take() {
+                    timing.report(show_at.elapsed());
                 }
                 r.toolbar_state.panel_preparation.ready = true;
             }
@@ -1382,6 +1471,7 @@ impl Registry {
 
     pub(super) fn close_panel(&mut self) {
         // Reject reentrant owner events before dropping child windows and hooks.
+        self.fonts.subscription = None;
         self.toolbar_state.panel_preparation = Default::default();
         self.toolbar_state.panel.retire_input();
         self.deferred_parameters.clear();

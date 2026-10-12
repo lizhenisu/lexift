@@ -14,7 +14,7 @@ use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, PixmapPaint, Rect as SkRec
 thread_local! { static FONTS: RefCell<FontCatalog> = RefCell::new(FontCatalog::new()); }
 
 struct FontCatalog {
-    db: Database,
+    db: std::sync::Arc<Database>,
     bytes: HashMap<ID, (Vec<u8>, u32)>,
     fallback: HashMap<char, ID>,
     text_fallback: HashMap<(char, bool, bool), ID>,
@@ -22,8 +22,10 @@ struct FontCatalog {
 
 impl FontCatalog {
     fn new() -> Self {
-        let mut db = Database::new();
-        db.load_system_fonts();
+        let db = super::font_service::snapshot()
+            .expect("font rendering requires a ready shared directory")
+            .db
+            .clone();
         Self {
             db,
             bytes: HashMap::new(),
@@ -157,69 +159,9 @@ impl FontCatalog {
     }
 }
 
-pub(crate) fn font_families() -> Vec<String> {
-    FONTS.with(|slot| {
-        let fonts = slot.borrow();
-        let mut names = fonts
-            .db
-            .faces()
-            .flat_map(|face| face.families.iter().map(|f| f.0.clone()))
-            .collect::<Vec<_>>();
-        normalize_family_names(&mut names);
-        names
-    })
-}
-
-/// Preserve the font's own language-tagged aliases for UI default selection.
-pub(crate) fn font_family_aliases() -> Vec<Vec<(String, fontdb::Language)>> {
-    FONTS.with(|slot| {
-        slot.borrow()
-            .db
-            .faces()
-            .map(|face| face.families.clone())
-            .collect()
-    })
-}
-
-fn normalize_family_names(names: &mut Vec<String>) {
+pub(super) fn normalize_family_names(names: &mut Vec<String>) {
     names.sort_by_cached_key(|name| (name.to_lowercase(), name.clone()));
     names.dedup_by(|a, b| a.to_lowercase() == b.to_lowercase());
-}
-
-/// Return an installed family that fontdb can resolve for its generic sans-serif face.
-pub(crate) fn system_sans_family() -> Option<String> {
-    FONTS.with(|slot| {
-        let fonts = slot.borrow();
-        let id = fonts
-            .db
-            .query(&Query {
-                families: &[Family::SansSerif],
-                ..Query::default()
-            })
-            .or_else(|| {
-                [
-                    "Noto Sans",
-                    "DejaVu Sans",
-                    "Liberation Sans",
-                    "Helvetica Neue",
-                    "Helvetica",
-                    "Arial",
-                ]
-                .into_iter()
-                .find_map(|family| {
-                    fonts.db.query(&Query {
-                        families: &[Family::Name(family)],
-                        ..Query::default()
-                    })
-                })
-            })?;
-        fonts
-            .db
-            .face(id)?
-            .families
-            .first()
-            .map(|family| family.0.clone())
-    })
 }
 
 fn glyph_advance(
@@ -1315,6 +1257,16 @@ pub(crate) fn resolve_watermark_template(template: &str, at: DateTime<Local>) ->
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn raster_threads_share_the_prepared_database() {
+        let snapshot = super::super::font_service::snapshot().unwrap();
+        let ui_db = super::FONTS.with(|fonts| fonts.borrow().db.clone());
+        let export_db = std::thread::spawn(|| super::FONTS.with(|fonts| fonts.borrow().db.clone()))
+            .join()
+            .unwrap();
+        assert!(std::sync::Arc::ptr_eq(&snapshot.db, &ui_db));
+        assert!(std::sync::Arc::ptr_eq(&ui_db, &export_db));
+    }
     #[test]
     fn family_names_sort_stably_and_deduplicate_case_variants() {
         let mut names = [

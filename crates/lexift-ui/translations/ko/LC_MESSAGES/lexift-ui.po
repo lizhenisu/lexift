@@ -1644,3 +1644,9 @@ msgstr "자동 감지에 포함 안내"
 
 msgid "When enabled, auto detection also runs Korean recognition and combines it with the base model results to improve Korean and mixed-text recognition. This increases recognition time and memory use. Manually selecting Korean is unaffected."
 msgstr "켜면 자동 감지 시 한국어 인식을 추가로 실행하고 기본 모델의 결과와 결합하여 텍스트를 선택합니다. 한국어와 혼합 텍스트의 인식 능력이 향상되지만 인식 시간과 메모리 사용량이 늘어납니다. 한국어를 수동으로 선택한 경우에는 이 설정이 영향을 주지 않습니다."
+
+msgid "Retry loading fonts"
+msgstr "글꼴 불러오기 다시 시도"
+
+msgid "Fonts unavailable — Retry"
+msgstr "글꼴을 사용할 수 없음 — 다시 시도"

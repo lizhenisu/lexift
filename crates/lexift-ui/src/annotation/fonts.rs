@@ -2,7 +2,7 @@
 use lexift_core::domain::ui_language::UiLanguage;
 use std::collections::HashMap;
 
-type Aliases = HashMap<String, Vec<(String, fontdb::Language)>>;
+pub(super) type Aliases = HashMap<String, Vec<(String, fontdb::Language)>>;
 
 /// The three font preferences are independent of object style snapshots.
 #[derive(Clone, Copy)]
@@ -39,19 +39,27 @@ pub(super) struct Directory {
     aliases: Aliases,
     sans: Option<String>,
     loaded: bool,
+    pub subscription: Option<(u64, u64, Option<u64>)>,
 }
 
 impl Directory {
-    /// Loading is one-shot even when the installed catalog is empty.
+    /// Adopt a validated background snapshot without scanning or waiting.
     pub fn ensure(&mut self) -> bool {
         if self.loaded {
             return false;
         }
-        self.names = crate::annotation_text::font_families();
-        self.aliases = alias_index(crate::annotation_text::font_family_aliases());
-        self.sans = crate::annotation_text::system_sans_family();
+        let Some(snapshot) = super::font_service::snapshot() else {
+            return false;
+        };
+        self.names = snapshot.names.clone();
+        self.aliases = snapshot.aliases.clone();
+        self.sans = snapshot.sans.clone();
         self.loaded = true;
         true
+    }
+
+    pub fn is_loaded(&self) -> bool {
+        self.loaded
     }
 
     pub fn names(&self) -> &[String] {
@@ -93,7 +101,7 @@ fn name_language(language: UiLanguage) -> fontdb::Language {
 }
 
 /// Index aliases once, merging regular/bold faces without changing the sorted menu.
-fn alias_index(families: Vec<Vec<(String, fontdb::Language)>>) -> Aliases {
+pub(super) fn alias_index(families: Vec<Vec<(String, fontdb::Language)>>) -> Aliases {
     let mut result = Aliases::new();
     for family in families {
         for (name, _) in &family {

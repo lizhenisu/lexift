@@ -1644,3 +1644,9 @@ msgstr "À propos de l’inclusion dans la détection automatique"
 
 msgid "When enabled, auto detection also runs Korean recognition and combines it with the base model results to improve Korean and mixed-text recognition. This increases recognition time and memory use. Manually selecting Korean is unaffected."
 msgstr "Lorsque cette option est activée, la détection automatique effectue aussi une reconnaissance du coréen et combine ses résultats avec ceux du modèle de base pour mieux reconnaître le coréen et les textes mixtes. Cela augmente le temps de reconnaissance et l’utilisation de la mémoire. La sélection manuelle du coréen n’est pas affectée."
+
+msgid "Retry loading fonts"
+msgstr "Réessayer le chargement des polices"
+
+msgid "Fonts unavailable — Retry"
+msgstr "Polices indisponibles — Réessayer"

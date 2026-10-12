@@ -261,6 +261,9 @@ pub(super) fn sequence_from_values(r: &Registry, at: (f32, f32), scale: f32) -> 
 
 /// The press snapshot includes selection and numbering; no undo entry exists until release.
 pub(super) fn begin_sequence_placement(r: &mut Registry, point: (f32, f32), scale: f32) {
+    if !r.ensure_fonts() {
+        return;
+    }
     capture_creation(r, 10);
     let object = sequence_from_values(r, point, scale);
     r.begin_document_gesture();
@@ -738,6 +741,13 @@ impl Registry {
         target: parameter_edit::Target,
         edit: parameters::Edit,
     ) {
+        if matches!(
+            edit,
+            parameters::Edit::Choice(parameters::ChoiceTarget::Font, _)
+        ) && !self.fonts.is_loaded()
+        {
+            return;
+        }
         if self.parameter_target(target.tool) != target
             || !self
                 .toolbar_state
@@ -766,10 +776,8 @@ impl Registry {
         }
     }
 
-    pub(super) fn ensure_fonts(&mut self) {
-        if self.fonts.ensure() {
-            self.reset_font_defaults();
-        }
+    pub(super) fn ensure_fonts(&mut self) -> bool {
+        font_workflow::ensure(self, false)
     }
 
     pub(super) fn preferred_font(&self, tool: usize) -> String {

@@ -1644,3 +1644,9 @@ msgstr "加入自动检测说明"
 
 msgid "When enabled, auto detection also runs Korean recognition and combines it with the base model results to improve Korean and mixed-text recognition. This increases recognition time and memory use. Manually selecting Korean is unaffected."
 msgstr "开启后，自动检测会额外运行韩文识别，并结合基础模型结果选择文字，提高韩文及混合文字的识别能力，但会增加识别耗时和内存占用。手动选择韩文不受此开关影响。"
+
+msgid "Retry loading fonts"
+msgstr "重试加载字体"
+
+msgid "Fonts unavailable — Retry"
+msgstr "字体不可用 — 重试"

@@ -283,6 +283,7 @@ impl Registry {
     }
 
     pub(super) fn close(&mut self) {
+        self.fonts.subscription = None;
         defer_export(
             lexift_core::domain::annotation_export::ExportEvent::Closed {
                 session: self.generation,

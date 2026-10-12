@@ -127,6 +127,50 @@ export component ComboBox inherits Rectangle {
     }); } }
 }
 
+// Fixed-size font control: loading and retry never alter panel measurements.
+export component FontPicker inherits Rectangle {
+    in property <int> status: 1;
+    in property <[string]> fonts;
+    in-out property <int> font-index;
+    in property <int> language-revision;
+    in property <int> active-field: -1;
+    callback menu-requested(AnnotationChoiceRequest);
+    callback retry-requested();
+    accessible-role: button;
+    accessible-label: root.status == 2 ? @tr("Fonts unavailable — Retry") : root.status == 0 ? @tr("Loading…") : @tr("Font");
+    forward-focus: keys;
+    keys := FocusScope {
+        enabled: root.status == 2;
+        key-pressed(event) => {
+            if event.text == " " || event.text == "\n" { root.retry-requested(); return accept; }
+            return reject;
+        }
+    }
+    if root.status != 2: ComboBox {
+        width: 100%; height: 100%; field: 12;
+        enabled: root.status != 0;
+        language-revision: root.language-revision;
+        active-field: root.active-field;
+        model: root.status == 1 ? root.fonts : [@tr("Loading…")];
+        current-index: root.status == 1 ? root.font-index : 0;
+        menu-requested(request) => {
+            if root.status == 1 { root.menu-requested(request); }
+            else { root.retry-requested(); }
+        }
+    }
+    if root.status == 2: Rectangle {
+        width: 100%; height: 100%; border-radius: 5px;
+        background: retry.has-hover ? Colors.icon-button-hover : Colors.background;
+        border-width: 1px; border-color: keys.has-focus ? Colors.primary : Colors.outline;
+        Text { x: 6px; width: parent.width - 12px; height: parent.height;
+            text: @tr("Retry loading fonts"); wrap: word-wrap;
+            font-size: 11px; color: Colors.error;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+        retry := TouchArea { clicked => { keys.focus(); root.retry-requested(); } }
+    }
+}
+
 export component CheckBox inherits Rectangle {
     in property <string> text;
     in-out property <bool> checked;

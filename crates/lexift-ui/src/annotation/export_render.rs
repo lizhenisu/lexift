@@ -52,6 +52,10 @@ pub(crate) fn compose(
     capture: Arc<ScreenCaptureFrame>,
     cancelled: &AtomicBool,
 ) -> Result<CapturedRegion> {
+    if super::font_service::document_needs_fonts(&snapshot.session) && !super::font_service::ready()
+    {
+        return Err(Error::new("annotation fonts are not ready"));
+    }
     let cancelled = || cancelled.load(Ordering::Acquire);
     let job = mosaic_worker::Job {
         key: 1,

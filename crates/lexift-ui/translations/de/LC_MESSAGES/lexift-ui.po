@@ -1644,3 +1644,9 @@ msgstr "Informationen zur Einbeziehung in die automatische Erkennung"
 
 msgid "When enabled, auto detection also runs Korean recognition and combines it with the base model results to improve Korean and mixed-text recognition. This increases recognition time and memory use. Manually selecting Korean is unaffected."
 msgstr "Wenn aktiviert, führt die automatische Erkennung zusätzlich eine koreanische Texterkennung aus und kombiniert deren Ergebnisse mit denen des Basismodells. Dies verbessert die Erkennung von Koreanisch und gemischten Texten, erhöht aber die Erkennungszeit und den Speicherbedarf. Die manuelle Auswahl von Koreanisch bleibt davon unberührt."
+
+msgid "Retry loading fonts"
+msgstr "Schriftarten erneut laden"
+
+msgid "Fonts unavailable — Retry"
+msgstr "Schriftarten nicht verfügbar — Erneut versuchen"

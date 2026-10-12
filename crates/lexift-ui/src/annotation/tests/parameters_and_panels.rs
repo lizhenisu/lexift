@@ -1948,3 +1948,126 @@ fn panels_flip_and_clamp_on_negative_monitors() {
         Point { x: -720, y: 788 }
     );
 }
+
+#[test]
+fn tool_group_menus_skip_fonts_parameters_and_keep_final_layout() {
+    use slint::Model;
+    use slint::platform::{
+        Platform, WindowAdapter, WindowEvent,
+        software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+    };
+    struct TestPlatform;
+    impl Platform for TestPlatform {
+        fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+            Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer))
+        }
+    }
+    slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+    init(
+        |_| PassiveWindowPreparation::Ready,
+        WindowLifecycleCallbacks::new(
+            |_, _| true,
+            |_| true,
+            |_| false,
+            |_, _, _| false,
+            |_, _| true,
+            |_, _| true,
+            || false,
+        ),
+    );
+    REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let r = slot.as_mut().unwrap();
+        r.toolbar_state.main.open(AnnotationToolbar::new().unwrap());
+        r.lifecycle.popup_work_area = Rc::new(|_| {
+            Some(Rect {
+                left: -1200,
+                top: -900,
+                right: 1800,
+                bottom: 1100,
+            })
+        });
+    });
+    for language in lexift_core::domain::ui_language::UiLanguage::ALL {
+        crate::i18n::select(language);
+        for scale in [1., 1.25] {
+            for dark in [false, true] {
+                for (group, tools) in GROUPS.iter().enumerate() {
+                    // Exercise both text and watermark as the remembered selection.
+                    for &tool in *tools {
+                        let (mode, binding) = REGISTRY.with(|slot| {
+                            let mut slot = slot.borrow_mut();
+                            let r = slot.as_mut().unwrap();
+                            r.selected[group] = tool;
+                            (r.mode, r.parameter_values.binding().get())
+                        });
+                        open_panel(group, true);
+                        let (generation, revision) = REGISTRY.with(|slot| {
+                            let slot = slot.borrow();
+                            let r = slot.as_ref().unwrap();
+                            assert!(!r.fonts.is_loaded(), "picker must not scan installed fonts");
+                            assert_eq!(r.mode, mode);
+                            assert_eq!(r.parameter_values.binding().get(), binding);
+                            assert!(!r.parameter_edit.active());
+                            let panel = r.toolbar_state.panel.get().unwrap();
+                            assert_eq!(panel.get_font_families().row_count(), 0);
+                            assert_eq!(panel.get_fields().row_count(), 0);
+                            panel.global::<crate::Colors>().set_preference(if dark {
+                                1
+                            } else {
+                                0
+                            });
+                            panel
+                                .window()
+                                .dispatch_event(WindowEvent::ScaleFactorChanged {
+                                    scale_factor: scale,
+                                });
+                            (r.generation, r.toolbar_state.panel.revision())
+                        });
+                        show_panel(generation, revision, 0);
+                        show_panel(generation, revision, 1);
+                        REGISTRY.with(|slot| {
+                            let slot = slot.borrow();
+                            let r = slot.as_ref().unwrap();
+                            let panel = r.toolbar_state.panel.get().unwrap();
+                            assert!(r.toolbar_state.panel_preparation.ready);
+                            assert!(panel.window().is_visible());
+                            assert_eq!(
+                                panel.window().size(),
+                                toolbar::physical_size(220., 46. + tools.len() as f32 * 42., scale)
+                            );
+                            if group == 3
+                                && tool == 9
+                                && let Ok(directory) =
+                                    std::env::var("LEXIFT_ANNOTATION_SNAPSHOT_DIR")
+                            {
+                                let pixels = panel.window().take_snapshot().unwrap();
+                                crate::i18n::write_test_bitmap(
+                                    &directory,
+                                    &format!("tool-menu-{}-{dark}-{scale}", language.code()),
+                                    pixels.width(),
+                                    pixels.height(),
+                                    pixels.as_slice().iter().map(|p| [p.r, p.g, p.b, p.a]),
+                                );
+                            }
+                        });
+                        open_panel(group, true);
+                        REGISTRY.with(|slot| {
+                            assert!(
+                                slot.borrow()
+                                    .as_ref()
+                                    .unwrap()
+                                    .toolbar_state
+                                    .panel
+                                    .get()
+                                    .is_none()
+                            )
+                        });
+                    }
+                }
+            }
+        }
+    }
+    crate::i18n::select(lexift_core::domain::ui_language::UiLanguage::EnglishUs);
+    shutdown();
+}

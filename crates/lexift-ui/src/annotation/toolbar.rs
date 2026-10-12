@@ -171,6 +171,7 @@ pub(super) struct Preparation {
     last: Option<Layout>,
     pub measured: bool,
     pub ready: bool,
+    pub timing: Option<PanelTiming>,
 }
 
 impl Preparation {
@@ -188,6 +189,62 @@ pub(super) fn physical_size(width: f32, height: f32, scale: f32) -> PhysicalSize
         (width * scale).ceil() as u32,
         (height * scale).ceil() as u32,
     )
+}
+
+/// One report per opening; no font names, document text or pointer-move logging.
+pub(super) struct PanelTiming {
+    requested_at: std::time::Instant,
+    create: std::time::Duration,
+    fonts: std::time::Duration,
+    pub native: std::time::Duration,
+    pub hidden_render: std::time::Duration,
+    pub retries: u8,
+    menu: bool,
+    generation: u64,
+    revision: u64,
+}
+
+impl PanelTiming {
+    pub fn new(
+        requested_at: std::time::Instant,
+        create: std::time::Duration,
+        fonts: std::time::Duration,
+        menu: bool,
+        generation: u64,
+        revision: u64,
+    ) -> Self {
+        Self {
+            requested_at,
+            create,
+            fonts,
+            menu,
+            generation,
+            revision,
+            native: Default::default(),
+            hidden_render: Default::default(),
+            retries: 0,
+        }
+    }
+
+    pub fn requested_at(&self) -> std::time::Instant {
+        self.requested_at
+    }
+
+    pub fn report(self, show: std::time::Duration) {
+        tracing::debug!(
+            generation = self.generation,
+            revision = self.revision,
+            menu = self.menu,
+            total_ms = self.requested_at.elapsed().as_secs_f64() * 1000.,
+            create_ms = self.create.as_secs_f64() * 1000.,
+            fonts_ms = self.fonts.as_secs_f64() * 1000.,
+            native_ms = self.native.as_secs_f64() * 1000.,
+            hidden_render_ms = self.hidden_render.as_secs_f64() * 1000.,
+            show_ms = show.as_secs_f64() * 1000.,
+            retries = self.retries,
+            "Annotation panel show returned (not compositor presentation)"
+        );
+    }
 }
 
 #[cfg(test)]

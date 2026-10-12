@@ -112,6 +112,9 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
         let mut open_geometry_panel = false;
         match event {
             0 => {
+                if matches!(r.mode, InteractionMode::Tool(3 | 4)) && !r.ensure_fonts() {
+                    return None;
+                }
                 // A second press cannot reuse an unfinished object's document transaction.
                 if r.gesture.as_ref().is_some_and(Active::is_manipulation) {
                     cancel_active_gesture(r);

@@ -296,8 +296,10 @@ pub(super) fn open_text_editor_with_settings(
             }
             None
         };
+        if !r.ensure_fonts() {
+            return;
+        }
         finish_text_edit_registry(r, true);
-        r.ensure_fonts();
         if index.is_none()
             && let Some(values) = &creation
         {

@@ -4,7 +4,7 @@ import { Colors } from "design/colors.slint";
 import { Spacing } from "design/spacing.slint";
 import { Typography } from "design/typography.slint";
 import { Metrics } from "design/metrics.slint";
-import { ComboBox, SpinBox, CheckBox, LineEdit, AnnotationChoiceRequest } from "annotation-fields.slint";
+import { FontPicker, ComboBox, SpinBox, CheckBox, LineEdit, AnnotationChoiceRequest } from "annotation-fields.slint";
 import { ScrollView } from "std-widgets.slint";
 
 export struct AnnotationValues {
@@ -173,6 +173,8 @@ export component AnnotationPanel inherits Window {
     in property <[string]> menu-labels;
     in property <[int]> fields;
     in property <[string]> font-families;
+    in property <int> font-status: 1;
+    callback font-retry-requested();
     in property <int> tool: 0;
     in property <string> heading: @tr("Rectangle");
     in-out property <AnnotationValues> values;
@@ -396,10 +398,10 @@ export component AnnotationPanel inherits Window {
             background-button := ToolButton {  kind: 0; text-style: 3; selected: root.values.text-background;
                 clicked => { root.text-style-requested({field: -4, options: [], selected: 0, lines: false, connectors: false,
                         x: self.absolute-position.x / 1px, y: self.absolute-position.y / 1px, width: self.width / 1px, height: self.height / 1px}); } }
-            ComboBox {   width:210px; height: 30px; field: 12; active-field: root.active-choice;
+            FontPicker { status: root.font-status; retry-requested => { root.font-retry-requested(); } width:210px; height: 30px; active-field: root.active-choice;
                 menu-requested(request) => { root.choice-requested(request); }
-                language-revision: root.language-revision; model: root.font-families;
-                current-index <=> root.values.font; }
+                language-revision: root.language-revision; fonts: root.font-families;
+                font-index <=> root.values.font; }
             NumericButton { tool:root.tool; height:38px; field:-102; value:root.values.text-size; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
             AnnotationPalette {
 
@@ -415,7 +417,7 @@ export component AnnotationPanel inherits Window {
                 background: Colors.icon-button-hover;
                 Text { x: 8px; width: 160px; height: 30px; text: root.values.text == "" ? @tr("Enter watermark") : root.values.text;
                     overflow: elide; vertical-alignment: center; color: Colors.foreground; }
-                TouchArea { clicked => { root.watermark-edit-requested(); } }
+                TouchArea { enabled: root.font-status == 1; clicked => { root.watermark-edit-requested(); } }
             }
             ComboBox {   width: 125px; height: 30px; field: 14;
                 active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); }
@@ -424,9 +426,9 @@ export component AnnotationPanel inherits Window {
                 current-index <=> root.values.mode; }
             NumericButton { tool:root.tool;   field:-101; value:root.values.strength; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
             NumericButton { tool:root.tool; height:38px; field:-102; value:root.values.text-size; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
-            ComboBox {   width: 130px; height: 30px; field: 12;
+            FontPicker { status: root.font-status; retry-requested => { root.font-retry-requested(); } width: 130px; height: 30px;
                 active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); }
-                language-revision: root.language-revision; model: root.font-families; current-index <=> root.values.font; }
+                language-revision: root.language-revision; fonts: root.font-families; font-index <=> root.values.font; }
             AnnotationPalette {
 
 
@@ -457,7 +459,7 @@ export component AnnotationPanel inherits Window {
                 expand := TouchArea { clicked=>{root.values.sequence-expanded=!root.values.sequence-expanded;} }
             }
             if root.values.sequence-expanded: CustomColorButton { width:38px;height:38px;active:root.active-choice == -8;clicked=>{root.choice-requested({field:-8,options:[],selected:0,lines:false,connectors:false,x:self.absolute-position.x/1px,y:self.absolute-position.y/1px,width:38,height:38});} }
-            if root.values.sequence-expanded: ComboBox { width:180px;height:38px;field:12;active-field:root.active-choice;model:root.font-families;current-index <=> root.values.font;menu-requested(q)=>{root.choice-requested(q);} }
+            if root.values.sequence-expanded: FontPicker { status: root.font-status; retry-requested => { root.font-retry-requested(); } width:180px;height:38px;active-field:root.active-choice;fonts:root.font-families;font-index <=> root.values.font;menu-requested(q)=>{root.choice-requested(q);} }
             if root.values.sequence-expanded: ToolButton { kind:8;text-style:2;selected:root.values.text-outline;clicked=>{root.text-style-requested({field:-3,options:[],selected:0,lines:false,connectors:false,x:self.absolute-position.x/1px,y:self.absolute-position.y/1px,width:38,height:38}); } }
             if root.values.sequence-expanded: CheckBox { width:self.content-width;text:@tr("Guide");checked <=> root.values.sequence-guide; }
             if root.values.sequence-expanded: NumericButton { tool:root.tool; height:38px; field:-108; value:root.values.sequence-ratio; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }

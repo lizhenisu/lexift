@@ -1181,6 +1181,9 @@ fn render_effect_layers(
     effects: Option<mosaic_worker::View<'_>>,
     capture: Option<&lexift_core::ports::screen_capture::ScreenCaptureFrame>,
 ) -> Option<Pixmap> {
+    if super::font_service::document_needs_fonts(session) && !super::font_service::ready() {
+        return None;
+    }
     let width = u32::try_from(monitor.right - monitor.left).ok()?;
     let height = u32::try_from(monitor.bottom - monitor.top).ok()?;
     if width == 0 || height == 0 || width as u64 * height as u64 > 40_000_000 {
