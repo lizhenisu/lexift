@@ -1650,3 +1650,42 @@ msgstr "重试加载字体"
 
 msgid "Fonts unavailable — Retry"
 msgstr "字体不可用 — 重试"
+
+msgid "Italic text"
+msgstr "斜体文字"
+
+msgid "Text background"
+msgstr "文字背景"
+
+msgid "Finish annotation"
+msgstr "完成标注"
+
+msgid "Select objects"
+msgstr "选择对象"
+
+msgid "Straight line"
+msgstr "直线"
+
+msgid "Curved line"
+msgstr "曲线"
+
+msgid "Choose shape"
+msgstr "选择形状"
+
+msgid "Choose brush"
+msgstr "选择画笔"
+
+msgid "Choose line tool"
+msgstr "选择线条工具"
+
+msgid "Choose text tool"
+msgstr "选择文字工具"
+
+msgid "Choose mosaic tool"
+msgstr "选择马赛克工具"
+
+msgid "Move toolbar"
+msgstr "移动工具条"
+
+msgid "Bold text"
+msgstr "粗体文字"

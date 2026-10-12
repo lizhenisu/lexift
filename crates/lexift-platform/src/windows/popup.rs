@@ -1551,6 +1551,64 @@ fn passive_extended_style(style: isize) -> isize {
     shell_policy::tool_style(style) | WS_EX_NOACTIVATE.0 as isize
 }
 
+/// Disable input without WS_EX_LAYERED, which hides Slint's rendered client area on Windows.
+/// The per-HWND guard preserves this policy when Winit rewrites its window styles on show.
+pub(crate) fn configure_hint_input(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    use windows::Win32::{
+        UI::Input::KeyboardAndMouse::{EnableWindow, IsWindowEnabled},
+        UI::Shell::SetWindowSubclass,
+    };
+    let hwnd = required_hwnd(window)?;
+    unsafe {
+        if !SetWindowSubclass(hwnd, Some(hint_input_proc), HINT_INPUT_SUBCLASS, 0).as_bool() {
+            return Err(lexift_core::Error::new(
+                "Could not protect hint input policy",
+            ));
+        }
+        let _ = EnableWindow(hwnd, false);
+        if IsWindowEnabled(hwnd).as_bool() {
+            return Err(lexift_core::Error::new("Could not disable hint input"));
+        }
+    }
+    Ok(())
+}
+const HINT_INPUT_SUBCLASS: usize = 0x4c584849;
+unsafe extern "system" fn hint_input_proc(
+    hwnd: windows::Win32::Foundation::HWND,
+    message: u32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+    _id: usize,
+    _data: usize,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::{
+        Foundation::LRESULT,
+        UI::{
+            Shell::{DefSubclassProc, RemoveWindowSubclass},
+            WindowsAndMessaging::*,
+        },
+    };
+    unsafe {
+        match message {
+            WM_STYLECHANGING if wparam.0 as i32 == GWL_STYLE.0 => {
+                let styles = lparam.0 as *mut STYLESTRUCT;
+                if !styles.is_null() {
+                    (*styles).styleNew |= WS_DISABLED.0;
+                }
+            }
+            WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
+            WM_NCHITTEST => return LRESULT(HTTRANSPARENT as isize),
+            WM_NCDESTROY => {
+                let _ = RemoveWindowSubclass(hwnd, Some(hint_input_proc), HINT_INPUT_SUBCLASS);
+            }
+            _ => {}
+        }
+        DefSubclassProc(hwnd, message, wparam, lparam)
+    }
+}
+
 pub(crate) fn set_click_through(
     window: &impl raw_window_handle::HasWindowHandle,
     enabled: bool,
@@ -2130,6 +2188,52 @@ mod passive_style_regression {
             let _ = unsafe { DestroyWindow(self.0) };
         }
     }
+    #[test]
+    fn hints_keep_disabled_input_through_backend_rewrites_without_layering() {
+        use windows::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled;
+        let foreground = unsafe { GetForegroundWindow() };
+        let window = OwnedWindow(
+            unsafe {
+                CreateWindowExW(
+                    WINDOW_EX_STYLE(0),
+                    w!("STATIC"),
+                    w!("Lexift hint regression"),
+                    WS_POPUP,
+                    0,
+                    0,
+                    96,
+                    28,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            }
+            .unwrap(),
+        );
+        configure_passive(&window).unwrap();
+        configure_hint_input(&window).unwrap();
+        assert!(!unsafe { IsWindowEnabled(window.0) }.as_bool());
+        for style in [WS_POPUP.0, WS_POPUP.0 | WS_VISIBLE.0] {
+            unsafe { SetWindowLongPtrW(window.0, GWL_STYLE, style as isize) };
+            assert!(!unsafe { IsWindowEnabled(window.0) }.as_bool());
+            assert_eq!(
+                unsafe { GetWindowLongPtrW(window.0, GWL_EXSTYLE) } & WS_EX_LAYERED.0 as isize,
+                0
+            );
+        }
+        let hit = unsafe {
+            SendMessageW(
+                window.0,
+                WM_NCHITTEST,
+                Some(windows::Win32::Foundation::WPARAM(0)),
+                Some(windows::Win32::Foundation::LPARAM(0)),
+            )
+        };
+        assert_eq!(hit.0, HTTRANSPARENT as isize);
+        assert_eq!(unsafe { GetForegroundWindow() }, foreground);
+    }
+
     #[test]
     fn backend_style_rewrites_preserve_passive_policy_until_explicit_interactive_transition() {
         let foreground = unsafe { GetForegroundWindow() };

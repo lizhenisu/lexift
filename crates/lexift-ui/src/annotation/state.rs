@@ -36,6 +36,7 @@ pub(super) struct Registry {
     pub(super) toolbar_state: ToolbarState,
     pub(super) canvas_state: CanvasState,
     pub(super) render_state: RenderState,
+    pub(super) hints: hints::State,
     pub(super) export: export::State,
     pub(super) editor: editor::State,
     pub(super) fonts: fonts::Directory,

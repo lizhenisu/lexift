@@ -62,6 +62,7 @@ mod font_service;
 mod font_workflow;
 mod fonts;
 mod frame;
+mod hints;
 #[path = "mosaic_session.rs"]
 mod mosaic;
 mod numeric;
@@ -177,6 +178,7 @@ pub(crate) fn init(
                 first_magnifier_measured: false,
                 magnifier_timer: slint::Timer::default(),
             },
+            hints: hints::State::default(),
             export: export::State::default(),
             editor: editor::State::default(),
             fonts: fonts::Directory::default(),

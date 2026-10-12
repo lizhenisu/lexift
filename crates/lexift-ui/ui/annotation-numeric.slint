@@ -1,3 +1,4 @@
+import { AnnotationHintTarget } from "annotation-hint.slint";
 import { Colors } from "design/colors.slint";
 import { AnnotationChoiceRequest, Slider, SpinBox } from "annotation-fields.slint";
 
@@ -31,17 +32,17 @@ export component NumericButton inherits Rectangle {
     callback scrolled(int,float);
     height: 38px; width: max(86px, value-metrics.preferred-width + 56px);
     border-radius: 6px; opacity: root.enabled ? 1 : 0.45;
-    accessible-role: button; accessible-label: NumericPresentation.name(root.field,root.tool) + " " + NumericPresentation.display(root.field,root.value);
-    Tooltip { text:@markdown("\{NumericPresentation.name(root.field,root.tool)}"); }
-    background: area.pressed ? Colors.icon-button-pressed : root.active-field == root.field ? Colors.primary-container : area.has-hover && root.enabled ? Colors.icon-button-hover : transparent;
+    accessible-role: button; accessible-enabled:root.enabled; accessible-label: NumericPresentation.name(root.field,root.tool) + " " + NumericPresentation.display(root.field,root.value);
+    AnnotationHintTarget { width:parent.width; height:parent.height; text:NumericPresentation.name(root.field,root.tool); hovered:area.has-hover; pressed:area.pressed; }
+    background: area.pressed && root.enabled ? Colors.icon-button-pressed : root.active-field == root.field ? Colors.primary-container : area.has-hover && root.enabled ? Colors.icon-button-hover : transparent;
     value-metrics := Text { visible:false; text:NumericPresentation.display(root.field,root.value); font-size:13px; }
     Image { x:8px; y:(parent.height - 24px)/2; width:24px; height:24px; source:NumericPresentation.icon(root.field); colorize:Colors.foreground; }
     Rectangle { x:40px; y:(parent.height - 28px)/2; width:parent.width - 48px; height:28px; border-radius:5px; background:Colors.background;
         Text { width:100%; height:100%; text:NumericPresentation.display(root.field,root.value); font-size:13px; color:Colors.foreground; horizontal-alignment:center; vertical-alignment:center; }
     }
-    area := TouchArea { enabled:root.enabled;
-        scroll-event(event) => { if event.delta-y == 0px { return reject; } root.scrolled(root.field,event.delta-y/1px); return accept; }
-        clicked => { root.requested({field:root.field,options:[],selected:0,lines:false,connectors:false,x:root.absolute-position.x/1px,y:root.absolute-position.y/1px,width:root.width/1px,height:root.height/1px}); }
+    area := TouchArea {
+        scroll-event(event) => { if !root.enabled || event.delta-y == 0px { return reject; } root.scrolled(root.field,event.delta-y/1px); return accept; }
+        clicked => { if root.enabled { root.requested({field:root.field,options:[],selected:0,lines:false,connectors:false,x:root.absolute-position.x/1px,y:root.absolute-position.y/1px,width:root.width/1px,height:root.height/1px}); } }
     }
 }
 

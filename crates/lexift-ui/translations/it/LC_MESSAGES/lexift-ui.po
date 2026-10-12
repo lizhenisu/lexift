@@ -1650,3 +1650,42 @@ msgstr "Riprova a caricare i caratteri"
 
 msgid "Fonts unavailable — Retry"
 msgstr "Caratteri non disponibili — Riprova"
+
+msgid "Italic text"
+msgstr "Testo in corsivo"
+
+msgid "Text background"
+msgstr "Sfondo del testo"
+
+msgid "Finish annotation"
+msgstr "Termina annotazione"
+
+msgid "Select objects"
+msgstr "Seleziona oggetti"
+
+msgid "Straight line"
+msgstr "Linea retta"
+
+msgid "Curved line"
+msgstr "Linea curva"
+
+msgid "Choose shape"
+msgstr "Scegli forma"
+
+msgid "Choose brush"
+msgstr "Scegli pennello"
+
+msgid "Choose line tool"
+msgstr "Scegli strumento linea"
+
+msgid "Choose text tool"
+msgstr "Scegli strumento testo"
+
+msgid "Choose mosaic tool"
+msgstr "Scegli strumento mosaico"
+
+msgid "Move toolbar"
+msgstr "Sposta barra degli strumenti"
+
+msgid "Bold text"
+msgstr "Testo in grassetto"

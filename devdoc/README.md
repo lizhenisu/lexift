@@ -50,6 +50,8 @@
 - [工具条拖动、收起与面板准备](annotation/annotation-toolbar-preparation.md)
 - [工具选择菜单首次展开验证](releases/annotation-menu-latency-2026-10-12.md)
 - [标注字体后台加载验证](releases/annotation-font-background-2026-10-12.md)
+- [标注按钮悬停提示](annotation/annotation-hints.md)
+- [标注按钮提示验证](releases/annotation-hints-2026-10-12.md)
 - [参数下拉菜单](annotation/annotation-dropdown.md)
 - [数值参数 UI](annotation/annotation-numeric-ui.md)
 - [自定义选色器](annotation/annotation-color-picker.md)

@@ -183,6 +183,7 @@ pub(crate) fn toggle(requested_at: Instant) {
         let generation = r.generation;
         let revision = r.toolbar_state.main.open(main);
         let main = r.toolbar_state.main.get().unwrap();
+        hints::bind_toolbar(main, generation, hints::Owner::Toolbar(revision));
         let input = r.toolbar_state.main.input();
         main.on_tool_clicked(move |group, menu| {
             later_main(&input, generation, revision, move || {
@@ -283,6 +284,7 @@ impl Registry {
     }
 
     pub(super) fn close(&mut self) {
+        self.hints.clear();
         self.fonts.subscription = None;
         defer_export(
             lexift_core::domain::annotation_export::ExportEvent::Closed {

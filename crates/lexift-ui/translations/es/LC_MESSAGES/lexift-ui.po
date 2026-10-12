@@ -1650,3 +1650,42 @@ msgstr "Reintentar cargar las fuentes"
 
 msgid "Fonts unavailable — Retry"
 msgstr "Fuentes no disponibles — Reintentar"
+
+msgid "Italic text"
+msgstr "Texto en cursiva"
+
+msgid "Text background"
+msgstr "Fondo del texto"
+
+msgid "Finish annotation"
+msgstr "Finalizar anotación"
+
+msgid "Select objects"
+msgstr "Seleccionar objetos"
+
+msgid "Straight line"
+msgstr "Línea recta"
+
+msgid "Curved line"
+msgstr "Línea curva"
+
+msgid "Choose shape"
+msgstr "Elegir forma"
+
+msgid "Choose brush"
+msgstr "Elegir pincel"
+
+msgid "Choose line tool"
+msgstr "Elegir herramienta de línea"
+
+msgid "Choose text tool"
+msgstr "Elegir herramienta de texto"
+
+msgid "Choose mosaic tool"
+msgstr "Elegir herramienta de mosaico"
+
+msgid "Move toolbar"
+msgstr "Mover barra de herramientas"
+
+msgid "Bold text"
+msgstr "Texto en negrita"

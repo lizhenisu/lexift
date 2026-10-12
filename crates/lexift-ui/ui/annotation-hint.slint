@@ -1,0 +1,65 @@
+import { Colors } from "design/colors.slint";
+
+// Winit cannot map Tooltip outside its parent; one passive host serves both annotation views.
+export global AnnotationHints {
+    callback requested(string, float, float, float, float);
+    callback cancelled(float, float);
+}
+export component AnnotationHintTarget inherits Rectangle {
+    in property <string> text;
+    in property <bool> hovered;
+    in property <bool> pressed;
+    private property <bool> dismissed: false;
+    changed hovered => {
+        if !root.hovered {
+            root.dismissed = false;
+            AnnotationHints.cancelled(root.absolute-position.x / 1px, root.absolute-position.y / 1px);
+        } else if !root.dismissed && root.text != "" {
+            AnnotationHints.requested(root.text, root.absolute-position.x / 1px, root.absolute-position.y / 1px, root.width / 1px, root.height / 1px);
+        }
+    }
+    changed pressed => {
+        if root.pressed {
+            root.dismissed = true;
+            AnnotationHints.cancelled(root.absolute-position.x / 1px, root.absolute-position.y / 1px);
+        }
+    }
+    changed text => {
+        if root.hovered {
+            root.dismissed = true;
+            AnnotationHints.cancelled(root.absolute-position.x / 1px, root.absolute-position.y / 1px);
+        }
+    }
+}
+export global AnnotationPresentation {
+    public pure function tool(kind: int, style: int, mosaic: int) -> string {
+        return style == 1 ? @tr("Italic text") : style == 2 ? @tr("Outline") : style == 3 ? @tr("Text background")
+            : mosaic == 1 ? @tr("Area") : mosaic == 2 ? @tr("Brush")
+            : kind == 0 ? @tr("Rectangle") : kind == 1 ? @tr("Ellipse") : kind == 2 ? @tr("Spotlight")
+            : kind == 3 ? @tr("Pencil") : kind == 4 ? @tr("Highlighter") : kind == 5 ? @tr("Arrow")
+            : kind == 6 ? @tr("Polyline") : kind == 7 ? @tr("Magnifier") : kind == 8 ? @tr("Text")
+            : kind == 9 ? @tr("Watermark") : kind == 10 ? @tr("Sequence") : kind == 11 ? @tr("Mosaic")
+            : kind == 12 ? @tr("Mosaic sticker") : kind == 13 ? @tr("Eraser") : kind == 14 ? @tr("Undo") + " (Ctrl+Z)"
+            : kind == 15 ? @tr("Save annotation screenshot") : kind == 16 ? @tr("Finish annotation")
+            : kind == 17 ? @tr("Select objects") : kind == 18 ? @tr("Straight line") : @tr("Curved line");
+    }
+    public pure function group(group: int) -> string {
+        return group == 0 ? @tr("Choose shape") : group == 1 ? @tr("Choose brush")
+            : group == 2 ? @tr("Choose line tool") : group == 3 ? @tr("Choose text tool") : @tr("Choose mosaic tool");
+    }
+}
+export component AnnotationHintWindow inherits Window {
+    title: ""; no-frame: true; always-on-top: true; background: transparent;
+    in property <string> text;
+    in property <length> limit: 320px;
+    out property <length> content-width: min(root.limit, max(28px, measure.preferred-width + 16px));
+    out property <length> content-height: max(28px, label.preferred-height + 8px);
+    preferred-width: root.content-width; preferred-height: root.content-height;
+    min-width:root.content-width; max-width:root.content-width; min-height:root.content-height; max-height:root.content-height;
+    measure := Text { visible: false; text: root.text; font-size: 12px; }
+    Rectangle {
+        width: parent.width; height: parent.height; border-radius: 4px; background: Colors.foreground;
+        label := Text { x:8px; y:4px; width:parent.width - 16px; height:parent.height - 8px; text:root.text; wrap:word-wrap;
+            font-size:12px; color:Colors.surface; vertical-alignment:center; }
+    }
+}

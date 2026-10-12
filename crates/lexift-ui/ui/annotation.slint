@@ -1,3 +1,4 @@
+import { AnnotationHintTarget, AnnotationPresentation } from "annotation-hint.slint";
 import { NumericButton } from "annotation-numeric.slint";
 import { AnnotationPalette, CustomColorButton } from "annotation-palette.slint";
 import { Colors } from "design/colors.slint";
@@ -50,17 +51,17 @@ component ToolIcon inherits Rectangle {
     }
 }
 
-component ToolButton inherits Rectangle {
+export component ToolButton inherits Rectangle {
     in property <int> kind;
-    in property <string> label;
+    in property <string> label: AnnotationPresentation.tool(root.kind, root.text-style, root.mosaic-style);
     in property <bool> selected;
     in property <int> text-style: 0;
     in property <bool> enabled: true;
     in property <int> mosaic-style: 0;
     callback clicked();
     width: 38px; height: 38px; border-radius: 6px;
-    accessible-role: button; accessible-label: root.label;
-    background: area.pressed ? Colors.icon-button-pressed : root.selected ? Colors.primary-container
+    accessible-role: button; accessible-label: root.label; accessible-enabled:root.enabled;
+    background: area.pressed && root.enabled ? Colors.icon-button-pressed : root.selected ? Colors.primary-container
         : area.has-hover && root.enabled ? Colors.icon-button-hover : transparent;
     if root.kind < 19 && root.text-style == 0 && root.mosaic-style == 0: ToolIcon { x: 7px; y: 7px; kind: root.kind;
         ink: !root.enabled ? Colors.outline : root.selected ? Colors.primary : Colors.foreground; }
@@ -75,7 +76,8 @@ component ToolButton inherits Rectangle {
             : root.text-style == 3 ? @image-url("icons/text-background.svg") : @image-url("icons/curve.svg"); image-fit: contain;
         colorize: !root.enabled ? Colors.outline : root.selected ? Colors.primary : Colors.foreground;
     }
-    area := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+    area := TouchArea { clicked => { if root.enabled { root.clicked(); } } }
+    AnnotationHintTarget { width:parent.width; height:parent.height; text:root.label; hovered:area.has-hover; pressed:area.pressed; }
 }
 
 export component AnnotationToolbar inherits Window {
@@ -124,9 +126,10 @@ export component AnnotationToolbar inherits Window {
                     x: 4px + Math.mod(dot,2) * 7px; y: 10px + floor(dot/2) * 7px;
                     width: 4px; height: 4px; border-radius: 2px; background: Colors.outline;
                 }
-                TouchArea { mouse-cursor: move; pointer-event(event) => {
+                grip := TouchArea { mouse-cursor: move; pointer-event(event) => {
                     if event.kind == PointerEventKind.down && event.button == PointerEventButton.left { root.drag-requested(); }
                 } }
+                AnnotationHintTarget { width:parent.width; height:parent.height; text:@tr("Move toolbar"); hovered:grip.has-hover; pressed:grip.pressed; }
             }
             if !root.collapsed: HorizontalLayout {
             x: 34px; y: 7px; width: parent.width - 85px; height: 38px; spacing: 7px;
@@ -134,7 +137,7 @@ export component AnnotationToolbar inherits Window {
             ToolButton { kind: 17; selected: root.operate; clicked => { root.operate-requested(); } }
             for tool[group] in root.tools: HorizontalLayout {
                 spacing: 0px;
-                ToolButton { kind: tool; selected: root.active-group == group;
+                ToolButton { kind: tool; label:tool == 0 ? @tr("Geometry") : AnnotationPresentation.tool(tool,0,0); selected: root.active-group == group;
                     clicked => { root.tool-clicked(group, false); } }
                 if group != 4 && group != 6: Rectangle {
                     width: 18px; height: 38px; border-radius: 5px;
@@ -142,7 +145,9 @@ export component AnnotationToolbar inherits Window {
                     Path { x: 4px; y: 16px; width: 10px; height: 6px;
                         viewbox-width: 10; viewbox-height: 6; commands: "M1 1L5 5L9 1";
                         fill: transparent; stroke: Colors.secondary-foreground; stroke-width: 1.6px; }
+                    accessible-role: button; accessible-label: AnnotationPresentation.group(group);
                     arrow := TouchArea { clicked => { root.tool-clicked(group, true); } }
+                    AnnotationHintTarget { width:parent.width; height:parent.height; text:AnnotationPresentation.group(group); hovered:arrow.has-hover; pressed:arrow.pressed; }
                 }
             }
             Rectangle { width: 1px; background: Colors.outline; }
@@ -308,6 +313,7 @@ export component AnnotationPanel inherits Window {
                         x: custom-color.absolute-position.x / 1px, y: custom-color.absolute-position.y / 1px,
                         width: custom-color.width / 1px, height: custom-color.height / 1px});
                 } }
+                AnnotationHintTarget { width:parent.width; height:parent.height; text:@tr("Custom color"); hovered:custom-hit.has-hover; pressed:custom-hit.pressed; }
             }
 }
         numeric-lines := FlexboxLayout { flex-wrap:root.numeric-measuring ? no-wrap : wrap; visible: !root.menu && root.tool >= 5 && root.tool <= 7;
@@ -376,9 +382,10 @@ export component AnnotationPanel inherits Window {
                 border-color: root.values.color-index == 8 || root.active-choice == -2 ? Colors.primary : Colors.outline;
                 background: Colors.surface; accessible-role: button; accessible-label: @tr("Custom color");
                 Image { x: 4px; y: 4px; width: 20px; height: 20px; source: @image-url("icons/custom-color.svg"); }
-                TouchArea { clicked => { root.choice-requested({field: -2, options: [], selected: 0, lines: false, connectors: false,
+                third-hit := TouchArea { clicked => { root.choice-requested({field: -2, options: [], selected: 0, lines: false, connectors: false,
                     x: custom-third.absolute-position.x / 1px, y: custom-third.absolute-position.y / 1px,
                     width: custom-third.width / 1px, height: custom-third.height / 1px}); } }
+                AnnotationHintTarget { width:parent.width; height:parent.height; text:@tr("Custom color"); hovered:third-hit.has-hover; pressed:third-hit.pressed; }
             }
 }
         numeric-text := FlexboxLayout { flex-wrap:root.numeric-measuring ? no-wrap : wrap; visible: !root.menu && root.tool == 8;
@@ -389,6 +396,8 @@ export component AnnotationPanel inherits Window {
                     horizontal-alignment: center; vertical-alignment: center;
                     color: root.values.text-bold ? Colors.primary : Colors.foreground; }
                 bold-area := TouchArea { clicked => { root.values.text-bold = !root.values.text-bold; } }
+                accessible-role:button; accessible-label:@tr("Bold text");
+                AnnotationHintTarget { width:parent.width; height:parent.height; text:@tr("Bold text"); hovered:bold-area.has-hover; pressed:bold-area.pressed; }
             }
             ToolButton {  kind: 8; text-style: 1; selected: root.values.text-italic;
                 clicked => { root.values.text-italic = !root.values.text-italic; } }
@@ -443,7 +452,9 @@ export component AnnotationPanel inherits Window {
                 Image { width:100%;height:100%;image-fit:contain;
                     source: root.values.shape==0 ? @image-url("icons/sequence-circle.svg") : root.values.shape==1 ? @image-url("icons/sequence-circle-border.svg") : root.values.shape==2 ? @image-url("icons/sequence-outline.svg") : root.values.shape==3 ? @image-url("icons/sequence-plain.svg") : @image-url("icons/sequence-square.svg"); }
                 Text { width:100%;height:100%;text:root.values.sequence-label;font-size:13px;horizontal-alignment:center;vertical-alignment:center;color:root.values.shape==2 ? #444444 : root.values.shape==3 ? Colors.foreground : #ffffff;overflow:elide; }
-                TouchArea { clicked => { root.choice-requested({ field:23,options:[@tr("Filled circle"),@tr("Circle with white border"),@tr("Outline circle"),@tr("Number only"),@tr("Filled square")],selected:root.values.shape,lines:false,connectors:false,x:parent.absolute-position.x/1px,y:parent.absolute-position.y/1px,width:parent.width/1px,height:parent.height/1px }); } }
+                sequence-shape := TouchArea { clicked => { root.choice-requested({ field:23,options:[@tr("Filled circle"),@tr("Circle with white border"),@tr("Outline circle"),@tr("Number only"),@tr("Filled square")],selected:root.values.shape,lines:false,connectors:false,x:parent.absolute-position.x/1px,y:parent.absolute-position.y/1px,width:parent.width/1px,height:parent.height/1px }); } }
+                accessible-role:button; accessible-label:@tr("Choose shape");
+                AnnotationHintTarget { width:parent.width; height:parent.height; text:@tr("Choose shape"); hovered:sequence-shape.has-hover; pressed:sequence-shape.pressed; }
             }
             SpinBox {
                 input-editing(active) => { root.report-parameter-input(active, self.absolute-position.x / 1px, self.absolute-position.y / 1px, (self.width - 28px) / 1px, self.height / 1px); }
@@ -457,6 +468,8 @@ export component AnnotationPanel inherits Window {
             Rectangle { width:30px;height:30px;border-radius:5px;background:expand.has-hover ? Colors.icon-button-hover : transparent;
                 Image { x:6px;y:6px;width:18px;height:18px;source:root.values.sequence-expanded ? @image-url("icons/chevron-left.svg") : @image-url("icons/chevron-right.svg");colorize:Colors.foreground; }
                 expand := TouchArea { clicked=>{root.values.sequence-expanded=!root.values.sequence-expanded;} }
+                accessible-role:button; accessible-label:@tr("More actions");
+                AnnotationHintTarget { width:parent.width; height:parent.height; text:@tr("More actions"); hovered:expand.has-hover; pressed:expand.pressed; }
             }
             if root.values.sequence-expanded: CustomColorButton { width:38px;height:38px;active:root.active-choice == -8;clicked=>{root.choice-requested({field:-8,options:[],selected:0,lines:false,connectors:false,x:self.absolute-position.x/1px,y:self.absolute-position.y/1px,width:38,height:38});} }
             if root.values.sequence-expanded: FontPicker { status: root.font-status; retry-requested => { root.font-retry-requested(); } width:180px;height:38px;active-field:root.active-choice;fonts:root.font-families;font-index <=> root.values.font;menu-requested(q)=>{root.choice-requested(q);} }

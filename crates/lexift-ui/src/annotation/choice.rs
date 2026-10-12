@@ -700,6 +700,7 @@ fn open_menu(
         }) else {
             return;
         };
+        r.hints.clear();
         if request.field == 12 && !r.fonts.is_loaded() {
             return;
         }

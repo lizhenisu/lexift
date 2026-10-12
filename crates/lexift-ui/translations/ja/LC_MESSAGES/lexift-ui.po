@@ -1650,3 +1650,42 @@ msgstr "フォントの読み込みを再試行"
 
 msgid "Fonts unavailable — Retry"
 msgstr "フォントを利用できません — 再試行"
+
+msgid "Italic text"
+msgstr "斜体"
+
+msgid "Text background"
+msgstr "文字の背景"
+
+msgid "Finish annotation"
+msgstr "注釈を終了"
+
+msgid "Select objects"
+msgstr "オブジェクトを選択"
+
+msgid "Straight line"
+msgstr "直線"
+
+msgid "Curved line"
+msgstr "曲線"
+
+msgid "Choose shape"
+msgstr "図形を選択"
+
+msgid "Choose brush"
+msgstr "ブラシを選択"
+
+msgid "Choose line tool"
+msgstr "線ツールを選択"
+
+msgid "Choose text tool"
+msgstr "文字ツールを選択"
+
+msgid "Choose mosaic tool"
+msgstr "モザイクツールを選択"
+
+msgid "Move toolbar"
+msgstr "ツールバーを移動"
+
+msgid "Bold text"
+msgstr "太字"

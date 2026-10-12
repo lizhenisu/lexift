@@ -1,3 +1,4 @@
+import { AnnotationHintTarget } from "annotation-hint.slint";
 import { Colors } from "design/colors.slint";
 
 // Shared frame and states for preset-row and standalone custom color entries.
@@ -21,6 +22,7 @@ export component CustomColorButton inherits Rectangle {
             border-width:root.selected ? 2px : 1px; border-color:root.selected || root.active ? Colors.primary : Colors.outline; }
     }
     hit := TouchArea { clicked=>{root.clicked();} }
+    AnnotationHintTarget { width:parent.width; height:parent.height; text:@tr("Custom color"); hovered:hit.has-hover; pressed:hit.pressed; }
 }
 
 // Shared preset/custom row. The caller owns the color target and popup lifetime.

@@ -142,6 +142,7 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) set_popup_dismissal: SetPopupDismissal,
     pub(crate) attach_tool_window: AttachToolWindow,
     pub(crate) annotation_displays: AnnotationDisplays,
+    pub(crate) configure_hint_window: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) annotation_click_through: AnnotationClickThrough,
     pub(crate) annotation_corner_cursor: AnnotationCornerCursor,
     pub(crate) annotation_brush_cursor: AnnotationBrushCursor,
@@ -209,6 +210,7 @@ impl WindowLifecycleCallbacks {
             set_popup_dismissal: Rc::new(set_popup_dismissal),
             attach_tool_window: Rc::new(attach_tool_window),
             annotation_displays: Rc::new(Vec::new),
+            configure_hint_window: Rc::new(|_| false),
             annotation_click_through: Rc::new(|_, _| false),
             annotation_corner_cursor: Rc::new(|_, _| false),
             annotation_brush_cursor: Rc::new(|_, _| false),
@@ -305,6 +307,12 @@ impl WindowLifecycleCallbacks {
     /// Returns focus to the tray only after explicit menu cancellation.
     pub fn with_tray_menu_cancelled(mut self, callback: impl Fn() + 'static) -> Self {
         self.tray_menu_cancelled = Rc::new(callback);
+        self
+    }
+
+    /// Supplies passive hint input policy independently of annotation canvas ordering.
+    pub fn with_hint_window(mut self, callback: impl Fn(&slint::Window) -> bool + 'static) -> Self {
+        self.configure_hint_window = Rc::new(callback);
         self
     }
 

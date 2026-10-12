@@ -1650,3 +1650,42 @@ msgstr "Réessayer le chargement des polices"
 
 msgid "Fonts unavailable — Retry"
 msgstr "Polices indisponibles — Réessayer"
+
+msgid "Italic text"
+msgstr "Texte en italique"
+
+msgid "Text background"
+msgstr "Fond du texte"
+
+msgid "Finish annotation"
+msgstr "Terminer l’annotation"
+
+msgid "Select objects"
+msgstr "Sélectionner des objets"
+
+msgid "Straight line"
+msgstr "Ligne droite"
+
+msgid "Curved line"
+msgstr "Courbe"
+
+msgid "Choose shape"
+msgstr "Choisir une forme"
+
+msgid "Choose brush"
+msgstr "Choisir un pinceau"
+
+msgid "Choose line tool"
+msgstr "Choisir un outil de ligne"
+
+msgid "Choose text tool"
+msgstr "Choisir un outil de texte"
+
+msgid "Choose mosaic tool"
+msgstr "Choisir un outil de mosaïque"
+
+msgid "Move toolbar"
+msgstr "Déplacer la barre d’outils"
+
+msgid "Bold text"
+msgstr "Texte en gras"

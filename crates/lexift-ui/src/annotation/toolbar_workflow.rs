@@ -325,6 +325,7 @@ pub(super) fn open_panel(group: usize, menu: bool) {
             r.parameter_values.bind(r.parameter_object(tool as usize));
         }
         let panel = r.toolbar_state.panel.get().unwrap();
+        hints::bind_panel(panel, generation, hints::Owner::Panel(panel_revision));
         if !menu && group <= 6 {
             panel.on_numeric_scrolled(move |field, delta| {
                 REGISTRY.with(|slot| {
@@ -934,6 +935,7 @@ pub(super) fn toggle_toolbar_collapse() {
         else {
             return;
         };
+        r.hints.clear();
         r.toolbar_state.main.cancel_position();
         r.toolbar_state.toolbar_drag = None;
         r.toolbar_state.toolbar_press = None;
@@ -1470,6 +1472,7 @@ impl Registry {
     }
 
     pub(super) fn close_panel(&mut self) {
+        self.hints.clear();
         // Reject reentrant owner events before dropping child windows and hooks.
         self.fonts.subscription = None;
         self.toolbar_state.panel_preparation = Default::default();

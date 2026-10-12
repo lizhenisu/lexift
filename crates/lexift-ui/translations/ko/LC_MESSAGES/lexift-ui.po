@@ -1650,3 +1650,42 @@ msgstr "글꼴 불러오기 다시 시도"
 
 msgid "Fonts unavailable — Retry"
 msgstr "글꼴을 사용할 수 없음 — 다시 시도"
+
+msgid "Italic text"
+msgstr "기울임꼴"
+
+msgid "Text background"
+msgstr "텍스트 배경"
+
+msgid "Finish annotation"
+msgstr "주석 완료"
+
+msgid "Select objects"
+msgstr "개체 선택"
+
+msgid "Straight line"
+msgstr "직선"
+
+msgid "Curved line"
+msgstr "곡선"
+
+msgid "Choose shape"
+msgstr "도형 선택"
+
+msgid "Choose brush"
+msgstr "브러시 선택"
+
+msgid "Choose line tool"
+msgstr "선 도구 선택"
+
+msgid "Choose text tool"
+msgstr "텍스트 도구 선택"
+
+msgid "Choose mosaic tool"
+msgstr "모자이크 도구 선택"
+
+msgid "Move toolbar"
+msgstr "도구 모음 이동"
+
+msgid "Bold text"
+msgstr "굵은 텍스트"

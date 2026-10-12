@@ -266,6 +266,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
             services.runtime.handle().clone(), services.credential_store.clone(),
             Arc::new(lexift_translate::providers::llm::LlmService::new()?),
         ))
+        .with_hint_window(|window| window.with_winit_window(lexift_platform::configure_hint_window).is_some_and(|result| result.is_ok()))
         .with_popup_work_area(move |point| {
             screen_for_popup
                 .as_ref()?

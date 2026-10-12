@@ -302,6 +302,20 @@ pub fn configure_menu_window(
     Ok(())
 }
 
+/// Passive hints must never intercept desktop or annotation input.
+#[cfg(target_os = "windows")]
+pub fn configure_hint_window(window: &winit::window::Window) -> lexift_core::Result<()> {
+    windows::popup::configure_hint_input(window)
+}
+#[cfg(not(target_os = "windows"))]
+pub fn configure_hint_window(
+    _window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    Err(lexift_core::Error::new(
+        "Passive hints are unavailable on this platform",
+    ))
+}
+
 /// Lets the annotation canvas pass mouse input to the live desktop in operate mode.
 pub fn set_annotation_click_through(
     window: &impl raw_window_handle::HasWindowHandle,

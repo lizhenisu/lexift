@@ -1650,3 +1650,42 @@ msgstr "Retry loading fonts"
 
 msgid "Fonts unavailable — Retry"
 msgstr "Fonts unavailable — Retry"
+
+msgid "Italic text"
+msgstr "Italic text"
+
+msgid "Text background"
+msgstr "Text background"
+
+msgid "Finish annotation"
+msgstr "Finish annotation"
+
+msgid "Select objects"
+msgstr "Select objects"
+
+msgid "Straight line"
+msgstr "Straight line"
+
+msgid "Curved line"
+msgstr "Curved line"
+
+msgid "Choose shape"
+msgstr "Choose shape"
+
+msgid "Choose brush"
+msgstr "Choose brush"
+
+msgid "Choose line tool"
+msgstr "Choose line tool"
+
+msgid "Choose text tool"
+msgstr "Choose text tool"
+
+msgid "Choose mosaic tool"
+msgstr "Choose mosaic tool"
+
+msgid "Move toolbar"
+msgstr "Move toolbar"
+
+msgid "Bold text"
+msgstr "Bold text"

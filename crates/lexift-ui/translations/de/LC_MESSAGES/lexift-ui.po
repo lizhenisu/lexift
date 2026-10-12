@@ -1650,3 +1650,42 @@ msgstr "Schriftarten erneut laden"
 
 msgid "Fonts unavailable — Retry"
 msgstr "Schriftarten nicht verfügbar — Erneut versuchen"
+
+msgid "Italic text"
+msgstr "Kursiver Text"
+
+msgid "Text background"
+msgstr "Texthintergrund"
+
+msgid "Finish annotation"
+msgstr "Anmerkung abschließen"
+
+msgid "Select objects"
+msgstr "Objekte auswählen"
+
+msgid "Straight line"
+msgstr "Gerade Linie"
+
+msgid "Curved line"
+msgstr "Kurve"
+
+msgid "Choose shape"
+msgstr "Form auswählen"
+
+msgid "Choose brush"
+msgstr "Pinsel auswählen"
+
+msgid "Choose line tool"
+msgstr "Linienwerkzeug auswählen"
+
+msgid "Choose text tool"
+msgstr "Textwerkzeug auswählen"
+
+msgid "Choose mosaic tool"
+msgstr "Mosaikwerkzeug auswählen"
+
+msgid "Move toolbar"
+msgstr "Werkzeugleiste verschieben"
+
+msgid "Bold text"
+msgstr "Fetter Text"
