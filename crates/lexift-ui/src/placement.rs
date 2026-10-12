@@ -1,15 +1,38 @@
 use lexift_core::domain::geometry::{Point, Rect};
 
+const SELECTION_TOOLBAR_TEXT_GAP: f32 = 12.0;
+const SELECTION_TOOLBAR_SCREEN_MARGIN: f32 = 8.0;
+
+pub(crate) const SELECTION_TOOLBAR_FADE_START: f64 = 24.0;
+pub(crate) const SELECTION_TOOLBAR_FADE_END: f64 = 220.0;
+
+/// Cursor-to-window edge distance in logical pixels, shared by placement and fading.
+pub(crate) fn selection_toolbar_distance(cursor: Point, bounds: Rect, scale: f32) -> f64 {
+    let dx = (i64::from(bounds.left) - i64::from(cursor.x))
+        .max(0)
+        .max(i64::from(cursor.x) - i64::from(bounds.right));
+    let dy = (i64::from(bounds.top) - i64::from(cursor.y))
+        .max(0)
+        .max(i64::from(cursor.y) - i64::from(bounds.bottom));
+    let scale = if scale.is_finite() {
+        scale.max(0.1)
+    } else {
+        1.0
+    };
+    (dx as f64).hypot(dy as f64) / f64::from(scale)
+}
+
 #[cfg(test)]
 mod selection_tests {
     use super::*;
     fn verify(rects: &[Rect], start: Point, end: Point, scale: f32, area: Rect) -> Point {
         let size = ((96.0 * scale) as u32, (48.0 * scale) as u32);
         let p = place_selection_toolbar(rects, start, end, size, scale, area).unwrap();
-        let gap = (8.0 * scale).ceil() as i32;
-        assert!(p.x >= area.left + gap && p.y >= area.top + gap);
-        assert!(i64::from(p.x) + i64::from(size.0) <= i64::from(area.right - gap));
-        assert!(i64::from(p.y) + i64::from(size.1) <= i64::from(area.bottom - gap));
+        let gap = (12.0 * scale).ceil() as i32;
+        let margin = (8.0 * scale).ceil() as i32;
+        assert!(p.x >= area.left + margin && p.y >= area.top + margin);
+        assert!(i64::from(p.x) + i64::from(size.0) <= i64::from(area.right - margin));
+        assert!(i64::from(p.y) + i64::from(size.1) <= i64::from(area.bottom - margin));
         for r in rects {
             assert!(
                 p.x + size.0 as i32 <= r.left - gap
@@ -50,7 +73,18 @@ mod selection_tests {
             (Point { x: 100, y: 155 }, Point { x: 480, y: 100 }),
         ] {
             let p = verify(&rows, start, end, 1.0, area);
-            assert!(p.y >= end.y + 8);
+            assert!(
+                selection_toolbar_distance(
+                    end,
+                    Rect {
+                        left: p.x,
+                        top: p.y,
+                        right: p.x + 96,
+                        bottom: p.y + 48
+                    },
+                    1.
+                ) < SELECTION_TOOLBAR_FADE_END
+            );
         }
     }
     #[test]
@@ -129,8 +163,305 @@ mod selection_tests {
             1.0,
             area,
         );
-        assert_eq!(p.y, 48);
+        assert_eq!(p.y, 52);
     }
+    #[test]
+    fn nearest_corner_and_below_ties_use_both_axis_gaps() {
+        let area = Rect {
+            left: 0,
+            top: 0,
+            right: 1000,
+            bottom: 700,
+        };
+        let text = Rect {
+            left: 300,
+            top: 250,
+            right: 500,
+            bottom: 300,
+        };
+        for scale in [1., 1.25] {
+            let gap = (12_f32 * scale).ceil() as i32;
+            let (w, h) = ((96_f32 * scale) as i32, (48_f32 * scale) as i32);
+            for (end, expected) in [
+                (
+                    Point { x: 500, y: 300 },
+                    Point {
+                        x: 500 + gap,
+                        y: 300 + gap,
+                    },
+                ),
+                (
+                    Point { x: 300, y: 300 },
+                    Point {
+                        x: 300 - gap - w,
+                        y: 300 + gap,
+                    },
+                ),
+                (
+                    Point { x: 300, y: 250 },
+                    Point {
+                        x: 300 - gap - w,
+                        y: 250 - gap - h,
+                    },
+                ),
+                (
+                    Point { x: 500, y: 250 },
+                    Point {
+                        x: 500 + gap,
+                        y: 250 - gap - h,
+                    },
+                ),
+            ] {
+                assert_eq!(
+                    verify(&[text], Point { x: 400, y: 275 }, end, scale, area),
+                    expected
+                );
+            }
+            let tie = verify(
+                &[text],
+                Point { x: 400, y: 275 },
+                Point { x: 400, y: 275 },
+                scale,
+                area,
+            );
+            assert_eq!(tie.y, text.bottom + gap);
+        }
+    }
+
+    #[test]
+    fn corner_failure_falls_back_without_increasing_screen_margin() {
+        let area = Rect {
+            left: 0,
+            top: 0,
+            right: 112,
+            bottom: 200,
+        };
+        let text = Rect {
+            left: 0,
+            top: 0,
+            right: 112,
+            bottom: 20,
+        };
+        let end = Point { x: 60, y: 20 };
+        assert_eq!(verify(&[text], end, end, 1., area), Point { x: 8, y: 32 });
+        let area = Rect { right: 800, ..area };
+        let text = Rect {
+            left: 300,
+            top: 0,
+            right: 500,
+            bottom: 200,
+        };
+        let p = verify(&[text], end, Point { x: 480, y: 100 }, 1., area);
+        assert!(p.x + 96 <= 288 || p.x >= 512);
+    }
+
+    #[test]
+    fn multiline_edge_prefers_near_fallback_over_remote_union_corner() {
+        let area = Rect {
+            left: -1000,
+            top: -500,
+            right: 0,
+            bottom: 300,
+        };
+        let rows = [
+            Rect {
+                left: -500,
+                top: 0,
+                right: -20,
+                bottom: 20,
+            },
+            Rect {
+                left: -300,
+                top: 25,
+                right: -200,
+                bottom: 50,
+            },
+        ];
+        for scale in [1., 1.25] {
+            let p = verify(
+                &rows,
+                Point { x: -500, y: 0 },
+                Point { x: -200, y: 50 },
+                scale,
+                area,
+            );
+            let gap = (12_f32 * scale).ceil() as i32;
+            assert_eq!(p.y, 50 + gap);
+            assert!(p.x <= -200 && p.x + (96_f32 * scale) as i32 >= -200);
+        }
+    }
+
+    #[test]
+    fn real_toolbar_size_uses_diagonal_placement_at_both_dpis() {
+        use slint::{
+            ComponentHandle,
+            platform::{
+                Platform, WindowAdapter,
+                software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+            },
+        };
+        use std::{cell::RefCell, rc::Rc};
+        struct TestPlatform(Rc<RefCell<Option<Rc<MinimalSoftwareWindow>>>>);
+        impl Platform for TestPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                let adapter = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+                *self.0.borrow_mut() = Some(adapter.clone());
+                Ok(adapter)
+            }
+        }
+        let last = Rc::new(RefCell::new(None));
+        slint::platform::set_platform(Box::new(TestPlatform(last.clone()))).unwrap();
+        let toolbar = crate::SelectionToolbarWindow::new().unwrap();
+        toolbar.set_history_supported(true);
+        let adapter = last.borrow().as_ref().unwrap().clone();
+        for scale in [1_f32, 1.25] {
+            toolbar
+                .window()
+                .dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged {
+                    scale_factor: scale,
+                });
+            let size = ((138. * scale).ceil() as u32, (48. * scale).ceil() as u32);
+            adapter.set_size(slint::PhysicalSize::new(size.0, size.1));
+            let text = Rect {
+                left: (240. * scale) as i32,
+                top: (130. * scale) as i32,
+                right: (480. * scale) as i32,
+                bottom: (154. * scale) as i32,
+            };
+            let area = Rect {
+                left: 0,
+                top: 0,
+                right: (800. * scale) as i32,
+                bottom: (400. * scale) as i32,
+            };
+            let end = Point {
+                x: text.right,
+                y: text.bottom,
+            };
+            let p = place_selection_toolbar(&[text], end, end, size, scale, area).unwrap();
+            assert_eq!(p.x - text.right, (12. * scale).ceil() as i32);
+            assert_eq!(p.y - text.bottom, (12. * scale).ceil() as i32);
+            for dark in [false, true] {
+                toolbar
+                    .global::<crate::Colors>()
+                    .set_preference(i32::from(dark));
+                slint::platform::update_timers_and_animations();
+                toolbar.window().request_redraw();
+                let mut pixels = vec![slint::Rgb8Pixel::default(); (size.0 * size.1) as usize];
+                assert!(adapter.draw_if_needed(|renderer| {
+                    renderer.render(&mut pixels, size.0 as usize);
+                }));
+                assert!(
+                    pixels
+                        .iter()
+                        .any(|pixel| pixel.r != 0 || pixel.g != 0 || pixel.b != 0)
+                );
+                if let Ok(directory) = std::env::var("LEXIFT_SELECTION_PLACEMENT_SNAPSHOT_DIR") {
+                    crate::i18n::write_test_bitmap(
+                        &directory,
+                        &format!("toolbar-{scale}-{dark}"),
+                        size.0,
+                        size.1,
+                        pixels
+                            .into_iter()
+                            .map(|pixel| [pixel.r, pixel.g, pixel.b, 255]),
+                    );
+                    std::fs::write(
+                        std::path::Path::new(&directory).join(format!("placement-{scale}.txt")),
+                        format!(
+                            "{} {} {} {} {} {}",
+                            text.left, text.top, text.right, text.bottom, p.x, p.y
+                        ),
+                    )
+                    .unwrap();
+                    let edge = Rect {
+                        left: (6. * scale) as i32,
+                        top: (374. * scale) as i32,
+                        right: (600. * scale) as i32,
+                        bottom: (394. * scale) as i32,
+                    };
+                    let end = Point {
+                        x: edge.left,
+                        y: (384. * scale) as i32,
+                    };
+                    let near = place_selection_toolbar(
+                        &[edge],
+                        Point {
+                            x: edge.right,
+                            y: end.y,
+                        },
+                        end,
+                        size,
+                        scale,
+                        area,
+                    )
+                    .unwrap();
+                    std::fs::write(
+                        std::path::Path::new(&directory)
+                            .join(format!("edge-placement-{scale}.txt")),
+                        format!(
+                            "{} {} {} {} {} {}",
+                            edge.left, edge.top, edge.right, edge.bottom, near.x, near.y
+                        ),
+                    )
+                    .unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn long_reverse_selections_at_screen_corners_remain_near_release() {
+        for scale in [1_f32, 1.25] {
+            let area = Rect {
+                left: -1200,
+                top: -500,
+                right: 0,
+                bottom: 400,
+            };
+            for right_edge in [false, true] {
+                for bottom_edge in [false, true] {
+                    let (left, right) = if right_edge {
+                        (-606, -6)
+                    } else {
+                        (-1194, -594)
+                    };
+                    let top = if bottom_edge { 374 } else { -494 };
+                    let text = Rect {
+                        left,
+                        top,
+                        right,
+                        bottom: top + 20,
+                    };
+                    let end = Point {
+                        x: if right_edge { right } else { left },
+                        y: top + 10,
+                    };
+                    let start = Point {
+                        x: if right_edge { left } else { right },
+                        y: top + 10,
+                    };
+                    let p = verify(&[text], start, end, scale, area);
+                    let toolbar = Rect {
+                        left: p.x,
+                        top: p.y,
+                        right: p.x + (96_f32 * scale) as i32,
+                        bottom: p.y + (48_f32 * scale) as i32,
+                    };
+                    assert!(
+                        selection_toolbar_distance(end, toolbar, scale)
+                            <= SELECTION_TOOLBAR_FADE_START
+                    );
+                    if bottom_edge {
+                        assert!(toolbar.bottom <= top - (12. * scale).ceil() as i32);
+                    } else {
+                        assert!(toolbar.top >= text.bottom + (12. * scale).ceil() as i32);
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn missing_bounds_double_click_and_no_full_size_space() {
         let area = Rect {
@@ -147,7 +478,18 @@ mod selection_tests {
             (Point { x: 100, y: 100 }, Point { x: 500, y: 400 }),
         ] {
             let p = verify(&[], start, end, 1.0, area);
-            assert!(p.y >= 409);
+            assert!(
+                selection_toolbar_distance(
+                    end,
+                    Rect {
+                        left: p.x,
+                        top: p.y,
+                        right: p.x + 96,
+                        bottom: p.y + 48
+                    },
+                    1.
+                ) < SELECTION_TOOLBAR_FADE_END
+            );
         }
         assert!(place_selection_toolbar(&[area], click, click, (96, 48), 1.0, area).is_none());
         assert!(
@@ -169,8 +511,8 @@ mod selection_tests {
     }
 }
 
-/// Places a full-size passive toolbar outside selected text. Horizontal free
-/// spans are swept at obstacle edges, avoiding a cubic candidate-grid search.
+/// Prefer a nearby corner, then nearby free spans. A distant valid corner must
+/// not outrank a reachable fallback and immediately trigger distance dismissal.
 pub(crate) fn place_selection_toolbar(
     bounds: &[Rect],
     start: Point,
@@ -184,13 +526,14 @@ pub(crate) fn place_selection_toolbar(
     } else {
         1.0
     };
-    let gap = (8.0 * scale).ceil() as i64;
+    let gap = (SELECTION_TOOLBAR_TEXT_GAP * scale).ceil() as i64;
+    let margin = (SELECTION_TOOLBAR_SCREEN_MARGIN * scale).ceil() as i64;
     let (width, height) = (i64::from(desired.0), i64::from(desired.1));
     let (left, top, right, bottom) = (
-        i64::from(area.left) + gap,
-        i64::from(area.top) + gap,
-        i64::from(area.right) - gap,
-        i64::from(area.bottom) - gap,
+        i64::from(area.left) + margin,
+        i64::from(area.top) + margin,
+        i64::from(area.right) - margin,
+        i64::from(area.bottom) - margin,
     );
     if width <= 0 || height <= 0 || right - left < width || bottom - top < height {
         return None;
@@ -228,6 +571,62 @@ pub(crate) fn place_selection_toolbar(
         })
         .collect();
     let (ex, ey) = (i64::from(end.x), i64::from(end.y));
+    // Expanded ranges encode the text gap once. Never clamp corners: doing so
+    // would silently reduce the requested separation on one of the axes.
+    let union = blocked.iter().fold(
+        (i64::MAX, i64::MAX, i64::MIN, i64::MIN),
+        |(l, t, r, b), &(x1, y1, x2, y2)| (l.min(x1), t.min(y1), r.max(x2), b.max(y2)),
+    );
+    let mut best = None;
+    let mut consider = |x: i64, y: i64| {
+        let bounds = Rect {
+            left: x as i32,
+            top: y as i32,
+            right: (x + width) as i32,
+            bottom: (y + height) as i32,
+        };
+        let distance = selection_toolbar_distance(end, bounds, scale);
+        let near = distance <= SELECTION_TOOLBAR_FADE_START;
+        let diagonal =
+            (x + width <= union.0 || x >= union.2) && (y + height <= union.1 || y >= union.3);
+        let direction = if y >= ey + gap {
+            0
+        } else if y + height <= ey - gap {
+            1
+        } else if x + width <= ex - gap {
+            2
+        } else {
+            3
+        };
+        // Preserve diagonal spacing while reachable; otherwise distance
+        // wins so a far corner cannot outrank a usable near fallback.
+        let score = (
+            !near,
+            near && !diagonal,
+            distance,
+            !diagonal,
+            direction,
+            y,
+            x,
+        );
+        if best.as_ref().is_none_or(|(saved, _)| score < *saved) {
+            best = Some((
+                score,
+                Point {
+                    x: x as i32,
+                    y: y as i32,
+                },
+            ));
+        }
+    };
+    for y in [union.3, union.1 - height] {
+        for x in [union.0 - width, union.2] {
+            if x < left || y < top || x + width > right || y + height > bottom {
+                continue;
+            }
+            consider(x, y);
+        }
+    }
     let mut ys = vec![
         top,
         bottom - height,
@@ -244,7 +643,6 @@ pub(crate) fn place_selection_toolbar(
     }
     ys.sort_unstable();
     ys.dedup();
-    let mut best = None;
     for y in ys {
         let mut intervals: Vec<_> = blocked
             .iter()
@@ -277,36 +675,20 @@ pub(crate) fn place_selection_toolbar(
             ];
             xs.sort_unstable();
             for x in xs {
-                let direction = if y >= ey + gap {
-                    0
-                } else if y + height <= ey - gap {
-                    1
-                } else if x + width <= ex - gap {
-                    2
-                } else if x >= ex + gap {
-                    3
-                } else {
+                if !(y >= ey + gap
+                    || y + height <= ey - gap
+                    || x + width <= ex - gap
+                    || x >= ex + gap)
+                {
                     continue;
-                };
+                }
                 if blocked
                     .iter()
                     .any(|&(l, t, r, b)| x < r && x + width > l && y < b && y + height > t)
                 {
                     continue;
                 }
-                let dx = (x - ex).max(0).max(ex - x - width);
-                let dy = (y - ey).max(0).max(ey - y - height);
-                let distance = i128::from(dx) * i128::from(dx) + i128::from(dy) * i128::from(dy);
-                let score = (direction, distance, (x - ex).abs() + (y - ey).abs(), y, x);
-                if best.as_ref().is_none_or(|(old, _)| score < *old) {
-                    best = Some((
-                        score,
-                        Point {
-                            x: x as i32,
-                            y: y as i32,
-                        },
-                    ));
-                }
+                consider(x, y);
             }
         }
     }

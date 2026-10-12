@@ -71,3 +71,32 @@ Evidence in ignored local `target/` artifacts:
 - [Tests](../../target/settings-only-tests-final.log), [Clippy](../../target/settings-only-clippy-final.log), [Release](../../target/settings-only-release-complete.log)
 
 Limits: Chinese IME composition, annotation text-editor focus, capture loss/Escape mid-drag, native edge snap, Explorer restart, a physical tray click and GPU device recovery were not separately exercised in this run. Tray and second-instance requests share the tested Main show path. GPU/magnifier hidden policy wiring and existing interaction tests cover their code paths, but no live magnifier or device-loss scene was created. This Windows-only change adds no Core Port, configuration schema, dependency or crate.
+
+
+## Selection toolbar placement
+
+The passive selection toolbar evaluates diagonal corners of the full selected-text bounds together with nearby below/above/side free spans. Candidates within the existing 24 logical-pixel fully visible distance win first; among these, diagonal corners win before distance. If none is within that range, closest distance wins, then diagonal preference and below/above/left/right tie ordering. This prevents reverse selection at a screen edge from choosing a far corner over a reachable location near release. Diagonal positions stay at least 12 logical pixels away on both axes; other positions preserve this gap on the separating axis. Physical spacing rounds up after DPI scaling (12 px at 100%, 15 px at 125%).
+
+Corners are rejected rather than clamped when they would leave the monitor work area. The below/above/side free-span search keeps at least 12 logical pixels from each text range, including gaps between discontinuous ranges. The independent screen safety margin remains 8 logical pixels. Missing text bounds retain the existing gesture estimate and double-click padding; no full-size unobstructed location means no toolbar.
+
+Placement and distance fading share the cursor-to-window distance and the unchanged 24/220 logical-pixel thresholds. Hidden preparation rejects a nearest location already at zero opacity before moving or showing the window. Bounded DPI stabilization, passive focus, toolbar size, actions and instance cleanup stay in the existing selection toolbar bridge. Candidate ranking retains only the best result instead of storing every free-span candidate.
+
+
+### Placement verification (2026-10-12)
+
+- Eight targeted regressions cover nearest corners, downward ties, four drag directions, multiline union, corner failure, side/gap fallback, independent 8 px screen margins, missing bounds, negative coordinates, cross-screen text and actual 138×48 logical-pixel Slint toolbar sizes at 100%/125%.
+- UI regression: 385 passed, 10 existing ignored. Software-rendered light/dark toolbar images were inspected at both scales. Local evidence: `target/selection-toolbar-gap/{toolbar,placement}-{1,1.25}-{false,true}.{bmp,png}`, `target/selection-toolbar-gap-tests.log`, `target/selection-toolbar-gap-ui-tests.log`. Placement PNGs composite the actual Slint toolbar with an artificial selection/background; they are not desktop screenshots.
+
+- UI all-target Clippy with warnings denied, formatting, Slint compilation and Windows Release passed. Release duration: 3m45s; SHA-256: `6cb5744d5918039ec99c594e20348b3819b160caa98b939c89051d7f6b7f3295`. Logs: `target/selection-toolbar-gap-clippy.log`, `target/selection-toolbar-gap-release.log`.
+- Started the exact project Release executable and verified PID 27640 at `D:/MyDocuments/Projects/lexift/target/release/lexift.exe`. Computer Use returned only ChatGPT in two post-launch window inventories, so native dual-monitor placement, focus, taskbar/Alt+Tab and actual cross-DPI transitions remain unverified. The new instance remains running for manual testing. No staging, commit or push was performed.
+
+
+### Reverse edge selection correction (2026-10-12)
+
+The prior diagonal-first implementation could choose a distant right corner when a right-to-left selection ended at the left edge. The 220 logical-pixel fade rule then closed the toolbar immediately. Nearby fallback candidates now participate even if a far diagonal fits. Regressions cover all four screen corners at both DPIs, negative coordinates, multiline ranges, normal diagonal preference, opacity when moving toward/away from the chosen position, and zero-opacity hidden preparation without a show.
+
+
+Follow-up verification: UI 387 passed, 10 existing ignored; formatting, Slint compilation and strict UI all-target Clippy passed. Logs: `target/selection-toolbar-near-ui-tests-final.log`, `target/selection-toolbar-near-clippy.log`. Reverse-edge light/dark 100%/125% composite images were inspected at `target/selection-toolbar-near/edge-{placement,crop}-{1,1.25}-{false,true}.png`; these use actual Slint toolbar pixels and an artificial source background/selection, not a native desktop capture. The chosen upper location remains inside the full-opacity distance at release; moving toward or away still uses the existing fade curve. Hidden preparation regression confirms a location already beyond the disappearance threshold never shows.
+
+
+Follow-up Windows Release passed (3m44s), with SHA-256 `852fc33822e7dc13a318388eade23a9608334d7b9c095d0083f82952aa403b70`; build log: `target/selection-toolbar-near-release.log`. Started and verified PID 22892 at `D:/MyDocuments/Projects/lexift/target/release/lexift.exe`. Two Computer Use inventories again exposed only ChatGPT, so actual dual-monitor reverse selection, cross-DPI transitions, native focus and Shell identity remain unverified. The updated instance remains running for manual testing. Earlier uncommitted placement changes were preserved; no staging, commit or push was performed.

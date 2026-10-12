@@ -19,8 +19,6 @@ use std::{
     time::Duration,
 };
 const TOOLBAR_FADE_SAMPLE_INTERVAL: Duration = Duration::from_millis(33);
-const TOOLBAR_FADE_START_LOGICAL_PX: f64 = 24.0;
-const TOOLBAR_FADE_END_LOGICAL_PX: f64 = 220.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
@@ -253,6 +251,16 @@ fn schedule_toolbar_show(work: &Rc<Work>, attempt: u8) {
                                 r.close();
                                 return;
                             };
+                            let bounds = Rect {
+                                left: point.x,
+                                top: point.y,
+                                right: point.x.saturating_add(size.width as i32),
+                                bottom: point.y.saturating_add(size.height as i32),
+                            };
+                            if toolbar_opacity(anchor, bounds, scale) <= 0.0 {
+                                r.close();
+                                return;
+                            }
                             let geometry = (point, size.width, size.height, scale.to_bits());
                             if work.placement.get() != Some(geometry) {
                                 if attempt >= 19 {
@@ -313,15 +321,9 @@ fn schedule_toolbar_show(work: &Rc<Work>, attempt: u8) {
 
 /// Measures from the cursor to the nearest point on the toolbar in logical pixels.
 pub(super) fn toolbar_opacity(cursor: Point, bounds: Rect, scale_factor: f32) -> f32 {
-    let dx = (i64::from(bounds.left) - i64::from(cursor.x))
-        .max(0)
-        .max(i64::from(cursor.x) - i64::from(bounds.right));
-    let dy = (i64::from(bounds.top) - i64::from(cursor.y))
-        .max(0)
-        .max(i64::from(cursor.y) - i64::from(bounds.bottom));
-    let physical_distance = ((dx as f64).hypot(dy as f64)) / f64::from(scale_factor.max(0.1));
-    ((TOOLBAR_FADE_END_LOGICAL_PX - physical_distance)
-        / (TOOLBAR_FADE_END_LOGICAL_PX - TOOLBAR_FADE_START_LOGICAL_PX))
+    let distance = placement::selection_toolbar_distance(cursor, bounds, scale_factor);
+    ((placement::SELECTION_TOOLBAR_FADE_END - distance)
+        / (placement::SELECTION_TOOLBAR_FADE_END - placement::SELECTION_TOOLBAR_FADE_START))
         .clamp(0.0, 1.0) as f32
 }
 
@@ -638,6 +640,93 @@ mod tests {
         assert_eq!(adapters.borrow()[1].shows.get(), 0);
         assert!(SELECTION_TOOLBAR_REGISTRY.with(|s| s.borrow().as_ref().unwrap().window.is_none()));
     }
+    #[test]
+    fn reverse_edge_placement_preserves_fade_and_unreachable_prepare_never_shows() {
+        let area = Rect {
+            left: 0,
+            top: 0,
+            right: 800,
+            bottom: 600,
+        };
+        for scale in [1_f32, 1.25] {
+            let text = Rect {
+                left: 6,
+                top: 570,
+                right: 600,
+                bottom: 590,
+            };
+            let end = Point { x: 6, y: 580 };
+            let size = ((138. * scale).ceil() as u32, (48. * scale).ceil() as u32);
+            let point = placement::place_selection_toolbar(
+                &[text],
+                Point { x: 600, y: 580 },
+                end,
+                size,
+                scale,
+                area,
+            )
+            .unwrap();
+            let bounds = Rect {
+                left: point.x,
+                top: point.y,
+                right: point.x + size.0 as i32,
+                bottom: point.y + size.1 as i32,
+            };
+            assert!(bounds.bottom <= text.top - (12. * scale).ceil() as i32);
+            assert_eq!(toolbar_opacity(end, bounds, scale), 1.);
+            assert_eq!(toolbar_opacity(point, bounds, scale), 1.);
+            let far = Point {
+                x: bounds.right
+                    + (placement::SELECTION_TOOLBAR_FADE_END * f64::from(scale)).ceil() as i32,
+                y: point.y,
+            };
+            assert_eq!(toolbar_opacity(far, bounds, scale), 0.);
+            let halfway = Point {
+                x: bounds.right + (100. * scale) as i32,
+                y: point.y,
+            };
+            assert!(
+                toolbar_opacity(halfway, bounds, scale) > 0.
+                    && toolbar_opacity(halfway, bounds, scale) < 1.
+            );
+        }
+        let adapters = Rc::new(RefCell::new(Vec::new()));
+        install(
+            |_| PassiveWindowPreparation::Ready,
+            adapters.clone(),
+            Rc::new(Cell::new(0)),
+        );
+        SELECTION_TOOLBAR_REGISTRY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            r.work_area = Rc::new(move |_| Some(area));
+            r.sync(
+                Some(Selection {
+                    text: "fixture".into(),
+                    anchor: Some(Point { x: 10, y: 300 }),
+                    gesture_start: Some(Point { x: 590, y: 300 }),
+                    bounds: vec![Rect {
+                        left: 0,
+                        top: 0,
+                        right: 600,
+                        bottom: 600,
+                    }],
+                }),
+                None,
+            );
+        });
+        drain(0);
+        assert_eq!(adapters.borrow()[0].shows.get(), 0);
+        assert!(
+            SELECTION_TOOLBAR_REGISTRY.with(|slot| slot
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .window
+                .is_none())
+        );
+    }
+
     #[test]
     fn changed_target_and_exhausted_preparation_destroy_without_showing() {
         let adapters = Rc::new(RefCell::new(Vec::new()));
