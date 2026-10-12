@@ -1431,6 +1431,15 @@ fn draw_document_interaction(
     scale: f32,
     hovered: Option<usize>,
 ) {
+    if let Some(geometry) = document.session.rectangle_erase_geometry() {
+        draw_erase_interaction(
+            pixmap,
+            geometry,
+            document.session.rectangle_erase_show_handles(),
+            monitor,
+            scale,
+        );
+    }
     let selected = document
         .selected()
         .and_then(|index| document.get(index))
@@ -1628,33 +1637,16 @@ fn draw_interaction_content(
             ) else {
                 continue;
             };
-            if handle >= 8
-                && matches!(
-                    selected.kind,
-                    Kind::HighlightRectangle | Kind::MosaicArea | Kind::StickerArea
-                )
-            {
-                if let Some(circle) =
-                    PathBuilder::from_circle(x - monitor.left as f32, y - monitor.top as f32, half)
-                {
-                    pixmap.fill_path(
-                        &circle,
-                        &color_paint([255, 255, 255]),
-                        FillRule::Winding,
-                        Transform::identity(),
-                        None,
-                    );
-                    pixmap.stroke_path(
-                        &circle,
-                        &color_paint([40, 129, 255]),
-                        &Stroke {
-                            width: scale,
-                            ..Stroke::default()
-                        },
-                        Transform::identity(),
-                        None,
-                    );
-                }
+            if matches!(
+                selected.kind,
+                Kind::HighlightRectangle | Kind::MosaicArea | Kind::StickerArea
+            ) {
+                draw_rectangle_handle(
+                    pixmap,
+                    (x - monitor.left as f32, y - monitor.top as f32),
+                    handle >= 8,
+                    scale,
+                );
                 continue;
             }
             let mut white = Paint::default();
@@ -1797,6 +1789,11 @@ fn erase_cuts<'a>(
                     );
                 }
             }
+            EraseRegion::RoundedRectangle { bounds, radius } => {
+                if let Some(shape) = notice_path(*bounds, *radius) {
+                    frame.fill_path(&shape, &paint, FillRule::Winding, transform, None);
+                }
+            }
             EraseRegion::Brush { points, diameter } => {
                 let Some(&first) = points.first() else {
                     continue;
@@ -1828,6 +1825,127 @@ fn erase_cuts<'a>(
                 }
             }
         }
+    }
+}
+
+/// Pure interaction raster, excluded from document/effect/export composition.
+pub(crate) fn draw_erase_interaction(
+    frame: &mut Pixmap,
+    geometry: lexift_core::domain::annotation_erase::RoundedRectangle,
+    handles: bool,
+    origin: Rect,
+    scale: f32,
+) {
+    // Rasterize in a canonical local ROI: fractional-DPI AA must not depend on
+    // whether the caller supplies a whole monitor or a cached interaction tile.
+    let b = geometry.bounds;
+    let padding = 18. * scale + 2.;
+    let Some(bounds) = crate::annotation_path::intersect(
+        Rect {
+            left: (b.left - padding).floor() as i32,
+            top: (b.top - padding).floor() as i32,
+            right: (b.right + padding).ceil() as i32,
+            bottom: (b.bottom + padding).ceil() as i32,
+        },
+        origin,
+    ) else {
+        return;
+    };
+    let Some(mut overlay) = Pixmap::new(
+        (bounds.right - bounds.left) as u32,
+        (bounds.bottom - bounds.top) as u32,
+    ) else {
+        return;
+    };
+    draw_erase_interaction_content(&mut overlay, geometry, handles, bounds, scale);
+    frame.draw_pixmap(
+        bounds.left - origin.left,
+        bounds.top - origin.top,
+        overlay.as_ref(),
+        &PixmapPaint::default(),
+        Transform::identity(),
+        None,
+    );
+}
+
+fn draw_erase_interaction_content(
+    frame: &mut Pixmap,
+    geometry: lexift_core::domain::annotation_erase::RoundedRectangle,
+    handles: bool,
+    origin: Rect,
+    scale: f32,
+) {
+    if let Some(shape) = path(geometry.bounds, Kind::Rectangle, geometry.radius(), origin) {
+        frame.stroke_path(
+            &shape,
+            &color_paint([40, 129, 255]),
+            &Stroke {
+                width: scale.max(1.),
+                ..Stroke::default()
+            },
+            Transform::identity(),
+            None,
+        );
+    }
+    if !handles {
+        return;
+    }
+    let b = geometry.bounds;
+    if let Some(rect) = SkRect::from_ltrb(
+        b.left - origin.left as f32,
+        b.top - origin.top as f32,
+        b.right - origin.left as f32,
+        b.bottom - origin.top as f32,
+    ) {
+        frame.stroke_path(
+            &PathBuilder::from_rect(rect),
+            &color_paint([40, 129, 255]),
+            &Stroke {
+                width: scale,
+                ..Stroke::default()
+            },
+            Transform::identity(),
+            None,
+        );
+    }
+    for (i, (x, y)) in geometry.handles(scale).into_iter().enumerate() {
+        draw_rectangle_handle(
+            frame,
+            (x - origin.left as f32, y - origin.top as f32),
+            i >= 8,
+            scale,
+        );
+    }
+}
+
+/// Shared interaction decoration for document rectangles and transient erase geometry.
+fn draw_rectangle_handle(frame: &mut Pixmap, (x, y): (f32, f32), round: bool, scale: f32) {
+    let shape = if round {
+        PathBuilder::from_circle(x, y, 4. * scale)
+    } else {
+        SkRect::from_xywh(x - 4. * scale, y - 4. * scale, 8. * scale, 8. * scale)
+            .map(PathBuilder::from_rect)
+    };
+    if let Some(shape) = shape {
+        frame.fill_path(
+            &shape,
+            &color_paint([255, 255, 255]),
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
+        let mut blue = color_paint([40, 129, 255]);
+        blue.anti_alias = round;
+        frame.stroke_path(
+            &shape,
+            &blue,
+            &Stroke {
+                width: scale,
+                ..Stroke::default()
+            },
+            Transform::identity(),
+            None,
+        );
     }
 }
 

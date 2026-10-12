@@ -157,13 +157,14 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                         .iter()
                         .map(|c| (c.bounds, c.window.window().scale_factor()))
                         .collect::<Vec<_>>();
-                    r.begin_document_gesture();
+                    r.finish_style_edit();
                     deselect_object(r);
                     r.gesture = Some(Active::Erasing(eraser::Press::begin(
                         &mut r.session,
                         point,
                         values.shape == 1,
                         values.size.clamp(1, 100) as f32 * scale,
+                        scale,
                         &views,
                     )));
                     cursor::refresh(r);
@@ -802,6 +803,7 @@ impl Registry {
                 changed.push(index);
             }
         }
+        self.session.finish_rectangle_erase();
         self.mode = mode;
         self.sync_edit_scope();
         if mode != InteractionMode::Tool(5) {

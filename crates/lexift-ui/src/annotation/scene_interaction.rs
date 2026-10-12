@@ -481,6 +481,10 @@ impl EditorOverlay {
 
 #[derive(PartialEq)]
 struct State {
+    erase: Option<(
+        lexift_core::domain::annotation_erase::RoundedRectangle,
+        bool,
+    )>,
     selected: Option<Object>,
     hovered: Option<Object>,
     editor: Option<EditorOverlay>,
@@ -489,7 +493,8 @@ struct State {
 
 impl State {
     fn caret_toggle_of(&self, previous: &Self) -> bool {
-        self.selected == previous.selected
+        self.erase == previous.erase
+            && self.selected == previous.selected
             && self.hovered == previous.hovered
             && self.scale == previous.scale
             && matches!((&self.editor, &previous.editor), (Some(a), Some(b))
@@ -550,6 +555,10 @@ impl SceneCompiler {
             })
             .cloned();
         let state = State {
+            erase: input
+                .session
+                .rectangle_erase_geometry()
+                .map(|geometry| (geometry, input.session.rectangle_erase_show_handles())),
             selected,
             hovered,
             editor: input.editor.cloned(),
@@ -561,14 +570,22 @@ impl SceneCompiler {
             .iter()
             .chain(state.hovered.iter())
             .chain(state.editor.iter().map(|e| &e.object));
-        let Some(first) = objects.next() else {
+        let mut bounds = if let Some(first) = objects.next() {
+            let mut bounds = first.bounds;
+            extend_object(&mut bounds, first, input.scale);
+            bounds
+        } else if let Some((geometry, _)) = state.erase {
+            geometry.bounds
+        } else {
             self.interactions.remove(&view);
             return Some(Vec::new());
         };
-        let mut bounds = first.bounds;
-        extend_object(&mut bounds, first, input.scale);
         for object in objects {
             extend_object(&mut bounds, object, input.scale);
+        }
+        if let Some((geometry, _)) = state.erase {
+            include(&mut bounds, (geometry.bounds.left, geometry.bounds.top));
+            include(&mut bounds, (geometry.bounds.right, geometry.bounds.bottom));
         }
         let padding = 18. * input.scale + 2.;
         let bounds = crate::annotation_path::intersect(
@@ -629,6 +646,15 @@ impl SceneCompiler {
                 input.scale,
                 hovered,
             );
+            if let Some((geometry, handles)) = state.erase {
+                annotation_render::draw_erase_interaction(
+                    &mut frame,
+                    geometry,
+                    handles,
+                    bounds,
+                    input.scale,
+                );
+            }
             if let Some(editor) = input.editor {
                 editor.draw(&mut frame, bounds, input.scale);
             }

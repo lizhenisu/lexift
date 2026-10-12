@@ -367,6 +367,9 @@ pub(super) fn apply_parameter_values(
         return None;
     }
     let source_object = target.object;
+    if tool == 13 && r.values(13).shape != values.shape {
+        r.session.finish_rectangle_erase();
+    }
     let previous_values = if tool == 10 {
         r.parameter_values.values(10, source_object)
     } else {

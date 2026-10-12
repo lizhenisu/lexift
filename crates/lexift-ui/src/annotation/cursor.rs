@@ -56,6 +56,24 @@ fn at_point(
     point: Option<(f32, f32)>,
     scale: f32,
 ) -> AnnotationCursor {
+    if mode == InteractionMode::Tool(6)
+        && gesture.is_none()
+        && let Some(hit) = point.and_then(|p| {
+            session
+                .rectangle_erase_geometry()
+                .and_then(|g| g.hit(p, scale))
+        })
+    {
+        return match hit {
+            lexift_core::domain::annotation_erase::RectangleEraseHit::Body => {
+                AnnotationCursor::Moving
+            }
+            lexift_core::domain::annotation_erase::RectangleEraseHit::Handle(h) if h >= 8 => {
+                AnnotationCursor::CornerRadius
+            }
+            lexift_core::domain::annotation_erase::RectangleEraseHit::Handle(h) => handle_cursor(h),
+        };
+    }
     let hit = if gesture.is_none() && !mode.is_mouse() {
         point.and_then(|p| session.hit(p, scale))
     } else {
@@ -144,7 +162,25 @@ pub(super) fn refresh(r: &Registry) {
                     )
                 })
             });
-        let desired = if let Some(cursor) = editing_control {
+        let erase_cursor = match &r.gesture {
+            Some(super::gestures::Active::Erasing(press)) => {
+                press.edit_hit().map(|hit| match hit {
+                    lexift_core::domain::annotation_erase::RectangleEraseHit::Body => {
+                        AnnotationCursor::Moving
+                    }
+                    lexift_core::domain::annotation_erase::RectangleEraseHit::Handle(h)
+                        if h >= 8 =>
+                    {
+                        AnnotationCursor::CornerRadius
+                    }
+                    lexift_core::domain::annotation_erase::RectangleEraseHit::Handle(h) => {
+                        handle_cursor(h)
+                    }
+                })
+            }
+            _ => None,
+        };
+        let desired = if let Some(cursor) = erase_cursor.or(editing_control) {
             cursor
         } else if r.arrow_pending().is_some() {
             AnnotationCursor::Drawing

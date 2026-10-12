@@ -24,6 +24,10 @@ pub(super) struct Compiled {
     spotlight_erased: Vec<lexift_core::domain::annotation_erase::ErasedCoverage>,
     displays: Vec<Rect>,
     spotlight_opacity: f32,
+    erase: Option<(
+        lexift_core::domain::annotation_erase::RoundedRectangle,
+        bool,
+    )>,
 }
 
 impl Compiled {
@@ -55,6 +59,10 @@ impl Compiled {
             spotlight_erased: input.session.spotlight_erased.clone(),
             displays: input.session.displays.clone(),
             spotlight_opacity: input.session.spotlight_opacity,
+            erase: input
+                .session
+                .rectangle_erase_geometry()
+                .map(|geometry| (geometry, input.session.rectangle_erase_show_handles())),
         })
     }
 
@@ -91,6 +99,10 @@ impl Compiled {
             && self.hovered == *hovered
             && self.reference.as_deref() == *reference
             && self.editor.as_ref() == *editor
+            && self.erase
+                == session
+                    .rectangle_erase_geometry()
+                    .map(|geometry| (geometry, session.rectangle_erase_show_handles()))
             && self.watermark_erased == session.watermark_erased
             && self.spotlight_erased == session.spotlight_erased
             && self.watermark == session.watermark

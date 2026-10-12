@@ -647,7 +647,7 @@ fn brush_wheel_updates_open_panel_parameters_without_feedback_callbacks() {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
-        let press = eraser::Press::begin(&mut r.session, (0., 0.), true, 1., &[]);
+        let press = eraser::Press::begin(&mut r.session, (0., 0.), true, 1., 1., &[]);
         r.gesture = Some(Active::Erasing(press));
     });
     wheel(120., 120.);

@@ -50,6 +50,8 @@
 - [工具条拖动、收起与面板准备](annotation/annotation-toolbar-preparation.md)
 - [工具选择菜单首次展开验证](releases/annotation-menu-latency-2026-10-12.md)
 - [标注字体后台加载验证](releases/annotation-font-background-2026-10-12.md)
+- [矩形橡皮擦连续编辑](annotation/rectangle-eraser-editing.md)
+- [矩形橡皮擦验证](releases/rectangle-eraser-editing-2026-10-12.md)
 - [标注按钮悬停提示](annotation/annotation-hints.md)
 - [标注按钮提示验证](releases/annotation-hints-2026-10-12.md)
 - [参数下拉菜单](annotation/annotation-dropdown.md)

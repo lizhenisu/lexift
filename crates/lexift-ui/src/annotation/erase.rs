@@ -1,7 +1,9 @@
 //! Eraser capture and visible-target resolution share the document's raster coverage.
 use lexift_core::domain::{
     annotation::{Bounds, Extra, Kind, Session},
-    annotation_erase::{EraseRegion, EraseTarget, ErasedCoverage},
+    annotation_erase::{
+        EraseRegion, EraseTarget, ErasedCoverage, RectangleEraseHit, RoundedRectangle,
+    },
     geometry::Rect,
 };
 use tiny_skia::{Paint, Pixmap};
@@ -11,6 +13,8 @@ pub(super) struct Press {
     last: (f32, f32),
     pub diameter: f32,
     brush: bool,
+    edit: Option<(RoundedRectangle, RectangleEraseHit)>,
+    scale: f32,
 }
 
 pub(super) fn has_coverage(session: &Session) -> bool {
@@ -27,14 +31,37 @@ impl Press {
         point: (f32, f32),
         brush: bool,
         diameter: f32,
+        scale: f32,
         views: &[(Rect, f32)],
     ) -> Self {
-        session.begin_drag();
+        let edit = if !brush {
+            session
+                .rectangle_erase_geometry()
+                .and_then(|geometry| geometry.hit(point, scale).map(|hit| (geometry, hit)))
+        } else {
+            None
+        };
+        if edit.is_some() {
+            session.begin_drag();
+        } else {
+            session.finish_rectangle_erase();
+            if brush {
+                session.begin_drag();
+            } else {
+                session.begin_rectangle_erase(RoundedRectangle {
+                    bounds: Bounds::from_corners(point, point),
+                    rounding: lexift_core::domain::annotation::Style::default().rounding,
+                    creation_scale: scale,
+                });
+            }
+        }
         let mut press = Self {
             start: point,
             last: point,
             diameter,
             brush,
+            edit,
+            scale,
         };
         press.update(session, point, views);
         press
@@ -50,12 +77,43 @@ impl Press {
                 diameter: self.diameter,
             }
         } else {
-            session.reset_drag_preview();
-            EraseRegion::Rectangle(Bounds::from_corners(self.start, point))
+            let Some(mut geometry) = session.rectangle_erase_geometry() else {
+                return;
+            };
+            if let Some((before, hit)) = self.edit {
+                geometry = before;
+                match hit {
+                    RectangleEraseHit::Body => {
+                        let (dx, dy) = (point.0 - self.start.0, point.1 - self.start.1);
+                        geometry.bounds = Bounds {
+                            left: before.bounds.left + dx,
+                            top: before.bounds.top + dy,
+                            right: before.bounds.right + dx,
+                            bottom: before.bounds.bottom + dy,
+                        };
+                    }
+                    RectangleEraseHit::Handle(handle) => {
+                        geometry.edit_handle(handle, point, self.scale)
+                    }
+                }
+            } else {
+                geometry.bounds = Bounds::from_corners(self.start, point);
+            }
+            let Some(region) = session.prepare_rectangle_erase(geometry) else {
+                return;
+            };
+            region
         };
         let targets = visible_targets(session, &region, views);
-        session.erase(region, &targets);
+        if self.brush {
+            session.erase(region, &targets);
+        } else {
+            session.apply_rectangle_erase(region, &targets);
+        }
         self.last = point;
+    }
+    pub fn edit_hit(&self) -> Option<RectangleEraseHit> {
+        self.edit.map(|(_, hit)| hit)
     }
 }
 
@@ -165,7 +223,7 @@ mod tests {
     use lexift_core::domain::annotation::{
         EditScope, Kind, MosaicAnnotation, MosaicEffect, Object, ObjectId, Style,
     };
-    fn object(kind: Kind, scale: f32) -> Object {
+    pub(super) fn object(kind: Kind, scale: f32) -> Object {
         Object {
             id: ObjectId::DRAFT,
             erased: Vec::new(),
@@ -213,17 +271,20 @@ mod tests {
                 let mut s = Session::new();
                 s.add(object(Kind::Rectangle, scale));
                 s.set_edit_scope(EditScope::None);
-                let mut press = Press::begin(&mut s, start, false, 12. * scale, &views(scale));
+                let mut press =
+                    Press::begin(&mut s, start, false, 12. * scale, scale, &views(scale));
                 press.update(&mut s, end, &views(scale));
                 s.finish_drag();
                 assert!(s.objects[0].erased[0].contains((0., 0.)));
-                let mut again = Press::begin(&mut s, start, false, 12. * scale, &views(scale));
+                s.finish_rectangle_erase();
+                let mut again =
+                    Press::begin(&mut s, start, false, 12. * scale, scale, &views(scale));
                 again.update(&mut s, end, &views(scale));
                 s.finish_drag();
                 assert_eq!(s.objects[0].erased.len(), 1);
                 assert!(s.undo());
                 assert!(s.objects[0].erased.is_empty());
-                let mut blank = Press::begin(&mut s, (90., 70.), false, 12., &views(scale));
+                let mut blank = Press::begin(&mut s, (90., 70.), false, 12., scale, &views(scale));
                 blank.update(&mut s, (110., 90.), &views(scale));
                 s.finish_drag();
                 assert!(s.undo());
@@ -249,7 +310,8 @@ mod tests {
             }
             s.set_edit_scope(EditScope::None);
             let before = s.objects.clone();
-            let mut press = Press::begin(&mut s, (-70., 0.), true, 12. * scale, &views(scale));
+            let mut press =
+                Press::begin(&mut s, (-70., 0.), true, 12. * scale, scale, &views(scale));
             press.update(&mut s, (70., 0.), &views(scale));
             s.finish_drag();
             for o in &s.objects {
@@ -261,11 +323,11 @@ mod tests {
             }
             s.undo();
             assert_eq!(s.objects, before);
-            let _press = Press::begin(&mut s, (0., 0.), true, 12. * scale, &views(scale));
+            let _press = Press::begin(&mut s, (0., 0.), true, 12. * scale, scale, &views(scale));
             assert!(!s.objects[0].erased.is_empty());
             s.cancel_drag();
             assert_eq!(s.objects, before);
-            let _press = Press::begin(&mut s, (0., 0.), true, 12. * scale, &views(scale));
+            let _press = Press::begin(&mut s, (0., 0.), true, 12. * scale, scale, &views(scale));
             s.finish_drag();
             s.add(object(Kind::Rectangle, scale));
             assert!(s.objects.last().unwrap().erased.is_empty());
@@ -330,7 +392,7 @@ mod tests {
         o.style.fill = false;
         s.add(o);
         s.selected = None;
-        let mut press = Press::begin(&mut s, (-10., -10.), false, 12., &views(1.));
+        let mut press = Press::begin(&mut s, (-10., -10.), false, 12., 1., &views(1.));
         press.update(&mut s, (10., 10.), &views(1.));
         s.finish_drag();
         assert!(s.objects[0].erased.is_empty());
@@ -509,6 +571,238 @@ mod tests {
             assert_eq!(
                 [pixel.red(), pixel.green(), pixel.blue(), pixel.alpha()],
                 [217, 71, 43, 255]
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod rectangle_edit_tests {
+    use super::*;
+    use lexift_core::domain::annotation::{Object, ObjectId, Style};
+    fn views(scale: f32) -> [(Rect, f32); 1] {
+        [(
+            Rect {
+                left: -150,
+                top: -120,
+                right: 150,
+                bottom: 120,
+            },
+            scale,
+        )]
+    }
+    fn document() -> Session {
+        let mut s = Session::new();
+        s.add(Object {
+            id: ObjectId::DRAFT,
+            kind: Kind::Rectangle,
+            bounds: Bounds::from_corners((-120., -90.), (120., 90.)),
+            points: vec![],
+            style: Style {
+                fill: true,
+                rounding: 0.,
+                ..Style::default()
+            },
+            extra: Extra::None,
+            erased: vec![],
+        });
+        s.selected = None;
+        s
+    }
+    fn create(s: &mut Session, scale: f32) {
+        let mut press = Press::begin(s, (-50., -40.), false, 12. * scale, scale, &views(scale));
+        press.update(s, (50., 40.), &views(scale));
+        s.finish_drag();
+    }
+    #[test]
+    fn rectangle_erase_blank_creation_can_move_into_existing_content() {
+        for scale in [1., 1.25] {
+            let mut s = document();
+            s.objects[0].bounds = Bounds::from_corners((30., 20.), (120., 90.));
+            let mut press = Press::begin(&mut s, (-120., -90.), false, 12., scale, &views(scale));
+            press.update(&mut s, (-20., -10.), &views(scale));
+            s.finish_drag();
+            assert!(s.objects[0].erased.is_empty());
+            assert!(s.rectangle_erase_show_handles());
+            let mut press = Press::begin(&mut s, (-70., -50.), false, 12., scale, &views(scale));
+            assert_eq!(press.edit_hit(), Some(RectangleEraseHit::Body));
+            press.update(&mut s, (70., 50.), &views(scale));
+            s.finish_drag();
+            assert!(
+                s.objects[0]
+                    .erased
+                    .iter()
+                    .any(|cut| cut.contains((70., 50.)))
+            );
+            let mut press = Press::begin(&mut s, (70., 50.), false, 12., scale, &views(scale));
+            press.update(&mut s, (-70., -50.), &views(scale));
+            s.cancel_drag();
+            assert!(s.rectangle_erase_show_handles());
+            assert!(
+                s.objects[0]
+                    .erased
+                    .iter()
+                    .any(|cut| cut.contains((70., 50.)))
+            );
+            assert!(s.undo());
+            assert!(s.objects[0].erased.is_empty());
+        }
+    }
+    #[test]
+    fn rectangle_erase_ui_move_resize_round_cancel_and_finalize() {
+        for scale in [1., 1.25] {
+            let mut s = document();
+            create(&mut s, scale);
+            let original = s.rectangle_erase_geometry().unwrap();
+            let mut press =
+                Press::begin(&mut s, (0., 0.), false, 12. * scale, scale, &views(scale));
+            assert_eq!(press.edit_hit(), Some(RectangleEraseHit::Body));
+            press.update(&mut s, (30., 0.), &views(scale));
+            s.finish_drag();
+            assert!(!s.objects[0].erased[0].contains((-40., 0.)));
+            assert!(s.objects[0].erased[0].contains((60., 0.)));
+            let moved = s.rectangle_erase_geometry().unwrap();
+            let mut press = Press::begin(
+                &mut s,
+                moved.handles(scale)[7],
+                false,
+                12. * scale,
+                scale,
+                &views(scale),
+            );
+            assert_eq!(press.edit_hit(), Some(RectangleEraseHit::Handle(7)));
+            press.update(&mut s, (100., 70.), &views(scale));
+            s.cancel_drag();
+            assert_eq!(s.rectangle_erase_geometry(), Some(moved));
+            let mut press = Press::begin(
+                &mut s,
+                moved.handles(scale)[8],
+                false,
+                12. * scale,
+                scale,
+                &views(scale),
+            );
+            press.update(&mut s, (moved.bounds.left, moved.bounds.top), &views(scale));
+            s.finish_drag();
+            assert_eq!(s.rectangle_erase_geometry().unwrap().rounding, 0.);
+            s.finish_rectangle_erase();
+            assert!(s.rectangle_erase_geometry().is_none());
+            assert_ne!(moved, original);
+        }
+    }
+    #[test]
+    fn rectangle_erase_rounded_effect_masks_preserve_corner_pixels() {
+        use lexift_core::ports::annotation_render::RenderLayer;
+        for scale in [1., 1.25] {
+            for kind in [Kind::MosaicArea, Kind::Magnifier] {
+                let mut s = Session::new();
+                let mut object = super::tests::object(kind, scale);
+                if kind == Kind::Magnifier {
+                    object.extra = Extra::Magnifier {
+                        output: object.bounds,
+                        ellipse: false,
+                        zoom: 2.,
+                        connector: lexift_core::domain::annotation::MagnifierConnector::Plain,
+                        erase_annotations: false,
+                        antialias: true,
+                        shadow: true,
+                    };
+                }
+                s.add(object);
+                s.selected = None;
+                s.erase(
+                    EraseRegion::RoundedRectangle {
+                        bounds: Bounds::from_corners((-30., -30.), (30., 30.)),
+                        radius: 25.,
+                    },
+                    &[EraseTarget::Object(s.objects[0].id)],
+                );
+                let mut compiler = crate::annotation_scene::SceneCompiler::default();
+                let layers = compiler.layers(&s, &views(scale), None, None).unwrap();
+                let mask = layers
+                    .into_iter()
+                    .find_map(|layer| match layer {
+                        RenderLayer::Mosaic(m) => Some(m.masks[0].clone()),
+                        RenderLayer::Magnifier(m) => Some(m.masks[0].clone()),
+                        _ => None,
+                    })
+                    .unwrap();
+                let alpha = |x: i32, y: i32| {
+                    mask.pixels[((y - mask.bounds.top) * (mask.bounds.right - mask.bounds.left)
+                        + (x - mask.bounds.left)) as usize
+                        * 4
+                        + 3]
+                };
+                assert_eq!(alpha(0, 0), 0);
+                assert!(alpha(-28, -28) > 0);
+                s.undo();
+                assert!(s.objects[0].erased.is_empty());
+            }
+        }
+    }
+    #[test]
+    fn rectangle_erase_interaction_cache_and_export_separation() {
+        for scale in [1., 1.25] {
+            let mut s = document();
+            let view = views(scale)[0].0;
+            let mut compiler = crate::annotation_scene::SceneCompiler::default();
+            let mut press = Press::begin(
+                &mut s,
+                (-50., -40.),
+                false,
+                12. * scale,
+                scale,
+                &views(scale),
+            );
+            press.update(&mut s, (50., 40.), &views(scale));
+            let drawing = compiler.render(&s, view, scale, None, None, None).unwrap();
+            let signature =
+                crate::annotation_signature::Frame::new(&s, None).display(view, scale, None);
+            s.finish_drag();
+            assert_ne!(
+                signature,
+                crate::annotation_signature::Frame::new(&s, None).display(view, scale, None)
+            );
+            let editing = compiler.render(&s, view, scale, None, None, None).unwrap();
+            let expected = crate::annotation_render::render(&s, view, scale, None, None).unwrap();
+            assert_ne!(drawing.data(), editing.data());
+            let content_signature = crate::annotation_signature::Frame::new(&s, None)
+                .document_signature(view, scale, None);
+            if let Some(folder) = std::env::var_os("LEXIFT_RECTANGLE_ERASE_SCREENSHOTS") {
+                let folder = std::path::PathBuf::from(folder);
+                std::fs::create_dir_all(&folder).unwrap();
+                std::fs::write(
+                    folder.join(format!("expected-{scale}.rgba")),
+                    expected.data(),
+                )
+                .unwrap();
+                std::fs::write(folder.join(format!("drawing-{scale}.rgba")), drawing.data())
+                    .unwrap();
+                std::fs::write(folder.join(format!("editing-{scale}.rgba")), editing.data())
+                    .unwrap();
+            }
+            // Separate transparent interaction composition adds up to two 8-bit rounding steps.
+            assert!(
+                editing
+                    .data()
+                    .iter()
+                    .zip(expected.data())
+                    .all(|(a, b)| a.abs_diff(*b) <= 2),
+                "interaction raster mismatch"
+            );
+            s.finish_rectangle_erase();
+            assert_eq!(
+                content_signature,
+                crate::annotation_signature::Frame::new(&s, None)
+                    .document_signature(view, scale, None)
+            );
+            let finalized = compiler.render(&s, view, scale, None, None, None).unwrap();
+            assert_ne!(editing.data(), finalized.data());
+            assert_eq!(
+                finalized.data(),
+                crate::annotation_render::render(&s, view, scale, None, None)
+                    .unwrap()
+                    .data()
             );
         }
     }

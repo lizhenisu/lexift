@@ -697,3 +697,160 @@ fn independent_tool_defaults_match_preview() {
         }
     }
 }
+
+#[test]
+fn rectangle_eraser_release_immediately_presents_controls_even_on_blank_canvas() {
+    use slint::platform::{
+        Platform, WindowAdapter,
+        software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+    };
+    struct TestPlatform;
+    impl Platform for TestPlatform {
+        fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+            Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer))
+        }
+    }
+    slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+    init(
+        |_| PassiveWindowPreparation::Ready,
+        WindowLifecycleCallbacks::new(
+            |_, _| true,
+            |_| true,
+            |_| false,
+            |_, _, _| false,
+            |_, _| true,
+            |_, _| true,
+            || false,
+        ),
+    );
+    let viewport = Rect {
+        left: -200,
+        top: -150,
+        right: 200,
+        bottom: 150,
+    };
+    for scale in [1., 1.25] {
+        for blank in [true, false] {
+            REGISTRY.with(|slot| {
+                let mut slot = slot.borrow_mut();
+                let r = slot.as_mut().unwrap();
+                r.close();
+                r.canvas_state.pending_displays = vec![viewport];
+                create_canvas(r, 0);
+                r.canvas_state.canvases[0].window.window().dispatch_event(
+                    slint::platform::WindowEvent::ScaleFactorChanged {
+                        scale_factor: scale,
+                    },
+                );
+                r.canvas_state.annotation_ready = true;
+                assert!(r.set_mode(InteractionMode::Tool(6)));
+                r.parameter_values.defaults_mut(13).shape = 0;
+                if !blank {
+                    r.session.add(Object {
+                        id: Default::default(),
+                        kind: Kind::Rectangle,
+                        bounds: Bounds::from_corners((-150., -100.), (150., 100.)),
+                        points: vec![],
+                        style: Style {
+                            fill: true,
+                            ..Default::default()
+                        },
+                        extra: Extra::None,
+                        erased: vec![],
+                    });
+                }
+            });
+            let canvas = REGISTRY.with(|slot| {
+                slot.borrow().as_ref().unwrap().canvas_state.canvases[0]
+                    .window
+                    .clone_strong()
+            });
+            canvas.invoke_pointer(0, 140. / scale, 100. / scale);
+            canvas.invoke_pointer(1, 260. / scale, 200. / scale);
+            let mut compiler = crate::annotation_scene::SceneCompiler::default();
+            let compile = |compiler: &mut crate::annotation_scene::SceneCompiler| {
+                REGISTRY.with(|slot| {
+                    let slot = slot.borrow();
+                    let r = slot.as_ref().unwrap();
+                    let surface = lexift_core::ports::annotation_render::RenderSurface {
+                        input_window: lexift_core::ports::magnifier::WindowToken(1),
+                        bounds: viewport,
+                        scale,
+                    };
+                    let scene = compiler
+                        .compile(crate::annotation_scene::SceneInput {
+                            session: &r.session,
+                            edit: None,
+                            surfaces: &[surface],
+                            stamp: lexift_core::ports::annotation_render::RenderStamp {
+                                session: r.generation,
+                                revision: 1,
+                            },
+                            draft: None,
+                            hovered: None,
+                            reference: None,
+                            editor: None,
+                            paused_regions: &[],
+                            excluded_windows: &[],
+                        })
+                        .unwrap();
+                    crate::annotation_scene::compose_document(&scene, viewport).unwrap()
+                })
+            };
+            let drawing = compile(&mut compiler);
+            REGISTRY.with(|slot| {
+                assert!(
+                    !slot
+                        .borrow()
+                        .as_ref()
+                        .unwrap()
+                        .session
+                        .rectangle_erase_show_handles()
+                )
+            });
+            // No subsequent click or move is allowed to make release feedback appear.
+            canvas.invoke_pointer(2, 260. / scale, 200. / scale);
+            let editing = compile(&mut compiler);
+            assert!(
+                drawing.data() != editing.data(),
+                "release must invalidate the assembled scene"
+            );
+            REGISTRY.with(|slot| {
+                let slot = slot.borrow();
+                let r = slot.as_ref().unwrap();
+                assert!(r.gesture.is_none());
+                assert!(r.render_state.frame_tasks.render_pending());
+                assert!(r.session.rectangle_erase_show_handles());
+                let geometry = r.session.rectangle_erase_geometry().unwrap();
+                assert_eq!(geometry.handles(scale).len(), 12);
+                for (x, y) in geometry.handles(scale) {
+                    let x = (x - viewport.left as f32).round() as u32;
+                    let y = (y - viewport.top as f32).round() as u32;
+                    assert!(editing.pixel(x, y).unwrap().alpha() > 0);
+                }
+                assert_eq!(r.session.can_undo(), !blank);
+                let software = crate::annotation_render::render_editing(
+                    &r.session, viewport, scale, None, None, None,
+                )
+                .unwrap();
+                assert!(
+                    software
+                        .data()
+                        .iter()
+                        .zip(editing.data())
+                        .all(|(a, b)| a.abs_diff(*b) <= 2)
+                );
+            });
+            let folder = std::path::Path::new("../../target/rectangle-erase");
+            std::fs::create_dir_all(folder).unwrap();
+            for (phase, frame) in [("release-drawing", drawing), ("release-editing", editing)] {
+                std::fs::write(
+                    folder.join(format!("{phase}-{scale}-{blank}.rgba")),
+                    frame.data(),
+                )
+                .unwrap();
+            }
+        }
+    }
+    REGISTRY.with(|slot| slot.borrow_mut().as_mut().unwrap().close());
+}

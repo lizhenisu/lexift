@@ -546,3 +546,44 @@ fn magnifier_component_coverage_invalidates_masks_and_decorations_without_reusin
         + 3) as usize;
     assert_eq!(mask.pixels[offset], 255);
 }
+
+#[test]
+fn blank_erase_geometry_and_edit_phase_invalidate_assembled_scene() {
+    use lexift_core::domain::annotation_erase::RoundedRectangle;
+    let mut session = Session::new();
+    let surfaces = surfaces();
+    let mut compiler = SceneCompiler::default();
+    let mut geometry = RoundedRectangle {
+        bounds: Bounds::from_corners((-120., -80.), (-20., 80.)),
+        rounding: 21.,
+        creation_scale: 1.,
+    };
+    let empty = compiler.compile(input(&session, &surfaces, 1)).unwrap();
+    session.begin_rectangle_erase(geometry);
+    let drawing = compiler.compile(input(&session, &surfaces, 2)).unwrap();
+    assert!(!same_content(&empty, &drawing));
+    session.finish_drag();
+    let editing = compiler.compile(input(&session, &surfaces, 3)).unwrap();
+    assert!(!same_content(&drawing, &editing));
+    let repeat = compiler.compile(input(&session, &surfaces, 4)).unwrap();
+    assert!(same_content(&editing, &repeat));
+    assert!(Arc::ptr_eq(&editing.interaction, &repeat.interaction));
+    geometry.bounds.left -= 20.;
+    geometry.bounds.right -= 20.;
+    session.begin_drag();
+    session.prepare_rectangle_erase(geometry).unwrap();
+    let moved = compiler.compile(input(&session, &surfaces, 5)).unwrap();
+    assert!(!same_content(&editing, &moved));
+    geometry.rounding = 0.;
+    session.prepare_rectangle_erase(geometry).unwrap();
+    let square = compiler.compile(input(&session, &surfaces, 6)).unwrap();
+    assert!(!same_content(&moved, &square));
+    session.cancel_drag();
+    let cancelled = compiler.compile(input(&session, &surfaces, 7)).unwrap();
+    assert!(!same_content(&square, &cancelled));
+    session.finish_rectangle_erase();
+    let finished = compiler.compile(input(&session, &surfaces, 8)).unwrap();
+    assert!(finished.interaction.is_empty());
+    assert!(same_content(&empty, &finished));
+    assert!(!session.can_undo());
+}

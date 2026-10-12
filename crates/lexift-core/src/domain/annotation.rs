@@ -623,20 +623,12 @@ impl Object {
             self.kind,
             Kind::HighlightRectangle | Kind::MosaicArea | Kind::StickerArea
         ) {
-            let b = self.bounds;
-            let rounding_scale = self.coverage_scale(scale);
-            let r = (self.style.rounding * rounding_scale)
-                .min(b.width() / 2.)
-                .min(b.height() / 2.);
-            let inset = (r * 0.5 + 10. * scale)
-                .min(b.width() / 2.)
-                .min(b.height() / 2.);
-            handles.extend([
-                (b.left + inset, b.top + inset),
-                (b.right - inset, b.top + inset),
-                (b.left + inset, b.bottom - inset),
-                (b.right - inset, b.bottom - inset),
-            ]);
+            handles = super::annotation_erase::RoundedRectangle {
+                bounds: self.bounds,
+                rounding: self.style.rounding,
+                creation_scale: self.coverage_scale(scale),
+            }
+            .handles(scale);
         }
         handles
     }
@@ -896,20 +888,13 @@ impl Object {
                 Kind::HighlightRectangle | Kind::MosaicArea | Kind::StickerArea
             )
         {
-            let scale = self.coverage_scale(scale);
-            let b = self.bounds;
-            let x = if handle == 8 || handle == 10 {
-                point.0 - b.left
-            } else {
-                b.right - point.0
+            let mut geometry = super::annotation_erase::RoundedRectangle {
+                bounds: self.bounds,
+                rounding: self.style.rounding,
+                creation_scale: self.coverage_scale(scale),
             };
-            let y = if handle < 10 {
-                point.1 - b.top
-            } else {
-                b.bottom - point.1
-            };
-            self.style.rounding = ((x.min(y) - 10. * scale) * 2. / scale)
-                .clamp(0., b.width().min(b.height()) / 2. / scale);
+            geometry.edit_handle(handle, point, scale);
+            self.style.rounding = geometry.rounding;
         } else {
             self.resize_to(self.bounds.resized(handle, point));
         }
@@ -993,6 +978,8 @@ pub struct Session {
     drag_before: Option<Snapshot>,
     next_object_id: u64,
     edit_scope: EditScope,
+    pub(crate) rectangle_erase: Option<super::annotation_erase::RectangleEraseEdit>,
+    erase_drag_before: Option<super::annotation_erase::RoundedRectangle>,
 }
 
 impl Session {
@@ -1058,6 +1045,7 @@ impl Session {
             .flatten()
     }
     pub fn add(&mut self, mut object: Object) -> bool {
+        self.finish_rectangle_erase();
         if object.kind == Kind::Sequence && self.next_sequence == i32::MAX {
             return false;
         }
@@ -1100,15 +1088,20 @@ impl Session {
     }
     pub fn begin_drag(&mut self) {
         if self.drag_before.is_none() {
+            self.erase_drag_before = self.rectangle_erase_geometry();
             self.drag_before = Some(self.snapshot());
         }
     }
     pub fn finish_drag(&mut self) {
+        if !self.complete_rectangle_erase() {
+            return;
+        }
         if let Some(before) = self.drag_before.take()
             && before != self.snapshot()
         {
             self.undo.push(before);
         }
+        self.erase_drag_before = None;
     }
     /// Restore the baseline of a rectangular erase preview without ending its transaction.
     pub fn reset_drag_preview(&mut self) {
@@ -1119,6 +1112,13 @@ impl Session {
     pub fn cancel_drag(&mut self) {
         if let Some(before) = self.drag_before.take() {
             self.restore_snapshot(before);
+            if let (Some(edit), Some(geometry)) =
+                (&mut self.rectangle_erase, self.erase_drag_before.take())
+            {
+                edit.geometry = geometry;
+            } else {
+                self.finish_rectangle_erase();
+            }
         }
     }
     fn restore_snapshot(&mut self, before: Snapshot) {
@@ -1191,6 +1191,7 @@ impl Session {
         }
     }
     pub fn undo(&mut self) -> bool {
+        self.finish_rectangle_erase();
         let Some(before) = self.undo.pop() else {
             return false;
         };
@@ -1200,6 +1201,7 @@ impl Session {
     }
     /// Undoable document clear, distinct from session teardown.
     pub fn clear_all(&mut self) -> bool {
+        self.finish_rectangle_erase();
         if !self.has_content() {
             return false;
         }

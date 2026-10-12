@@ -139,8 +139,29 @@ impl<'a> Frame<'a> {
         Some(*keys[index].get_or_insert_with(|| Content::from(object).key()))
     }
     pub fn display(&self, monitor: Rect, scale: f32, hovered: Option<usize>) -> u64 {
-        self.signature(monitor, scale, self.document.selected(), hovered, None)
+        let base = self.signature(monitor, scale, self.document.selected(), hovered, None);
+        let Some(g) = self.document.session.rectangle_erase_geometry() else {
+            return base;
+        };
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        base.hash(&mut hash);
+        for v in [
+            g.bounds.left,
+            g.bounds.top,
+            g.bounds.right,
+            g.bounds.bottom,
+            g.rounding,
+            g.creation_scale,
+        ] {
+            v.to_bits().hash(&mut hash);
+        }
+        self.document
+            .session
+            .rectangle_erase_show_handles()
+            .hash(&mut hash);
+        hash.finish()
     }
+
     pub fn document_signature(
         &self,
         monitor: Rect,
@@ -206,6 +227,12 @@ fn hash_erased(
             EraseRegion::Rectangle(b) => {
                 0u8.hash(hash);
                 for v in [b.left, b.top, b.right, b.bottom] {
+                    v.to_bits().hash(hash);
+                }
+            }
+            EraseRegion::RoundedRectangle { bounds: b, radius } => {
+                2u8.hash(hash);
+                for v in [b.left, b.top, b.right, b.bottom, *radius] {
                     v.to_bits().hash(hash);
                 }
             }
