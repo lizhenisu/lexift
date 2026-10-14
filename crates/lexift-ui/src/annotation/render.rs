@@ -1919,7 +1919,12 @@ fn draw_erase_interaction_content(
 }
 
 /// Shared interaction decoration for document rectangles and transient erase geometry.
-fn draw_rectangle_handle(frame: &mut Pixmap, (x, y): (f32, f32), round: bool, scale: f32) {
+pub(crate) fn draw_rectangle_handle(
+    frame: &mut Pixmap,
+    (x, y): (f32, f32),
+    round: bool,
+    scale: f32,
+) {
     let shape = if round {
         PathBuilder::from_circle(x, y, 4. * scale)
     } else {

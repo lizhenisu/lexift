@@ -15,7 +15,7 @@ pub(super) fn editing_text_object(r: &Registry) -> Option<Object> {
     let (Some(edit), Some(editor)) = (r.editor.edit(), r.editor.window()) else {
         return None;
     };
-    if edit.object.is_some() && edit.index(&r.session).is_none() {
+    if edit.object.is_some() && edit.index(&r.document.session).is_none() {
         return None;
     }
     let mut visible = edit.original.clone();
@@ -25,8 +25,8 @@ pub(super) fn editing_text_object(r: &Registry) -> Option<Object> {
         visible.outline = None;
     }
     let mut object = edit
-        .index(&r.session)
-        .and_then(|index| r.session.objects.get(index))
+        .index(&r.document.session)
+        .and_then(|index| r.document.session.objects.get(index))
         .cloned()
         .unwrap_or_else(|| Object {
             erased: Vec::new(),
@@ -50,11 +50,11 @@ pub(super) fn editing_text_object(r: &Registry) -> Option<Object> {
 pub(super) fn edited_document_object(r: &Registry) -> Option<(Option<usize>, Object)> {
     let edit = r.editor.edit()?;
     let visible = editing_text_object(r)?;
-    let index = edit.index(&r.session);
+    let index = edit.index(&r.document.session);
     if let Some(index) = index
-        && matches!(r.session.objects[index].extra, Extra::Sequence(_))
+        && matches!(r.document.session.objects[index].extra, Extra::Sequence(_))
     {
-        let mut object = r.session.objects[index].clone();
+        let mut object = r.document.session.objects[index].clone();
         if let (Extra::Sequence(sequence), Extra::Text(text)) = (&mut object.extra, visible.extra) {
             sequence.caption = text;
             sequence.caption_bounds = visible.bounds;
@@ -73,9 +73,13 @@ pub(super) fn render_canvases(generation: u64) {
         if r.canvas_state.canvases.is_empty() {
             return None;
         }
+        if r.screenshot.is_some() {
+            screenshot::render(r);
+            return None;
+        }
         let edited_object = edited_document_object(r);
         let display_document = crate::annotation_scene::Document {
-            session: &r.session,
+            session: &r.document.session,
             edit: edited_object
                 .as_ref()
                 .map(|(index, object)| (*index, object)),
@@ -170,7 +174,7 @@ pub(super) fn render_canvases(generation: u64) {
                             session: generation,
                             revision: r.render_state.scene_revision,
                         },
-                        session: &r.session,
+                        session: &r.document.session,
                         edit: display_document.edit,
                         surfaces: &surfaces,
                         draft: gestures::display_draft(&r.gesture, &r.pending_drawing),
@@ -266,7 +270,7 @@ pub(super) fn render_canvases(generation: u64) {
         } else {
             mosaic::sync(r);
             let views = magnifier_views(
-                &r.session,
+                &r.document.session,
                 gestures::display_draft(&r.gesture, &r.pending_drawing),
             );
             let drawing_magnifier = matches!(
@@ -324,7 +328,7 @@ pub(super) fn render_canvases(generation: u64) {
         };
         let edited_object = edited_document_object(r);
         let display_document = crate::annotation_scene::Document {
-            session: &r.session,
+            session: &r.document.session,
             edit: edited_object
                 .as_ref()
                 .map(|(index, object)| (*index, object)),
@@ -404,7 +408,7 @@ pub(super) fn render_canvases(generation: u64) {
                 r.render_state
                     .scene_compiler
                     .render_scene(crate::annotation_scene::RenderInput {
-                        session: &r.session,
+                        session: &r.document.session,
                         edit: display_document.edit,
                         viewport: layer.bounds,
                         scale: layer.window.window().scale_factor(),
@@ -476,7 +480,7 @@ pub(super) fn render_canvases(generation: u64) {
                             .is_empty()
                 });
             let needs_lens = !magnifier_views(
-                &r.session,
+                &r.document.session,
                 gestures::display_draft(&r.gesture, &r.pending_drawing),
             )
             .is_empty();
@@ -573,6 +577,9 @@ pub(super) fn sync_magnifier_views(
     r: &mut Registry,
     views: &[lexift_core::ports::magnifier::MagnifierSpec],
 ) -> bool {
+    if r.screenshot.is_some() {
+        return true;
+    }
     let mut overlay_windows = r
         .canvas_state
         .canvases
@@ -615,7 +622,7 @@ pub(super) fn sync_first_magnifier(generation: u64, revision: u64) {
             return;
         };
         let views = magnifier_views(
-            &r.session,
+            &r.document.session,
             gestures::display_draft(&r.gesture, &r.pending_drawing),
         );
         if views.is_empty() {

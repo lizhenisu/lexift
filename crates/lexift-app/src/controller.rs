@@ -40,6 +40,43 @@ pub(crate) trait ViewPort: Send + Sync {
         work_area: Option<Rect>,
     );
     fn hide_popup(&self, session_id: PopupSessionId);
+    fn suspend_for_screenshot(&self, _session: u64) {}
+    fn restore_screenshot(&self, _session: u64) {}
+    fn show_screenshot_capture(
+        &self,
+        _session: u64,
+        _frames: Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>,
+        _capture: Arc<dyn lexift_core::ports::screen_capture::ScreenCapturePort>,
+    ) {
+    }
+    fn close_pinned_image(&self, _id: u64) {}
+    fn begin_pinned_edit(&self, _id: u64, _edit: u64) {}
+    fn end_pinned_edit(&self, _id: u64, _edit: u64) {}
+    fn present_pinned_image(
+        &self,
+        _id: u64,
+        _revision: u64,
+        _image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+    ) {
+    }
+    fn show_editable_pinned_screenshot(
+        &self,
+        session: u64,
+        operation: u64,
+        image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        _base: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        _samples: Arc<lexift_core::ports::screen_capture::ScreenCaptureFrame>,
+        _document: lexift_core::domain::annotation_export::ExportRequest,
+    ) {
+        self.show_pinned_screenshot(session, operation, image);
+    }
+    fn show_pinned_screenshot(
+        &self,
+        _session: u64,
+        _operation: u64,
+        _image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+    ) {
+    }
     fn show_ocr_capture(
         &self,
         _generation: u64,
@@ -64,6 +101,56 @@ pub(crate) trait ViewPort: Send + Sync {
 }
 
 impl ViewPort for lexift_ui::UiHandle {
+    fn begin_pinned_edit(&self, id: u64, edit: u64) {
+        self.begin_pinned_edit(id, edit);
+    }
+    fn end_pinned_edit(&self, id: u64, edit: u64) {
+        self.end_pinned_edit(id, edit);
+    }
+    fn present_pinned_image(
+        &self,
+        id: u64,
+        revision: u64,
+        image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+    ) {
+        self.present_pinned_image(id, revision, image);
+    }
+    fn show_editable_pinned_screenshot(
+        &self,
+        session: u64,
+        operation: u64,
+        image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        base: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        samples: Arc<lexift_core::ports::screen_capture::ScreenCaptureFrame>,
+        document: lexift_core::domain::annotation_export::ExportRequest,
+    ) {
+        self.show_editable_pinned_screenshot(session, operation, image, base, samples, document);
+    }
+    fn suspend_for_screenshot(&self, session: u64) {
+        self.suspend_for_screenshot(session);
+    }
+    fn restore_screenshot(&self, session: u64) {
+        self.restore_screenshot(session);
+    }
+    fn show_screenshot_capture(
+        &self,
+        session: u64,
+        frames: Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>,
+        capture: Arc<dyn lexift_core::ports::screen_capture::ScreenCapturePort>,
+    ) {
+        self.show_screenshot_capture(session, frames, capture);
+    }
+    fn close_pinned_image(&self, id: u64) {
+        self.close_pinned_image(id);
+    }
+    fn show_pinned_screenshot(
+        &self,
+        session: u64,
+        operation: u64,
+        image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+    ) {
+        self.show_pinned_screenshot(session, operation, image);
+    }
     fn show_ocr_capture(
         &self,
         generation: u64,
@@ -131,6 +218,7 @@ impl ViewPort for lexift_ui::UiHandle {
 
 /// Executes Core commands on background workers and returns events to Core.
 pub(crate) struct AppController {
+    screenshot: Option<Arc<crate::screenshot::ScreenshotRuntime>>,
     annotation_export: Option<Arc<crate::annotation_export::ExportRuntime>>,
     history: Option<Arc<crate::clipboard_history::HistoryRuntime>>,
     pub(crate) runtime: Handle,
@@ -170,6 +258,7 @@ impl AppController {
             .desired_settings
             .selection_toolbar;
         Self {
+            screenshot: None,
             annotation_export: None,
             history: None,
             ocr: None,
@@ -210,6 +299,13 @@ impl AppController {
         self
     }
 
+    pub(crate) fn with_screenshot(
+        mut self,
+        runtime: Option<Arc<crate::screenshot::ScreenshotRuntime>>,
+    ) -> Self {
+        self.screenshot = runtime;
+        self
+    }
     pub(crate) fn with_annotation_export(
         mut self,
         runtime: Option<Arc<crate::annotation_export::ExportRuntime>>,
@@ -300,6 +396,10 @@ impl AppController {
                     current
                 });
             let snapshot = state.clone();
+            if let Some(runtime) = &self.screenshot {
+                runtime.sync(&snapshot.screenshot, quitting);
+                runtime.sync_pins(&snapshot.pinned_images, quitting);
+            }
             if let Some(export) = &self.annotation_export {
                 export.sync(&snapshot.annotation_export, quitting);
             }
@@ -343,6 +443,40 @@ impl AppController {
 
     fn execute(self: &Arc<Self>, command: AppCommand) {
         match command {
+            AppCommand::PinnedImage(command) => {
+                if let Some(runtime) = &self.screenshot {
+                    runtime.execute_pin(self, command);
+                } else if let lexift_core::domain::pinned_image::Command::Output {
+                    id,
+                    operation,
+                    ..
+                } = command
+                {
+                    self.dispatch(AppEvent::PinnedImage(
+                        lexift_core::domain::pinned_image::Event::Completed {
+                            id,
+                            operation,
+                            result: Err(lexift_core::Error::new("Screenshot unavailable")),
+                        },
+                    ));
+                }
+            }
+            AppCommand::Screenshot(command) => {
+                if let Some(runtime) = &self.screenshot {
+                    runtime.execute(self, command);
+                } else if let lexift_core::domain::screenshot::ScreenshotCommand::Prepare {
+                    session,
+                    ..
+                } = command
+                {
+                    self.dispatch(AppEvent::Screenshot(
+                        lexift_core::domain::screenshot::ScreenshotEvent::Failed {
+                            session,
+                            error: "Screenshot unavailable".into(),
+                        },
+                    ));
+                }
+            }
             AppCommand::AnnotationExport(command) => {
                 if let Some(export) = &self.annotation_export {
                     export.execute(self, command);
@@ -1253,6 +1387,8 @@ impl AppController {
 fn event_name(event: &AppEvent) -> &'static str {
     match event {
         AppEvent::ClipboardHistory(_) => "clipboard_history",
+        AppEvent::PinnedImage(_) => "pinned-image",
+        AppEvent::Screenshot(_) => "screenshot",
         AppEvent::AnnotationExport(_) => "annotation_export",
         AppEvent::Ocr(_) => "ocr",
         AppEvent::Started => "started",

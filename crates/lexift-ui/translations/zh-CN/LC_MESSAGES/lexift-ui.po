@@ -1689,3 +1689,45 @@ msgstr "移动工具条"
 
 msgid "Bold text"
 msgstr "粗体文字"
+
+msgid "Screenshot"
+msgstr "截图"
+
+msgid "Save screenshot"
+msgstr "保存截图"
+
+msgid "Copy screenshot"
+msgstr "复制截图"
+
+msgid "Pin screenshot"
+msgstr "贴图"
+
+msgid "Pinned screenshot"
+msgstr "贴图"
+
+msgid "Select screenshot region"
+msgstr "选择截图区域"
+
+msgid "Drag to select. Escape or right-click to cancel."
+msgstr "拖动框选。按 Escape 或右键取消。"
+
+msgid "Screenshot unavailable"
+msgstr "截图不可用"
+
+msgid "Copy image"
+msgstr "复制图像"
+
+msgid "Save image"
+msgstr "保存图像"
+
+msgid "Window shadow"
+msgstr "窗口阴影"
+
+msgid "Always on top"
+msgstr "窗口置顶"
+
+msgid "Annotate"
+msgstr "标注"
+
+msgid "Hide annotations"
+msgstr "隐藏标注"

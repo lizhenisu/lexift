@@ -1,6 +1,31 @@
 //! Checked physical-pixel operations on stable desktop snapshots.
 use super::geometry::Rect;
 
+/// Preserve source monitor DPI when a frozen image crosses display boundaries.
+pub fn render_partitions(
+    bounds: Rect,
+    monitors: &[(Rect, f32)],
+    fallback: f32,
+) -> Vec<(Rect, f32)> {
+    let parts: Vec<_> = monitors
+        .iter()
+        .filter_map(|(m, scale)| {
+            let b = Rect {
+                left: bounds.left.max(m.left),
+                top: bounds.top.max(m.top),
+                right: bounds.right.min(m.right),
+                bottom: bounds.bottom.min(m.bottom),
+            };
+            (b.left < b.right && b.top < b.bottom).then_some((b, *scale))
+        })
+        .collect();
+    if parts.is_empty() {
+        vec![(bounds, fallback)]
+    } else {
+        parts
+    }
+}
+
 /// Merge frozen monitor pixels in physical coordinates; gaps between monitors remain white.
 pub fn crop_frames(
     frames: &[crate::ports::screen_capture::CapturedRegion],

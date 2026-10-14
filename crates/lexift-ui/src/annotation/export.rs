@@ -16,6 +16,9 @@ pub(super) struct State {
     monitor: Option<Rect>,
 }
 impl State {
+    pub(super) fn pending(&self) -> bool {
+        self.pending
+    }
     pub fn cancel(&mut self) {
         self.pending = false;
         self.editor = None;
@@ -35,7 +38,7 @@ fn display_at(center: (i64, i64), displays: &[(Rect, f32)]) -> Option<(Rect, f32
     })
 }
 
-fn snapshot(r: &Registry) -> Option<Snapshot> {
+pub(super) fn snapshot(r: &Registry) -> Option<Snapshot> {
     let main = r.toolbar_state.main.get()?;
     let position = main.window().position();
     let size = main.window().size();
@@ -52,14 +55,26 @@ fn snapshot(r: &Registry) -> Option<Snapshot> {
         ),
         &monitors,
     )?;
+    snapshot_at(r, monitor, scale)
+}
+
+/// Freeze editor content independently of toolbar placement (including hidden startup).
+pub(super) fn snapshot_at(r: &Registry, monitor: Rect, scale: f32) -> Option<Snapshot> {
+    let main = r.toolbar_state.main.get()?;
+    let monitors = r
+        .canvas_state
+        .canvases
+        .iter()
+        .map(|c| (c.bounds, c.window.window().scale_factor()))
+        .collect();
     // Copy visible state, not the undo stack or parameter bindings.
     let mut session = Session::new();
-    session.objects = r.session.objects.clone();
-    session.displays = r.session.displays.clone();
-    session.watermark = r.session.watermark.clone();
-    session.watermark_erased = r.session.watermark_erased.clone();
-    session.spotlight_erased = r.session.spotlight_erased.clone();
-    session.spotlight_opacity = r.session.spotlight_opacity;
+    session.objects = r.document.session.objects.clone();
+    session.displays = r.document.session.displays.clone();
+    session.watermark = r.document.session.watermark.clone();
+    session.watermark_erased = r.document.session.watermark_erased.clone();
+    session.spotlight_erased = r.document.session.spotlight_erased.clone();
+    session.spotlight_opacity = r.document.session.spotlight_opacity;
     if let Some((index, mut object)) = super::edited_document_object(r) {
         // Native editors omit their glyphs from the canvas, but their HWND is
         // excluded from export. Restore visible draft glyphs in the snapshot.
@@ -505,7 +520,7 @@ mod tests {
             assert!(
                 matches!(&frozen.session.objects[0].extra,Extra::Text(t) if t.content=="draft 中文")
             );
-            assert!(r.session.objects.is_empty() && !r.session.can_undo());
+            assert!(r.document.session.objects.is_empty() && !r.document.session.can_undo());
             assert_eq!(r.editor.edit().unwrap().id, 88);
             assert_eq!(r.editor.window().unwrap().get_cursor_offset(), 5);
             assert_eq!(r.editor.window().unwrap().get_anchor_offset(), 2);

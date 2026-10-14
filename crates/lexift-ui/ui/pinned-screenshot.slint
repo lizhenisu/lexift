@@ -1,0 +1,82 @@
+import { Colors } from "design/colors.slint";
+import { AppToast } from "design/toast.slint";
+import { MenuMetrics } from "design/menu.slint";
+import { AnnotationCursor } from "annotation-canvas.slint";
+// A shared Gaussian alpha mask works in software renderers without drop-shadow.
+// Fixed corners preserve the 8px exterior falloff when the image is resized.
+component PinGlow inherits Image {
+    source:@image-url("assets/pin-glow-mask.png", nine-slice(16));
+    colorize:Colors.primary;
+    image-rendering:smooth;
+}
+export component PinnedScreenshotWindow inherits Window {
+    title:@tr("Pinned screenshot"); no-frame:true; always-on-top:root.topmost; background:transparent;
+    in property <image> picture;
+    in property <image> decoration;
+    in property <bool> interactive:true;
+    in property <bool> output-busy:false;
+    in property <bool> editing:false;
+    in property <bool> annotations-hidden:false;
+    in property <AnnotationCursor> cursor:AnnotationCursor.idle;
+    callback annotate-requested(); callback visibility-requested(bool); callback edit-pointer(int,float,float); callback escape-requested(); callback edit-key(int); callback edit-scroll(float);
+    in-out property <bool> shadow-enabled:true;
+    in-out property <bool> topmost:true;
+    out property <float> frame-inset: MenuMetrics.shadow-inset / 1px;
+    callback press-changed(bool); callback drag-requested(); callback close-requested(); callback zoom-requested(float,float,float);
+    callback output-requested(int); callback option-requested(int,bool);
+    public function close-menu() { context.close(); }
+    forward-focus:keys;
+    if root.shadow-enabled: PinGlow {width:parent.width; height:parent.height;}
+    Rectangle {
+        x:MenuMetrics.shadow-inset; y:MenuMetrics.shadow-inset;
+        width:parent.width - 2 * MenuMetrics.shadow-inset; height:parent.height - 2 * MenuMetrics.shadow-inset;
+        background:Colors.surface;
+        Image { source:root.picture; width:parent.width; height:parent.height; image-fit:fill; }
+        if root.editing: Image {source:root.decoration;width:parent.width;height:parent.height;image-fit:fill;}
+        area := TouchArea {
+            width:parent.width; height:parent.height; enabled:root.interactive;
+            pointer-event(event)=>{
+                if !root.editing && event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.press-changed(true);root.drag-requested();}
+                if event.kind==PointerEventKind.up || event.kind==PointerEventKind.cancel {root.press-changed(false);}
+                if root.editing {
+                    if event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.edit-pointer(0,self.mouse-x/1px,self.mouse-y/1px);}
+                    if event.kind==PointerEventKind.move {root.edit-pointer(1,self.mouse-x/1px,self.mouse-y/1px);}
+                    if event.kind==PointerEventKind.up && event.button==PointerEventButton.left {root.edit-pointer(2,self.mouse-x/1px,self.mouse-y/1px);}
+                    if event.kind==PointerEventKind.cancel {root.edit-pointer(3,self.mouse-x/1px,self.mouse-y/1px);}
+                }
+            }
+            changed has-hover=>{if root.editing && !self.has-hover {root.edit-pointer(4,self.mouse-x/1px,self.mouse-y/1px);}}
+            mouse-cursor: root.editing ? (root.cursor==AnnotationCursor.moving ? move : root.cursor==AnnotationCursor.text ? text : root.cursor==AnnotationCursor.horizontal ? ew-resize : root.cursor==AnnotationCursor.vertical ? ns-resize : root.cursor==AnnotationCursor.diagonal-down ? nwse-resize : root.cursor==AnnotationCursor.diagonal-up ? nesw-resize : root.cursor==AnnotationCursor.drawing ? crosshair : default) : default;
+            scroll-event(event)=>{if root.editing {root.edit-scroll(event.delta-y/1px);return accept;}root.zoom-requested(event.delta-y/1px,self.mouse-x/1px+root.frame-inset,self.mouse-y/1px+root.frame-inset);return accept;}
+            // The context area gets right clicks before the draggable parent's grab.
+            context := ContextMenuArea {
+                width:parent.width; height:parent.height; enabled:root.interactive;
+            Menu {
+                MenuItem { title:@tr("Copy image"); enabled:!root.output-busy; activated=>{root.output-requested(0);} }
+                MenuItem { title:@tr("Save image"); enabled:!root.output-busy; activated=>{root.output-requested(1);} }
+                MenuSeparator {}
+                MenuItem { title:@tr("Annotate"); enabled:!root.output-busy && !root.editing; activated=>{root.annotate-requested();} }
+                MenuItem { title:@tr("Hide annotations"); checkable:true; checked:root.annotations-hidden; activated=>{root.visibility-requested(!root.annotations-hidden);} }
+                MenuSeparator {}
+                MenuItem { title:@tr("Window shadow"); checkable:true; checked <=> root.shadow-enabled; activated=>{root.option-requested(0,self.checked);} }
+                MenuItem { title:@tr("Always on top"); checkable:true; checked <=> root.topmost; activated=>{root.option-requested(1,self.checked);} }
+                MenuSeparator {}
+                MenuItem { title:@tr("Close"); activated=>{root.close-requested();} }
+            }
+                keys := FocusScope { key-pressed(event)=>{if root.interactive && event.text==Key.Escape {root.escape-requested();return accept;}
+                    if root.editing {
+                        if event.text==Key.Delete {root.edit-key(1);return accept;}
+                        if event.text==Key.Return {root.edit-key(2);return accept;}
+                        if event.text==Key.Backspace {root.edit-key(3);return accept;}
+                        if event.text=="z" && event.modifiers.control {root.edit-key(0);return accept;}
+                    }return reject;} }
+            }
+        }
+    }
+}
+export component ScreenshotToastWindow inherits Window {
+    title:""; no-frame:true; always-on-top:true; background:transparent;
+    in property <string> message; callback dismissed();
+    preferred-width:320px; height:toast.height;
+    toast := AppToast { width:parent.width; adaptive-height:true; height-limit:200px; error:true; message:root.message; dismissed=>{root.dismissed();} }
+}

@@ -233,6 +233,8 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
             Ok(()) => true,
             Err(error) => { tracing::warn!(%error, "About link could not be opened"); false }
         })
+        .with_pinned_image_policy(|window,topmost,interactive,inset|lexift_platform::configure_pinned_image(&window.window_handle(),topmost,interactive,inset).is_ok())
+        .with_pinned_image_preparation(|window| lexift_platform::prepare_pinned_image_window(&window.window_handle()).is_ok())
         .with_app_window_preparation(|window, role| {
             match window.with_winit_window(|native| lexift_platform::configure_window_shell_role(native, role == lexift_ui::WindowRole::Settings)) {
                 Some(Ok(())) => lexift_ui::PassiveWindowPreparation::Ready,
@@ -332,6 +334,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         .with_toolbar_cursor_position(move || {
             screen_for_toolbar.as_ref()?.cursor_position().ok()
         })
+        .with_window_interaction_cancellation(|window| lexift_platform::cancel_window_interaction(&window.window_handle()).is_ok())
         .with_toolbar_drag_cancellation(|window| {
             lexift_platform::cancel_toolbar_drag_on_escape(&window.window_handle())
         })
@@ -410,6 +413,18 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         )
         .with_speech(services.speech.clone())
         .with_history(history_runtime)
+        .with_screenshot(
+            lexift_platform::annotation_save_port()
+                .zip(services.clipboard.clone())
+                .map(|(save, clipboard)| {
+                    Arc::new(crate::screenshot::ScreenshotRuntime::new(
+                        lexift_platform::annotation_screen_capture_port,
+                        save,
+                        Arc::new(lexift_ui::SoftwareExportRenderer),
+                        clipboard,
+                    ))
+                }),
+        )
         .with_annotation_export(lexift_platform::annotation_save_port().map(|save| {
             Arc::new(crate::annotation_export::ExportRuntime::new(
                 lexift_platform::annotation_screen_capture_port,
@@ -532,6 +547,16 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
     let tray_registered = register_tray(services.tray.as_ref(), controller.tray_handler());
     ui.set_background_mode(tray_registered);
     controller.dispatch(lexift_core::AppEvent::Started);
+    #[cfg(all(test, debug_assertions, target_os = "windows"))]
+    let native_pin_result = if std::env::var_os("LEXIFT_NATIVE_PIN_REPRO").is_some() {
+        Some(lexift_ui::start_native_pin_repro(std::rc::Rc::new(
+            |window, label, click| {
+                lexift_platform::diagnose_pin_hit(&window.window_handle(), label, click)
+            },
+        )))
+    } else {
+        None
+    };
 
     let result = ui
         .run(startup_mode == StartupMode::Interactive)
@@ -543,6 +568,14 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
     drop(ui);
     drop(services);
     lifecycle::on_exit();
+    #[cfg(all(test, debug_assertions, target_os = "windows"))]
+    if let Some(result) = native_pin_result {
+        assert!(
+            result.get() && lexift_platform::pin_diagnostic_windows_destroyed(),
+            "native screenshot roundtrip failed; inspect PIN_NATIVE diagnostics"
+        );
+    }
+
     result
 }
 
@@ -555,8 +588,11 @@ fn map_pointer_event(event: lexift_platform::PopupPointerEvent) -> lexift_ui::Po
             lexift_ui::PopupPointerInput::Moved { x, y }
         }
         lexift_platform::PopupPointerEvent::Exited => lexift_ui::PopupPointerInput::Exited,
-        lexift_platform::PopupPointerEvent::RightPressed => {
-            lexift_ui::PopupPointerInput::RightPressed
+        lexift_platform::PopupPointerEvent::RightPressed { x, y } => {
+            lexift_ui::PopupPointerInput::RightPressed { x, y }
+        }
+        lexift_platform::PopupPointerEvent::RightReleased { x, y } => {
+            lexift_ui::PopupPointerInput::RightReleased { x, y }
         }
         lexift_platform::PopupPointerEvent::LeftPressed { x, y } => {
             lexift_ui::PopupPointerInput::LeftPressed { x, y }
@@ -703,4 +739,11 @@ mod tests {
             assert_eq!(popup_resize_direction(edge), expected);
         }
     }
+}
+
+#[cfg(all(test, debug_assertions, target_os = "windows"))]
+#[test]
+#[ignore = "opens the real App; moves the pointer over owned pins; no clipboard output"]
+fn native_pin_roundtrip_exact_effects_sequence() {
+    run(StartupMode::Interactive).unwrap();
 }

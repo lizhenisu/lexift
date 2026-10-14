@@ -284,7 +284,7 @@ mod tests {
             }
             crate::annotation_sequence::layout(&mut object);
             assert!(r.set_mode(super::super::InteractionMode::Tool(4)));
-            assert!(r.session.add(object));
+            assert!(r.document.session.add(object));
             r.canvas_state.pending_displays = vec![Rect {
                 left: -400,
                 top: -300,
@@ -303,7 +303,7 @@ mod tests {
                 unreachable!()
             };
             assert_eq!(s.caption.font_family, "Malgun Gothic");
-            let Extra::Sequence(existing) = &r.session.objects[0].extra else {
+            let Extra::Sequence(existing) = &r.document.session.objects[0].extra else {
                 unreachable!()
             };
             assert_eq!(existing.caption.font_family, "Arial");

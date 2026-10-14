@@ -1,4 +1,9 @@
 //! Owns the ephemeral annotation preview windows and per-tool UI values.
+mod editor_document;
+mod frozen_editor;
+pub(crate) mod pin_editor;
+pub(crate) mod screenshot;
+mod screenshot_preview;
 use crate::bridge::dispatch_pointer_input as dispatch;
 use crate::{
     AnnotationCanvas, AnnotationPanel, AnnotationTextInput, AnnotationToolbar, AnnotationValues,
@@ -147,6 +152,7 @@ pub(crate) fn init(
     REGISTRY.with(|slot| {
         *slot.borrow_mut() = Some(Registry {
             toolbar_state: ToolbarState {
+                resume: None,
                 main: window::Slot::default(),
                 panel: window::Slot::default(),
                 watermark: window::Slot::default(),
@@ -183,20 +189,14 @@ pub(crate) fn init(
             editor: editor::State::default(),
             fonts: fonts::Directory::default(),
             focus: focus::Coordinator::default(),
-            session: {
-                let mut session = Session::new();
-                session.set_edit_scope(EditScope::Geometry);
-                session
-            },
+            document: Default::default(),
+            screenshot: None,
             hovered: None,
             gesture: None,
             pending_drawing: PendingState::default(),
-            mode: InteractionMode::Tool(0),
             parameter_edit: Default::default(),
             deferred_parameters: parameters::Pending::default(),
             pending_edit_panel: false,
-            selected: [0, 4, 7, 9, 10, 11, 13],
-            parameter_values: parameters::State::new(),
             prepare,
             lifecycle,
             timer: slint::Timer::default(),
@@ -275,10 +275,10 @@ pub(crate) fn apply_theme() {
 
 fn sync_history_controls(r: &Registry) {
     if let Some(main) = r.toolbar_state.main.get() {
-        main.set_can_undo(r.session.can_undo());
+        main.set_can_undo(r.document.session.can_undo());
     }
     if let Some(panel) = r.toolbar_state.panel.get() {
-        panel.set_can_clear(r.session.has_content());
+        panel.set_can_clear(r.document.session.has_content());
     }
 }
 
@@ -323,3 +323,13 @@ mod lifecycle;
 use lifecycle::escape;
 use lifecycle::{backspace_polyline, escape_from, finish_polyline};
 pub(crate) use lifecycle::{close, shutdown, toggle};
+
+#[cfg(debug_assertions)]
+pub(crate) mod native_repro;
+
+pub(crate) fn emit_pin(event: lexift_core::domain::pinned_image::Event) {
+    let handler = EXPORT_HANDLER.with(|h| h.borrow().clone());
+    if let Some(handler) = handler {
+        handler(lexift_core::AppEvent::PinnedImage(event));
+    }
+}

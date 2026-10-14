@@ -37,6 +37,7 @@ lexift/
     ├── lexift-app/src/
     │   ├── bootstrap.rs / wiring.rs / controller.rs
     │   ├── annotation_export.rs    # 导出采集、合成、保存后台任务
+    │   ├── screenshot.rs           # 截图冻结与图片输出后台任务
     │   ├── ocr.rs / clipboard_history.rs
     │   └── runtime/                # 快捷键与翻译能力生命周期
     ├── lexift-core/src/
@@ -47,7 +48,9 @@ lexift/
     │   ├── src/annotation/         # 会话、画布、输入、参数、编辑与渲染
     │   ├── src/bridge/             # 按窗口拆分的 UI 接线及生命周期
     │   ├── src/ocr/                # selection 框选与 provider 设置桥接
-    │   ├── src/screen_interaction/ # 共用屏幕交互宿主
+    │   ├── src/screen_interaction/ # 共用屏幕交互宿主与冻结框选
+    │   ├── src/pinned_screenshot.rs # 独立临时贴图窗口
+    │   ├── src/frozen_capture.rs    # 冻结帧采样器
     │   ├── ui/ / translations/
     │   └── build.rs
     ├── lexift-platform/src/
@@ -94,7 +97,7 @@ default-members = [
 
 [workspace.package]
 edition = "2024"
-version = "0.0.1-rc.10"
+version = "0.0.1-rc.11"
 ```
 
 内部 crate 和常用第三方依赖统一通过 `[workspace.dependencies]` 管理，成员 crate 使用 `.workspace = true` 继承，减少版本漂移和重复声明。
@@ -472,3 +475,9 @@ Workspace 初始化后至少满足：
 - App 可以完成全部具体实现的组装。
 - 不存在内部循环依赖。
 - 主链路可以自然承载“选中文字 → 快捷键 → 获取 Selection → 翻译 → Popup 展示”。
+
+## 截图编辑边界
+
+截图由 Core 管理会话与输出身份，App 持有底图并调度采集及输出；UI 复用与窗口分离的 EditorDocument 和现有标注编辑工作流。普通标注在截图期间移动到纯恢复状态，窗口销毁后按需重建。冻结区域宿主供 OCR／截图复用，推理、截图输出及两种业务会话保持独立。详见 [截图模式](../features/screenshot-mode.md)。
+
+贴图将底图与可编辑标注分开保存。Core 的 pinned_image 管理编辑身份、隐藏、版本与冻结输出；App 保存像素并执行后台合成。UI 的 frozen_editor 共用冻结预览，pin_editor 持有独立编辑文档与桌面恢复状态；Canvas Surface 可借用既有贴图窗口，编辑租约退休不销毁或退休贴图本身。源坐标、DPI 分区和视图缩放分离，编辑装饰独立于正文纹理。没有新增 crate、配置或业务 Port。

@@ -22,3 +22,6 @@ pub mod region_selection;
 pub mod screen_snapshot;
 
 pub mod service_provider;
+
+pub mod pinned_image;
+pub mod screenshot;

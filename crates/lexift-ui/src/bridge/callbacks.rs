@@ -9,7 +9,14 @@ pub enum PopupDismissCause {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PopupPointerInput {
-    RightPressed,
+    RightPressed {
+        x: f32,
+        y: f32,
+    },
+    RightReleased {
+        x: f32,
+        y: f32,
+    },
     /// Cancels the canvas gesture before clearing Slint's pressed pointer state.
     LeftCancelled {
         x: f32,
@@ -119,6 +126,8 @@ pub enum PassiveWindowPreparation {
     Failed,
 }
 
+type ConfigurePinnedImage = Rc<dyn Fn(&slint::Window, bool, bool, i32) -> bool>;
+
 #[derive(Clone)]
 pub struct WindowLifecycleCallbacks {
     pub(super) llm_query: Option<crate::llm_settings::LlmQuery>,
@@ -135,6 +144,7 @@ pub struct WindowLifecycleCallbacks {
     pub(super) configure_translation_popup_corners: fn(&slint::Window) -> PopupCornerMode,
     pub(crate) activate_user_requested_window: fn(&slint::Window) -> bool,
     pub(crate) begin_window_drag: fn(&slint::Window) -> bool,
+    pub(crate) cancel_window_interaction: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(super) begin_window_resize: BeginWindowResize,
     pub(crate) popup_work_area: PopupWorkArea,
     pub(crate) toolbar_cursor_position: ToolbarCursorPosition,
@@ -163,6 +173,8 @@ pub struct WindowLifecycleCallbacks {
     pub(super) configure_window_paint_repair: ConfigureWindowPaintRepair,
     pub(super) configure_app_window_icon: fn(&slint::Window) -> bool,
     pub(super) prepare_app_window: PrepareAppWindow,
+    pub(crate) configure_pinned_image: ConfigurePinnedImage,
+    pub(crate) prepare_pinned_image: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(super) open_about_link: Rc<dyn Fn(crate::AboutLink) -> bool>,
 }
 
@@ -203,6 +215,7 @@ impl WindowLifecycleCallbacks {
             configure_translation_popup_corners: |_| PopupCornerMode::SlintRounded,
             activate_user_requested_window,
             begin_window_drag,
+            cancel_window_interaction: Rc::new(|_| true),
             begin_window_resize: Rc::new(begin_window_resize),
             popup_work_area: Rc::new(|_| None),
             toolbar_cursor_position: Rc::new(|| None),
@@ -229,6 +242,8 @@ impl WindowLifecycleCallbacks {
             configure_window_paint_repair: Rc::new(|_, _| true),
             configure_app_window_icon: |_| true,
             prepare_app_window: Rc::new(|_, _| PassiveWindowPreparation::Ready),
+            prepare_pinned_image: Rc::new(|_| true),
+            configure_pinned_image: Rc::new(|_, _, _, _| true),
             open_about_link: Rc::new(|_| false),
         }
     }
@@ -281,6 +296,20 @@ impl WindowLifecycleCallbacks {
         self
     }
 
+    pub fn with_pinned_image_policy(
+        mut self,
+        callback: impl Fn(&slint::Window, bool, bool, i32) -> bool + 'static,
+    ) -> Self {
+        self.configure_pinned_image = Rc::new(callback);
+        self
+    }
+    pub fn with_pinned_image_preparation(
+        mut self,
+        callback: impl Fn(&slint::Window) -> bool + 'static,
+    ) -> Self {
+        self.prepare_pinned_image = Rc::new(callback);
+        self
+    }
     pub fn with_app_window_preparation(
         mut self,
         callback: impl Fn(&slint::Window, WindowRole) -> PassiveWindowPreparation + 'static,
@@ -426,6 +455,15 @@ impl WindowLifecycleCallbacks {
     }
 
     /// Cancels captured passive toolbar dragging without activating the toolbar.
+    /// Cancel only this instance's native move/capture before retiring its view.
+    pub fn with_window_interaction_cancellation(
+        mut self,
+        cancel: impl Fn(&slint::Window) -> bool + 'static,
+    ) -> Self {
+        self.cancel_window_interaction = Rc::new(cancel);
+        self
+    }
+
     pub fn with_toolbar_drag_cancellation(
         mut self,
         cancel: impl Fn(&slint::Window) -> bool + 'static,

@@ -28,7 +28,7 @@ fn new_sequence_adopts_displayed_settings_and_cancel_restores_selected_projectio
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
-        r.mode = InteractionMode::Tool(4);
+        r.document.mode = InteractionMode::Tool(4);
         r.sync_edit_scope();
         let mut existing = crate::annotation_sequence::tests::badge(1.);
         existing.style.color = [1, 2, 3];
@@ -36,9 +36,9 @@ fn new_sequence_adopts_displayed_settings_and_cancel_restores_selected_projectio
             sequence.size = 90.;
         }
         crate::annotation_sequence::layout(&mut existing);
-        assert!(r.session.add(existing));
-        let old_id = r.session.objects[0].id;
-        let old_next = r.session.next_sequence;
+        assert!(r.document.session.add(existing));
+        let old_id = r.document.session.objects[0].id;
+        let old_next = r.document.session.next_sequence;
         project_object_parameters(r, 0);
         assert_eq!(r.values(10).text_size, 90);
         let placed = sequence_from_values(r, (100., 100.), 1.25);
@@ -47,19 +47,22 @@ fn new_sequence_adopts_displayed_settings_and_cancel_restores_selected_projectio
         };
         assert_eq!(
             sequence.size,
-            r.parameter_values.defaults(10).text_size as f32
+            r.document.parameter_values.defaults(10).text_size as f32
         );
         assert_ne!(placed.style.color, [1, 2, 3]);
         begin_sequence_placement(r, (100., 100.), 1.25);
         assert!(cancel_sequence_placement(r));
         assert_eq!(
-            r.session.selected.map(|index| r.session.objects[index].id),
+            r.document
+                .session
+                .selected
+                .map(|index| r.document.session.objects[index].id),
             Some(old_id)
         );
-        assert_eq!(r.session.next_sequence, old_next);
+        assert_eq!(r.document.session.next_sequence, old_next);
         assert_eq!(r.values(10).text_size, 90);
-        assert_eq!(r.parameter_values.defaults(10).text_size, 90);
-        assert_eq!(r.mode, InteractionMode::Tool(4));
+        assert_eq!(r.document.parameter_values.defaults(10).text_size, 90);
+        assert_eq!(r.document.mode, InteractionMode::Tool(4));
     });
     REGISTRY.with(|slot| {
         slot.borrow_mut().take();
@@ -106,7 +109,7 @@ fn sequence_press_drag_release_and_cancellation_do_not_create_hover_frames() {
                 .window()
                 .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
             r.canvas_state.annotation_ready = true;
-            r.mode = InteractionMode::Tool(4);
+            r.document.mode = InteractionMode::Tool(4);
             r.sync_edit_scope();
         });
         for x in 40..100 {
@@ -116,7 +119,7 @@ fn sequence_press_drag_release_and_cancellation_do_not_create_hover_frames() {
                 let r = slot.as_ref().unwrap();
                 assert!(
                     gestures::display_draft(&r.gesture, &r.pending_drawing).is_none()
-                        && r.session.objects.is_empty()
+                        && r.document.session.objects.is_empty()
                 );
                 assert!(!r.render_state.frame_tasks.render_pending());
                 assert_eq!(
@@ -129,14 +132,14 @@ fn sequence_press_drag_release_and_cancellation_do_not_create_hover_frames() {
         REGISTRY.with(|slot| {
             let slot = slot.borrow();
             let r = slot.as_ref().unwrap();
-            assert_eq!(r.session.objects.len(), 1);
+            assert_eq!(r.document.session.objects.len(), 1);
             assert_eq!(
-                r.session.objects[0].bounds.center(),
+                r.document.session.objects[0].bounds.center(),
                 (-500. + 80. * dpi, -300. + 80. * dpi)
             );
             assert!(r.sequence_placement().is_some() && r.text_handle().is_none());
-            assert_eq!(r.session.next_sequence, 2);
-            assert!(r.session.selected.is_none() && !r.session.can_undo());
+            assert_eq!(r.document.session.next_sequence, 2);
+            assert!(r.document.session.selected.is_none() && !r.document.session.can_undo());
         });
         canvas_pointer(0, 1, 280., 200.);
         canvas_pointer(0, 2, 300., 210.);
@@ -144,12 +147,12 @@ fn sequence_press_drag_release_and_cancellation_do_not_create_hover_frames() {
             let slot = slot.borrow();
             let r = slot.as_ref().unwrap();
             assert_eq!(
-                r.session.objects[0].bounds.center(),
+                r.document.session.objects[0].bounds.center(),
                 (-500. + 300. * dpi, -300. + 210. * dpi)
             );
             assert!(r.sequence_placement().is_none() && r.text_handle().is_none());
-            assert_eq!(r.session.selected, Some(0));
-            assert!(r.session.can_undo());
+            assert_eq!(r.document.session.selected, Some(0));
+            assert!(r.document.session.can_undo());
         });
         undo();
         // A new press retires an interrupted placement instead of joining its snapshot.
@@ -159,10 +162,10 @@ fn sequence_press_drag_release_and_cancellation_do_not_create_hover_frames() {
         REGISTRY.with(|slot| {
             let slot = slot.borrow();
             let r = slot.as_ref().unwrap();
-            assert_eq!(r.session.objects.len(), 1);
-            assert_eq!(r.session.next_sequence, 2);
+            assert_eq!(r.document.session.objects.len(), 1);
+            assert_eq!(r.document.session.next_sequence, 2);
             assert_eq!(
-                r.session.objects[0].bounds.center(),
+                r.document.session.objects[0].bounds.center(),
                 (-500. + 100. * dpi, -300. + 120. * dpi)
             );
         });
@@ -170,9 +173,9 @@ fn sequence_press_drag_release_and_cancellation_do_not_create_hover_frames() {
         REGISTRY.with(|slot| {
             let slot = slot.borrow();
             let r = slot.as_ref().unwrap();
-            assert!(r.session.objects.is_empty() && !r.session.can_undo());
+            assert!(r.document.session.objects.is_empty() && !r.document.session.can_undo());
             assert!(r.sequence_placement().is_none());
-            assert_eq!(r.session.next_sequence, 1);
+            assert_eq!(r.document.session.next_sequence, 1);
         });
         for cancel in 0..4 {
             canvas_pointer(0, 0, 80., 80.);
@@ -207,12 +210,12 @@ fn sequence_press_drag_release_and_cancellation_do_not_create_hover_frames() {
             REGISTRY.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
-                assert!(r.session.objects.is_empty() && !r.session.can_undo());
-                assert_eq!(r.session.next_sequence, 1);
+                assert!(r.document.session.objects.is_empty() && !r.document.session.can_undo());
+                assert_eq!(r.document.session.next_sequence, 1);
                 assert!(r.gesture().is_none() && r.text_handle().is_none());
                 assert!(r.geometry_drag().is_none());
                 assert!(r.sequence_placement().is_none());
-                r.mode = InteractionMode::Tool(4);
+                r.document.mode = InteractionMode::Tool(4);
                 r.sync_edit_scope();
             });
         }
@@ -221,9 +224,14 @@ fn sequence_press_drag_release_and_cancellation_do_not_create_hover_frames() {
         REGISTRY.with(|slot| {
             let slot = slot.borrow();
             let r = slot.as_ref().unwrap();
-            assert_eq!(r.session.objects.len(), 1);
-            assert_eq!(r.session.objects[0].kind, Kind::Sequence);
-            assert!(r.session.object_index(r.session.objects[0].id).is_some());
+            assert_eq!(r.document.session.objects.len(), 1);
+            assert_eq!(r.document.session.objects[0].kind, Kind::Sequence);
+            assert!(
+                r.document
+                    .session
+                    .object_index(r.document.session.objects[0].id)
+                    .is_some()
+            );
         });
         open_text_editor((-100., 0.), Some(0), dpi);
         let (generation, old_id) = REGISTRY.with(|slot| {
@@ -263,9 +271,9 @@ fn sequence_press_drag_release_and_cancellation_do_not_create_hover_frames() {
         REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
-            assert_eq!(r.session.objects.len(), 1);
-            assert!(r.session.undo());
-            assert!(!r.session.can_undo());
+            assert_eq!(r.document.session.objects.len(), 1);
+            assert!(r.document.session.undo());
+            assert!(!r.document.session.can_undo());
             begin_sequence_placement(r, (-100., 0.), dpi);
             assert!(r.sequence_placement().is_some());
             r.close();
@@ -307,9 +315,9 @@ fn sequence_placement_parameters_keep_default_target_after_release_or_cancel() {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
                 r.close_panel();
-                r.session = Session::new();
-                r.parameter_values = parameters::State::new();
-                r.mode = InteractionMode::Tool(4);
+                r.document.session = Session::new();
+                r.document.parameter_values = parameters::State::new();
+                r.document.mode = InteractionMode::Tool(4);
                 r.sync_edit_scope();
                 r.canvas_state.annotation_ready = true;
                 r.canvas_state.canvases.clear();
@@ -328,8 +336,8 @@ fn sequence_placement_parameters_keep_default_target_after_release_or_cancel() {
                 ));
                 let mut existing = crate::annotation_sequence::tests::badge(dpi);
                 crate::annotation_sequence::layout(&mut existing);
-                assert!(r.session.add(existing));
-                let original = r.session.objects[0].clone();
+                assert!(r.document.session.add(existing));
+                let original = r.document.session.objects[0].clone();
                 let panel = AnnotationPanel::new().unwrap();
                 panel.set_tool(10);
                 r.toolbar_state.panel.open(panel);
@@ -360,42 +368,48 @@ fn sequence_placement_parameters_keep_default_target_after_release_or_cancel() {
                 let r = slot.as_mut().unwrap();
                 assert!(r.deferred_parameters.is_empty());
                 assert_eq!(
-                    r.parameter_values.defaults(10).color_index,
+                    r.document.parameter_values.defaults(10).color_index,
                     changed.color_index
                 );
                 assert_eq!(
-                    r.parameter_values.defaults(10).custom_color,
+                    r.document.parameter_values.defaults(10).custom_color,
                     changed.custom_color
                 );
-                assert_eq!(r.session.next_sequence, 20);
-                assert_eq!(r.session.objects[0], original);
+                assert_eq!(r.document.session.next_sequence, 20);
+                assert_eq!(r.document.session.objects[0], original);
                 if cancel {
-                    assert_eq!(r.session.selected, Some(0));
+                    assert_eq!(r.document.session.selected, Some(0));
                 } else {
-                    assert_eq!(r.session.selected, Some(1));
-                    assert_ne!(r.session.objects[1].style.color, [11, 22, 33]);
+                    assert_eq!(r.document.session.selected, Some(1));
+                    assert_ne!(r.document.session.objects[1].style.color, [11, 22, 33]);
                 }
                 r.finish_style_edit();
                 assert!(
-                    r.session.undo(),
+                    r.document.session.undo(),
                     "number change owns a separate parameter undo"
                 );
-                assert_eq!(r.session.selected, if cancel { Some(0) } else { None });
-                assert_eq!(r.session.next_sequence, if cancel { 2 } else { 3 });
+                assert_eq!(
+                    r.document.session.selected,
+                    if cancel { Some(0) } else { None }
+                );
+                assert_eq!(r.document.session.next_sequence, if cancel { 2 } else { 3 });
                 if !cancel {
-                    assert!(r.session.undo(), "creation plus placement owns one undo");
+                    assert!(
+                        r.document.session.undo(),
+                        "creation plus placement owns one undo"
+                    );
                 }
-                assert_eq!(r.session.objects, vec![original]);
-                assert!(r.session.undo());
-                assert!(r.session.objects.is_empty() && !r.session.can_undo());
+                assert_eq!(r.document.session.objects, vec![original]);
+                assert!(r.document.session.undo());
+                assert!(r.document.session.objects.is_empty() && !r.document.session.can_undo());
                 // An old target must not mutate a reopened parameter panel.
                 r.close_panel();
                 let panel = AnnotationPanel::new().unwrap();
                 panel.set_tool(10);
                 r.toolbar_state.panel.open(panel);
-                let before = r.parameter_values.defaults(10).clone();
+                let before = r.document.parameter_values.defaults(10).clone();
                 assert!(apply_geometry_values(r, target, changed).is_none());
-                assert_eq!(r.parameter_values.defaults(10), &before);
+                assert_eq!(r.document.parameter_values.defaults(10), &before);
             });
         }
     }
@@ -429,12 +443,12 @@ fn retired_sequence_panel_discards_waiting_requests_before_reopen() {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
-        r.mode = InteractionMode::Tool(4);
+        r.document.mode = InteractionMode::Tool(4);
         r.sync_edit_scope();
         let mut original = crate::annotation_sequence::tests::badge(1.25);
         crate::annotation_sequence::layout(&mut original);
-        assert!(r.session.add(original));
-        let original = r.session.objects[0].clone();
+        assert!(r.document.session.add(original));
+        let original = r.document.session.objects[0].clone();
         let panel = AnnotationPanel::new().unwrap();
         panel.set_tool(10);
         r.toolbar_state.panel.open(panel);
@@ -453,16 +467,16 @@ fn retired_sequence_panel_discards_waiting_requests_before_reopen() {
         r.toolbar_state.panel.open(reopened);
         assert!(apply_geometry_values(r, retired_target, pending).is_none());
         assert!(cancel_sequence_placement(r));
-        assert_eq!(r.session.objects, vec![original.clone()]);
-        assert_eq!(r.session.selected, Some(0));
-        assert_eq!(r.session.next_sequence, 2);
+        assert_eq!(r.document.session.objects, vec![original.clone()]);
+        assert_eq!(r.document.session.selected, Some(0));
+        assert_eq!(r.document.session.next_sequence, 2);
         assert_ne!(
-            parameters::style(r.parameter_values.defaults(10), 10).color,
+            parameters::style(r.document.parameter_values.defaults(10), 10).color,
             [11, 22, 33]
         );
         assert!(!r.parameter_edit.active());
-        assert!(r.session.undo());
-        assert!(r.session.objects.is_empty() && !r.session.can_undo());
+        assert!(r.document.session.undo());
+        assert!(r.document.session.objects.is_empty() && !r.document.session.can_undo());
     });
     shutdown();
 }
@@ -495,7 +509,7 @@ fn applied_watermark_parameters_and_stale_events_do_not_change_defaults() {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
         r.toolbar_state.main.open(AnnotationToolbar::new().unwrap());
-        r.selected[3] = 9;
+        r.document.selected[3] = 9;
         r.sync_edit_scope();
         r.generation
     });
@@ -504,6 +518,7 @@ fn applied_watermark_parameters_and_stale_events_do_not_change_defaults() {
         slot.borrow()
             .as_ref()
             .unwrap()
+            .document
             .parameter_values
             .defaults(9)
             .clone()
@@ -548,12 +563,12 @@ fn applied_watermark_parameters_and_stale_events_do_not_change_defaults() {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
         r.finish_style_edit();
-        let watermark = r.session.watermark.as_ref().unwrap();
+        let watermark = r.document.session.watermark.as_ref().unwrap();
         assert_eq!(watermark.template, "甲");
         assert_eq!(watermark.font_size, 44.);
         assert_eq!(watermark.color, [18, 52, 86]);
         assert_eq!(watermark.opacity, 70);
-        assert_eq!(r.parameter_values.defaults(9), &defaults);
+        assert_eq!(r.document.parameter_values.defaults(9), &defaults);
         let mut stale = r.toolbar_state.panel.get().unwrap().get_values();
         stale.text_size = 68;
         r.toolbar_state
@@ -576,18 +591,21 @@ fn applied_watermark_parameters_and_stale_events_do_not_change_defaults() {
     REGISTRY.with(|slot| {
         let slot = slot.borrow();
         let r = slot.as_ref().unwrap();
-        assert!(r.session.watermark.is_none());
+        assert!(r.document.session.watermark.is_none());
         assert_eq!(r.values(9), &defaults);
-        assert_eq!(r.parameter_values.defaults(9), &defaults);
+        assert_eq!(r.document.parameter_values.defaults(9), &defaults);
     });
     undo();
     REGISTRY.with(|slot| {
         let slot = slot.borrow();
         let r = slot.as_ref().unwrap();
-        assert_eq!(r.session.watermark.as_ref().unwrap().font_size, 44.);
+        assert_eq!(
+            r.document.session.watermark.as_ref().unwrap().font_size,
+            44.
+        );
         assert_eq!(r.values(9).text_size, 44);
         assert_eq!(r.values(9).custom_color, "#123456");
-        assert_eq!(r.parameter_values.defaults(9), &defaults);
+        assert_eq!(r.document.parameter_values.defaults(9), &defaults);
     });
     shutdown();
 }
@@ -635,7 +653,7 @@ fn new_text_draft_parameters_are_cancelled_or_committed_and_retained_for_subsequ
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
         r.toolbar_state.main.open(AnnotationToolbar::new().unwrap());
-        r.selected[3] = 8;
+        r.document.selected[3] = 8;
         r.sync_edit_scope();
     });
     for commit in [false, true] {
@@ -645,7 +663,7 @@ fn new_text_draft_parameters_are_cancelled_or_committed_and_retained_for_subsequ
         let _defaults = REGISTRY.with(|slot| {
             let slot = slot.borrow();
             let r = slot.as_ref().unwrap();
-            let defaults = r.parameter_values.defaults(8).clone();
+            let defaults = r.document.parameter_values.defaults(8).clone();
             let panel = r.toolbar_state.panel.get().unwrap();
             let mut values = panel.get_values();
             values.text_size = 58;
@@ -662,18 +680,18 @@ fn new_text_draft_parameters_are_cancelled_or_committed_and_retained_for_subsequ
         REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
-            assert_eq!(r.parameter_values.defaults(8).text_size, 58);
-            assert!(r.parameter_values.defaults(8).text.is_empty());
+            assert_eq!(r.document.parameter_values.defaults(8).text_size, 58);
+            assert!(r.document.parameter_values.defaults(8).text.is_empty());
             assert_eq!(r.values(8).text_size, 58);
             assert_eq!(r.editor.edit().unwrap().original.font_size, 58.);
             assert_eq!(current_style(r, 8).color, [16, 32, 48]);
             finish_text_edit_registry(r, commit);
             r.finish_style_edit();
-            assert_eq!(r.parameter_values.defaults(8).text_size, 58);
-            assert!(r.parameter_values.defaults(8).text.is_empty());
+            assert_eq!(r.document.parameter_values.defaults(8).text_size, 58);
+            assert!(r.document.parameter_values.defaults(8).text.is_empty());
             assert!(r.editor.draft_values().is_none());
             if commit {
-                let object = r.session.objects.last().unwrap();
+                let object = r.document.session.objects.last().unwrap();
                 assert_eq!(object.style.color, [16, 32, 48]);
                 let Extra::Text(text) = &object.extra else {
                     unreachable!()
@@ -681,23 +699,23 @@ fn new_text_draft_parameters_are_cancelled_or_committed_and_retained_for_subsequ
                 assert_eq!(text.content, "中文草稿");
                 assert_eq!(text.font_size, 58.);
                 assert_eq!(text.background.as_ref().unwrap().padding, 13.);
-                assert!(r.session.undo());
+                assert!(r.document.session.undo());
                 assert!(
-                    !r.session.can_undo(),
+                    !r.document.session.can_undo(),
                     "draft parameters added an extra undo"
                 );
             } else {
-                assert!(!r.session.can_undo());
+                assert!(!r.document.session.can_undo());
                 assert_eq!(
                     r.toolbar_state.panel.get().unwrap().get_values().text_size,
                     58
                 );
             }
-            assert!(r.session.objects.is_empty());
+            assert!(r.document.session.objects.is_empty());
             // Closing retains accepted settings without retaining draft contents.
             r.close_panel();
-            assert_eq!(r.parameter_values.defaults(8).text_size, 58);
-            assert!(r.parameter_values.defaults(8).text.is_empty());
+            assert_eq!(r.document.parameter_values.defaults(8).text_size, 58);
+            assert!(r.document.parameter_values.defaults(8).text.is_empty());
         });
     }
     shutdown();
@@ -749,7 +767,7 @@ fn sequence_panel_parameters_reach_the_session_before_the_panel_closes() {
         assert!(r.set_mode(InteractionMode::Tool(4)));
         let mut object = crate::annotation_sequence::tests::badge(1.25);
         crate::annotation_sequence::layout(&mut object);
-        assert!(r.session.add(object));
+        assert!(r.document.session.add(object));
     });
     open_panel(4, false);
     REGISTRY.with(|slot| {
@@ -930,8 +948,8 @@ fn sequence_panel_parameters_reach_the_session_before_the_panel_closes() {
             parameters::Edit::Color(parameters::ColorTarget::SequenceText, [16, 32, 48]),
         );
         finish_text_edit_registry(r, false);
-        assert_eq!(r.session.next_sequence, 8);
-        let Extra::Sequence(s) = &r.session.objects[0].extra else {
+        assert_eq!(r.document.session.next_sequence, 8);
+        let Extra::Sequence(s) = &r.document.session.objects[0].extra else {
             unreachable!()
         };
         assert_eq!(s.shape, SequenceShape::Circle);
@@ -958,17 +976,17 @@ fn sequence_panel_parameters_reach_the_session_before_the_panel_closes() {
         // Accepted settings persist; the counter remains session-owned.
         assert_eq!(s.format, SequenceFormat::Chinese);
         assert_eq!(s.size, 28.);
-        assert_eq!(r.parameter_values.defaults(10).format, 4);
-        let retired = r.session.objects[0].id;
-        assert_eq!(r.parameter_values.binding().get(), Some(retired));
+        assert_eq!(r.document.parameter_values.defaults(10).format, 4);
+        let retired = r.document.session.objects[0].id;
+        assert_eq!(r.document.parameter_values.binding().get(), Some(retired));
         let generation = r.generation;
         drop(slot);
         delete_selected();
         let stale = REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
-            assert!(r.session.objects.is_empty());
-            assert_eq!(r.parameter_values.bound_object(), None);
+            assert!(r.document.session.objects.is_empty());
+            assert_eq!(r.document.parameter_values.bound_object(), None);
             assert_eq!(
                 r.toolbar_state.panel.get().unwrap().get_values(),
                 *r.values(10)
@@ -1003,17 +1021,17 @@ fn sequence_panel_parameters_reach_the_session_before_the_panel_closes() {
         sequence.format = SequenceFormat::Roman;
         sequence.size = 41.;
         crate::annotation_sequence::layout(&mut new_object);
-        assert!(r.session.add(new_object));
+        assert!(r.document.session.add(new_object));
         refresh_parameter_target(r);
         assert_eq!(r.toolbar_state.panel.get().unwrap().get_values().format, 1);
         assert_eq!(
             r.toolbar_state.panel.get().unwrap().get_values().text_size,
             41
         );
-        assert_eq!(r.parameter_values.defaults(10).format, 4);
-        assert_eq!(r.parameter_values.defaults(10).text_size, 28);
+        assert_eq!(r.document.parameter_values.defaults(10).format, 4);
+        assert_eq!(r.document.parameter_values.defaults(10).text_size, 28);
         r.close();
-        assert_eq!(r.session.next_sequence, 1);
+        assert_eq!(r.document.session.next_sequence, 1);
         assert_eq!(r.values(10).sequence_label, "1");
         assert!(
             r.editor.window().is_none()
@@ -1117,7 +1135,7 @@ fn foreground_dismissal_closes_the_menu_without_activating_the_text_window() {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
         r.toolbar_state.main.open(AnnotationToolbar::new().unwrap());
-        r.selected[3] = 8;
+        r.document.selected[3] = 8;
         r.sync_edit_scope();
     });
     open_panel(3, false);
@@ -2072,8 +2090,8 @@ fn watermark_pointer_bridge_reaches_controls_and_stale_instances_are_ignored() {
         let r = slot.as_mut().unwrap();
         assert!(r.toolbar_state.watermark.get().is_some());
         assert!(r.toolbar_state.menus.current.is_none());
-        assert!(r.session.watermark.is_none());
-        assert!(!r.session.can_undo());
+        assert!(r.document.session.watermark.is_none());
+        assert!(!r.document.session.can_undo());
         r.close();
         assert!(r.toolbar_state.watermark.get().is_none());
         slot.take();
@@ -2110,14 +2128,14 @@ fn text_handle_activation_preserves_parameters_and_separates_undo() {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
                 r.close_panel();
-                r.session = Session::new();
-                r.parameter_values = parameters::State::new();
-                r.mode = InteractionMode::Tool(3);
+                r.document.session = Session::new();
+                r.document.parameter_values = parameters::State::new();
+                r.document.mode = InteractionMode::Tool(3);
                 r.sync_edit_scope();
-                r.selected[3] = 8;
+                r.document.selected[3] = 8;
                 r.sync_edit_scope();
                 let text = text_from_values(r, "文字".into());
-                assert!(r.session.add(Object {
+                assert!(r.document.session.add(Object {
                     erased: Vec::new(),
                     id: ObjectId::DRAFT,
                     kind: Kind::Text,
@@ -2126,7 +2144,7 @@ fn text_handle_activation_preserves_parameters_and_separates_undo() {
                     points: Vec::new(),
                     extra: Extra::Text(text),
                 }));
-                let baseline = r.session.objects[0].clone();
+                let baseline = r.document.session.objects[0].clone();
                 let panel = AnnotationPanel::new().unwrap();
                 panel.set_tool(8);
                 r.toolbar_state.panel.open(panel);
@@ -2138,14 +2156,14 @@ fn text_handle_activation_preserves_parameters_and_separates_undo() {
                     .apply(&mut values);
                 let target = r.parameter_target(8);
                 assert!(apply_geometry_values(r, target, values).is_some());
-                let colored = r.session.objects[0].clone();
+                let colored = r.document.session.objects[0].clone();
                 update_text_handle(r, (start.0 + dpi, start.1));
                 assert!(r.parameter_edit.active());
                 assert!(!r.gesture().unwrap().owns_document_transaction());
                 update_text_handle(r, (start.0 + 20. * dpi, start.1 + 20. * dpi));
                 assert!(!r.parameter_edit.active());
                 assert!(r.gesture().unwrap().owns_document_transaction());
-                assert_eq!(r.session.objects[0].style.color, [44, 55, 66]);
+                assert_eq!(r.document.session.objects[0].style.color, [44, 55, 66]);
                 let end = (start.0 + 40. * dpi, start.1 + 40. * dpi);
                 update_text_handle(r, end);
                 let mut values = r.values(8).clone();
@@ -2157,20 +2175,20 @@ fn text_handle_activation_preserves_parameters_and_separates_undo() {
                 } else {
                     finish_text_handle(r, end);
                 }
-                assert_eq!(r.session.objects[0].style.color, [77, 88, 99]);
+                assert_eq!(r.document.session.objects[0].style.color, [77, 88, 99]);
                 r.finish_style_edit();
-                assert!(r.session.undo());
-                assert_eq!(r.session.objects[0].style.color, [44, 55, 66]);
+                assert!(r.document.session.undo());
+                assert_eq!(r.document.session.objects[0].style.color, [44, 55, 66]);
                 if !cancel {
-                    assert_ne!(r.session.objects[0].bounds, colored.bounds);
-                    assert!(r.session.undo());
+                    assert_ne!(r.document.session.objects[0].bounds, colored.bounds);
+                    assert!(r.document.session.undo());
                 }
-                assert_eq!(r.session.objects, vec![colored]);
-                assert!(r.session.undo());
-                assert_eq!(r.session.objects, vec![baseline]);
-                assert!(r.session.undo());
-                assert!(r.session.objects.is_empty());
-                assert!(!r.session.can_undo());
+                assert_eq!(r.document.session.objects, vec![colored]);
+                assert!(r.document.session.undo());
+                assert_eq!(r.document.session.objects, vec![baseline]);
+                assert!(r.document.session.undo());
+                assert!(r.document.session.objects.is_empty());
+                assert!(!r.document.session.can_undo());
             });
         }
     }
@@ -2208,11 +2226,11 @@ fn draft_text_handle_preserves_parameters_across_activation_and_cancel() {
                 let r = slot.as_mut().unwrap();
                 r.close_panel();
                 r.editor.clear();
-                r.session = Session::new();
-                r.parameter_values = parameters::State::new();
-                r.mode = InteractionMode::Tool(3);
+                r.document.session = Session::new();
+                r.document.parameter_values = parameters::State::new();
+                r.document.mode = InteractionMode::Tool(3);
                 r.sync_edit_scope();
-                r.selected[3] = 8;
+                r.document.selected[3] = 8;
                 r.sync_edit_scope();
                 let original = text_from_values(r, "说明文字".into());
                 let at = (-120., 60.);
@@ -2230,8 +2248,11 @@ fn draft_text_handle_preserves_parameters_across_activation_and_cancel() {
                     bounds,
                     original.content.clone(),
                 );
-                r.editor
-                    .open(window, edit, Some(r.parameter_values.defaults(8).clone()));
+                r.editor.open(
+                    window,
+                    edit,
+                    Some(r.document.parameter_values.defaults(8).clone()),
+                );
                 let panel = AnnotationPanel::new().unwrap();
                 panel.set_tool(8);
                 r.toolbar_state.panel.open(panel);
@@ -2288,9 +2309,9 @@ fn draft_text_handle_preserves_parameters_across_activation_and_cancel() {
                 assert_eq!(r.editor.window().unwrap().get_value().as_str(), "说明文字");
                 assert!(r.deferred_parameters.is_empty());
                 r.finish_style_edit();
-                assert!(r.session.objects.is_empty());
+                assert!(r.document.session.objects.is_empty());
                 assert!(
-                    !r.session.can_undo(),
+                    !r.document.session.can_undo(),
                     "draft geometry and parameters never create document history"
                 );
             });
@@ -2429,7 +2450,7 @@ fn text_editor_failure_invalidates_preview_and_retires_input() {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
-        r.selected[3] = 8;
+        r.document.selected[3] = 8;
         assert!(r.set_mode(InteractionMode::Tool(3)));
     });
     for failure in 0..3 {
@@ -2455,8 +2476,8 @@ fn text_editor_failure_invalidates_preview_and_retires_input() {
                 r.render_state.frame_tasks.render_pending(),
                 "retiring an editor must repaint a previously displayed preview"
             );
-            assert!(r.session.objects.is_empty());
-            assert!(!r.session.undo());
+            assert!(r.document.session.objects.is_empty());
+            assert!(!r.document.session.undo());
             r.render_state.frame_tasks.cancel_render();
         });
         held.invoke_content_changed("迟到输入".into());
@@ -2469,7 +2490,7 @@ fn text_editor_failure_invalidates_preview_and_retires_input() {
             let r = r.as_ref().unwrap();
             assert!(r.editor.window().is_none());
             assert!(!r.render_state.frame_tasks.render_pending());
-            assert!(r.session.objects.is_empty());
+            assert!(r.document.session.objects.is_empty());
         });
     }
     shutdown();
@@ -2540,7 +2561,7 @@ fn text_editor_owner_is_attached_after_ready_and_old_retries_are_inert() {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
-        r.selected[3] = 8;
+        r.document.selected[3] = 8;
         assert!(r.set_mode(InteractionMode::Tool(3)));
     });
     for scale in [1., 1.25] {
@@ -2592,8 +2613,8 @@ fn text_editor_owner_is_attached_after_ready_and_old_retries_are_inert() {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
                 assert!(r.editor.window().is_none());
-                assert!(r.session.objects.is_empty());
-                assert!(!r.session.undo());
+                assert!(r.document.session.objects.is_empty());
+                assert!(!r.document.session.undo());
             });
             accept_owner.set(true);
         }
@@ -2635,7 +2656,7 @@ fn text_editor_target_survives_index_changes_and_does_not_resurrect_deleted_obje
             REGISTRY.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
-                r.selected[3] = 8;
+                r.document.selected[3] = 8;
                 assert!(r.set_mode(InteractionMode::Tool(if sequence { 4 } else { 3 })));
                 r.ensure_fonts();
                 for i in 0..3 {
@@ -2655,18 +2676,18 @@ fn text_editor_target_survives_index_changes_and_does_not_resurrect_deleted_obje
                             extra: Extra::Text(text),
                         }
                     };
-                    assert!(r.session.add(object));
+                    assert!(r.document.session.add(object));
                 }
             });
             open_text_editor((-100., 20.), Some(1), dpi);
             let (target, last) = REGISTRY.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
-                let target = r.session.objects[1].id;
-                let last = r.session.objects[2].clone();
+                let target = r.document.session.objects[1].id;
+                let last = r.document.session.objects[2].clone();
                 r.editor.window().unwrap().set_value("修改中".into());
-                r.session.selected = Some(0);
-                r.session.delete_selected();
+                r.document.session.selected = Some(0);
+                r.document.session.delete_selected();
                 assert_eq!(editing_text_object(r).unwrap().id, target);
                 let input = r.editor.window().unwrap();
                 input.invoke_content_changed("修改中".into());
@@ -2680,30 +2701,30 @@ fn text_editor_target_survives_index_changes_and_does_not_resurrect_deleted_obje
                 let slot = slot.borrow();
                 let r = slot.as_ref().unwrap();
                 assert!(r.editor.edit().is_none());
-                assert_eq!(r.session.objects.len(), 2);
-                assert_eq!(r.session.objects[0].id, target);
-                let content = match &r.session.objects[0].extra {
+                assert_eq!(r.document.session.objects.len(), 2);
+                assert_eq!(r.document.session.objects[0].id, target);
+                let content = match &r.document.session.objects[0].extra {
                     Extra::Text(t) => &t.content,
                     Extra::Sequence(s) => &s.caption.content,
                     _ => unreachable!(),
                 };
                 assert_eq!(content, "修改中");
-                assert_eq!(r.session.objects[1], last);
+                assert_eq!(r.document.session.objects[1], last);
             });
             open_text_editor((-100., 20.), Some(0), dpi);
             REGISTRY.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
-                let before = r.session.objects.clone();
+                let before = r.document.session.objects.clone();
                 r.editor.window().unwrap().set_value("obsolete".into());
-                r.session.selected = Some(0);
-                r.session.delete_selected();
+                r.document.session.selected = Some(0);
+                r.document.session.delete_selected();
                 assert!(editing_text_object(r).is_none());
                 finish_text_edit_registry(r, true);
-                assert_eq!(r.session.objects, before[1..]);
-                r.session.undo();
+                assert_eq!(r.document.session.objects, before[1..]);
+                r.document.session.undo();
                 assert_eq!(
-                    r.session.objects, before,
+                    r.document.session.objects, before,
                     "ignored commit must not add an undo record"
                 );
                 r.close();

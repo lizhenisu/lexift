@@ -44,6 +44,9 @@ pub struct PopupSessionState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppState {
+    pub last_pin_id: u64,
+    pub pinned_images: crate::domain::pinned_image::States,
+    pub screenshot: crate::domain::screenshot::ScreenshotState,
     pub annotation_export: crate::domain::annotation_export::ExportState,
     pub ocr: crate::domain::ocr::OcrState,
     pub clipboard_history: crate::domain::clipboard_history::HistoryState,
@@ -88,6 +91,9 @@ impl Default for AppState {
 impl AppState {
     pub fn new(settings: Settings) -> Self {
         Self {
+            last_pin_id: 0,
+            pinned_images: Default::default(),
+            screenshot: Default::default(),
             annotation_export: Default::default(),
             ocr: Default::default(),
             clipboard_history: Default::default(),
@@ -132,7 +138,20 @@ impl AppState {
 
     /// Applies a domain event and returns the capabilities the app must execute.
     pub fn reduce(&mut self, event: AppEvent) -> Vec<AppCommand> {
+        if self.screenshot.active()
+            && matches!(
+                event,
+                AppEvent::SelectionInteractionStarted
+                    | AppEvent::SelectionGestureCompleted { .. }
+                    | AppEvent::SelectionToolbarCaptured { .. }
+                    | AppEvent::Ocr(crate::domain::ocr::OcrEvent::Requested { .. })
+            )
+        {
+            return vec![];
+        }
         match event {
+            AppEvent::PinnedImage(event) => crate::domain::pinned_image::reduce(self, event),
+            AppEvent::Screenshot(event) => crate::domain::screenshot::reduce(self, event),
             AppEvent::AnnotationExport(event) => {
                 crate::domain::annotation_export::reduce(self, event)
             }
@@ -598,12 +617,23 @@ impl AppState {
                 self.provider_settings_error.clear();
                 self.launch_at_login_settings_error.clear();
                 self.credential_error_message.clear();
-                vec![
+                let mut commands = if self.screenshot.active() {
+                    crate::domain::screenshot::reduce(
+                        self,
+                        crate::domain::screenshot::ScreenshotEvent::Cancelled {
+                            session: self.screenshot.session,
+                        },
+                    )
+                } else {
+                    vec![]
+                };
+                commands.extend([
                     AppCommand::ShowSettingsWindow,
                     AppCommand::Ocr(crate::domain::ocr::OcrCommand::Check {
                         generation: self.ocr.generation,
                     }),
-                ]
+                ]);
+                commands
             }
             AppEvent::SettingsChangeRequested { change } => {
                 if matches!(change, SettingsChange::SelectionToolbar(false)) {
@@ -949,6 +979,8 @@ impl AppState {
                 commands
             }
             AppEvent::ExitRequested => {
+                self.pinned_images.clear();
+                self.screenshot.phase = crate::domain::screenshot::ScreenshotPhase::Idle;
                 let mut commands =
                     self.annotation_export
                         .session

@@ -21,6 +21,7 @@ pub(super) struct CanvasState {
     pub(super) cold_open_timing: Option<ColdOpenTiming>,
 }
 pub(super) struct ToolbarState {
+    pub(super) resume: Option<(slint::PhysicalPosition, bool)>,
     pub(super) main: window::Slot<AnnotationToolbar>,
     pub(super) panel: window::Slot<AnnotationPanel>,
     pub(super) watermark: window::Slot<AnnotationWatermarkInput>,
@@ -41,16 +42,14 @@ pub(super) struct Registry {
     pub(super) editor: editor::State,
     pub(super) fonts: fonts::Directory,
     pub(super) focus: focus::Coordinator,
-    pub(super) session: Session,
+    pub(super) document: super::editor_document::EditorDocument,
+    pub(super) screenshot: Option<super::screenshot::Editing>,
     pub(super) hovered: Option<usize>,
     pub(super) gesture: Option<Active>,
     pub(super) pending_drawing: PendingState,
-    pub(super) mode: InteractionMode,
     pub(super) parameter_edit: parameter_edit::Transaction,
     pub(super) deferred_parameters: parameters::Pending,
     pub(super) pending_edit_panel: bool,
-    pub(super) selected: [i32; 7],
-    pub(super) parameter_values: parameters::State,
     pub(super) prepare: fn(&slint::Window) -> PassiveWindowPreparation,
     pub(super) lifecycle: WindowLifecycleCallbacks,
     pub(super) timer: slint::Timer,
@@ -233,8 +232,6 @@ impl ToolbarState {
 }
 impl CanvasState {
     pub(super) fn pause_inputs(&self) -> impl Iterator<Item = window::PointerPause> + '_ {
-        self.canvases
-            .iter()
-            .map(|layer| layer.input().pause_pointer())
+        self.canvases.iter().map(|layer| layer.pause_pointer())
     }
 }

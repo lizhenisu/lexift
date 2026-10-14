@@ -224,6 +224,7 @@ fn rounded_contains(b: Bounds, radius: f32, p: (f32, f32)) -> bool {
     (p.0 - x).hypot(p.1 - y) <= r
 }
 /// Only coverage is retained: no screenshot, UI object or duplicate document body.
+#[derive(Clone)]
 pub(crate) struct RectangleEraseEdit {
     pub geometry: RoundedRectangle,
     editing: bool,

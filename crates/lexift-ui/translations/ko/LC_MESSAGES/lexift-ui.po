@@ -1689,3 +1689,45 @@ msgstr "도구 모음 이동"
 
 msgid "Bold text"
 msgstr "굵은 텍스트"
+
+msgid "Screenshot"
+msgstr "스크린샷"
+
+msgid "Save screenshot"
+msgstr "스크린샷 저장"
+
+msgid "Copy screenshot"
+msgstr "스크린샷 복사"
+
+msgid "Pin screenshot"
+msgstr "이미지 고정"
+
+msgid "Pinned screenshot"
+msgstr "고정된 이미지"
+
+msgid "Select screenshot region"
+msgstr "캡처 영역 선택"
+
+msgid "Drag to select. Escape or right-click to cancel."
+msgstr "드래그하여 선택하세요. Escape 또는 오른쪽 클릭으로 취소합니다."
+
+msgid "Screenshot unavailable"
+msgstr "스크린샷을 사용할 수 없습니다"
+
+msgid "Copy image"
+msgstr "이미지 복사"
+
+msgid "Save image"
+msgstr "이미지 저장"
+
+msgid "Window shadow"
+msgstr "창 그림자"
+
+msgid "Always on top"
+msgstr "항상 위에 표시"
+
+msgid "Annotate"
+msgstr "주석 추가"
+
+msgid "Hide annotations"
+msgstr "주석 숨기기"

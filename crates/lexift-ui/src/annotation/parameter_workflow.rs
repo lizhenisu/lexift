@@ -22,6 +22,7 @@ pub(super) fn watermark_from_values(r: &Registry, template: String, content: Str
 
 pub(super) fn adopt_watermark_style(r: &mut Registry) {
     let font_index = r
+        .document
         .session
         .watermark
         .as_ref()
@@ -32,8 +33,9 @@ pub(super) fn adopt_watermark_style(r: &mut Registry) {
                 .position(|name| name == &watermark.font_family)
         })
         .unwrap_or(0) as i32;
-    r.parameter_values
-        .project_watermark(r.session.watermark.as_ref(), font_index);
+    r.document
+        .parameter_values
+        .project_watermark(r.document.session.watermark.as_ref(), font_index);
     choice::close_if_context_changed(r);
     if let Some(panel) = r.toolbar_state.panel.get()
         && panel.get_tool() == 9
@@ -44,7 +46,7 @@ pub(super) fn adopt_watermark_style(r: &mut Registry) {
 }
 
 pub(super) fn toolbar_tools(r: &Registry) -> Vec<i32> {
-    let mut selected = r.selected;
+    let mut selected = r.document.selected;
     if selected[0] != 2 && r.values(selected[0] as usize).shape == 1 {
         selected[0] = 1;
     }
@@ -59,15 +61,15 @@ pub(super) fn capture_creation(r: &mut Registry, tool: usize) -> AnnotationValue
     values.text = Default::default();
     values.sequence_label = Default::default();
     if tool == 10 {
-        values.start = r.session.next_sequence;
+        values.start = r.document.session.next_sequence;
     }
-    r.parameter_values.remember_creation(tool, &values);
+    r.document.parameter_values.remember_creation(tool, &values);
     values
 }
 
 pub(super) fn deselect_object(r: &mut Registry) {
-    r.session.selected = None;
-    r.parameter_values.deselect();
+    r.document.session.selected = None;
+    r.document.parameter_values.deselect();
     if let Some(panel) = r
         .toolbar_state
         .panel
@@ -79,7 +81,7 @@ pub(super) fn deselect_object(r: &mut Registry) {
 }
 
 pub(super) fn project_object_parameters(r: &mut Registry, index: usize) -> [u8; 3] {
-    let object = &r.session.objects[index];
+    let object = &r.document.session.objects[index];
     let font_family = match &object.extra {
         Extra::Text(text) => Some(&text.font_family),
         Extra::Sequence(sequence) => Some(&sequence.caption.font_family),
@@ -89,20 +91,20 @@ pub(super) fn project_object_parameters(r: &mut Registry, index: usize) -> [u8; 
         .and_then(|family| r.fonts.names().iter().position(|name| name == family))
         .unwrap_or(0) as i32;
     let preview_color = object.style.color;
-    r.parameter_values.project(
+    r.document.parameter_values.project(
         object,
         font_index,
-        r.session.next_sequence,
-        r.session.spotlight_opacity,
+        r.document.session.next_sequence,
+        r.document.session.spotlight_opacity,
     );
     preview_color
 }
 
 pub(super) fn restore_parameter_projection(r: &mut Registry) {
-    if let Some(index) = r.session.selected {
+    if let Some(index) = r.document.session.selected {
         project_object_parameters(r, index);
     } else {
-        r.parameter_values.deselect();
+        r.document.parameter_values.deselect();
     }
     choice::close_if_context_changed(r);
     if let Some(panel) = r
@@ -112,7 +114,7 @@ pub(super) fn restore_parameter_projection(r: &mut Registry) {
         .filter(|panel| !panel.get_menu())
     {
         let tool = panel.get_tool() as usize;
-        r.parameter_values.bind(r.parameter_object(tool));
+        r.document.parameter_values.bind(r.parameter_object(tool));
         panel.set_values(r.values(tool).clone());
     }
 }
@@ -130,21 +132,22 @@ pub(super) fn refresh_parameter_target(r: &mut Registry) {
         return;
     };
     let target = r.parameter_object(panel.get_tool() as usize);
-    if r.parameter_values.bound_object() != target {
+    if r.document.parameter_values.bound_object() != target {
         restore_parameter_projection(r);
     }
 }
 
 pub(super) fn adopt_selected_style(r: &mut Registry, index: usize) -> bool {
     if !r
+        .document
         .session
         .objects
         .get(index)
-        .is_some_and(|object| r.session.can_edit(object))
+        .is_some_and(|object| r.document.session.can_edit(object))
     {
         return false;
     }
-    let object = &r.session.objects[index];
+    let object = &r.document.session.objects[index];
     let tool = object.kind.tool();
     let group = if matches!(tool, 11 | 12) {
         5
@@ -159,7 +162,7 @@ pub(super) fn adopt_selected_style(r: &mut Registry, index: usize) -> bool {
     };
     let preview_color = project_object_parameters(r, index);
     choice::close_if_context_changed(r);
-    r.selected[group] = tool as i32;
+    r.document.selected[group] = tool as i32;
     r.set_mode(InteractionMode::Tool(group));
     if let Some(main) = r.toolbar_state.main.get() {
         main.set_tools(ModelRc::new(VecModel::from(toolbar_tools(r))));
@@ -188,10 +191,10 @@ pub(super) fn magnifier_connector(index: i32) -> MagnifierConnector {
 }
 
 pub(super) fn active_kind(r: &Registry) -> Option<Kind> {
-    if r.mode.is_mouse() {
+    if r.document.mode.is_mouse() {
         return None;
     }
-    let tool = r.selected[r.mode.selected_group() as usize] as usize;
+    let tool = r.document.selected[r.document.mode.selected_group() as usize] as usize;
     let capture = r
         .lifecycle
         .annotation_screen_capture
@@ -204,7 +207,9 @@ pub(super) fn active_kind(r: &Registry) -> Option<Kind> {
 }
 
 pub(super) fn sync_sequence_counter(r: &mut Registry) {
-    r.parameter_values.sequence_counter(r.session.next_sequence);
+    r.document
+        .parameter_values
+        .sequence_counter(r.document.session.next_sequence);
     if let Some(panel) = r.toolbar_state.panel.get()
         && panel.get_tool() == 10
     {
@@ -225,7 +230,7 @@ pub(super) fn update_sequence_style(
 }
 
 pub(super) fn sequence_from_values(r: &Registry, at: (f32, f32), scale: f32) -> Object {
-    let v = r.parameter_values.defaults(10);
+    let v = r.document.parameter_values.defaults(10);
     let style = parameters::style(v, 10);
     let mut caption = text_from_values(r, String::new());
     caption.outline = None;
@@ -241,7 +246,7 @@ pub(super) fn sequence_from_values(r: &Registry, at: (f32, f32), scale: f32) -> 
         style,
         points: Vec::new(),
         extra: Extra::Sequence(SequenceAnnotation {
-            value: r.session.next_sequence.max(1),
+            value: r.document.session.next_sequence.max(1),
             format: SequenceFormat::Decimal,
             shape: SequenceShape::Square,
             size: 16.,
@@ -267,7 +272,9 @@ pub(super) fn begin_sequence_placement(r: &mut Registry, point: (f32, f32), scal
     capture_creation(r, 10);
     let object = sequence_from_values(r, point, scale);
     r.begin_document_gesture();
-    let Some(placement) = gestures::SequencePlacement::insert(&mut r.session, point, object) else {
+    let Some(placement) =
+        gestures::SequencePlacement::insert(&mut r.document.session, point, object)
+    else {
         return;
     };
     deselect_object(r);
@@ -277,7 +284,7 @@ pub(super) fn begin_sequence_placement(r: &mut Registry, point: (f32, f32), scal
 
 pub(super) fn update_sequence_placement(r: &mut Registry, point: (f32, f32)) {
     if let Some(placement) = r.gesture.as_ref().and_then(Active::sequence) {
-        placement.update(&mut r.session, point);
+        placement.update(&mut r.document.session, point);
     }
 }
 
@@ -307,7 +314,7 @@ pub(super) fn cancel_active_gesture(r: &mut Registry) -> bool {
     if active.is_none() && r.pending_drawing.is_none() {
         return false;
     }
-    if let Some(original) = active.and_then(|active| active.cancel(&mut r.session)) {
+    if let Some(original) = active.and_then(|active| active.cancel(&mut r.document.session)) {
         apply_editing_object(r, original);
     }
     if let Some(edit) = r.editor.edit_mut() {
@@ -368,10 +375,10 @@ pub(super) fn apply_parameter_values(
     }
     let source_object = target.object;
     if tool == 13 && r.values(13).shape != values.shape {
-        r.session.finish_rectangle_erase();
+        r.document.session.finish_rectangle_erase();
     }
     let previous_values = if tool == 10 {
-        r.parameter_values.values(10, source_object)
+        r.document.parameter_values.values(10, source_object)
     } else {
         r.values(tool as usize)
     }
@@ -379,13 +386,16 @@ pub(super) fn apply_parameter_values(
     if previous_values == values {
         return None;
     }
-    let token = r.parameter_edit.touch(&mut r.session, target);
+    let token = r.parameter_edit.touch(&mut r.document.session, target);
     if tool == 8 {
-        r.parameter_values.remember_creation(tool as usize, &values);
+        r.document
+            .parameter_values
+            .remember_creation(tool as usize, &values);
     }
     let edited = values;
     if tool == 10 {
-        r.parameter_values
+        r.document
+            .parameter_values
             .replace(10, source_object, edited.clone());
     } else {
         r.replace_values(tool as usize, edited.clone());
@@ -403,9 +413,10 @@ pub(super) fn apply_parameter_values(
     }
     let kind = active_kind(r);
     let text_scale = r
+        .document
         .session
         .selected
-        .and_then(|index| r.session.objects.get(index))
+        .and_then(|index| r.document.session.objects.get(index))
         .and_then(|object| {
             r.canvas_state.canvases.iter().find(|layer| {
                 let center = object.bounds.center();
@@ -415,12 +426,13 @@ pub(super) fn apply_parameter_values(
                     && center.1 < layer.bounds.bottom as f32
             })
         })
-        .map_or(1., |layer| layer.window.window().scale_factor().max(0.1));
+        .map_or(1., |layer| layer.scale());
     let text_style = (tool == 8).then(|| text_from_values(r, String::new()));
     let text_scale = r
+        .document
         .session
         .selected
-        .and_then(|index| r.session.objects.get(index))
+        .and_then(|index| r.document.session.objects.get(index))
         .filter(|object| object.kind == Kind::Text)
         .map_or(text_scale, crate::annotation_text::object_scale);
     let displays: Vec<_> = if r.editor.edit().is_some() && (tool == 8 || tool == 10) {
@@ -437,21 +449,23 @@ pub(super) fn apply_parameter_values(
             .apply_text_style(next, style.color, &previous_values, &edited, &displays);
     }
     let watermark = if tool == 9 {
-        r.session.watermark.as_ref().map(|current| {
+        r.document.session.watermark.as_ref().map(|current| {
             watermark_from_values(r, current.template.clone(), current.content.clone())
         })
     } else {
         None
     };
     if tool == 2 {
-        r.session.set_spotlight_opacity(r.values(2).strength / 100.);
+        r.document
+            .session
+            .set_spotlight_opacity(r.values(2).strength / 100.);
     }
     if tool == 10 {
         if edited.start != previous_values.start {
-            r.session.next_sequence = edited.start.max(1);
+            r.document.session.next_sequence = edited.start.max(1);
         }
         let fonts = r.fonts.names();
-        r.session.update_selected(|object| {
+        r.document.session.update_selected(|object| {
             if Some(object.id) != source_object {
                 return;
             }
@@ -459,13 +473,16 @@ pub(super) fn apply_parameter_values(
                 update_sequence_style(object, &edited, fonts, style);
             }
         });
-        if let Some(index) = r.editor.edit().and_then(|edit| edit.index(&r.session))
-            && let Some(object) = r.session.objects.get(index)
+        if let Some(index) = r
+            .editor
+            .edit()
+            .and_then(|edit| edit.index(&r.document.session))
+            && let Some(object) = r.document.session.objects.get(index)
         {
             r.editor.apply_caption_style(object, &displays);
         }
     } else if let Some(kind) = kind {
-        r.session.update_selected(|object| {
+        r.document.session.update_selected(|object| {
             if Some(object.id) != source_object {
                 return;
             }
@@ -587,10 +604,10 @@ pub(super) fn apply_parameter_values(
     if tool == 9
         && let Some(watermark) = watermark
     {
-        r.session.set_watermark(Some(watermark));
+        r.document.session.set_watermark(Some(watermark));
     }
     if let Some(main) = r.toolbar_state.main.get() {
-        main.set_can_undo(r.session.can_undo());
+        main.set_can_undo(r.document.session.can_undo());
     }
     if tool == 10 {
         sync_sequence_counter(r);
@@ -661,19 +678,20 @@ impl Registry {
     }
 
     pub(super) fn parameter_entry_active(&self, tool: i32) -> bool {
-        !self.mode.is_mouse()
+        !self.document.mode.is_mouse()
             && parameters::compatible_tools(
-                self.selected[self.mode.selected_group() as usize] as usize,
+                self.document.selected[self.document.mode.selected_group() as usize] as usize,
                 tool as usize,
             )
     }
 
     pub(super) fn parameter_object(&self, tool: usize) -> Option<ObjectId> {
-        self.session
+        self.document
+            .session
             .selected
-            .and_then(|index| self.session.objects.get(index))
+            .and_then(|index| self.document.session.objects.get(index))
             .filter(|object| {
-                self.session.can_edit(object)
+                self.document.session.can_edit(object)
                     && parameters::compatible_tools(object.kind.tool(), tool)
             })
             .map(|object| object.id)
@@ -685,7 +703,8 @@ impl Registry {
         {
             return values;
         }
-        self.parameter_values
+        self.document
+            .parameter_values
             .values(tool, self.parameter_object(tool))
     }
 
@@ -696,12 +715,12 @@ impl Registry {
             object: self.parameter_object(tool as usize),
             editor: self.editor.edit().map(|edit| edit.id),
             watermark: if tool == 9 {
-                self.parameter_values.watermark_revision()
+                self.document.parameter_values.watermark_revision()
             } else {
                 0
             },
             projection: if tool != 9 {
-                self.parameter_values.projection_revision()
+                self.document.parameter_values.projection_revision()
             } else {
                 0
             },
@@ -714,7 +733,7 @@ impl Registry {
             return self.editor.draft_values_mut().unwrap();
         }
         let object = self.parameter_object(tool);
-        self.parameter_values.edit(tool, object)
+        self.document.parameter_values.edit(tool, object)
     }
 
     pub(super) fn replace_values(&mut self, tool: usize, values: AnnotationValues) {
@@ -725,7 +744,7 @@ impl Registry {
             return;
         }
         let object = self.parameter_object(tool);
-        self.parameter_values.replace(tool, object, values);
+        self.document.parameter_values.replace(tool, object, values);
     }
 
     pub(super) fn pending_parameter_values(
@@ -767,7 +786,7 @@ impl Registry {
             && let Some(font_tool) = fonts::Tool::from_index(tool)
         {
             self.fonts.choose(font_tool, *index);
-            self.parameter_values.defaults_mut(tool).font = *index;
+            self.document.parameter_values.defaults_mut(tool).font = *index;
         }
         let changed = apply_geometry_values(self, target, values);
         if let Some(panel) = self.toolbar_state.panel.get() {
@@ -795,8 +814,9 @@ impl Registry {
             let editing = self.editor.edit().is_some_and(|e| {
                 if tool == 8 {
                     !editing_sequence(self)
-                        && e.index(&self.session).is_none_or(|i| {
-                            self.session
+                        && e.index(&self.document.session).is_none_or(|i| {
+                            self.document
+                                .session
                                 .objects
                                 .get(i)
                                 .is_some_and(|o| o.kind == Kind::Text)
@@ -815,7 +835,7 @@ impl Registry {
                 .iter()
                 .position(|f| f.eq_ignore_ascii_case(&name))
             {
-                self.parameter_values.defaults_mut(tool).font = index as i32;
+                self.document.parameter_values.defaults_mut(tool).font = index as i32;
             }
         }
     }
@@ -843,7 +863,7 @@ impl Registry {
                     .get()
                     .filter(|panel| !panel.get_menu())
                     .map(|panel| panel.get_tool()),
-                bound_object: self.parameter_values.bound_object(),
+                bound_object: self.document.parameter_values.bound_object(),
                 cancelled_sequence: matches!(cancelled, Some(Gesture::PlaceSequence)),
             };
             match context.resolve(target) {
@@ -859,12 +879,12 @@ impl Registry {
     }
 
     pub(super) fn finish_style_edit(&mut self) {
-        if self.parameter_edit.finish(&mut self.session)
+        if self.parameter_edit.finish(&mut self.document.session)
             && let Some(main) = self.toolbar_state.main.get()
         {
-            main.set_can_undo(self.session.can_undo());
+            main.set_can_undo(self.document.session.can_undo());
             if let Some(panel) = self.toolbar_state.panel.get() {
-                panel.set_can_clear(self.session.has_content());
+                panel.set_can_clear(self.document.session.has_content());
             }
         }
     }

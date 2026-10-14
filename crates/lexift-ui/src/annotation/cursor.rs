@@ -1,7 +1,7 @@
 //! Cursor feedback shares the canvas hit test and locks to an active drag's operation.
 use super::{Gesture, InteractionMode, Registry};
 use crate::AnnotationCursor;
-use lexift_core::domain::annotation::{Extra, Hit, Kind, Object, Session};
+use lexift_core::domain::annotation::{Bounds, Extra, Hit, Kind, Object, Session};
 #[cfg(test)]
 use lexift_core::domain::geometry::Rect;
 use slint::ComponentHandle;
@@ -144,7 +144,32 @@ fn editing_control_cursor(
 /// Updating feedback does not enqueue annotation rasterization. Slint applies it only
 /// to the hovered canvas TouchArea, leaving tool windows and click-through apps alone.
 pub(super) fn refresh(r: &Registry) {
-    let editing = if r.gesture().is_none() && !r.mode.is_mouse() {
+    if let Some(editing) = &r.screenshot
+        && editing.pin.is_none()
+        && r.document.mode.is_mouse()
+    {
+        if let Some(b) = editing.region.bounds() {
+            let geometry = Bounds {
+                left: b.left as f32,
+                top: b.top as f32,
+                right: b.right as f32,
+                bottom: b.bottom as f32,
+            };
+            for layer in &r.canvas_state.canvases {
+                let scale = layer.scale();
+                let handle = layer.last_pointer.and_then(|point| {
+                    geometry.handles().iter().position(|&(x, y)| {
+                        (point.0 - x).abs() <= 9. * scale && (point.1 - y).abs() <= 9. * scale
+                    })
+                });
+                let cursor = handle.map_or(AnnotationCursor::Idle, handle_cursor);
+                layer.window.set_cursor(cursor);
+            }
+        }
+        return;
+    }
+
+    let editing = if r.gesture().is_none() && !r.document.mode.is_mouse() {
         super::editing_text_object(r)
     } else {
         None
@@ -154,13 +179,9 @@ pub(super) fn refresh(r: &Registry) {
             .as_ref()
             .filter(|_| !super::editing_sequence(r))
             .and_then(|object| {
-                layer.last_pointer.and_then(|point| {
-                    editing_control_cursor(
-                        object,
-                        point,
-                        layer.window.window().scale_factor().max(0.1),
-                    )
-                })
+                layer
+                    .last_pointer
+                    .and_then(|point| editing_control_cursor(object, point, layer.scale()))
             });
         let erase_cursor = match &r.gesture {
             Some(super::gestures::Active::Erasing(press)) => {
@@ -186,23 +207,23 @@ pub(super) fn refresh(r: &Registry) {
             AnnotationCursor::Drawing
         } else {
             at_point(
-                &r.session,
-                r.mode,
+                &r.document.session,
+                r.document.mode,
                 r.gesture(),
                 layer.last_pointer,
-                layer.window.window().scale_factor().max(0.1),
+                layer.scale(),
             )
         };
         let hovered_text = r.editor.window().is_some()
             && r.gesture().is_none()
             && layer.last_pointer.is_some_and(|point| {
-                matches!(r.session.hit(point, layer.window.window().scale_factor().max(0.1)),
-                Some(Hit::Object(index)) if r.session.objects[index].kind == Kind::Text)
+                matches!(r.document.session.hit(point, layer.scale()),
+                Some(Hit::Object(index)) if r.document.session.objects[index].kind == Kind::Text)
             });
         let desired = if editing_control.is_none()
             && (hovered_text
-                || (r.mode == InteractionMode::Tool(3)
-                    && r.selected[3] == 8
+                || (r.document.mode == InteractionMode::Tool(3)
+                    && r.document.selected[3] == 8
                     && desired == AnnotationCursor::Drawing))
         {
             AnnotationCursor::Text
@@ -214,17 +235,17 @@ pub(super) fn refresh(r: &Registry) {
             && (matches!(
                 super::active_kind(r),
                 Some(Kind::MosaicBrush | Kind::StickerBrush)
-            ) || (r.mode == InteractionMode::Tool(6) && r.values(13).shape == 1))
+            ) || (r.document.mode == InteractionMode::Tool(6) && r.values(13).shape == 1))
             && layer.last_pointer.is_some();
         if !brush && layer.window.get_cursor() == AnnotationCursor::Brush {
             (r.lifecycle.annotation_brush_cursor)(layer.window.window(), 0.);
         }
         let cursor = if brush {
-            let diameter = if r.mode == InteractionMode::Tool(6) {
+            let diameter = if r.document.mode == InteractionMode::Tool(6) {
                 if let Some(super::gestures::Active::Erasing(press)) = &r.gesture {
                     press.diameter
                 } else {
-                    r.values(13).size.clamp(1, 100) as f32 * layer.window.window().scale_factor()
+                    r.values(13).size.clamp(1, 100) as f32 * layer.scale()
                 }
             } else {
                 super::gestures::display_draft(&r.gesture, &r.pending_drawing)
@@ -245,10 +266,13 @@ pub(super) fn refresh(r: &Registry) {
                         })
                         .size
                         .clamp(1, 100) as f32
-                            * layer.window.window().scale_factor(),
+                            * layer.scale(),
                     )
             };
-            if (r.lifecycle.annotation_brush_cursor)(layer.window.window(), diameter) {
+            if (r.lifecycle.annotation_brush_cursor)(
+                layer.window.window(),
+                diameter * layer.view_zoom(),
+            ) {
                 AnnotationCursor::Brush
             } else {
                 AnnotationCursor::Drawing
@@ -290,7 +314,7 @@ fn refresh_stationary_pointer(generation: u64, index: usize, revision: u64, poin
         let slot = slot.borrow();
         let r = slot
             .as_ref()
-            .filter(|r| r.generation == generation && !r.mode.is_mouse())?;
+            .filter(|r| r.generation == generation && !r.document.mode.is_mouse())?;
         let layer = r
             .canvas_state
             .canvases
@@ -298,9 +322,10 @@ fn refresh_stationary_pointer(generation: u64, index: usize, revision: u64, poin
             .filter(|layer| layer.revision() == revision)?;
         // Do not replay a stale position or change a tool window's cursor.
         let cursor = (r.lifecycle.toolbar_cursor_position)()?;
+        let display_point = super::pin_editor::view_point(point, false);
         if layer.last_pointer != Some(point)
-            || (cursor.x as f32 - point.0).abs() > 0.5
-            || (cursor.y as f32 - point.1).abs() > 0.5
+            || (cursor.x as f32 - display_point.0).abs() > 0.5
+            || (cursor.y as f32 - display_point.1).abs() > 0.5
         {
             return None;
         }
@@ -328,12 +353,12 @@ fn refresh_stationary_pointer(generation: u64, index: usize, revision: u64, poin
         {
             return None;
         }
-        let scale = layer.window.window().scale_factor().max(0.1);
+        let scale = layer.input_scale();
         Some((
             layer.window.clone_strong(),
             slint::LogicalPosition::new(
-                (point.0 - layer.bounds.left as f32) / scale,
-                (point.1 - layer.bounds.top as f32) / scale,
+                (point.0 - layer.bounds.left as f32) / scale + layer.client_inset(),
+                (point.1 - layer.bounds.top as f32) / scale + layer.client_inset(),
             ),
         ))
     });

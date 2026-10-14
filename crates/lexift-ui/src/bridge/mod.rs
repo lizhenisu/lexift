@@ -108,6 +108,8 @@ fn has_live_window_instances() -> bool {
         || HISTORY.with(|s| s.borrow().as_ref().is_some_and(|r| r.window.is_some()))
         || crate::ocr::active()
         || crate::annotation::is_open()
+        || crate::annotation::screenshot::active()
+        || crate::pinned_screenshot::active()
         || crate::tray_menu::is_open()
         || SELECTION_TOOLBAR_REGISTRY.with(|registry| {
             registry
@@ -210,6 +212,7 @@ impl Ui {
     ) -> Result<Self, slint::PlatformError> {
         crate::annotation::init(prepare_passive_window, window_lifecycle.clone());
         crate::ocr::init(prepare_passive_window, window_lifecycle.clone());
+        crate::pinned_screenshot::init(prepare_passive_window, window_lifecycle.clone());
         crate::tray_menu::init(prepare_passive_window, window_lifecycle.clone());
         HISTORY.with(|s| {
             *s.borrow_mut() = Some(clipboard_history::Registry::new(
@@ -413,6 +416,7 @@ impl Ui {
         slint::run_event_loop_until_quit()?;
         crate::tray_menu::close(false);
         crate::annotation::shutdown();
+        crate::pinned_screenshot::close_all();
         crate::ocr::close();
         HISTORY.with(|s| {
             s.borrow_mut().take();
@@ -468,6 +472,72 @@ impl UiHandle {
     pub fn request_ocr(&self) {
         let _ = slint::invoke_from_event_loop(crate::ocr::request);
     }
+    pub fn suspend_for_screenshot(&self, session: u64) {
+        let _ =
+            slint::invoke_from_event_loop(move || crate::annotation::screenshot::suspend(session));
+    }
+    pub fn restore_screenshot(&self, session: u64) {
+        let _ =
+            slint::invoke_from_event_loop(move || crate::annotation::screenshot::restore(session));
+    }
+    pub fn show_screenshot_capture(
+        &self,
+        session: u64,
+        frames: Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>,
+        capture: Arc<dyn lexift_core::ports::screen_capture::ScreenCapturePort>,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::annotation::screenshot::show(session, frames, capture)
+        });
+    }
+    pub fn close_pinned_image(&self, id: u64) {
+        let _ = slint::invoke_from_event_loop(move || crate::pinned_screenshot::request_close(id));
+    }
+    pub fn begin_pinned_edit(&self, id: u64, edit: u64) {
+        let _ =
+            slint::invoke_from_event_loop(move || crate::annotation::pin_editor::begin(id, edit));
+    }
+    pub fn end_pinned_edit(&self, id: u64, edit: u64) {
+        let _ = slint::invoke_from_event_loop(move || crate::annotation::pin_editor::end(id, edit));
+    }
+    pub fn present_pinned_image(
+        &self,
+        id: u64,
+        revision: u64,
+        image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::pinned_screenshot::present(id, revision, image)
+        });
+    }
+    pub fn show_editable_pinned_screenshot(
+        &self,
+        session: u64,
+        operation: u64,
+        image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        base: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        samples: Arc<lexift_core::ports::screen_capture::ScreenCaptureFrame>,
+        document: lexift_core::domain::annotation_export::ExportRequest,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::pinned_screenshot::show_document(
+                session,
+                operation,
+                image,
+                Some((base, samples, document)),
+            )
+        });
+    }
+    pub fn show_pinned_screenshot(
+        &self,
+        session: u64,
+        operation: u64,
+        image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::pinned_screenshot::show(session, operation, image)
+        });
+    }
     pub fn show_ocr_capture(
         &self,
         generation: u64,
@@ -482,7 +552,11 @@ impl UiHandle {
     pub fn toggle_annotation_toolbar(&self) {
         let requested_at = Instant::now();
         let _ = slint::invoke_from_event_loop(move || {
-            if !crate::ocr::screen_busy() {
+            if crate::annotation::pin_editor::active() {
+                crate::annotation::pin_editor::finish_now();
+            } else if crate::annotation::screenshot::active() {
+                crate::annotation::screenshot::cancel();
+            } else if !crate::ocr::screen_busy() {
                 crate::annotation::toggle(requested_at);
             }
         });
@@ -500,9 +574,12 @@ impl UiHandle {
             let language_changed = crate::i18n::select(state.desired_settings.ui_language);
             crate::ocr::sync(state.ocr.generation, state.ocr.phase);
             crate::annotation::sync_export(&state.annotation_export);
+            crate::annotation::screenshot::sync(&state.screenshot);
+            crate::pinned_screenshot::sync_outputs(&state.pinned_images);
             let view_state = mapper::view_state(&state);
             let popup_states = mapper::popup_states(&state);
             if language_changed {
+                crate::pinned_screenshot::close_menus();
                 crate::tray_menu::close(false);
                 crate::annotation::refresh_language();
             }
@@ -595,6 +672,7 @@ fn apply_window_themes() {
             crate::theme::apply(w);
         }
     });
+    crate::pinned_screenshot::apply_theme();
     crate::annotation::apply_theme();
     crate::tray_menu::apply_theme();
 }
@@ -604,7 +682,14 @@ pub(crate) fn dispatch_pointer_input(window: &slint::Window, input: PopupPointer
     let scale = window.scale_factor().max(0.1);
     let pos = |x, y| slint::LogicalPosition::new(x / scale, y / scale);
     let event = match input {
-        PopupPointerInput::RightPressed => return,
+        PopupPointerInput::RightPressed { x, y } => WindowEvent::PointerPressed {
+            position: pos(x, y),
+            button: PointerEventButton::Right,
+        },
+        PopupPointerInput::RightReleased { x, y } => WindowEvent::PointerReleased {
+            position: pos(x, y),
+            button: PointerEventButton::Right,
+        },
         PopupPointerInput::Moved { x, y } => WindowEvent::PointerMoved {
             position: pos(x, y),
         },

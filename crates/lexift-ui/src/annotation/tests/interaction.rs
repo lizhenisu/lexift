@@ -42,13 +42,13 @@ fn highlighter_rectangle_mode_survives_deselection_drawing_and_cancellation() {
                 );
                 r.canvas_state.annotation_ready = true;
                 assert!(r.set_mode(InteractionMode::Tool(1)));
-                let defaults = r.parameter_values.defaults(4).clone();
+                let defaults = r.document.parameter_values.defaults(4).clone();
                 let kind = if explicit {
                     Kind::HighlightLine
                 } else {
                     Kind::HighlightRectangle
                 };
-                r.session.add(Object {
+                r.document.session.add(Object {
                     erased: Vec::new(),
                     id: Default::default(),
                     kind,
@@ -78,13 +78,13 @@ fn highlighter_rectangle_mode_survives_deselection_drawing_and_cancellation() {
                     r.finish_style_edit();
                 }
                 assert_eq!(r.values(4).shape, 1);
-                let baseline = r.session.objects[0].clone();
+                let baseline = r.document.session.objects[0].clone();
                 assert_eq!(
-                    r.parameter_values.defaults(4).size,
+                    r.document.parameter_values.defaults(4).size,
                     if explicit { 37 } else { defaults.size }
                 );
                 assert_eq!(
-                    r.parameter_values.defaults(4).color_index,
+                    r.document.parameter_values.defaults(4).color_index,
                     if explicit { 8 } else { defaults.color_index }
                 );
                 baseline
@@ -114,18 +114,18 @@ fn highlighter_rectangle_mode_survives_deselection_drawing_and_cancellation() {
             REGISTRY.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
-                assert_eq!(r.session.objects.len(), 3);
-                assert_eq!(r.session.objects[0], baseline);
+                assert_eq!(r.document.session.objects.len(), 3);
+                assert_eq!(r.document.session.objects[0], baseline);
                 assert!(
-                    r.session.objects[1..]
+                    r.document.session.objects[1..]
                         .iter()
                         .all(|o| o.kind == Kind::HighlightRectangle)
                 );
-                assert_eq!(r.parameter_values.defaults(4).shape, 1);
-                assert!(r.session.undo());
-                assert_eq!(r.session.objects.len(), 2);
-                assert!(r.session.undo());
-                assert_eq!(r.session.objects, vec![baseline]);
+                assert_eq!(r.document.parameter_values.defaults(4).shape, 1);
+                assert!(r.document.session.undo());
+                assert_eq!(r.document.session.objects.len(), 2);
+                assert!(r.document.session.undo());
+                assert_eq!(r.document.session.objects, vec![baseline]);
                 restore_parameter_projection(r);
                 assert!(r.set_mode(InteractionMode::Tool(2)));
                 assert!(r.set_mode(InteractionMode::Tool(1)));
@@ -210,7 +210,7 @@ fn replaced_canvas_at_same_index_rejects_old_input_and_keyboard_callbacks() {
     REGISTRY.with(|slot| {
         let slot = slot.borrow();
         let r = slot.as_ref().unwrap();
-        assert!(r.session.objects.is_empty());
+        assert!(r.document.session.objects.is_empty());
         assert!(r.gesture().is_none());
     });
     current.invoke_pointer(0, 20., 20.);
@@ -229,9 +229,9 @@ fn replaced_canvas_at_same_index_rejects_old_input_and_keyboard_callbacks() {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
-        assert_eq!(r.session.objects.len(), 1);
-        assert!(r.session.undo());
-        assert!(!r.session.can_undo());
+        assert_eq!(r.document.session.objects.len(), 1);
+        assert!(r.document.session.undo());
+        assert!(!r.document.session.can_undo());
     });
     shutdown();
 }
@@ -378,8 +378,8 @@ fn retired_toolbar_cannot_operate_or_reposition_a_reopened_session() {
         let r = slot.as_ref().unwrap();
         assert_eq!(r.toolbar_state.main.revision(), new_revision);
         assert!(r.toolbar_state.panel.get().is_none());
-        assert_eq!(r.mode, InteractionMode::Tool(0));
-        assert!(!r.session.can_undo());
+        assert_eq!(r.document.mode, InteractionMode::Tool(0));
+        assert!(!r.document.session.can_undo());
         r.toolbar_state.main.get().unwrap().clone_strong()
     });
     current.invoke_tool_clicked(4, false);
@@ -427,7 +427,7 @@ fn document_commands_retire_object_gestures_without_extra_undo_records() {
             let original = REGISTRY.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
-                assert!(r.session.add(Object {
+                assert!(r.document.session.add(Object {
                     erased: Vec::new(),
                     id: ObjectId::DRAFT,
                     kind: Kind::Rectangle,
@@ -436,22 +436,22 @@ fn document_commands_retire_object_gestures_without_extra_undo_records() {
                     points: Vec::new(),
                     extra: Extra::None,
                 }));
-                let original = r.session.objects[0].clone();
+                let original = r.document.session.objects[0].clone();
                 let target = original.id;
                 r.gesture = (if resize {
-                    gestures::GeometryDrag::resizing(&r.session, target, 7)
+                    gestures::GeometryDrag::resizing(&r.document.session, target, 7)
                 } else {
-                    gestures::GeometryDrag::moving(&r.session, target, (40., 40.))
+                    gestures::GeometryDrag::moving(&r.document.session, target, (40., 40.))
                 })
                 .map(Active::Geometry);
-                r.session.begin_drag();
+                r.document.session.begin_drag();
                 let mut changed = original.clone();
                 if resize {
                     changed.edit_handle(7, (150., 120.), 1.);
                 } else {
                     changed.move_by(70., 30.);
                 }
-                assert!(gestures::write(&mut r.session, target, changed));
+                assert!(gestures::write(&mut r.document.session, target, changed));
                 original
             });
             match command {
@@ -473,13 +473,13 @@ fn document_commands_retire_object_gestures_without_extra_undo_records() {
                 assert!(r.gesture().is_none() && r.text_handle().is_none());
                 assert!(r.geometry_drag().is_none());
                 if command == 1 {
-                    assert!(r.session.objects.is_empty());
-                    assert!(r.session.undo());
+                    assert!(r.document.session.objects.is_empty());
+                    assert!(r.document.session.undo());
                 }
-                assert_eq!(r.session.objects, vec![original]);
-                assert!(r.session.undo());
+                assert_eq!(r.document.session.objects, vec![original]);
+                assert!(r.document.session.undo());
                 assert!(
-                    r.session.objects.is_empty(),
+                    r.document.session.objects.is_empty(),
                     "cancellation must not create an undo record"
                 );
                 r.close();
@@ -744,9 +744,9 @@ fn rectangle_eraser_release_immediately_presents_controls_even_on_blank_canvas()
                 );
                 r.canvas_state.annotation_ready = true;
                 assert!(r.set_mode(InteractionMode::Tool(6)));
-                r.parameter_values.defaults_mut(13).shape = 0;
+                r.document.parameter_values.defaults_mut(13).shape = 0;
                 if !blank {
-                    r.session.add(Object {
+                    r.document.session.add(Object {
                         id: Default::default(),
                         kind: Kind::Rectangle,
                         bounds: Bounds::from_corners((-150., -100.), (150., 100.)),
@@ -779,7 +779,7 @@ fn rectangle_eraser_release_immediately_presents_controls_even_on_blank_canvas()
                     };
                     let scene = compiler
                         .compile(crate::annotation_scene::SceneInput {
-                            session: &r.session,
+                            session: &r.document.session,
                             edit: None,
                             surfaces: &[surface],
                             stamp: lexift_core::ports::annotation_render::RenderStamp {
@@ -804,6 +804,7 @@ fn rectangle_eraser_release_immediately_presents_controls_even_on_blank_canvas()
                         .borrow()
                         .as_ref()
                         .unwrap()
+                        .document
                         .session
                         .rectangle_erase_show_handles()
                 )
@@ -820,17 +821,22 @@ fn rectangle_eraser_release_immediately_presents_controls_even_on_blank_canvas()
                 let r = slot.as_ref().unwrap();
                 assert!(r.gesture.is_none());
                 assert!(r.render_state.frame_tasks.render_pending());
-                assert!(r.session.rectangle_erase_show_handles());
-                let geometry = r.session.rectangle_erase_geometry().unwrap();
+                assert!(r.document.session.rectangle_erase_show_handles());
+                let geometry = r.document.session.rectangle_erase_geometry().unwrap();
                 assert_eq!(geometry.handles(scale).len(), 12);
                 for (x, y) in geometry.handles(scale) {
                     let x = (x - viewport.left as f32).round() as u32;
                     let y = (y - viewport.top as f32).round() as u32;
                     assert!(editing.pixel(x, y).unwrap().alpha() > 0);
                 }
-                assert_eq!(r.session.can_undo(), !blank);
+                assert_eq!(r.document.session.can_undo(), !blank);
                 let software = crate::annotation_render::render_editing(
-                    &r.session, viewport, scale, None, None, None,
+                    &r.document.session,
+                    viewport,
+                    scale,
+                    None,
+                    None,
+                    None,
                 )
                 .unwrap();
                 assert!(

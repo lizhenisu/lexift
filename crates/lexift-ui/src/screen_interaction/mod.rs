@@ -1,4 +1,5 @@
 //! Instance-owned screen surfaces shared by annotation and region selection.
+pub(crate) mod selection;
 pub(crate) mod window;
 use crate::{PassiveWindowPreparation, WindowLifecycleCallbacks};
 use lexift_core::{domain::geometry::Rect, ports::screen_capture::CapturedRegion};
@@ -25,7 +26,23 @@ enum Phase {
 }
 
 /// Owns view lifetime only; rendering and domain state remain with the caller.
-pub(crate) struct Host<C: ComponentHandle> {
+pub(crate) trait SurfaceHandle {
+    fn surface_window(&self) -> &slint::Window;
+    fn surface_show(&self) -> Result<(), slint::PlatformError>;
+    fn surface_hide(&self) -> Result<(), slint::PlatformError>;
+}
+impl<C: ComponentHandle> SurfaceHandle for C {
+    fn surface_window(&self) -> &slint::Window {
+        ComponentHandle::window(self)
+    }
+    fn surface_show(&self) -> Result<(), slint::PlatformError> {
+        ComponentHandle::show(self)
+    }
+    fn surface_hide(&self) -> Result<(), slint::PlatformError> {
+        ComponentHandle::hide(self)
+    }
+}
+pub(crate) struct Host<C: SurfaceHandle> {
     pub window: C,
     pub bounds: Rect,
     input: Rc<window::InputWork>,
@@ -33,7 +50,7 @@ pub(crate) struct Host<C: ComponentHandle> {
     placement: slint::Timer,
     phase: Cell<Phase>,
 }
-impl<C: ComponentHandle> Host<C> {
+impl<C: SurfaceHandle> Host<C> {
     pub fn new(window: C, bounds: Rect) -> Self {
         Self {
             window,
@@ -68,10 +85,10 @@ impl<C: ComponentHandle> Host<C> {
             return false;
         };
         self.window
-            .window()
+            .surface_window()
             .set_position(slint::PhysicalPosition::new(b.left, b.top));
         self.window
-            .window()
+            .surface_window()
             .set_size(slint::PhysicalSize::new(width as u32, height as u32));
         true
     }
@@ -79,7 +96,7 @@ impl<C: ComponentHandle> Host<C> {
         if self.phase.get() != Phase::Prepared {
             return Err("Screen host is not prepared".into());
         }
-        self.window.show()?;
+        self.window.surface_show()?;
         self.phase.set(Phase::Visible);
         Ok(())
     }
@@ -96,17 +113,18 @@ impl<C: ComponentHandle> Host<C> {
         if self.phase.get() == Phase::Retired || !self.place() {
             return PassiveWindowPreparation::Failed;
         }
-        let status = (lifecycle.prepare_screen_window)(self.window.window(), self.bounds, frame);
+        let status =
+            (lifecycle.prepare_screen_window)(self.window.surface_window(), self.bounds, frame);
         if status == PassiveWindowPreparation::Ready {
             self.phase.set(Phase::Prepared);
         }
         status
     }
 }
-impl<C: ComponentHandle> Drop for Host<C> {
+impl<C: SurfaceHandle> Drop for Host<C> {
     fn drop(&mut self) {
         self.retire_input();
-        let _ = self.window.hide();
+        let _ = self.window.surface_hide();
     }
 }
 

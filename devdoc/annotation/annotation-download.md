@@ -32,3 +32,7 @@
 - 两个 DPI 下均实际验证取消、重新下载，以及保存对话框打开时通过标注快捷键关闭会话；没有残留工具条或保存对话框。
 - 实机截图：`target/annotation-download-toolbar-125.png`、`target/annotation-download-toolbar-100.png`；导出对照：`target/annotation-download-125-verified.png`、`target/annotation-download-100-verified.png`。自有夹具与 App 已关闭，生成文件保留在忽略目录。
 - 负坐标由自动化覆盖；中文 IME 在原生保存对话框往返时的组字行为、实机所有效果组合及故障采集尚未单独实测。
+
+## 截图模式输出
+
+[截图模式](../features/screenshot-mode.md) 复用纯合成与 PNG 保存能力，但拥有独立 Core 会话和 App 任务。截图输出从冻结多屏底图取样，逐屏按 DPI 合成后裁切；成功恢复原标注，取消保存或失败继续截图编辑。普通标注导出的整屏范围、取消行为与焦点恢复保持现状。

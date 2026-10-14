@@ -1099,7 +1099,9 @@ pub(super) fn popup_pointer_sink(popup: slint::Weak<TranslationPopup>) -> PopupP
         let position = |x: f32, y: f32| slint::LogicalPosition::new(x / scale, y / scale);
         use slint::platform::{PointerEventButton, WindowEvent};
         let event = match input {
-            PopupPointerInput::RightPressed => return,
+            PopupPointerInput::RightPressed { .. } | PopupPointerInput::RightReleased { .. } => {
+                return;
+            }
             PopupPointerInput::NativeTopResizeRequested => {
                 let edge = PopupResizeEdge::Top;
                 if let Some(begin_resize) = prepare_popup_resize(&popup, edge)

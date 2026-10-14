@@ -150,7 +150,7 @@ fn contains(a: Rect, b: Rect) -> bool {
 }
 /// The new instance cannot publish a prior request's cache. Unchanged pixels
 /// still produce its first frame; no serial-increment test is needed.
-fn capture(
+pub(crate) fn capture(
     factory: CaptureFactory,
     regions: Vec<Rect>,
     excluded_windows: Vec<WindowToken>,

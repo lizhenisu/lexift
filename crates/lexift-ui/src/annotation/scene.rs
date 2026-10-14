@@ -786,6 +786,17 @@ impl SceneCompiler {
         )
     }
 
+    /// Rasterize cached ordinary layers without interaction decorations.
+    pub(crate) fn render_document(
+        &mut self,
+        session: &Session,
+        viewport: Rect,
+        scale: f32,
+    ) -> Option<Pixmap> {
+        let layers = self.document(session, viewport, scale, None, None)?;
+        compose(viewport, layers.iter())
+    }
+
     #[cfg(test)]
     pub fn render(
         &mut self,

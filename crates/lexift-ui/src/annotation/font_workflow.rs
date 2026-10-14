@@ -55,22 +55,28 @@ pub(super) fn sync_panel(r: &mut Registry) {
     let tool = panel.get_tool() as usize;
     let object = r.parameter_object(tool);
     let name = object
-        .and_then(|id| r.session.object_index(id))
-        .and_then(|i| match &r.session.objects[i].extra {
+        .and_then(|id| r.document.session.object_index(id))
+        .and_then(|i| match &r.document.session.objects[i].extra {
             Extra::Text(text) => Some(text.font_family.clone()),
             Extra::Sequence(s) => Some(s.caption.font_family.clone()),
             _ => None,
         })
         .or_else(|| {
             (tool == 9)
-                .then(|| r.session.watermark.as_ref().map(|w| w.font_family.clone()))
+                .then(|| {
+                    r.document
+                        .session
+                        .watermark
+                        .as_ref()
+                        .map(|w| w.font_family.clone())
+                })
                 .flatten()
         });
     let index = name
         .and_then(|name| r.fonts.names().iter().position(|f| f == &name))
         .map(|i| i as i32)
         .unwrap_or_else(|| r.values(tool).font);
-    r.parameter_values.edit(tool, object).font = index;
+    r.document.parameter_values.edit(tool, object).font = index;
     let panel = r.toolbar_state.panel.get().unwrap().clone_strong();
     let mut values = panel.get_values();
     values.font = index;
@@ -300,8 +306,8 @@ mod tests {
             panel.set_values(values.clone());
             r.replace_values(9, values);
             begin_sequence_placement(r, (50., 50.), 1.);
-            assert!(r.session.objects.is_empty());
-            assert!(!r.session.can_undo());
+            assert!(r.document.session.objects.is_empty());
+            assert!(!r.document.session.can_undo());
             (
                 r.generation,
                 r.toolbar_state.panel.revision(),

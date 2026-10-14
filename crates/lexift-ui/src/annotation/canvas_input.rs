@@ -4,7 +4,7 @@ pub(super) fn scroll_eraser_size(r: &mut Registry, delta: f32) {
     if !delta.is_finite()
         || delta == 0.
         || r.gesture().is_some()
-        || r.mode != InteractionMode::Tool(6)
+        || r.document.mode != InteractionMode::Tool(6)
         || r.values(13).shape != 1
     {
         return;
@@ -38,12 +38,12 @@ pub(super) fn brush_size_scrolled(index: usize, delta: f32) {
             || delta == 0.
             || r.gesture().is_some()
             || (!matches!(active_kind(r), Some(Kind::MosaicBrush | Kind::StickerBrush))
-                && !(r.mode == InteractionMode::Tool(6) && r.values(13).shape == 1))
+                && !(r.document.mode == InteractionMode::Tool(6) && r.values(13).shape == 1))
             || index >= r.canvas_state.canvases.len()
         {
             return None;
         }
-        if r.mode == InteractionMode::Tool(6) {
+        if r.document.mode == InteractionMode::Tool(6) {
             scroll_eraser_size(r, delta);
             return None;
         }
@@ -66,7 +66,7 @@ pub(super) fn brush_size_scrolled(index: usize, delta: f32) {
         } else {
             r.replace_values(tool, values);
             let size = r.values(tool).size;
-            r.session.update_selected(|object| {
+            r.document.session.update_selected(|object| {
                 match &mut object.extra {
                     Extra::Mosaic(value) if object.kind == Kind::MosaicBrush => {
                         value.diameter = size as f32 * value.creation_scale
@@ -92,14 +92,28 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
     let result = REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
         let r = slot.as_mut()?;
-        if !r.canvas_state.annotation_ready || r.mode.is_mouse() {
+        if !r.canvas_state.annotation_ready
+            || (r.document.mode.is_mouse() && r.screenshot.is_none())
+        {
             return None;
         }
+        pin_editor::sync_watermark_anchor(r);
+        if screenshot::pointer(r, index, event, x, y) {
+            return Some((r.generation, false));
+        }
         let layer = r.canvas_state.canvases.get(index)?;
-        let scale = layer.window.window().scale_factor().max(0.1);
-        let point = cursor::screen_point(layer.bounds, (x, y), scale);
+        let scale = layer.scale();
+        let mut point = cursor::screen_point(layer.bounds, (x, y), layer.input_scale());
+        if let Some(bounds) = r.screenshot.as_ref().and_then(|e| e.region.bounds()) {
+            // A captured drag still receives its release outside the crop, but
+            // drawing may only modify pixels inside the selected region.
+            if !r.document.mode.is_mouse() {
+                point.0 = point.0.clamp(bounds.left as f32, bounds.right as f32);
+                point.1 = point.1.clamp(bounds.top as f32, bounds.bottom as f32);
+            }
+        }
         let _input_timing =
-            drag_timing::pointer(event, r.generation, index, r.session.objects.len());
+            drag_timing::pointer(event, r.generation, index, r.document.session.objects.len());
         if event == 4 {
             r.canvas_state.canvases[index].last_pointer = None;
             let preview_changed = r.pending_drawing.pointer_left();
@@ -112,7 +126,7 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
         let mut open_geometry_panel = false;
         match event {
             0 => {
-                if matches!(r.mode, InteractionMode::Tool(3 | 4)) && !r.ensure_fonts() {
+                if matches!(r.document.mode, InteractionMode::Tool(3 | 4)) && !r.ensure_fonts() {
                     return None;
                 }
                 // A second press cannot reuse an unfinished object's document transaction.
@@ -149,7 +163,7 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                         return Some((r.generation, false));
                     }
                 }
-                if r.mode == InteractionMode::Tool(6) {
+                if r.document.mode == InteractionMode::Tool(6) {
                     let values = r.values(13).clone();
                     let views = r
                         .canvas_state
@@ -160,7 +174,7 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                     r.finish_style_edit();
                     deselect_object(r);
                     r.gesture = Some(Active::Erasing(eraser::Press::begin(
-                        &mut r.session,
+                        &mut r.document.session,
                         point,
                         values.shape == 1,
                         values.size.clamp(1, 100) as f32 * scale,
@@ -177,9 +191,9 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 if r.arrow_pending().is_some() {
                     r.gesture = Some(Active::Action(Action::FinishArrow));
                 } else if r.polyline().is_some()
-                    || (r.mode == InteractionMode::Tool(2)
-                        && r.selected[2] == 6
-                        && r.session.hit(point, scale).is_none())
+                    || (r.document.mode == InteractionMode::Tool(2)
+                        && r.document.selected[2] == 6
+                        && r.document.session.hit(point, scale).is_none())
                 {
                     if r.polyline().is_none() {
                         let values = capture_creation(r, 6);
@@ -189,20 +203,22 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                     deselect_object(r);
                     r.gesture = Some(Active::Action(Action::PlacePoint));
                 } else {
-                    match r.session.hit(point, scale) {
+                    match r.document.session.hit(point, scale) {
                         Some(Hit::Handle(handle)) => {
-                            let index = r.session.selected.unwrap();
-                            if r.session.objects[index].kind == Kind::Sequence && handle < 5 {
+                            let index = r.document.session.selected.unwrap();
+                            if r.document.session.objects[index].kind == Kind::Sequence
+                                && handle < 5
+                            {
                                 r.gesture = Some(Active::Action(Action::SequenceControl {
-                                    target: r.session.objects[index].id,
+                                    target: r.document.session.objects[index].id,
                                     handle,
                                 }));
                                 return Some((r.generation, false));
                             }
-                            if r.session.objects[index].kind == Kind::Text && handle == 3 {
+                            if r.document.session.objects[index].kind == Kind::Text && handle == 3 {
                                 begin_text_handle(
                                     r,
-                                    r.session.objects[index].clone(),
+                                    r.document.session.objects[index].clone(),
                                     handle,
                                     point,
                                     scale,
@@ -210,54 +226,61 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                                 );
                                 return Some((r.generation, false));
                             }
-                            if r.session.objects[index].kind == Kind::Text && handle == 2 {
+                            if r.document.session.objects[index].kind == Kind::Text && handle == 2 {
                                 r.gesture = Some(Active::Action(Action::ToggleTextArrow {
-                                    target: r.session.objects[index].id,
+                                    target: r.document.session.objects[index].id,
                                 }));
                                 return Some((r.generation, false));
                             }
-                            if r.session.objects[index].kind == Kind::Text && handle == 1 {
-                                r.session.delete_selected();
+                            if r.document.session.objects[index].kind == Kind::Text && handle == 1 {
+                                r.document.session.delete_selected();
                                 refresh_parameter_target(r);
                                 r.gesture = Some(Active::Action(Action::DeleteText));
                                 return Some((r.generation, false));
                             }
                             r.begin_document_gesture();
                             r.gesture = (gestures::GeometryDrag::resizing(
-                                &r.session,
-                                r.session.objects[index].id,
+                                &r.document.session,
+                                r.document.session.objects[index].id,
                                 handle,
                             ))
                             .map(Active::Geometry);
                         }
                         Some(Hit::Object(index)) => {
-                            r.session.selected = Some(index);
+                            r.document.session.selected = Some(index);
                             r.pending_edit_panel = adopt_selected_style(r, index);
                             r.begin_document_gesture();
                             r.gesture = (gestures::GeometryDrag::moving(
-                                &r.session,
-                                r.session.objects[index].id,
+                                &r.document.session,
+                                r.document.session.objects[index].id,
                                 point,
                             ))
                             .map(Active::Geometry);
                         }
                         None => {
                             r.pending_edit_panel = false;
-                            if r.mode == InteractionMode::Tool(4) {
+                            if r.document.mode == InteractionMode::Tool(4) {
                                 begin_sequence_placement(r, point, scale);
                                 cursor::refresh(r);
                                 return Some((r.generation, false));
                             }
-                            let tool = r.selected[r.mode.selected_group() as usize] as usize;
+                            if r.document.mode.is_mouse() {
+                                return Some((r.generation, false));
+                            }
+                            let tool = r.document.selected
+                                [r.document.mode.selected_group() as usize]
+                                as usize;
                             let creation = capture_creation(r, tool);
                             deselect_object(r);
-                            if r.mode == InteractionMode::Tool(3) && r.selected[3] == 8 {
+                            if r.document.mode == InteractionMode::Tool(3)
+                                && r.document.selected[3] == 8
+                            {
                                 r.gesture = Some(Active::Action(Action::CreateText {
                                     at: point,
                                     scale,
                                     values: Box::new(creation.clone()),
                                 }));
-                            } else if matches!(r.mode, InteractionMode::Tool(0..=2 | 5))
+                            } else if matches!(r.document.mode, InteractionMode::Tool(0..=2 | 5))
                                 && let Some(kind) = active_kind(r)
                             {
                                 if kind == Kind::Magnifier
@@ -268,6 +291,7 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                                     && gestures::display_draft(&r.gesture, &r.pending_drawing)
                                         .is_none()
                                     && !r
+                                        .document
                                         .session
                                         .objects
                                         .iter()
@@ -299,7 +323,7 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                         .map(|c| (c.bounds, c.window.window().scale_factor()))
                         .collect::<Vec<_>>();
                     if let Some(Active::Erasing(press)) = &mut r.gesture {
-                        press.update(&mut r.session, point, &views);
+                        press.update(&mut r.document.session, point, &views);
                     }
                 }
                 Some(Gesture::PlaceSequence) => update_sequence_placement(r, point),
@@ -330,7 +354,7 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
 
                 Some(Gesture::Move | Gesture::Resize { .. }) => {
                     if let Some(drag) = r.gesture.as_ref().and_then(Active::geometry) {
-                        drag.update(&mut r.session, point, scale);
+                        drag.update(&mut r.document.session, point, scale);
                     }
                 }
                 Some(Gesture::TextHandle { .. }) => {
@@ -344,7 +368,7 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                         r.pending_drawing.pointer_moved(point, scale, None);
                         return Some((r.generation, false));
                     }
-                    let hovered = hovered_geometry_at(&r.session, point, scale);
+                    let hovered = hovered_geometry_at(&r.document.session, point, scale);
                     let changed = r.hovered != hovered;
                     r.hovered = hovered;
                     cursor::refresh(r);
@@ -363,9 +387,9 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                         .map(|c| (c.bounds, c.window.window().scale_factor()))
                         .collect::<Vec<_>>();
                     if let Some(Active::Erasing(mut press)) = r.gesture.take() {
-                        press.update(&mut r.session, point, &views);
+                        press.update(&mut r.document.session, point, &views);
                     }
-                    r.session.finish_drag();
+                    r.document.session.finish_drag();
                     r.flush_deferred_parameters();
                     sync_history_controls(r);
                     cursor::refresh(r);
@@ -373,14 +397,14 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 }
                 if matches!(r.gesture(), Some(Gesture::PlaceSequence)) {
                     let placement = Active::take_sequence(&mut r.gesture)?;
-                    let target = placement.finish(&mut r.session, point);
+                    let target = placement.finish(&mut r.document.session, point);
                     r.gesture = None;
                     r.flush_deferred_parameters();
-                    r.session.selected = r.session.object_index(target);
+                    r.document.session.selected = r.document.session.object_index(target);
                     if let Some(main) = r.toolbar_state.main.get() {
-                        main.set_can_undo(r.session.can_undo());
+                        main.set_can_undo(r.document.session.can_undo());
                         if let Some(panel) = r.toolbar_state.panel.get() {
-                            panel.set_can_clear(r.session.has_content());
+                            panel.set_can_clear(r.document.session.has_content());
                         }
                     }
                     cursor::refresh(r);
@@ -388,19 +412,23 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 }
                 if let Some(Gesture::SequenceControl { target, handle }) = r.gesture() {
                     r.gesture = None;
-                    let Some(index) = r.session.object_index(target) else {
+                    let Some(index) = r.document.session.object_index(target) else {
                         return Some((r.generation, false));
                     };
-                    if r.session.selected == Some(index)
-                        && r.session.hit(point, scale) == Some(Hit::Handle(handle))
+                    if r.document.session.selected == Some(index)
+                        && r.document.session.hit(point, scale) == Some(Hit::Handle(handle))
                     {
                         if handle == 4 {
-                            text_to_open =
-                                Some((point, Some(r.session.objects[index].id), scale, None));
+                            text_to_open = Some((
+                                point,
+                                Some(r.document.session.objects[index].id),
+                                scale,
+                                None,
+                            ));
                         } else if handle == 2 {
-                            r.session.delete_selected();
+                            r.document.session.delete_selected();
                         } else {
-                            r.session.update_selected(|object| {
+                            r.document.session.update_selected(|object| {
                                 if handle == 3 {
                                     object.toggle_text_arrow(scale);
                                 } else if let Extra::Sequence(s) = &mut object.extra {
@@ -415,9 +443,9 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                         }
                     }
                     if let Some(main) = r.toolbar_state.main.get() {
-                        main.set_can_undo(r.session.can_undo());
+                        main.set_can_undo(r.document.session.can_undo());
                         if let Some(panel) = r.toolbar_state.panel.get() {
-                            panel.set_can_clear(r.session.has_content());
+                            panel.set_can_clear(r.document.session.has_content());
                         }
                     }
                     cursor::refresh(r);
@@ -435,15 +463,16 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                     return Some((r.generation, false));
                 }
                 if let Some(Gesture::ToggleTextArrow { target }) = r.gesture() {
-                    let Some(index) = r.session.object_index(target) else {
+                    let Some(index) = r.document.session.object_index(target) else {
                         r.gesture = None;
                         return Some((r.generation, false));
                     };
-                    if r.session.selected == Some(index)
-                        && r.session.objects.get(index).is_some()
-                        && r.session.hit(point, scale) == Some(Hit::Handle(2))
+                    if r.document.session.selected == Some(index)
+                        && r.document.session.objects.get(index).is_some()
+                        && r.document.session.hit(point, scale) == Some(Hit::Handle(2))
                     {
-                        r.session
+                        r.document
+                            .session
                             .update_selected(|object| object.toggle_text_arrow(scale));
                     }
                     r.gesture = None;
@@ -468,27 +497,27 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 if matches!(r.gesture(), Some(Gesture::FinishArrow)) {
                     r.gesture = None;
                     if let Some(object) = r.pending_drawing.release_arrow(point) {
-                        r.session.add(object);
+                        r.document.session.add(object);
                     }
                 } else if matches!(r.gesture(), Some(Gesture::PlacePoint)) {
                     r.gesture = None;
                     let style = current_style(r, 6);
                     let object = r.parameter_object(6);
-                    let values = r.parameter_values.values(6, object);
+                    let values = r.document.parameter_values.values(6, object);
                     if let Some(drawing::Progress::Retired(Some(object))) = r
                         .pending_drawing
                         .place_polyline(point, scale, Instant::now(), style, values)
                     {
-                        r.session.add(*object);
+                        r.document.session.add(*object);
                     }
                 } else if matches!(r.gesture(), Some(Gesture::Draw { .. })) {
                     let press = Active::take_drawing(&mut r.gesture)?;
                     match press.release(point, scale) {
                         Some(drawing::Release::Add(object)) => {
-                            r.session.add(object);
+                            r.document.session.add(object);
                         }
                         Some(drawing::Release::StageMosaic(object)) => {
-                            r.render_state.mosaic.stage(&mut r.session, object);
+                            r.render_state.mosaic.stage(&mut r.document.session, object);
                         }
                         Some(drawing::Release::AwaitArrow(arrow)) => {
                             r.pending_drawing.await_arrow(arrow);
@@ -506,7 +535,7 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                                     Some(FirstMagnifierTiming::new());
                             }
                             if let Some(object) = magnifier_from_source(source, style, &values) {
-                                r.session.add(object);
+                                r.document.session.add(object);
                             }
                         }
                         None => {}
@@ -514,10 +543,10 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 } else {
                     if let Some(drag) = r.geometry_drag()
                         && let Some(start) = drag.move_start()
-                        && let Some(index) = r.session.object_index(drag.target())
-                        && (r.session.objects[index].kind == Kind::Text
-                            || (r.session.objects[index].kind == Kind::Sequence
-                                && r.session.objects[index]
+                        && let Some(index) = r.document.session.object_index(drag.target())
+                        && (r.document.session.objects[index].kind == Kind::Text
+                            || (r.document.session.objects[index].kind == Kind::Sequence
+                                && r.document.session.objects[index]
                                     .sequence_caption()
                                     .is_some_and(|o| {
                                         point.0 >= o.bounds.left
@@ -527,16 +556,20 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                                     })))
                         && (point.0 - start.0).hypot(point.1 - start.1) <= 3. * scale
                     {
-                        text_to_open =
-                            Some((point, Some(r.session.objects[index].id), scale, None));
+                        text_to_open = Some((
+                            point,
+                            Some(r.document.session.objects[index].id),
+                            scale,
+                            None,
+                        ));
                         open_geometry_panel = false;
                     }
                     if let Some(drag) = Active::take_geometry(&mut r.gesture) {
-                        drag.finish(&mut r.session);
+                        drag.finish(&mut r.document.session);
                     }
                     r.gesture = None;
                     r.flush_deferred_parameters();
-                    if let Some(index) = r.session.selected {
+                    if let Some(index) = r.document.session.selected {
                         adopt_selected_style(r, index);
                     }
                 }
@@ -570,11 +603,12 @@ pub(super) fn queue_geometry_panel(generation: u64, index: usize) {
         let r = slot.as_ref().filter(|r| r.generation == generation)?;
         let layer = r.canvas_state.canvases.get(index)?;
         let target = r
+            .document
             .session
             .selected
-            .and_then(|selected| r.session.objects.get(selected))
+            .and_then(|selected| r.document.session.objects.get(selected))
             .map(|object| object.id)?;
-        let group = r.mode.selected_group().max(0) as usize;
+        let group = r.document.mode.selected_group().max(0) as usize;
         Some((layer.input(), layer.revision(), target, group))
     });
     if let Some((input, revision, target, group)) = request {
@@ -582,15 +616,16 @@ pub(super) fn queue_geometry_panel(generation: u64, index: usize) {
             let valid = REGISTRY.with(|slot| {
                 slot.borrow().as_ref().is_some_and(|r| {
                     r.generation == generation
-                        && !r.mode.is_mouse()
+                        && !r.document.mode.is_mouse()
                         && r.canvas_state
                             .canvases
                             .get(index)
                             .is_some_and(|layer| layer.revision() == revision)
-                        && r.mode.selected_group().max(0) as usize == group
-                        && r.session
+                        && r.document.mode.selected_group().max(0) as usize == group
+                        && r.document
+                            .session
                             .selected
-                            .and_then(|selected| r.session.objects.get(selected))
+                            .and_then(|selected| r.document.session.objects.get(selected))
                             .is_some_and(|object| object.id == target)
                 })
             });
@@ -621,16 +656,12 @@ pub(super) fn hovered_geometry_at(
 }
 
 pub(super) fn refresh_hovered(r: &mut Registry) {
-    r.hovered = if r.mode.is_mouse() {
+    r.hovered = if r.document.mode.is_mouse() {
         None
     } else {
         r.canvas_state.canvases.iter().find_map(|layer| {
             let point = layer.last_pointer?;
-            hovered_geometry_at(
-                &r.session,
-                point,
-                layer.window.window().scale_factor().max(0.1),
-            )
+            hovered_geometry_at(&r.document.session, point, layer.scale())
         })
     };
 }
@@ -638,7 +669,7 @@ pub(super) fn refresh_hovered(r: &mut Registry) {
 pub(super) fn activate_mouse_mode() {
     let generation = REGISTRY.with(|s| {
         if let Some(r) = s.borrow_mut().as_mut() {
-            if r.mode == InteractionMode::Mouse {
+            if r.document.mode == InteractionMode::Mouse {
                 r.close_panel();
                 return None;
             }
@@ -670,11 +701,11 @@ pub(super) fn undo() {
             finish_text_edit_registry(r, true);
         }
         r.finish_style_edit();
-        let erased = eraser::has_coverage(&r.session);
-        if !r.session.undo() {
+        let erased = eraser::has_coverage(&r.document.session);
+        if !r.document.session.undo() {
             return None;
         }
-        if erased || eraser::has_coverage(&r.session) {
+        if erased || eraser::has_coverage(&r.document.session) {
             // Restoring alpha coverage must retire the accepted native candidate,
             // not leave a pre-undo presentation eligible for composition reuse.
             r.render_state
@@ -709,7 +740,7 @@ pub(super) fn delete_selected() {
         if r.editor.window().is_some() {
             finish_text_edit_registry(r, false);
         }
-        r.session.delete_selected();
+        r.document.session.delete_selected();
         refresh_parameter_target(r);
         refresh_hovered(r);
         sync_history_controls(r);
@@ -754,25 +785,31 @@ impl Registry {
 
     /// Keep selection and parameter projection within the active toolbar entry.
     pub(super) fn sync_edit_scope(&mut self) {
-        let scope = if self.mode.is_mouse() {
-            EditScope::None
+        let scope = if self.document.mode.is_mouse() {
+            if self.screenshot.is_some() {
+                EditScope::All
+            } else {
+                EditScope::None
+            }
         } else {
-            tools::scope(self.selected[self.mode.selected_group() as usize] as usize)
+            tools::scope(
+                self.document.selected[self.document.mode.selected_group() as usize] as usize,
+            )
         };
-        let previous = self.session.selected;
+        let previous = self.document.session.selected;
         let hovered = self.hovered.take();
-        self.session.set_edit_scope(scope);
-        if previous != self.session.selected {
+        self.document.session.set_edit_scope(scope);
+        if previous != self.document.session.selected {
             deselect_object(self);
         }
-        if previous != self.session.selected || hovered.is_some() {
+        if previous != self.document.session.selected || hovered.is_some() {
             self.queue_render();
         }
     }
 
     /// Apply the native input policy before exposing a new mode in the toolbar.
     pub(super) fn set_mode(&mut self, mode: InteractionMode) -> bool {
-        if self.mode == mode {
+        if self.document.mode == mode {
             self.sync_edit_scope();
             cursor::refresh(self);
             self.sync_mode_display();
@@ -784,18 +821,21 @@ impl Registry {
         if self.editor.window().is_some() {
             finish_text_edit_registry(self, true);
         }
-        if self.mode.is_mouse() != mode.is_mouse() {
+        if self.document.mode.is_mouse() != mode.is_mouse() {
             let mut changed = Vec::new();
             for (index, layer) in self.canvas_state.canvases.iter().enumerate() {
+                if matches!(layer.window, canvas::Surface::Pin(_)) {
+                    continue;
+                }
                 if !(self.lifecycle.annotation_click_through)(
                     layer.host.window.window(),
-                    mode.is_mouse(),
+                    mode.is_mouse() && self.screenshot.is_none(),
                 ) {
                     for index in changed {
                         let layer: &CanvasLayer = &self.canvas_state.canvases[index];
                         (self.lifecycle.annotation_click_through)(
                             layer.host.window.window(),
-                            self.mode.is_mouse(),
+                            self.document.mode.is_mouse() && self.screenshot.is_none(),
                         );
                     }
                     return false;
@@ -803,8 +843,8 @@ impl Registry {
                 changed.push(index);
             }
         }
-        self.session.finish_rectangle_erase();
-        self.mode = mode;
+        self.document.session.finish_rectangle_erase();
+        self.document.mode = mode;
         self.sync_edit_scope();
         if mode != InteractionMode::Tool(5) {
             mosaic::cancel_pending(self);
@@ -821,7 +861,7 @@ impl Registry {
         if !self.set_mode(InteractionMode::Tool(group)) {
             return false;
         }
-        if self.selected[group] != tool {
+        if self.document.selected[group] != tool {
             cancel_active_gesture(self);
             self.finish_style_edit();
             self.close_watermark_input();
@@ -830,7 +870,7 @@ impl Registry {
             }
         }
         self.close_panel();
-        self.selected[group] = tool;
+        self.document.selected[group] = tool;
         self.sync_edit_scope();
         cursor::refresh(self);
         if let Some(main) = self.toolbar_state.main.get() {
@@ -843,6 +883,6 @@ impl Registry {
     /// Keeping the handoff here prevents callers from depending on pointer routing.
     pub(super) fn begin_document_gesture(&mut self) {
         self.finish_style_edit();
-        self.session.begin_drag();
+        self.document.session.begin_drag();
     }
 }

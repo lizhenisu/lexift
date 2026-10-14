@@ -148,7 +148,14 @@ pub enum PopupDismissCause {
 /// its logical coordinate system before dispatching them to the rendering backend.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PopupPointerEvent {
-    RightPressed,
+    RightPressed {
+        x: f32,
+        y: f32,
+    },
+    RightReleased {
+        x: f32,
+        y: f32,
+    },
     /// Native capture loss is not a user release; canvases must cancel pending placement.
     LeftCancelled {
         x: f32,
@@ -603,6 +610,17 @@ pub fn begin_window_drag(
     Ok(())
 }
 
+/// Cancel the supplied auxiliary window's move and owned capture before destruction.
+pub fn cancel_window_interaction(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    windows::popup::cancel_interaction(window)?;
+    #[cfg(not(target_os = "windows"))]
+    let _ = window;
+    Ok(())
+}
+
 /// Asks Windows to evict this process's resident pages after an extended no-window idle period.
 ///
 /// This only changes the resident working set. It does not decommit private allocations or
@@ -715,5 +733,61 @@ pub fn complete_screen_interaction_frame(
     {
         let _ = window;
         Ok(false)
+    }
+}
+
+#[cfg(all(debug_assertions, target_os = "windows"))]
+#[doc(hidden)]
+pub fn diagnose_pin_hit(
+    window: &impl raw_window_handle::HasWindowHandle,
+    label: &str,
+    click: bool,
+) -> bool {
+    windows::pin_diagnostic::probe(window, label, click)
+}
+
+/// Register an independent pinned image above annotation canvases; it remains desktop capture content.
+#[cfg(target_os = "windows")]
+pub fn prepare_pinned_image_window(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    use raw_window_handle::RawWindowHandle;
+    let handle = window
+        .window_handle()
+        .map_err(|e| lexift_core::Error::new(e.to_string()))?;
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return Err(lexift_core::Error::new("expected Win32 pin"));
+    };
+    windows::annotation_window_order::pin(
+        ::windows::Win32::Foundation::HWND(handle.hwnd.get() as _),
+    )
+    .map_err(|e| lexift_core::Error::new(e.to_string()))
+}
+#[cfg(not(target_os = "windows"))]
+pub fn prepare_pinned_image_window(
+    _window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    Ok(())
+}
+
+#[cfg(all(debug_assertions, target_os = "windows"))]
+#[doc(hidden)]
+pub fn pin_diagnostic_windows_destroyed() -> bool {
+    windows::pin_diagnostic::destroyed()
+}
+
+/// Update an existing pin without changing its auxiliary Shell identity or taking focus.
+pub fn configure_pinned_image(
+    window: &impl raw_window_handle::HasWindowHandle,
+    topmost: bool,
+    interactive: bool,
+    inset: i32,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    return windows::pinned_image::configure(window, topmost, interactive, inset);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, topmost, interactive, inset);
+        Ok(())
     }
 }

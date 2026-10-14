@@ -5,7 +5,7 @@ pub(super) mod annotation_gpu;
 pub(super) mod annotation_magnifier;
 mod annotation_overlay;
 pub(super) mod annotation_save;
-mod annotation_window_order;
+pub(super) mod annotation_window_order;
 pub(super) mod app_icon;
 mod autostart;
 pub(super) mod browser;
@@ -23,6 +23,7 @@ mod hotkey;
 mod instance;
 pub(crate) mod memory;
 mod ocr_capture;
+pub(super) mod pinned_image;
 pub(crate) mod renderer;
 pub(super) mod resize_background;
 mod screen;
@@ -44,3 +45,6 @@ pub(crate) use tray::WindowsTrayPort;
 pub(super) mod popup;
 pub(crate) mod window_shell_policy;
 pub(crate) use clipboard::WindowsClipboardPort;
+
+#[cfg(debug_assertions)]
+pub(crate) mod pin_diagnostic;

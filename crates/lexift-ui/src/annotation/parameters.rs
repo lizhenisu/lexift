@@ -186,6 +186,23 @@ struct Projection {
     object: ObjectId,
     values: AnnotationValues,
 }
+impl Clone for State {
+    fn clone(&self) -> Self {
+        Self {
+            defaults: self.defaults.clone(),
+            binding: std::rc::Rc::new(std::cell::Cell::new(self.binding.get())),
+            projection: self.projection.as_ref().map(|p| Projection {
+                tool: p.tool,
+                object: p.object,
+                values: p.values.clone(),
+            }),
+            projection_revision: self.projection_revision,
+            watermark: self.watermark.clone(),
+            watermark_revision: self.watermark_revision,
+            mosaic_mode: self.mosaic_mode,
+        }
+    }
+}
 impl State {
     pub fn new() -> Self {
         Self {

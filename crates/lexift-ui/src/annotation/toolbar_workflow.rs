@@ -28,7 +28,13 @@ pub(super) fn show_main(generation: u64, revision: u64, attempt: u8) {
         match preparation {
             PassiveWindowPreparation::Ready => {
                 let place_start = Instant::now();
-                let anchor = (r.lifecycle.toolbar_cursor_position)().unwrap_or_default();
+                let anchor = r.toolbar_state.resume.map_or_else(
+                    || (r.lifecycle.toolbar_cursor_position)().unwrap_or_default(),
+                    |(position, _)| Point {
+                        x: position.x,
+                        y: position.y,
+                    },
+                );
                 if let Some(area) = (r.lifecycle.popup_work_area)(anchor) {
                     let scale = main.window().scale_factor();
                     let width = (main.get_toolbar_width() * scale)
@@ -46,8 +52,23 @@ pub(super) fn show_main(generation: u64, revision: u64, attempt: u8) {
                         (16. * scale) as i32,
                     )
                     .position;
-                    main.window()
-                        .set_position(slint::PhysicalPosition::new(p.x, p.y));
+                    main.window().set_position(
+                        r.toolbar_state
+                            .resume
+                            .map(|(position, _)| {
+                                slint::PhysicalPosition::new(
+                                    position.x.clamp(
+                                        area.left,
+                                        (area.right - size.width as i32).max(area.left),
+                                    ),
+                                    position.y.clamp(
+                                        area.top,
+                                        (area.bottom - size.height as i32).max(area.top),
+                                    ),
+                                )
+                            })
+                            .unwrap_or(slint::PhysicalPosition::new(p.x, p.y)),
+                    );
                 }
                 if let Some(timing) = r.canvas_state.cold_open_timing.as_mut() {
                     let elapsed = place_start.elapsed();
@@ -93,7 +114,9 @@ pub(super) fn show_main(generation: u64, revision: u64, attempt: u8) {
                     retry_main_owner(r, generation, revision, attempt);
                     return;
                 }
-                settle_main_position(r, generation, revision, anchor, 2);
+                if r.toolbar_state.resume.take().is_none() && r.screenshot.is_none() {
+                    settle_main_position(r, generation, revision, anchor, 2);
+                }
                 r.timer.start(
                     slint::TimerMode::Repeated,
                     Duration::from_millis(33),
@@ -104,13 +127,42 @@ pub(super) fn show_main(generation: u64, revision: u64, attempt: u8) {
                     Duration::from_secs(1),
                     check_display_layout,
                 );
-                r.render_state.magnifier_timer.start(
-                    slint::TimerMode::Repeated,
-                    Duration::from_millis(66),
-                    refresh_magnifiers,
-                );
+                if r.screenshot.is_none() {
+                    r.render_state.magnifier_timer.start(
+                        slint::TimerMode::Repeated,
+                        Duration::from_millis(66),
+                        refresh_magnifiers,
+                    );
+                }
                 r.canvas_state.annotation_ready = true;
+                if let Some(editing) = &r.screenshot
+                    && let Some(bounds) = if editing.pin.is_some() {
+                        r.canvas_state.canvases.first().map(|c| c.display_bounds())
+                    } else {
+                        editing.region.bounds()
+                    }
+                {
+                    let size = main.window().size();
+                    let area = (r.lifecycle.popup_work_area)(Point {
+                        x: bounds.left,
+                        y: bounds.bottom,
+                    });
+                    let point = placement::place_toolbar_popup(
+                        bounds,
+                        size.width,
+                        size.height,
+                        area,
+                        (8. * main.window().scale_factor()) as i32,
+                        placement::Side::After,
+                    );
+                    main.window()
+                        .set_position(slint::PhysicalPosition::new(point.x, point.y));
+                }
+                if r.screenshot.is_some() {
+                    r.queue_render();
+                }
                 r.canvas_state.pending_displays.clear();
+                slint::Timer::single_shot(Duration::ZERO, screenshot::toolbar_ready);
                 // Build the empty native scene while the canvases are ready,
                 // before the first drag has to pay for software/native handoff.
                 // Submission remains asynchronous; no capture or UI wait is added.
@@ -131,8 +183,6 @@ pub(super) fn show_main(generation: u64, revision: u64, attempt: u8) {
             }
             PassiveWindowPreparation::Pending if attempt < 20 => {
                 let retry_start = Instant::now();
-                let _ = main.show();
-                let _ = main.hide();
                 if let Some(timing) = r.canvas_state.cold_open_timing.as_mut() {
                     let elapsed = retry_start.elapsed();
                     timing.toolbar_retry += elapsed;
@@ -152,13 +202,17 @@ pub(super) fn show_main(generation: u64, revision: u64, attempt: u8) {
 }
 
 pub(super) fn refresh_magnifiers() {
+    if screenshot::active() {
+        return;
+    }
     REGISTRY.with(|slot| {
         let slot = slot.borrow();
         let Some(r) = slot.as_ref() else { return };
         if r.render_state.native_presenter.in_use() {
             return;
         }
-        if r.session
+        if r.document
+            .session
             .objects
             .iter()
             .chain(gestures::display_draft(&r.gesture, &r.pending_drawing))
@@ -170,6 +224,9 @@ pub(super) fn refresh_magnifiers() {
 }
 
 pub(super) fn check_display_layout() {
+    if pin_editor::active() {
+        return;
+    }
     let changed = REGISTRY.with(|s| {
         let slot = s.borrow();
         let Some(r) = slot
@@ -261,7 +318,7 @@ pub(super) fn open_panel(group: usize, menu: bool) {
         };
         let create = create_at.elapsed();
         crate::theme::apply(&panel);
-        let tool = r.selected[group];
+        let tool = r.document.selected[group];
         let fonts_at = Instant::now();
         // A tool picker has no font controls or parameter transaction. Keep the
         // installed-font scan on the paths that actually need editable text.
@@ -287,7 +344,7 @@ pub(super) fn open_panel(group: usize, menu: bool) {
             fonts_at.elapsed()
         };
         if !menu {
-            panel.set_can_clear(r.session.has_content());
+            panel.set_can_clear(r.document.session.has_content());
         }
         panel.set_tool(tool);
         panel.set_menu(menu);
@@ -322,7 +379,9 @@ pub(super) fn open_panel(group: usize, menu: bool) {
                 dismissal(window, false);
             });
         if !menu {
-            r.parameter_values.bind(r.parameter_object(tool as usize));
+            r.document
+                .parameter_values
+                .bind(r.parameter_object(tool as usize));
         }
         let panel = r.toolbar_state.panel.get().unwrap();
         hints::bind_panel(panel, generation, hints::Owner::Panel(panel_revision));
@@ -484,22 +543,22 @@ pub(super) fn apply_panel_input(generation: u64, revision: u64, group: usize, ev
                 REGISTRY.with(|slot| {
                     let mut slot = slot.borrow_mut();
                     let Some(r) = slot.as_mut() else { return };
-                    if r.mode != InteractionMode::Tool(6) {
+                    if r.document.mode != InteractionMode::Tool(6) {
                         return;
                     }
                     cancel_active_gesture(r);
                     r.finish_style_edit();
-                    if r.session.clear_all() {
+                    if r.document.session.clear_all() {
                         deselect_object(r);
                         r.hovered = None;
                         sync_sequence_counter(r);
                         r.queue_render();
                     }
                     if let Some(panel) = r.toolbar_state.panel.get() {
-                        panel.set_can_clear(r.session.has_content());
+                        panel.set_can_clear(r.document.session.has_content());
                     }
                     if let Some(main) = r.toolbar_state.main.get() {
-                        main.set_can_undo(r.session.can_undo());
+                        main.set_can_undo(r.document.session.can_undo());
                     }
                 });
             }
@@ -777,7 +836,7 @@ pub(super) fn apply_watermark(generation: u64, revision: u64, template: String) 
             crate::annotation_text::resolve_watermark_template(&template, chrono::Local::now());
         let watermark =
             (!content.trim().is_empty()).then(|| watermark_from_values(r, template, content));
-        r.session.set_watermark(watermark);
+        r.document.session.set_watermark(watermark);
         adopt_watermark_style(r);
         sync_history_controls(r);
         Some(r.generation)
@@ -1447,9 +1506,13 @@ pub(super) fn pointer_panel(
 
 impl Registry {
     pub(super) fn sync_mode_display(&self) {
+        crate::pinned_screenshot::set_annotation_interaction(
+            self.screenshot.as_ref().is_some_and(|e| e.pin.is_some())
+                || (self.document.mode.is_mouse() && self.screenshot.is_none()),
+        );
         if let Some(main) = self.toolbar_state.main.get() {
-            main.set_operate(self.mode.is_mouse());
-            main.set_active_group(self.mode.selected_group());
+            main.set_operate(self.document.mode.is_mouse());
+            main.set_active_group(self.document.mode.selected_group());
         }
     }
 
@@ -1486,7 +1549,7 @@ impl Registry {
             && !panel.get_menu()
         {
             let tool = panel.get_tool() as usize;
-            if self.parameter_values.binding().get() == self.parameter_object(tool) {
+            if self.document.parameter_values.binding().get() == self.parameter_object(tool) {
                 self.replace_values(tool, panel.get_values());
             }
         }

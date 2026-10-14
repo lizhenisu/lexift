@@ -46,6 +46,25 @@ pub(crate) fn regions(snapshot: &Snapshot) -> Vec<Rect> {
 fn contains(a: Rect, b: Rect) -> bool {
     a.left <= b.left && a.top <= b.top && a.right >= b.right && a.bottom >= b.bottom
 }
+/// Compose a frozen document using its source DPI partitions, irrespective of view zoom.
+pub(crate) fn compose_frozen(
+    snapshot: &Snapshot,
+    capture: Arc<ScreenCaptureFrame>,
+    cancelled: &AtomicBool,
+) -> Result<CapturedRegion> {
+    let mut rendered = Vec::new();
+    for (monitor, scale) in lexift_core::domain::screen_snapshot::render_partitions(
+        snapshot.monitor,
+        &snapshot.monitors,
+        snapshot.scale,
+    ) {
+        let mut part = snapshot.clone();
+        part.monitor = monitor;
+        part.scale = scale;
+        rendered.push(compose(&part, capture.clone(), cancelled)?);
+    }
+    lexift_core::domain::screen_snapshot::crop_frames(&rendered, snapshot.monitor)
+}
 
 pub(crate) fn compose(
     snapshot: &Snapshot,

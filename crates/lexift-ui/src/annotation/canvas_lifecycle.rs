@@ -109,7 +109,10 @@ pub(super) fn create_canvas(r: &mut Registry, index: usize) {
     let layer = CanvasLayer::new(window, bounds);
     let generation = r.generation;
     let revision = layer.revision();
-    let window = &layer.window;
+    let window = match &layer.window {
+        canvas::Surface::Canvas(w) => w,
+        canvas::Surface::Pin(_) => unreachable!(),
+    };
     window.on_pointer(move |kind, x, y| {
         if canvas_current(generation, index, revision) {
             canvas_pointer(index, kind, x, y);
@@ -173,7 +176,11 @@ pub(super) fn show_canvas(r: &mut Registry, index: usize, attempt: u8) {
         .window
         .window()
         .set_position(slint::PhysicalPosition::new(rect.left, rect.top));
-    let preparation = match layer.prepare(&r.lifecycle, None) {
+    let frozen = r
+        .screenshot
+        .as_ref()
+        .and_then(|e| e.frames.iter().find(|f| f.bounds == rect));
+    let preparation = match layer.prepare(&r.lifecycle, frozen) {
         PassiveWindowPreparation::Ready => (r.prepare)(layer.window.window()),
         status => status,
     };
@@ -237,7 +244,10 @@ pub(super) fn show_prepared_canvas(r: &mut Registry, index: usize) {
         timing.largest_stage = timing.largest_stage.max(elapsed);
         timing.per_screen[index].native_complete += elapsed;
     }
-    (r.lifecycle.annotation_click_through)(layer.window.window(), r.mode.is_mouse());
+    (r.lifecycle.annotation_click_through)(
+        layer.window.window(),
+        r.document.mode.is_mouse() && r.screenshot.is_none(),
+    );
     settle_canvas(r, index, layer.revision(), 2);
     r.canvas_state.canvases[index].bootstrap = CanvasBootstrap::Present;
 }
@@ -246,18 +256,24 @@ pub(super) fn show_prepared_canvas(r: &mut Registry, index: usize) {
 /// The native layered bitmap is retained here until Windows hit testing of an
 /// unpresented Slint canvas has been verified on supported DPI layouts.
 pub(super) fn render_initial_canvas(r: &mut Registry, index: usize) {
-    let layer = &mut r.canvas_state.canvases[index];
     let raster_start = Instant::now();
-    let Some(frame) = crate::annotation_render::render(
-        &r.session,
-        layer.bounds,
-        layer.window.window().scale_factor(),
-        None,
-        None,
-    ) else {
+    let frame = if r.screenshot.is_some() {
+        screenshot::frame(r, index)
+    } else {
+        let layer = &r.canvas_state.canvases[index];
+        crate::annotation_render::render(
+            &r.document.session,
+            layer.bounds,
+            layer.window.window().scale_factor(),
+            None,
+            None,
+        )
+    };
+    let Some(frame) = frame else {
         r.close();
         return;
     };
+    let layer = &mut r.canvas_state.canvases[index];
     if let Some(timing) = r.canvas_state.cold_open_timing.as_mut() {
         let elapsed = raster_start.elapsed();
         timing.raster += elapsed;
@@ -284,7 +300,7 @@ pub(super) fn render_initial_canvas(r: &mut Registry, index: usize) {
         return;
     }
     r.canvas_state.canvases[index].signature = Some(render_signature(
-        &r.session,
+        &r.document.session,
         r.canvas_state.canvases[index].bounds,
         r.canvas_state.canvases[index]
             .window

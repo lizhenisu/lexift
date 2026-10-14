@@ -743,6 +743,7 @@ impl UiHandle {
         let credential_generation = Arc::clone(&self.credential_generation);
         let toast_records = Arc::clone(&self.toast_records);
         let _ = slint::invoke_from_event_loop(move || {
+            crate::annotation::pin_editor::finish_now();
             cancel_idle_memory_trim();
             APP_WINDOW_REGISTRY.with(|registry| {
                 let mut registry = registry.borrow_mut();

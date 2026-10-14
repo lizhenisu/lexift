@@ -1689,3 +1689,45 @@ msgstr "Werkzeugleiste verschieben"
 
 msgid "Bold text"
 msgstr "Fetter Text"
+
+msgid "Screenshot"
+msgstr "Screenshot"
+
+msgid "Save screenshot"
+msgstr "Screenshot speichern"
+
+msgid "Copy screenshot"
+msgstr "Screenshot kopieren"
+
+msgid "Pin screenshot"
+msgstr "Screenshot anheften"
+
+msgid "Pinned screenshot"
+msgstr "Angehefteter Screenshot"
+
+msgid "Select screenshot region"
+msgstr "Screenshot-Bereich auswählen"
+
+msgid "Drag to select. Escape or right-click to cancel."
+msgstr "Ziehen zum Auswählen. Escape oder Rechtsklick zum Abbrechen."
+
+msgid "Screenshot unavailable"
+msgstr "Screenshot nicht verfügbar"
+
+msgid "Copy image"
+msgstr "Bild kopieren"
+
+msgid "Save image"
+msgstr "Bild speichern"
+
+msgid "Window shadow"
+msgstr "Fensterschatten"
+
+msgid "Always on top"
+msgstr "Immer im Vordergrund"
+
+msgid "Annotate"
+msgstr "Annotieren"
+
+msgid "Hide annotations"
+msgstr "Anmerkungen ausblenden"

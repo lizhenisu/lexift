@@ -1911,7 +1911,7 @@ mod tests {
         let (generation, panel) = REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
-            r.selected[3] = 8;
+            r.document.selected[3] = 8;
             r.set_mode(super::super::InteractionMode::Tool(3));
             let window = AnnotationPanel::new().unwrap();
             window.set_tool(8);
@@ -3024,7 +3024,7 @@ mod tests {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
             let panel = AnnotationPanel::new().unwrap();
-            r.selected[3] = 8;
+            r.document.selected[3] = 8;
             assert!(r.set_mode(super::super::InteractionMode::Tool(3)));
             panel.set_tool(8);
             panel.set_values(defaults(8));
@@ -3096,7 +3096,7 @@ mod tests {
             r.toolbar_state.panel.get().unwrap().set_tool(0);
             r.toolbar_state.panel.get().unwrap().set_values(defaults(0));
             use lexift_core::domain::annotation::{Bounds, Extra, Kind, Object, Style};
-            assert!(r.session.add(Object {
+            assert!(r.document.session.add(Object {
                 erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Rectangle,
@@ -3106,8 +3106,8 @@ mod tests {
                 extra: Extra::None,
             }));
         });
-        let baseline =
-            REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().session.objects[0].clone());
+        let baseline = REGISTRY
+            .with(|slot| slot.borrow().as_ref().unwrap().document.session.objects[0].clone());
         open(
             generation,
             panel_revision,
@@ -3138,13 +3138,19 @@ mod tests {
         REGISTRY.with(|slot| {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
-            assert_eq!(r.session.objects[0].style.color, [0x65, 0x43, 0x21]);
-            assert!(r.session.undo());
-            assert_eq!(r.session.objects, vec![baseline]);
-            assert!(r.session.undo(), "creation remains its own operation");
-            assert!(r.session.objects.is_empty());
+            assert_eq!(
+                r.document.session.objects[0].style.color,
+                [0x65, 0x43, 0x21]
+            );
+            assert!(r.document.session.undo());
+            assert_eq!(r.document.session.objects, vec![baseline]);
             assert!(
-                !r.session.can_undo(),
+                r.document.session.undo(),
+                "creation remains its own operation"
+            );
+            assert!(r.document.session.objects.is_empty());
+            assert!(
+                !r.document.session.can_undo(),
                 "continuous color changes create one operation"
             );
             close(r, CloseReason::InteractionFinished);

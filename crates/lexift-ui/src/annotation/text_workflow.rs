@@ -36,8 +36,8 @@ pub(super) fn text_edit_matches(r: &Registry, id: u64) -> bool {
 pub(super) fn editing_sequence(r: &Registry) -> bool {
     r.editor
         .edit()
-        .and_then(|e| e.index(&r.session))
-        .and_then(|i| r.session.objects.get(i))
+        .and_then(|e| e.index(&r.document.session))
+        .and_then(|i| r.document.session.objects.get(i))
         .is_some_and(|o| o.kind == Kind::Sequence)
 }
 
@@ -60,30 +60,34 @@ pub(super) fn finish_text_edit_registry(r: &mut Registry, commit: bool) {
     r.queue_render();
     let target_kind = closed
         .edit
-        .index(&r.session)
-        .map(|index| r.session.objects[index].kind);
+        .index(&r.document.session)
+        .map(|index| r.document.session.objects[index].kind);
     let Some(change) = closed.resolve(commit, target_kind) else {
         return;
     };
     match change {
         editor::EditChange::Caption { target, text } => {
-            let Some(index) = r.session.object_index(target) else {
+            let Some(index) = r.document.session.object_index(target) else {
                 return;
             };
-            if !r.session.can_edit(&r.session.objects[index]) {
+            if !r
+                .document
+                .session
+                .can_edit(&r.document.session.objects[index])
+            {
                 return;
             }
-            r.session.selected = Some(index);
-            r.session.update_selected(|object| {
+            r.document.session.selected = Some(index);
+            r.document.session.update_selected(|object| {
                 if let Extra::Sequence(sequence) = &mut object.extra {
                     sequence.caption = text;
                 }
                 crate::annotation_sequence::layout(object);
             });
             if let Some(main) = r.toolbar_state.main.get() {
-                main.set_can_undo(r.session.can_undo());
+                main.set_can_undo(r.document.session.can_undo());
                 if let Some(panel) = r.toolbar_state.panel.get() {
-                    panel.set_can_clear(r.session.has_content());
+                    panel.set_can_clear(r.document.session.has_content());
                 }
             }
             return;
@@ -93,25 +97,29 @@ pub(super) fn finish_text_edit_registry(r: &mut Registry, commit: bool) {
             text,
             bounds,
         } => {
-            let Some(index) = r.session.object_index(target) else {
+            let Some(index) = r.document.session.object_index(target) else {
                 return;
             };
-            if !r.session.can_edit(&r.session.objects[index]) {
+            if !r
+                .document
+                .session
+                .can_edit(&r.document.session.objects[index])
+            {
                 return;
             }
-            r.session.selected = Some(index);
-            r.session.update_selected(|object| {
+            r.document.session.selected = Some(index);
+            r.document.session.update_selected(|object| {
                 object.bounds = bounds;
                 object.extra = Extra::Text(text);
             });
         }
         editor::EditChange::New(object) => {
-            r.session.add(*object);
+            r.document.session.add(*object);
         }
     }
     restore_parameter_projection(r);
     if let Some(main) = r.toolbar_state.main.get() {
-        main.set_can_undo(r.session.can_undo());
+        main.set_can_undo(r.document.session.can_undo());
     }
 }
 
@@ -150,7 +158,8 @@ pub(super) fn editor_pointer(generation: u64, id: u64, event: i32, x: f32, y: f3
         let editor = r.editor.window().unwrap();
         let origin = editor.window().position();
         let dpi = editor.window().scale_factor();
-        let point = (origin.x as f32 + x * dpi, origin.y as f32 + y * dpi);
+        let point =
+            pin_editor::view_point((origin.x as f32 + x * dpi, origin.y as f32 + y * dpi), true);
         let handle = if editing_sequence(r) {
             None
         } else {
@@ -218,8 +227,8 @@ pub(super) fn resize_text_editor(generation: u64, id: u64) {
         let mut text = edit.original.clone();
         text.content = editor_preview(editor).0;
         let b = if let Some(mut object) = edit
-            .index(&r.session)
-            .and_then(|i| r.session.objects.get(i))
+            .index(&r.document.session)
+            .and_then(|i| r.document.session.objects.get(i))
             .filter(|o| o.kind == Kind::Sequence)
             .cloned()
         {
@@ -235,7 +244,14 @@ pub(super) fn resize_text_editor(generation: u64, id: u64) {
         };
         edit.bounds = b;
         edit.laid_out_content = text.content.clone();
-        place_text_editor(editor, b, edit.scale, &text, &r.canvas_state.canvases);
+        place_text_editor(
+            editor,
+            b,
+            edit.scale,
+            &text,
+            &r.canvas_state.canvases,
+            r.screenshot.as_ref().and_then(|e| e.region.bounds()),
+        );
         reset_text_caret(r);
         Some(r.generation)
     });
@@ -251,8 +267,11 @@ pub(super) fn place_text_editor(
     scale: f32,
     text: &TextAnnotation,
     canvases: &[CanvasLayer],
+    crop: Option<Rect>,
 ) {
-    let displays: Vec<_> = canvases.iter().map(|layer| layer.bounds).collect();
+    let displays: Vec<_> = crop
+        .map(|bounds| vec![bounds])
+        .unwrap_or_else(|| canvases.iter().map(|layer| layer.bounds).collect());
     editor::place(editor, bounds, scale, text, &displays);
 }
 
@@ -280,13 +299,20 @@ pub(super) fn open_text_editor_with_settings(
             return;
         };
         let index = if let Some(target) = target {
-            let Some(index) = r.session.object_index(target) else {
+            let Some(index) = r.document.session.object_index(target) else {
                 return;
             };
-            if !r.session.can_edit(&r.session.objects[index]) {
+            if !r
+                .document
+                .session
+                .can_edit(&r.document.session.objects[index])
+            {
                 return;
             }
-            if !matches!(r.session.objects[index].kind, Kind::Text | Kind::Sequence) {
+            if !matches!(
+                r.document.session.objects[index].kind,
+                Kind::Text | Kind::Sequence
+            ) {
                 return;
             }
             Some(index)
@@ -303,10 +329,10 @@ pub(super) fn open_text_editor_with_settings(
         if index.is_none()
             && let Some(values) = &creation
         {
-            r.parameter_values.remember_creation(8, values);
+            r.document.parameter_values.remember_creation(8, values);
         }
         let scale = index
-            .and_then(|i| r.session.objects.get(i))
+            .and_then(|i| r.document.session.objects.get(i))
             .map_or(scale, |o| {
                 if let Extra::Sequence(s) = &o.extra {
                     s.scale
@@ -315,7 +341,7 @@ pub(super) fn open_text_editor_with_settings(
                 }
             });
         let original = index
-            .and_then(|i| r.session.objects.get(i))
+            .and_then(|i| r.document.session.objects.get(i))
             .and_then(|o| {
                 if let Extra::Text(text) = &o.extra {
                     Some(text.clone())
@@ -327,7 +353,7 @@ pub(super) fn open_text_editor_with_settings(
             })
             .unwrap_or_else(|| text_from_values(r, String::new()));
         let at = index
-            .and_then(|i| r.session.objects.get(i))
+            .and_then(|i| r.document.session.objects.get(i))
             .map_or(at, |object| {
                 let b = object
                     .sequence_caption()
@@ -341,21 +367,27 @@ pub(super) fn open_text_editor_with_settings(
         let generation = r.generation;
         let id = editor::next_instance();
         editor.set_value(original.content.clone().into());
-        let color = index.and_then(|i| r.session.objects.get(i)).map_or(
-            current_style(r, 8).color,
-            |object| {
+        let color = index
+            .and_then(|i| r.document.session.objects.get(i))
+            .map_or(current_style(r, 8).color, |object| {
                 if let Extra::Sequence(s) = &object.extra {
                     s.caption_color
                 } else {
                     object.style.color
                 }
-            },
-        );
+            });
         editor::configure(&editor, &original, color);
         editor.on_pointer(move |event, x, y| editor_pointer(generation, id, event, x, y));
         let b = crate::annotation_text::text_bounds(at, &original, scale);
-        place_text_editor(&editor, b, scale, &original, &r.canvas_state.canvases);
-        if let Some(object) = index.and_then(|i| r.session.objects.get(i)) {
+        place_text_editor(
+            &editor,
+            b,
+            scale,
+            &original,
+            &r.canvas_state.canvases,
+            r.screenshot.as_ref().and_then(|e| e.region.bounds()),
+        );
+        if let Some(object) = index.and_then(|i| r.document.session.objects.get(i)) {
             let caption = object.sequence_caption();
             let offset =
                 crate::annotation_text::caret_at(caption.as_ref().unwrap_or(object), clicked)
@@ -364,7 +396,9 @@ pub(super) fn open_text_editor_with_settings(
         }
         let edit = TextEdit::new(
             id,
-            index.and_then(|i| r.session.objects.get(i)).map(|o| o.id),
+            index
+                .and_then(|i| r.document.session.objects.get(i))
+                .map(|o| o.id),
             at,
             scale,
             original,
@@ -372,7 +406,7 @@ pub(super) fn open_text_editor_with_settings(
             editor.get_value().to_string(),
         );
         let values = index.is_none().then(|| {
-            let mut values = r.parameter_values.defaults(8).clone();
+            let mut values = r.document.parameter_values.defaults(8).clone();
             text_dimensions_to_values(&mut values, &edit.original);
             values
         });
@@ -413,7 +447,7 @@ pub(super) fn open_text_editor(at: (f32, f32), index: Option<usize>, scale: f32)
         let slot = slot.borrow();
         let r = slot.as_ref()?;
         let target = match index {
-            Some(index) => Some(r.session.objects.get(index)?.id),
+            Some(index) => Some(r.document.session.objects.get(index)?.id),
             None => None,
         };
         Some((r.generation, target))
@@ -448,6 +482,7 @@ pub(super) fn show_text_editor(generation: u64, id: u64, attempt: u8, origin: fo
                     edit.scale,
                     &edit.original,
                     &r.canvas_state.canvases,
+                    r.screenshot.as_ref().and_then(|e| e.region.bounds()),
                 );
                 if editor.show().is_err()
                     || !(r.lifecycle.complete_passive_window_show)(
@@ -466,6 +501,7 @@ pub(super) fn show_text_editor(generation: u64, id: u64, attempt: u8, origin: fo
                         edit.scale,
                         &edit.original,
                         &r.canvas_state.canvases,
+                        r.screenshot.as_ref().and_then(|e| e.region.bounds()),
                     );
                 }
                 if !attach_text_editor_owner(r) {
@@ -588,9 +624,10 @@ pub(super) fn begin_text_handle(
     let target = if editing {
         r.editor.edit().and_then(|edit| edit.object)
     } else {
-        r.session
+        r.document
+            .session
             .selected
-            .and_then(|index| r.session.objects.get(index))
+            .and_then(|index| r.document.session.objects.get(index))
             .map(|object| object.id)
     };
     let handle = gestures::TextHandle::new(object, handle, point, scale, editing, target);
@@ -611,8 +648,8 @@ pub(super) fn update_text_handle(r: &mut Registry, point: (f32, f32)) {
             editing_text_object(r)
         } else {
             info.target
-                .and_then(|id| r.session.object_index(id))
-                .and_then(|index| r.session.objects.get(index))
+                .and_then(|id| r.document.session.object_index(id))
+                .and_then(|index| r.document.session.objects.get(index))
                 .cloned()
         };
         let Some(current) = current else {
@@ -633,7 +670,7 @@ pub(super) fn update_text_handle(r: &mut Registry, point: (f32, f32)) {
     if info.editing {
         apply_editing_object(r, object);
     } else if let Some(target) = info.target {
-        gestures::write(&mut r.session, target, object);
+        gestures::write(&mut r.document.session, target, object);
     }
 }
 
@@ -653,6 +690,7 @@ pub(super) fn apply_editing_object(r: &mut Registry, object: Object) {
         edit.scale,
         &text,
         &r.canvas_state.canvases,
+        r.screenshot.as_ref().and_then(|e| e.region.bounds()),
     );
     text.content = editor.get_value().to_string();
     edit.original = text;
@@ -676,21 +714,21 @@ pub(super) fn finish_text_handle(r: &mut Registry, point: (f32, f32)) {
     {
         if handle == 1 {
             finish_text_edit_registry(r, false);
-            if let Some(index) = target.and_then(|id| r.session.object_index(id)) {
-                r.session.selected = Some(index);
-                r.session.delete_selected();
+            if let Some(index) = target.and_then(|id| r.document.session.object_index(id)) {
+                r.document.session.selected = Some(index);
+                r.document.session.delete_selected();
             }
         } else {
             object.toggle_text_arrow(scale);
             apply_editing_object(r, object);
         }
     }
-    operation.finish(&mut r.session);
+    operation.finish(&mut r.document.session);
     r.gesture = None;
     r.flush_deferred_parameters();
     if !editing
         && active
-        && let Some(index) = target.and_then(|id| r.session.object_index(id))
+        && let Some(index) = target.and_then(|id| r.document.session.object_index(id))
     {
         adopt_selected_style(r, index);
     }
@@ -699,7 +737,10 @@ pub(super) fn finish_text_handle(r: &mut Registry, point: (f32, f32)) {
         if !r.editor.sync_draft_dimensions()
             && let Some(edit) = r.editor.edit()
         {
-            text_dimensions_to_values(r.parameter_values.edit(8, parameter_object), &edit.original);
+            text_dimensions_to_values(
+                r.document.parameter_values.edit(8, parameter_object),
+                &edit.original,
+            );
         }
         if let Some(panel) = r.toolbar_state.panel.get()
             && panel.get_tool() == 8

@@ -1689,3 +1689,45 @@ msgstr "ツールバーを移動"
 
 msgid "Bold text"
 msgstr "太字"
+
+msgid "Screenshot"
+msgstr "スクリーンショット"
+
+msgid "Save screenshot"
+msgstr "スクリーンショットを保存"
+
+msgid "Copy screenshot"
+msgstr "スクリーンショットをコピー"
+
+msgid "Pin screenshot"
+msgstr "画像を固定"
+
+msgid "Pinned screenshot"
+msgstr "固定した画像"
+
+msgid "Select screenshot region"
+msgstr "撮影範囲を選択"
+
+msgid "Drag to select. Escape or right-click to cancel."
+msgstr "ドラッグして範囲を選択。Escape または右クリックでキャンセル。"
+
+msgid "Screenshot unavailable"
+msgstr "スクリーンショットを利用できません"
+
+msgid "Copy image"
+msgstr "画像をコピー"
+
+msgid "Save image"
+msgstr "画像を保存"
+
+msgid "Window shadow"
+msgstr "ウィンドウの影"
+
+msgid "Always on top"
+msgstr "最前面に表示"
+
+msgid "Annotate"
+msgstr "注釈を付ける"
+
+msgid "Hide annotations"
+msgstr "注釈を非表示"

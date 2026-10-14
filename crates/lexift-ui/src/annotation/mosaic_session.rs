@@ -207,7 +207,7 @@ pub(super) fn sync(r: &mut Registry) {
     };
     let monitors: Vec<_> = r.canvas_state.canvases.iter().map(|c| c.bounds).collect();
     let regions = capture_regions(
-        &r.session.objects,
+        &r.document.session.objects,
         super::gestures::display_draft(&r.gesture, &r.pending_drawing),
         &monitors,
     );
@@ -615,9 +615,9 @@ pub(super) fn cancel_pending(r: &mut Registry) {
         return;
     }
     let editing_pending = r.geometry_drag().is_some_and(|drag| {
-        r.session
+        r.document.session
             .object_index(drag.target())
-            .and_then(|index| r.session.objects.get(index))
+            .and_then(|index| r.document.session.objects.get(index))
             .is_some_and(
                 |o| matches!(&o.extra, Extra::Mosaic(m) if r.render_state.mosaic.pending.contains(&m.id)),
             )
@@ -628,10 +628,12 @@ pub(super) fn cancel_pending(r: &mut Registry) {
     // Gesture rollback can replay accepted parameter input. Complete it before
     // removing provisional objects from every Core history snapshot.
     r.finish_style_edit();
-    r.render_state.mosaic.cancel_pending(&mut r.session);
+    r.render_state
+        .mosaic
+        .cancel_pending(&mut r.document.session);
     r.hovered = None;
     if let Some(main) = r.toolbar_state.main.get() {
-        main.set_can_undo(r.session.can_undo());
+        main.set_can_undo(r.document.session.can_undo());
     }
 }
 
@@ -1168,7 +1170,9 @@ mod tests {
                 points: Vec::new(),
                 extra: settings(&defaults(11), 1.25),
             };
-            r.render_state.mosaic.stage(&mut r.session, draft.clone());
+            r.render_state
+                .mosaic
+                .stage(&mut r.document.session, draft.clone());
             let values = defaults(11);
             let mut press = super::super::drawing::Press::begin(
                 (-900., -400.),
@@ -1203,7 +1207,7 @@ mod tests {
                         .is_none()
                     && r.gesture().is_none()
             );
-            assert!(r.session.objects.is_empty() && !r.session.can_undo());
+            assert!(r.document.session.objects.is_empty() && !r.document.session.can_undo());
             let notice = r
                 .render_state
                 .mosaic
@@ -1264,7 +1268,7 @@ mod tests {
                 points: Vec::new(),
                 extra: settings(&defaults(11), 1.25),
             };
-            r.session.add(original.clone());
+            r.document.session.add(original.clone());
             let last_good = Arc::new(ScreenCaptureFrame {
                 revision: 0,
                 serial: 42,
@@ -1281,7 +1285,7 @@ mod tests {
             r.render_state.mosaic.frame = Some(last_good.clone());
             let mut next = original;
             next.bounds = next.bounds.moved(200., 0.);
-            r.render_state.mosaic.stage(&mut r.session, next);
+            r.render_state.mosaic.stage(&mut r.document.session, next);
             sync(r);
             r.render_state.mosaic.waiting_since = Some(Instant::now() - Duration::from_secs(6));
             last_good
@@ -1295,12 +1299,12 @@ mod tests {
                 r.render_state.mosaic.frame.as_ref().unwrap(),
                 &last_good
             ));
-            assert_eq!(r.session.objects.len(), 1);
+            assert_eq!(r.document.session.objects.len(), 1);
             assert!(r.render_state.mosaic.notice.is_some());
-            assert!(r.session.undo());
-            assert!(r.session.objects.is_empty());
+            assert!(r.document.session.undo());
+            assert!(r.document.session.objects.is_empty());
             assert!(
-                !r.session.can_undo(),
+                !r.document.session.can_undo(),
                 "failed stroke must not add a second undo"
             );
             r.render_state.mosaic = State::default();

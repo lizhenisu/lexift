@@ -1689,3 +1689,45 @@ msgstr "Déplacer la barre d’outils"
 
 msgid "Bold text"
 msgstr "Texte en gras"
+
+msgid "Screenshot"
+msgstr "Capture d’écran"
+
+msgid "Save screenshot"
+msgstr "Enregistrer la capture"
+
+msgid "Copy screenshot"
+msgstr "Copier la capture"
+
+msgid "Pin screenshot"
+msgstr "Épingler la capture"
+
+msgid "Pinned screenshot"
+msgstr "Capture épinglée"
+
+msgid "Select screenshot region"
+msgstr "Sélectionner la zone de capture"
+
+msgid "Drag to select. Escape or right-click to cancel."
+msgstr "Faites glisser pour sélectionner. Échap ou clic droit pour annuler."
+
+msgid "Screenshot unavailable"
+msgstr "Capture indisponible"
+
+msgid "Copy image"
+msgstr "Copier l’image"
+
+msgid "Save image"
+msgstr "Enregistrer l’image"
+
+msgid "Window shadow"
+msgstr "Ombre de la fenêtre"
+
+msgid "Always on top"
+msgstr "Toujours au premier plan"
+
+msgid "Annotate"
+msgstr "Annoter"
+
+msgid "Hide annotations"
+msgstr "Masquer les annotations"

@@ -30,4 +30,8 @@ Slint 的 `RegionPreview` 与 `ScreenInteractionHint` 只呈现选区、遮罩�
 
 ## 模块所有权
 
-标注实现集中在 UI 的 `annotation/`，OCR 独立宿主在 `ocr/selection`；设置桥接在 `ocr/provider`。这些目录调整不改变公共宿主、隐藏准备和首次呈现流程，也不合并两种业务会话。窗口 Bridge 的回调契约位于 `bridge/callbacks`，原生实现仍由 App 注入。
+标注实现集中在 UI 的 `annotation/`，共用冻结框选宿主在 `screen_interaction/selection`，OCR 业务入口在 `ocr/selection`；设置桥接在 `ocr/provider`。这些目录调整不改变公共宿主、隐藏准备和首次呈现流程，也不合并两种业务会话。窗口 Bridge 的回调契约位于 `bridge/callbacks`，原生实现仍由 App 注入。
+
+## 截图复用
+
+[截图模式](screenshot-mode.md) 与 OCR 共用冻结框选宿主；OCR 和截图各自拥有业务会话，不能同时占用该宿主。截图编辑复用标注 CanvasLayer 和文档工作流，初始画面为冻结帧，后台软件合成预览；普通标注的透明画布和实时呈现保持原路径。Core `RegionEditor` 提供确认后的裁切范围编辑，不改变 OCR 松手提交规则。

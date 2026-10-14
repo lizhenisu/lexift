@@ -963,7 +963,7 @@ pub enum Hit {
 }
 
 /// Owns the undoable document; a drag is committed as one undo step on release.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Session {
     pub next_sequence: i32,
     pub objects: Vec<Object>,
@@ -989,6 +989,33 @@ impl Session {
             spotlight_opacity: 0.1,
             ..Self::default()
         }
+    }
+    /// Keep undo history while adopting the visible export, including uncommitted drafts.
+    /// Draft identities are assigned through normal insertion, so they remain editable.
+    pub fn freeze_visible(&self, visible: &Session) -> Self {
+        let mut frozen = self.clone();
+        frozen.objects = visible
+            .objects
+            .iter()
+            .filter(|o| o.id != ObjectId::DRAFT)
+            .cloned()
+            .collect();
+        frozen.displays = visible.displays.clone();
+        frozen.watermark = visible.watermark.clone();
+        frozen.watermark_erased = visible.watermark_erased.clone();
+        frozen.spotlight_erased = visible.spotlight_erased.clone();
+        frozen.spotlight_opacity = visible.spotlight_opacity;
+        if frozen.drag_before.is_none() && frozen.snapshot() != self.snapshot() {
+            frozen.undo.push(self.snapshot());
+        }
+        frozen.finish_drag();
+        frozen.finish_rectangle_erase();
+        for draft in visible.objects.iter().filter(|o| o.id == ObjectId::DRAFT) {
+            frozen.add(draft.clone());
+        }
+        frozen.selected = None;
+        frozen.set_edit_scope(EditScope::All);
+        frozen
     }
     fn snapshot(&self) -> Snapshot {
         Snapshot {
@@ -1483,6 +1510,30 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn frozen_visible_drafts_receive_identity_and_preserve_independent_undo() {
+        let mut source = Session::new();
+        source.add(text_object());
+        let original = source.objects[0].bounds;
+        let mut visible = source.clone();
+        visible.objects[0].move_by(40., 20.);
+        visible.objects.push(text_object());
+        let mut pin = source.freeze_visible(&visible);
+        assert_eq!(source.objects.len(), 1);
+        assert_eq!(source.objects[0].bounds, original);
+        assert_eq!(pin.objects.len(), 2);
+        let draft = pin.objects[1].id;
+        assert_ne!(draft, ObjectId::DRAFT);
+        assert_eq!(pin.object_index(draft), Some(1));
+        assert!(pin.undo());
+        assert_eq!(pin.objects.len(), 1);
+        assert_eq!(pin.objects[0].bounds, visible.objects[0].bounds);
+        assert!(pin.undo());
+        assert_eq!(pin.objects[0].bounds, original);
+        assert!(pin.undo());
+        assert!(pin.objects.is_empty());
+        assert_eq!(source.objects.len(), 1);
+    }
 
     #[test]
     fn object_identity_survives_edits_and_undo_but_is_never_reused() {

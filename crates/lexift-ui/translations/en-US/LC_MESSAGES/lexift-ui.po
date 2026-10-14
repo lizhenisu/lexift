@@ -1689,3 +1689,45 @@ msgstr "Move toolbar"
 
 msgid "Bold text"
 msgstr "Bold text"
+
+msgid "Screenshot"
+msgstr "Screenshot"
+
+msgid "Save screenshot"
+msgstr "Save screenshot"
+
+msgid "Copy screenshot"
+msgstr "Copy screenshot"
+
+msgid "Pin screenshot"
+msgstr "Pin screenshot"
+
+msgid "Pinned screenshot"
+msgstr "Pinned screenshot"
+
+msgid "Select screenshot region"
+msgstr "Select screenshot region"
+
+msgid "Drag to select. Escape or right-click to cancel."
+msgstr "Drag to select. Escape or right-click to cancel."
+
+msgid "Screenshot unavailable"
+msgstr "Screenshot unavailable"
+
+msgid "Copy image"
+msgstr "Copy image"
+
+msgid "Save image"
+msgstr "Save image"
+
+msgid "Window shadow"
+msgstr "Window shadow"
+
+msgid "Always on top"
+msgstr "Always on top"
+
+msgid "Annotate"
+msgstr "Annotate"
+
+msgid "Hide annotations"
+msgstr "Hide annotations"

@@ -6,6 +6,7 @@ use crate::{AppCommand, AppState, Result};
 use std::sync::Arc;
 
 /// Immutable visible document; excludes undo history and all UI components.
+#[derive(Clone)]
 pub struct ExportSnapshot {
     pub session: Arc<Session>,
     pub monitor: Rect,

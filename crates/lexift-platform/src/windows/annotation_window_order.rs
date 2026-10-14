@@ -25,6 +25,8 @@ const LOWER_VISUAL: u32 = WM_APP + 0x52;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Role {
     Canvas,
+    Pin,
+    Unpinned,
     Tool { owner: usize },
     Visual,
 }
@@ -108,6 +110,13 @@ pub(super) fn canvas(hwnd: HWND) -> Result<()> {
     register(hwnd, Role::Canvas)?;
     super::annotation_overlay::mark(hwnd)
 }
+/// Pins remain interactive above rebuilt annotation canvases, without capture exclusion.
+pub(crate) fn pin(hwnd: HWND) -> Result<()> {
+    register(hwnd, Role::Pin)
+}
+pub(crate) fn set_pin_level(hwnd: HWND, topmost: bool) -> Result<()> {
+    register(hwnd, if topmost { Role::Pin } else { Role::Unpinned })
+}
 pub(super) fn visual(hwnd: HWND) -> Result<()> {
     register(hwnd, Role::Visual)
 }
@@ -166,6 +175,7 @@ fn ordered(entries: &[Entry]) -> Vec<Entry> {
     let mut current = unsafe { GetTopWindow(None) }.unwrap_or_default();
     while !current.0.is_null() {
         if let Some(entry) = entries.iter().find(|entry| entry.window() == current)
+            && entry.role != Role::Unpinned
             && unsafe { IsWindowVisible(current) }.as_bool()
         {
             ordered.push(*entry);
@@ -182,6 +192,8 @@ fn rank(entry: Entry, entries: &[Entry]) -> usize {
         match role {
             Role::Visual => return 0,
             Role::Canvas => return rank,
+            Role::Pin => return entries.len() + rank,
+            Role::Unpinned => return 0,
             Role::Tool { owner } => {
                 rank += 1;
                 let Some(parent) = entries.iter().find(|parent| parent.id == owner) else {
@@ -210,7 +222,7 @@ fn reconcile() {
     let mut tools: Vec<_> = order
         .iter()
         .copied()
-        .filter(|entry| matches!(entry.role, Role::Tool { .. }))
+        .filter(|entry| matches!(entry.role, Role::Tool { .. } | Role::Pin))
         .collect();
     tools.sort_by_key(|entry| (rank(*entry, &entries), entry.id));
     for tool in tools {
@@ -263,9 +275,9 @@ unsafe extern "system" fn subclass(
                 let anchor = match entry.role {
                     Role::Canvas => order
                         .iter()
-                        .rfind(|entry| matches!(entry.role, Role::Tool { .. })),
+                        .rfind(|entry| matches!(entry.role, Role::Tool { .. } | Role::Pin)),
                     Role::Visual => order.iter().rfind(|entry| entry.role == Role::Canvas),
-                    Role::Tool { .. } => None,
+                    Role::Tool { .. } | Role::Pin | Role::Unpinned => None,
                 };
                 if let Some(anchor) = anchor {
                     position.hwndInsertAfter = anchor.window();
@@ -531,6 +543,20 @@ mod tests {
             foreground,
             "ordering activated a window"
         );
+    }
+
+    #[test]
+    fn pins_survive_canvas_rebuild_without_becoming_capture_exclusions() {
+        let pin = window(0, 0, 40, 40);
+        super::pin(pin.0).unwrap();
+        assert!(!super::super::annotation_overlay::contains(pin.0));
+        let canvas = window(0, 0, 40, 40);
+        super::canvas(canvas.0).unwrap();
+        let entries = snapshot();
+        let pin = *entries.iter().find(|e| e.window() == pin.0).unwrap();
+        let canvas = *entries.iter().find(|e| e.window() == canvas.0).unwrap();
+        assert!(valid_order(&[pin, canvas], &entries));
+        assert!(!valid_order(&[canvas, pin], &entries));
     }
 
     #[test]

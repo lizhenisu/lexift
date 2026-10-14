@@ -8,6 +8,7 @@ mod lifecycle;
 mod llm_credentials;
 mod ocr;
 mod runtime;
+mod screenshot;
 mod wiring;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

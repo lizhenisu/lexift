@@ -35,10 +35,10 @@ fn collapse_preserves_tool_and_document_retires_panel_and_startup_placement() {
         let r = slot.as_mut().unwrap();
         r.toolbar_state.main.open(AnnotationToolbar::new().unwrap());
         r.toolbar_state.panel.open(AnnotationPanel::new().unwrap());
-        r.mode = InteractionMode::Tool(0);
+        r.document.mode = InteractionMode::Tool(0);
         r.sync_mode_display();
         r.edit_values(0).size = 13;
-        r.session.add(Object {
+        r.document.session.add(Object {
             id: Default::default(),
             kind: Kind::Rectangle,
             bounds: Bounds::from_corners((10., 10.), (90., 80.)),
@@ -69,10 +69,10 @@ fn collapse_preserves_tool_and_document_retires_panel_and_startup_placement() {
             80
         );
         assert!(r.toolbar_state.panel.get().is_none());
-        assert_eq!(r.mode, InteractionMode::Tool(0));
+        assert_eq!(r.document.mode, InteractionMode::Tool(0));
         assert_eq!(r.values(0).size, 13);
-        assert_eq!(r.session.objects.len(), 1);
-        assert!(r.session.can_undo());
+        assert_eq!(r.document.session.objects.len(), 1);
+        assert!(r.document.session.can_undo());
     });
     open_panel(0, false);
     REGISTRY.with(|slot| {
@@ -93,7 +93,7 @@ fn collapse_preserves_tool_and_document_retires_panel_and_startup_placement() {
         assert!(!r.toolbar_state.main.get().unwrap().get_collapsed());
         assert_eq!(
             r.toolbar_state.main.get().unwrap().window().size().width,
-            695
+            723
         );
         assert!(r.toolbar_state.panel.get().is_none());
         r.close();

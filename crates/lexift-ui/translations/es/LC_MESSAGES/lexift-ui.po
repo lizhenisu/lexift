@@ -1689,3 +1689,45 @@ msgstr "Mover barra de herramientas"
 
 msgid "Bold text"
 msgstr "Texto en negrita"
+
+msgid "Screenshot"
+msgstr "Captura de pantalla"
+
+msgid "Save screenshot"
+msgstr "Guardar captura"
+
+msgid "Copy screenshot"
+msgstr "Copiar captura"
+
+msgid "Pin screenshot"
+msgstr "Fijar captura"
+
+msgid "Pinned screenshot"
+msgstr "Captura fijada"
+
+msgid "Select screenshot region"
+msgstr "Seleccionar área de captura"
+
+msgid "Drag to select. Escape or right-click to cancel."
+msgstr "Arrastra para seleccionar. Escape o clic derecho para cancelar."
+
+msgid "Screenshot unavailable"
+msgstr "Captura no disponible"
+
+msgid "Copy image"
+msgstr "Copiar imagen"
+
+msgid "Save image"
+msgstr "Guardar imagen"
+
+msgid "Window shadow"
+msgstr "Sombra de ventana"
+
+msgid "Always on top"
+msgstr "Siempre visible"
+
+msgid "Annotate"
+msgstr "Anotar"
+
+msgid "Hide annotations"
+msgstr "Ocultar anotaciones"

@@ -40,6 +40,9 @@
 - [本地 OCR 框选翻译](features/ocr-translation.md)
 - [屏幕区域选择基础](features/region-selection.md)
 - [共用屏幕交互宿主](features/screen-interaction.md)
+- [截图模式与临时贴图](features/screenshot-mode.md)
+- [截图模式验证](releases/screenshot-mode-2026-10-13.md)
+- [多贴图输入与生命周期验证](releases/multi-pin-interaction-2026-10-13.md)
 - [剪贴板历史](features/clipboard-history.md)
 - [复制按钮反馈](features/copy-feedback.md)
 - [界面国际化](features/i18n.md)
@@ -80,6 +83,9 @@
 
 ## 发布
 
+- [贴图菜单与恢复行为验证](releases/pinned-image-menu-2026-10-14.md)
+- [贴图可编辑标注验证](releases/pinned-image-annotation-2026-10-14.md)
+
 - [标注、窗口 Bridge 与 OCR 职责整理验证](releases/responsibility-refactor-validation.md)
 
 - [OCR 基础包、韩文扩展与性能验证](releases/ocr-extension-validation.md)
@@ -90,7 +96,7 @@
 - [发布检查清单](releases/release-checklist.md)
 - [Release 测量](releases/release-performance.md)
 - [v0.1.0 候选验收记录](releases/release-validation-v0.1.0.md)
-- 发布说明：[v0.1.0](releases/notes/release-notes-v0.1.0.md)、[rc.10](releases/notes/release-notes-v0.0.1-rc.10.md)、[rc.9](releases/notes/release-notes-v0.0.1-rc.9.md)、[rc.8](releases/notes/release-notes-v0.0.1-rc.8.md)、[rc.7](releases/notes/release-notes-v0.0.1-rc.7.md)、[rc.6](releases/notes/release-notes-v0.0.1-rc.6.md)、[rc.5](releases/notes/release-notes-v0.0.1-rc.5.md)、[rc.4](releases/notes/release-notes-v0.0.1-rc.4.md)、[rc.3](releases/notes/release-notes-v0.0.1-rc.3.md)、[rc.2](releases/notes/release-notes-v0.0.1-rc.2.md)、[rc.1](releases/notes/release-notes-v0.0.1-rc.1.md)。
+- 发布说明：[v0.1.0](releases/notes/release-notes-v0.1.0.md)、[rc.11](releases/notes/release-notes-v0.0.1-rc.11.md)、[rc.10](releases/notes/release-notes-v0.0.1-rc.10.md)、[rc.9](releases/notes/release-notes-v0.0.1-rc.9.md)、[rc.8](releases/notes/release-notes-v0.0.1-rc.8.md)、[rc.7](releases/notes/release-notes-v0.0.1-rc.7.md)、[rc.6](releases/notes/release-notes-v0.0.1-rc.6.md)、[rc.5](releases/notes/release-notes-v0.0.1-rc.5.md)、[rc.4](releases/notes/release-notes-v0.0.1-rc.4.md)、[rc.3](releases/notes/release-notes-v0.0.1-rc.3.md)、[rc.2](releases/notes/release-notes-v0.0.1-rc.2.md)、[rc.1](releases/notes/release-notes-v0.0.1-rc.1.md)。
 
 ## 维护约定
 

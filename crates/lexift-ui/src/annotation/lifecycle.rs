@@ -1,6 +1,8 @@
 //! Annotation session startup, cancellation and teardown coordination.
 use super::*;
 pub(crate) fn shutdown() {
+    pin_editor::shutdown();
+    screenshot::shutdown();
     let retired = REGISTRY.with(|s| {
         s.borrow_mut().take().map(|mut r| {
             let session = r.generation;
@@ -14,6 +16,10 @@ pub(crate) fn shutdown() {
     EXPORT_HANDLER.with(|h| h.borrow_mut().take());
 }
 pub(crate) fn close() {
+    if pin_editor::active() {
+        pin_editor::finish();
+        return;
+    }
     let retired = REGISTRY.with(|s| {
         s.borrow_mut().as_mut().map(|r| {
             let session = r.generation;
@@ -33,6 +39,19 @@ pub(super) fn escape() {
 }
 
 pub(super) fn escape_from(origin: focus::Origin) {
+    let crop_cancelled = REGISTRY.with(|s| {
+        s.borrow_mut()
+            .as_mut()
+            .is_some_and(screenshot::cancel_region)
+    });
+    if crop_cancelled {
+        REGISTRY.with(|s| {
+            if let Some(r) = s.borrow_mut().as_mut() {
+                r.queue_render();
+            }
+        });
+        return;
+    }
     let restored = REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let Some(r) = slot.as_mut() else { return false };
@@ -84,7 +103,7 @@ pub(super) fn escape_from(origin: focus::Origin) {
             refresh_hovered(r);
             return Some(r.generation);
         }
-        if r.session.selected.is_some() {
+        if r.document.session.selected.is_some() {
             deselect_object(r);
             refresh_hovered(r);
             cursor::refresh(r);
@@ -115,7 +134,13 @@ pub(super) fn escape_from(origin: focus::Origin) {
             activate(main.window());
         }
     } else {
-        close();
+        if pin_editor::active() {
+            pin_editor::finish();
+        } else if screenshot::active() {
+            screenshot::cancel();
+        } else {
+            close();
+        }
     }
 }
 
@@ -124,7 +149,7 @@ pub(super) fn finish_polyline() {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut()?;
         if let drawing::Progress::Retired(Some(object)) = r.pending_drawing.finish_polyline()? {
-            r.session.add(*object);
+            r.document.session.add(*object);
         }
         if matches!(r.gesture(), Some(Gesture::PlacePoint)) {
             r.gesture = None;
@@ -174,11 +199,17 @@ pub(crate) fn toggle(requested_at: Instant) {
             });
         }
         let toolbar_start = Instant::now();
-        let Ok(main) = AnnotationToolbar::new() else {
+        let Ok(main) = crate::screen_interaction::create(&r.lifecycle, AnnotationToolbar::new)
+        else {
             r.close();
             return None;
         };
         crate::theme::apply(&main);
+        main.set_screenshot_mode(r.screenshot.is_some());
+        main.set_pin_edit_mode(r.screenshot.as_ref().is_some_and(|e| e.pin.is_some()));
+        if let Some((_, collapsed)) = r.toolbar_state.resume {
+            main.set_collapsed(collapsed);
+        }
         r.generation = r.generation.wrapping_add(1);
         let generation = r.generation;
         let revision = r.toolbar_state.main.open(main);
@@ -201,7 +232,37 @@ pub(crate) fn toggle(requested_at: Instant) {
         let input = r.toolbar_state.main.input();
         main.on_undo_requested(move || later_main(&input, generation, revision, undo));
         let input = r.toolbar_state.main.input();
-        main.on_download_requested(move || later_main(&input, generation, revision, export::start));
+        main.on_download_requested(move || {
+            later_main(&input, generation, revision, || {
+                if pin_editor::active() {
+                    pin_editor::output(lexift_core::domain::pinned_image::Output::Save);
+                } else if screenshot::active() {
+                    screenshot::output(lexift_core::domain::screenshot::ScreenshotOutput::Save);
+                } else {
+                    export::start();
+                }
+            })
+        });
+        let input = r.toolbar_state.main.input();
+        main.on_screenshot_requested(move || {
+            later_main(&input, generation, revision, screenshot::request)
+        });
+        let input = r.toolbar_state.main.input();
+        main.on_copy_screenshot_requested(move || {
+            later_main(&input, generation, revision, || {
+                if pin_editor::active() {
+                    pin_editor::output(lexift_core::domain::pinned_image::Output::Copy);
+                } else {
+                    screenshot::output(lexift_core::domain::screenshot::ScreenshotOutput::Copy)
+                }
+            })
+        });
+        let input = r.toolbar_state.main.input();
+        main.on_pin_screenshot_requested(move || {
+            later_main(&input, generation, revision, || {
+                screenshot::output(lexift_core::domain::screenshot::ScreenshotOutput::Pin)
+            })
+        });
         main.set_can_download(export::available(r));
         let input = r.toolbar_state.main.input();
         main.on_delete_requested(move || later_main(&input, generation, revision, delete_selected));
@@ -214,7 +275,17 @@ pub(crate) fn toggle(requested_at: Instant) {
             later_main(&input, generation, revision, backspace_polyline)
         });
         let input = r.toolbar_state.main.input();
-        main.on_finish_requested(move || later_main(&input, generation, revision, close));
+        main.on_finish_requested(move || {
+            later_main(&input, generation, revision, || {
+                if pin_editor::active() {
+                    pin_editor::finish();
+                } else if screenshot::active() {
+                    screenshot::cancel();
+                } else {
+                    close();
+                }
+            })
+        });
         let input = r.toolbar_state.main.input();
         let lifecycle = r.lifecycle.clone();
         main.on_escape_requested(move || {
@@ -251,8 +322,15 @@ pub(crate) fn toggle(requested_at: Instant) {
         }
         r.sync_mode_display();
         let query_start = Instant::now();
-        r.canvas_state.pending_displays = (r.lifecycle.annotation_displays)();
-        r.session.displays = r.canvas_state.pending_displays.clone();
+        r.canvas_state.pending_displays = if r.screenshot.as_ref().is_some_and(|e| e.pin.is_some())
+        {
+            r.canvas_state.canvases.iter().map(|c| c.bounds).collect()
+        } else {
+            (r.lifecycle.annotation_displays)()
+        };
+        if !r.screenshot.as_ref().is_some_and(|e| e.pin.is_some()) {
+            r.document.session.displays = r.canvas_state.pending_displays.clone();
+        }
         if let Some(timing) = r.canvas_state.cold_open_timing.as_mut() {
             let elapsed = query_start.elapsed();
             timing.display_query += elapsed;
@@ -284,6 +362,20 @@ impl Registry {
     }
 
     pub(super) fn close(&mut self) {
+        let _pointer_guards = self.pause_native_pointer_inputs();
+        crate::pinned_screenshot::set_annotation_interaction(true);
+        if let Some(editing) = self.screenshot.take() {
+            if let Some((id, edit)) = editing.pin {
+                pin_editor::retain_closing(self, id, edit);
+            } else {
+                slint::Timer::single_shot(Duration::ZERO, move || {
+                    screenshot::emit(lexift_core::domain::screenshot::ScreenshotEvent::Failed {
+                        session: editing.id,
+                        error: crate::i18n::tr("Screenshot unavailable"),
+                    })
+                });
+            }
+        }
         self.hints.clear();
         self.fonts.subscription = None;
         defer_export(
@@ -308,7 +400,7 @@ impl Registry {
         }
         self.focus.cancel();
         if let Some(active) = self.gesture.take() {
-            let _ = active.cancel(&mut self.session);
+            let _ = active.cancel(&mut self.document.session);
         }
         self.pending_drawing.cancel();
         self.render_state
@@ -342,16 +434,16 @@ impl Registry {
         self.render_state.first_magnifier_timing = None;
         self.render_state.first_magnifier_measured = false;
         self.pending_edit_panel = false;
-        self.mode = InteractionMode::Tool(0);
-        self.session.clear();
+        self.document.mode = InteractionMode::Tool(0);
+        self.document.session.clear();
         self.toolbar_state.toolbar_owner = None;
         self.canvas_state.canvases.clear();
         self.toolbar_state.main.clear();
-        self.parameter_values = parameters::State::new();
+        self.document.parameter_values = parameters::State::new();
         if !self.fonts.names().is_empty() {
             self.reset_font_defaults();
         }
-        self.selected = [0, 4, 7, 9, 10, 11, 13];
+        self.document.selected = [0, 4, 7, 9, 10, 11, 13];
         self.hovered = None;
         self.sync_edit_scope();
     }

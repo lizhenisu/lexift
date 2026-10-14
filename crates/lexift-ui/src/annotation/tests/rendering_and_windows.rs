@@ -133,10 +133,10 @@ fn interrupted_drawing_cannot_commit_after_tool_switch_escape_or_capture_loss() 
                         .window()
                         .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
                     r.canvas_state.annotation_ready = true;
-                    r.mode = InteractionMode::Tool(if pencil { 1 } else { 0 });
+                    r.document.mode = InteractionMode::Tool(if pencil { 1 } else { 0 });
                     r.sync_edit_scope();
                     if pencil {
-                        r.selected[1] = 3;
+                        r.document.selected[1] = 3;
                         r.sync_edit_scope();
                     }
                 });
@@ -147,7 +147,9 @@ fn interrupted_drawing_cannot_commit_after_tool_switch_escape_or_capture_loss() 
                     let r = slot.as_ref().unwrap();
                     assert!(matches!(r.gesture(), Some(Gesture::Draw { .. })));
                     assert!(gestures::display_draft(&r.gesture, &r.pending_drawing).is_some());
-                    assert!(r.session.objects.is_empty() && !r.session.can_undo());
+                    assert!(
+                        r.document.session.objects.is_empty() && !r.document.session.can_undo()
+                    );
                 });
                 match interruption {
                     0 => REGISTRY.with(|slot| {
@@ -183,7 +185,9 @@ fn interrupted_drawing_cannot_commit_after_tool_switch_escape_or_capture_loss() 
                         gestures::display_draft(&r.gesture, &r.pending_drawing).is_none()
                             && r.pending_drawing.is_none()
                     );
-                    assert!(r.session.objects.is_empty() && !r.session.can_undo());
+                    assert!(
+                        r.document.session.objects.is_empty() && !r.document.session.can_undo()
+                    );
                     r.close();
                 });
             }
@@ -195,9 +199,9 @@ fn interrupted_drawing_cannot_commit_after_tool_switch_escape_or_capture_loss() 
             REGISTRY.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
-                r.mode = InteractionMode::Tool(2);
+                r.document.mode = InteractionMode::Tool(2);
                 r.sync_edit_scope();
-                r.selected[2] = 6;
+                r.document.selected[2] = 6;
                 r.sync_edit_scope();
                 r.canvas_state.annotation_ready = true;
                 let window = AnnotationCanvas::new().unwrap();
@@ -245,7 +249,7 @@ fn interrupted_drawing_cannot_commit_after_tool_switch_escape_or_capture_loss() 
                     r.render_state.frame_tasks.render_pending(),
                     "exit must refresh confirmed nodes"
                 );
-                assert!(r.session.objects.is_empty() && !r.session.can_undo());
+                assert!(r.document.session.objects.is_empty() && !r.document.session.can_undo());
                 r.render_state.frame_tasks.cancel_render();
             });
             canvas_pointer(0, 4, 100., 100.);
@@ -282,11 +286,11 @@ fn interrupted_drawing_cannot_commit_after_tool_switch_escape_or_capture_loss() 
                 );
                 assert!(r.drawing_press().is_none());
                 if complete {
-                    assert_eq!(r.session.objects.len(), 1);
-                    assert_eq!(r.session.objects[0].points.len(), 2);
-                    assert!(r.session.undo());
+                    assert_eq!(r.document.session.objects.len(), 1);
+                    assert_eq!(r.document.session.objects[0].points.len(), 2);
+                    assert!(r.document.session.undo());
                 }
-                assert!(r.session.objects.is_empty() && !r.session.can_undo());
+                assert!(r.document.session.objects.is_empty() && !r.document.session.can_undo());
                 r.close();
             });
         }
@@ -377,7 +381,7 @@ fn sticker_only_draws_without_capture_workers_or_repeated_static_submissions() {
                         .window()
                         .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
                     r.canvas_state.annotation_ready = true;
-                    r.selected[5] = 12;
+                    r.document.selected[5] = 12;
                     r.set_mode(InteractionMode::Tool(5));
                     r.edit_values(12).shape = shape;
                     r.edit_values(12).mode = texture;
@@ -390,9 +394,9 @@ fn sticker_only_draws_without_capture_workers_or_repeated_static_submissions() {
                 REGISTRY.with(|slot| {
                     let slot = slot.borrow();
                     let r = slot.as_ref().unwrap();
-                    assert_eq!(r.session.objects.len(), 1);
+                    assert_eq!(r.document.session.objects.len(), 1);
                     assert_eq!(
-                        r.session.objects[0].kind,
+                        r.document.session.objects[0].kind,
                         if shape == 0 {
                             Kind::StickerArea
                         } else {
@@ -400,11 +404,11 @@ fn sticker_only_draws_without_capture_workers_or_repeated_static_submissions() {
                         }
                     );
                     assert!(
-                        matches!(&r.session.objects[0].extra, Extra::Sticker(s) if s.opacity == 95)
+                        matches!(&r.document.session.objects[0].extra, Extra::Sticker(s) if s.opacity == 95)
                     );
-                    assert_eq!(r.session.selected, (shape == 0).then_some(0));
+                    assert_eq!(r.document.session.selected, (shape == 0).then_some(0));
                     if shape == 1 {
-                        assert!(r.session.objects[0].edit_handles(dpi).is_empty());
+                        assert!(r.document.session.objects[0].edit_handles(dpi).is_empty());
                         assert_eq!(r.parameter_object(12), None);
                     }
                     assert_eq!(r.values(12).strength, 95.);
@@ -431,7 +435,7 @@ fn sticker_only_draws_without_capture_workers_or_repeated_static_submissions() {
                     REGISTRY.with(|slot| {
                         let mut slot = slot.borrow_mut();
                         let r = slot.as_mut().unwrap();
-                        let before = r.session.objects[0].clone();
+                        let before = r.document.session.objects[0].clone();
                         let mut stale = r.parameter_target(12);
                         stale.object = Some(before.id);
                         let mut values = r.values(12).clone();
@@ -441,7 +445,7 @@ fn sticker_only_draws_without_capture_workers_or_repeated_static_submissions() {
                         let target = r.parameter_target(12);
                         assert!(apply_parameter_values(r, target, values).is_some());
                         r.finish_style_edit();
-                        assert_eq!(r.session.objects[0], before);
+                        assert_eq!(r.document.session.objects[0], before);
                         assert_eq!(r.values(12).strength, 80.);
                     });
                     // The old trajectory is not an edit target: drawing over it creates a new mark.
@@ -451,20 +455,20 @@ fn sticker_only_draws_without_capture_workers_or_repeated_static_submissions() {
                     REGISTRY.with(|slot| {
                             let mut slot = slot.borrow_mut();
                             let r = slot.as_mut().unwrap();
-                            assert_eq!(r.session.objects.len(), 2);
-                            assert_eq!(r.session.selected, None);
-                            assert!(matches!(&r.session.objects[0].extra, Extra::Sticker(s) if s.opacity == 95));
-                            assert!(matches!(&r.session.objects[1].extra, Extra::Sticker(s) if s.opacity == 80));
-                            assert!(r.session.undo());
-                            assert_eq!(r.session.objects.len(), 1);
-                            assert_eq!(r.session.selected, None);
+                            assert_eq!(r.document.session.objects.len(), 2);
+                            assert_eq!(r.document.session.selected, None);
+                            assert!(matches!(&r.document.session.objects[0].extra, Extra::Sticker(s) if s.opacity == 95));
+                            assert!(matches!(&r.document.session.objects[1].extra, Extra::Sticker(s) if s.opacity == 80));
+                            assert!(r.document.session.undo());
+                            assert_eq!(r.document.session.objects.len(), 1);
+                            assert_eq!(r.document.session.selected, None);
                         });
                 }
                 REGISTRY.with(|slot| {
                     let mut slot = slot.borrow_mut();
                     let r = slot.as_mut().unwrap();
-                    assert!(r.session.undo());
-                    assert!(r.session.objects.is_empty());
+                    assert!(r.document.session.undo());
+                    assert!(r.document.session.objects.is_empty());
                 });
             }
         }
@@ -524,7 +528,7 @@ fn creation_captures_displayed_settings_before_deselecting_all_tools() {
                     slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: dpi },
                 );
                 r.canvas_state.annotation_ready = true;
-                r.selected[group] = tool;
+                r.document.selected[group] = tool;
                 r.set_mode(InteractionMode::Tool(group));
                 let object = Object {
                     erased: Vec::new(),
@@ -535,7 +539,7 @@ fn creation_captures_displayed_settings_before_deselecting_all_tools() {
                     style: Style::default(),
                     extra: Extra::None,
                 };
-                r.session.add(object);
+                r.document.session.add(object);
                 project_object_parameters(r, 0);
                 // Refill is independent; it is only adopted when creation begins.
                 let mut values = r.values(tool as usize).clone();
@@ -552,12 +556,14 @@ fn creation_captures_displayed_settings_before_deselecting_all_tools() {
                 values.format = 2;
                 values.mode = 1;
                 values.strength = 73.;
-                *r.parameter_values
-                    .edit(tool as usize, r.session.objects.first().map(|o| o.id)) = values.clone();
+                *r.document.parameter_values.edit(
+                    tool as usize,
+                    r.document.session.objects.first().map(|o| o.id),
+                ) = values.clone();
                 values.text = Default::default();
                 values.sequence_label = Default::default();
                 if tool == 10 {
-                    values.start = r.session.next_sequence;
+                    values.start = r.document.session.next_sequence;
                 }
                 values
             });
@@ -565,21 +571,21 @@ fn creation_captures_displayed_settings_before_deselecting_all_tools() {
             REGISTRY.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
-                let mut actual = r.parameter_values.defaults(tool as usize).clone();
+                let mut actual = r.document.parameter_values.defaults(tool as usize).clone();
                 if tool == 10 {
                     actual.start = expected.start;
                     actual.sequence_label = Default::default();
                 }
                 assert_eq!(actual, expected, "tool {tool} DPI {dpi}");
                 if tool != 10 {
-                    assert_eq!(r.session.selected, None);
+                    assert_eq!(r.document.session.selected, None);
                 }
                 if tool != 10 {
                     assert_eq!(r.values(tool as usize), &expected);
                 }
-                assert_eq!(r.session.objects[0].style, Style::default());
+                assert_eq!(r.document.session.objects[0].style, Style::default());
                 cancel_active_gesture(r);
-                let mut actual = r.parameter_values.defaults(tool as usize).clone();
+                let mut actual = r.document.parameter_values.defaults(tool as usize).clone();
                 if tool == 10 {
                     actual.start = expected.start;
                     actual.sequence_label = Default::default();
@@ -653,7 +659,7 @@ fn software_capture_excludes_annotation_ui_and_reissues_for_replaced_canvas() {
         r.toolbar_state
             .watermark
             .open(AnnotationWatermarkInput::new().unwrap());
-        r.session.add(Object {
+        r.document.session.add(Object {
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicArea,
@@ -787,7 +793,7 @@ fn ready_canvas_prepares_empty_native_scene_before_drawing_and_retires_it() {
         let slot = slot.borrow();
         let r = slot.as_ref().unwrap();
         assert!(r.canvas_state.annotation_ready && r.render_state.frame_tasks.render_pending());
-        assert!(r.session.objects.is_empty() && !r.session.can_undo());
+        assert!(r.document.session.objects.is_empty() && !r.document.session.can_undo());
         assert!(r.render_state.mosaic.is_idle());
     });
     render_canvases(generation);
@@ -810,7 +816,7 @@ fn ready_canvas_prepares_empty_native_scene_before_drawing_and_retires_it() {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
-        assert!(r.session.objects.is_empty() && !r.session.can_undo());
+        assert!(r.document.session.objects.is_empty() && !r.document.session.can_undo());
         r.close();
         assert!(!r.render_state.frame_tasks.render_pending());
     });
@@ -932,7 +938,7 @@ fn native_completion_hands_off_canvas_and_failure_restores_software_pixels() {
                 bottom: 32,
             },
         ));
-        r.session.add(Object {
+        r.document.session.add(Object {
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Rectangle,
@@ -1024,7 +1030,7 @@ fn native_completion_hands_off_canvas_and_failure_restores_software_pixels() {
         r.toolbar_state.main.open(AnnotationToolbar::new().unwrap());
         r.toolbar_state.panel.open(AnnotationPanel::new().unwrap());
         r.render_state.mosaic.stage(
-            &mut r.session,
+            &mut r.document.session,
             Object {
                 erased: Vec::new(),
                 id: Default::default(),
@@ -1040,7 +1046,7 @@ fn native_completion_hands_off_canvas_and_failure_restores_software_pixels() {
                 )),
             },
         );
-        r.session.add(Object {
+        r.document.session.add(Object {
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Magnifier,
@@ -1127,13 +1133,13 @@ fn native_completion_hands_off_canvas_and_failure_restores_software_pixels() {
             r.render_state.native_presenter.active && r.canvas_state.canvases[0].gpu_input_cleared
         );
         assert!(r.render_state.mosaic.pending.is_empty());
-        r.session.erase(
+        r.document.session.erase(
             lexift_core::domain::annotation_erase::EraseRegion::Rectangle(Bounds::from_corners(
                 (10., 10.),
                 (20., 20.),
             )),
             &[lexift_core::domain::annotation_erase::EraseTarget::Object(
-                r.session.objects[0].id,
+                r.document.session.objects[0].id,
             )],
         );
     });
@@ -1143,7 +1149,7 @@ fn native_completion_hands_off_canvas_and_failure_restores_software_pixels() {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
-        assert!(!eraser::has_coverage(&r.session));
+        assert!(!eraser::has_coverage(&r.document.session));
         assert!(!r.render_state.native_presenter.active);
         assert!(
             r.canvas_state
@@ -1227,7 +1233,7 @@ fn mosaic_refresh_submits_only_changed_canvas_pixels_and_retries_failure() {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
         r.canvas_state.pending_displays = monitors.to_vec();
-        r.session.displays = monitors.to_vec();
+        r.document.session.displays = monitors.to_vec();
         for (index, monitor) in monitors.iter().enumerate() {
             create_canvas(r, index);
             r.canvas_state.canvases[index]
@@ -1236,7 +1242,7 @@ fn mosaic_refresh_submits_only_changed_canvas_pixels_and_retries_failure() {
                 .set_position(slint::PhysicalPosition::new(monitor.left, 0));
             render_initial_canvas(r, index);
         }
-        r.session.add(Object {
+        r.document.session.add(Object {
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicArea,
@@ -1245,7 +1251,7 @@ fn mosaic_refresh_submits_only_changed_canvas_pixels_and_retries_failure() {
             style: Style::default(),
             extra: Extra::Mosaic(MosaicAnnotation::new(MosaicEffect::Pixelate, 50, 12., 1.)),
         });
-        r.session.selected = None;
+        r.document.session.selected = None;
         r.generation
     });
     assert_eq!(*submissions.borrow(), [1, 1]);
@@ -1253,7 +1259,7 @@ fn mosaic_refresh_submits_only_changed_canvas_pixels_and_retries_failure() {
     let mut publish = |serial, color: [u8; 4]| {
         let session = REGISTRY.with(|slot| {
             let slot = slot.borrow();
-            let source = &slot.as_ref().unwrap().session;
+            let source = &slot.as_ref().unwrap().document.session;
             let mut snapshot = Session::new();
             snapshot.objects = source.objects.clone();
             snapshot.displays = source.displays.clone();
@@ -1347,7 +1353,14 @@ fn mosaic_refresh_submits_only_changed_canvas_pixels_and_retries_failure() {
     );
     render_canvases(generation);
     assert_eq!(*submissions.borrow(), [1, 4]);
-    REGISTRY.with(|slot| slot.borrow_mut().as_mut().unwrap().session.selected = Some(0));
+    REGISTRY.with(|slot| {
+        slot.borrow_mut()
+            .as_mut()
+            .unwrap()
+            .document
+            .session
+            .selected = Some(0)
+    });
     render_canvases(generation);
     assert_eq!(
         *submissions.borrow(),
@@ -1357,8 +1370,8 @@ fn mosaic_refresh_submits_only_changed_canvas_pixels_and_retries_failure() {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
-        r.session.objects.clear();
-        r.session.selected = None;
+        r.document.session.objects.clear();
+        r.document.session.selected = None;
         r.render_state.mosaic.effects = None;
     });
     render_canvases(generation);

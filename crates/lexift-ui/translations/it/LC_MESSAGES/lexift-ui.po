@@ -1689,3 +1689,45 @@ msgstr "Sposta barra degli strumenti"
 
 msgid "Bold text"
 msgstr "Testo in grassetto"
+
+msgid "Screenshot"
+msgstr "Screenshot"
+
+msgid "Save screenshot"
+msgstr "Salva screenshot"
+
+msgid "Copy screenshot"
+msgstr "Copia screenshot"
+
+msgid "Pin screenshot"
+msgstr "Fissa screenshot"
+
+msgid "Pinned screenshot"
+msgstr "Screenshot fissato"
+
+msgid "Select screenshot region"
+msgstr "Seleziona area dello screenshot"
+
+msgid "Drag to select. Escape or right-click to cancel."
+msgstr "Trascina per selezionare. Escape o clic destro per annullare."
+
+msgid "Screenshot unavailable"
+msgstr "Screenshot non disponibile"
+
+msgid "Copy image"
+msgstr "Copia immagine"
+
+msgid "Save image"
+msgstr "Salva immagine"
+
+msgid "Window shadow"
+msgstr "Ombra della finestra"
+
+msgid "Always on top"
+msgstr "Sempre in primo piano"
+
+msgid "Annotate"
+msgstr "Annota"
+
+msgid "Hide annotations"
+msgstr "Nascondi annotazioni"

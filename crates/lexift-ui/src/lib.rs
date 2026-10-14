@@ -1,3 +1,6 @@
+mod frozen_capture;
+pub use frozen_capture::FrozenCapture;
+mod pinned_screenshot;
 pub use annotation_export_render::SoftwareExportRenderer;
 mod about;
 mod ocr;
@@ -41,3 +44,12 @@ pub(crate) use annotation::sequence as annotation_sequence;
 pub(crate) use annotation::signature as annotation_signature;
 pub(crate) use annotation::sticker as annotation_sticker;
 pub(crate) use annotation::text as annotation_text;
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+pub type NativePinProbe = std::rc::Rc<dyn Fn(&slint::Window, &str, bool) -> bool>;
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+pub fn start_native_pin_repro(probe: NativePinProbe) -> std::rc::Rc<std::cell::Cell<bool>> {
+    annotation::native_repro::start(probe)
+}

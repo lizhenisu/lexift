@@ -21,36 +21,42 @@ fn tool_entries_gate_selection_parameters_and_undo_without_auto_switching() {
         object.extra = Extra::None;
         object.style.fill = true;
         object.bounds = Bounds::from_corners((-40., -30.), (40., 30.));
-        assert!(r.session.add(object));
-        let original = r.session.objects[0].clone();
+        assert!(r.document.session.add(object));
+        let original = r.document.session.objects[0].clone();
         let target = r.parameter_target(0);
         let mut values = r.values(0).clone();
         values.size = 20;
         assert!(r.select_tool_variant(0, 1));
-        assert_eq!(r.session.selected, Some(0), "same family retains selection");
-        assert!(r.select_tool_variant(2, 7));
-        assert_eq!(r.session.selected, None);
-        assert_eq!(r.parameter_object(0), None);
-        assert_eq!(r.session.hit(original.bounds.center(), 1.), None);
-        assert!(apply_parameter_values(r, target, values).is_none());
-        assert_eq!(r.session.objects[0], original);
-        assert!(r.select_tool_variant(0, 0));
-        assert_eq!(r.session.selected, None);
         assert_eq!(
-            r.session.hit(original.bounds.center(), 1.),
+            r.document.session.selected,
+            Some(0),
+            "same family retains selection"
+        );
+        assert!(r.select_tool_variant(2, 7));
+        assert_eq!(r.document.session.selected, None);
+        assert_eq!(r.parameter_object(0), None);
+        assert_eq!(r.document.session.hit(original.bounds.center(), 1.), None);
+        assert!(apply_parameter_values(r, target, values).is_none());
+        assert_eq!(r.document.session.objects[0], original);
+        assert!(r.select_tool_variant(0, 0));
+        assert_eq!(r.document.session.selected, None);
+        assert_eq!(
+            r.document.session.hit(original.bounds.center(), 1.),
             Some(Hit::Object(0))
         );
-        r.session.selected = Some(0);
-        r.session.update_selected(|object| object.move_by(20., 0.));
+        r.document.session.selected = Some(0);
+        r.document
+            .session
+            .update_selected(|object| object.move_by(20., 0.));
         assert!(r.select_tool_variant(2, 7));
     });
     undo();
     REGISTRY.with(|slot| {
         let slot = slot.borrow();
         let r = slot.as_ref().unwrap();
-        assert_eq!(r.mode, InteractionMode::Tool(2));
-        assert_eq!(r.selected[2], 7);
-        assert_eq!(r.session.selected, None);
+        assert_eq!(r.document.mode, InteractionMode::Tool(2));
+        assert_eq!(r.document.selected[2], 7);
+        assert_eq!(r.document.session.selected, None);
     });
     shutdown();
 }
@@ -87,10 +93,10 @@ fn unowned_pointer_completion_does_not_finish_or_cancel_parameter_transactions()
                     let r = slot.as_mut().unwrap();
                     r.finish_style_edit();
                     r.close_panel();
-                    r.session = Session::new();
-                    r.parameter_values = parameters::State::new();
-                    r.selected[0] = 0;
-                    r.mode = InteractionMode::Tool(0);
+                    r.document.session = Session::new();
+                    r.document.parameter_values = parameters::State::new();
+                    r.document.selected[0] = 0;
+                    r.document.mode = InteractionMode::Tool(0);
                     r.sync_edit_scope();
                     r.canvas_state.annotation_ready = true;
                     r.canvas_state.canvases.clear();
@@ -107,7 +113,7 @@ fn unowned_pointer_completion_does_not_finish_or_cancel_parameter_transactions()
                             bottom: 100,
                         },
                     ));
-                    assert!(r.session.add(Object {
+                    assert!(r.document.session.add(Object {
                         erased: Vec::new(),
                         id: Default::default(),
                         kind: Kind::Rectangle,
@@ -116,17 +122,17 @@ fn unowned_pointer_completion_does_not_finish_or_cancel_parameter_transactions()
                         points: Vec::new(),
                         extra: Extra::None,
                     }));
-                    let baseline = r.session.objects[0].clone();
-                    let opacity = r.session.spotlight_opacity;
+                    let baseline = r.document.session.objects[0].clone();
+                    let opacity = r.document.session.spotlight_opacity;
                     let tool = if cancel_draft { 2 } else { 0 };
-                    r.selected[0] = tool;
+                    r.document.selected[0] = tool;
                     r.sync_edit_scope();
                     let panel = AnnotationPanel::new().unwrap();
                     panel.set_tool(tool);
                     panel.set_values(defaults(tool));
                     r.toolbar_state.panel.open(panel);
                     if cancel_draft {
-                        r.session.selected = None;
+                        r.document.session.selected = None;
                     }
                     let mut values = r.values(tool as usize).clone();
                     if cancel_draft {
@@ -154,13 +160,13 @@ fn unowned_pointer_completion_does_not_finish_or_cancel_parameter_transactions()
                     r.gesture = Some(Active::Drawing(press));
                     assert!(cancel_active_gesture(r));
                     assert!(
-                        (r.session.spotlight_opacity - 0.28).abs() < 0.0001,
+                        (r.document.session.spotlight_opacity - 0.28).abs() < 0.0001,
                         "draft cancellation cannot roll back parameter opacity"
                     );
                     r.finish_style_edit();
-                    assert!(r.session.undo());
-                    assert_eq!(r.session.spotlight_opacity, opacity);
-                    assert_eq!(r.session.objects, vec![baseline]);
+                    assert!(r.document.session.undo());
+                    assert_eq!(r.document.session.spotlight_opacity, opacity);
+                    assert_eq!(r.document.session.objects, vec![baseline]);
                 });
             } else {
                 canvas_pointer(0, 2, 30., 40.);
@@ -174,9 +180,9 @@ fn unowned_pointer_completion_does_not_finish_or_cancel_parameter_transactions()
                     let target = r.parameter_target(0);
                     assert!(apply_geometry_values(r, target, values).is_some());
                     r.finish_style_edit();
-                    assert!(r.session.undo());
+                    assert!(r.document.session.undo());
                     assert_eq!(
-                        r.session.objects,
+                        r.document.session.objects,
                         vec![baseline],
                         "one undo must restore both continuous updates"
                     );
@@ -185,10 +191,10 @@ fn unowned_pointer_completion_does_not_finish_or_cancel_parameter_transactions()
             REGISTRY.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
-                assert!(r.session.undo());
-                assert!(r.session.objects.is_empty());
+                assert!(r.document.session.undo());
+                assert!(r.document.session.objects.is_empty());
                 assert!(
-                    !r.session.can_undo(),
+                    !r.document.session.can_undo(),
                     "parameter edits remain a single operation separate from creation"
                 );
             });
@@ -232,9 +238,9 @@ fn geometry_handoff_retires_parameter_idle_without_merging_undo() {
                     let mut slot = slot.borrow_mut();
                     let r = slot.as_mut().unwrap();
                     r.close_panel();
-                    r.session = Session::new();
-                    r.parameter_values = parameters::State::new();
-                    r.mode = InteractionMode::Tool(0);
+                    r.document.session = Session::new();
+                    r.document.parameter_values = parameters::State::new();
+                    r.document.mode = InteractionMode::Tool(0);
                     r.sync_edit_scope();
                     r.canvas_state.annotation_ready = true;
                     r.canvas_state.canvases.clear();
@@ -251,7 +257,7 @@ fn geometry_handoff_retires_parameter_idle_without_merging_undo() {
                             bottom: 100,
                         },
                     ));
-                    assert!(r.session.add(Object {
+                    assert!(r.document.session.add(Object {
                         erased: Vec::new(),
                         id: Default::default(),
                         kind: Kind::Rectangle,
@@ -260,7 +266,7 @@ fn geometry_handoff_retires_parameter_idle_without_merging_undo() {
                         points: Vec::new(),
                         extra: Extra::None,
                     }));
-                    let original = r.session.objects[0].clone();
+                    let original = r.document.session.objects[0].clone();
                     let panel = AnnotationPanel::new().unwrap();
                     panel.set_tool(0);
                     r.toolbar_state.panel.open(panel);
@@ -302,22 +308,24 @@ fn geometry_handoff_retires_parameter_idle_without_merging_undo() {
                     let mut slot = slot.borrow_mut();
                     let r = slot.as_mut().unwrap();
                     assert!(r.gesture().is_none());
-                    assert_eq!(r.session.objects[0].style.width, 25.);
+                    assert_eq!(r.document.session.objects[0].style.width, 25.);
                     if !cancel {
-                        assert_ne!(r.session.objects[0].bounds, original.bounds);
+                        assert_ne!(r.document.session.objects[0].bounds, original.bounds);
                         assert!(
-                            r.session.undo(),
+                            r.document.session.undo(),
                             "movement owns its own undo after idle and panel close"
                         );
                     }
-                    assert_eq!(r.session.objects[0].bounds, original.bounds);
+                    assert_eq!(r.document.session.objects[0].bounds, original.bounds);
                     assert!(
-                        r.session.undo(),
+                        r.document.session.undo(),
                         "earlier parameters remain an independent undo"
                     );
-                    assert_eq!(r.session.objects, vec![original]);
-                    assert!(r.session.undo());
-                    assert!(r.session.objects.is_empty() && !r.session.can_undo());
+                    assert_eq!(r.document.session.objects, vec![original]);
+                    assert!(r.document.session.undo());
+                    assert!(
+                        r.document.session.objects.is_empty() && !r.document.session.can_undo()
+                    );
                 });
             }
         }
@@ -359,9 +367,9 @@ fn delayed_parameters_wait_for_document_gesture_commit_or_cancel() {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
                 r.close_panel();
-                r.session = Session::new();
-                r.parameter_values = parameters::State::new();
-                r.mode = InteractionMode::Tool(0);
+                r.document.session = Session::new();
+                r.document.parameter_values = parameters::State::new();
+                r.document.mode = InteractionMode::Tool(0);
                 r.sync_edit_scope();
                 r.canvas_state.annotation_ready = true;
                 r.canvas_state.canvases.clear();
@@ -380,7 +388,7 @@ fn delayed_parameters_wait_for_document_gesture_commit_or_cancel() {
                         bottom: 100,
                     },
                 ));
-                assert!(r.session.add(Object {
+                assert!(r.document.session.add(Object {
                     erased: Vec::new(),
                     id: Default::default(),
                     kind: Kind::Rectangle,
@@ -389,14 +397,15 @@ fn delayed_parameters_wait_for_document_gesture_commit_or_cancel() {
                     points: Vec::new(),
                     extra: Extra::None,
                 }));
-                let baseline = r.session.objects[0].clone();
+                let baseline = r.document.session.objects[0].clone();
                 let panel = AnnotationPanel::new().unwrap();
                 panel.set_tool(0);
                 r.toolbar_state.panel.open(panel);
                 restore_parameter_projection(r);
-                r.session.begin_drag();
-                r.gesture = (gestures::GeometryDrag::moving(&r.session, baseline.id, (0., 0.)))
-                    .map(Active::Geometry);
+                r.document.session.begin_drag();
+                r.gesture =
+                    (gestures::GeometryDrag::moving(&r.document.session, baseline.id, (0., 0.)))
+                        .map(Active::Geometry);
                 let target = r.parameter_target(0);
                 for rgb in [[11, 22, 33], [44, 55, 66]] {
                     let mut values = r.values(0).clone();
@@ -421,7 +430,10 @@ fn delayed_parameters_wait_for_document_gesture_commit_or_cancel() {
             REGISTRY.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
-                assert_eq!(r.session.objects[0].style.color, baseline.style.color);
+                assert_eq!(
+                    r.document.session.objects[0].style.color,
+                    baseline.style.color
+                );
                 r.finish_style_edit();
                 assert!(r.gesture().is_some());
             });
@@ -436,21 +448,24 @@ fn delayed_parameters_wait_for_document_gesture_commit_or_cancel() {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
                 assert!(r.deferred_parameters.is_empty());
-                assert_eq!(r.session.objects[0].style.color, [44, 55, 66]);
+                assert_eq!(r.document.session.objects[0].style.color, [44, 55, 66]);
                 r.finish_style_edit();
-                assert!(r.session.undo(), "parameter update owns a separate undo");
-                assert_eq!(r.session.objects[0].style, baseline.style);
+                assert!(
+                    r.document.session.undo(),
+                    "parameter update owns a separate undo"
+                );
+                assert_eq!(r.document.session.objects[0].style, baseline.style);
                 if !cancel {
-                    assert_ne!(r.session.objects[0].bounds, baseline.bounds);
+                    assert_ne!(r.document.session.objects[0].bounds, baseline.bounds);
                     assert!(
-                        r.session.undo(),
+                        r.document.session.undo(),
                         "movement remains one undo after idle time"
                     );
                 }
-                assert_eq!(r.session.objects, vec![baseline]);
-                assert!(r.session.undo());
-                assert!(r.session.objects.is_empty());
-                assert!(!r.session.can_undo());
+                assert_eq!(r.document.session.objects, vec![baseline]);
+                assert!(r.document.session.undo());
+                assert!(r.document.session.objects.is_empty());
+                assert!(!r.document.session.can_undo());
             });
         }
     }
@@ -504,13 +519,13 @@ fn brush_wheel_updates_open_panel_parameters_without_feedback_callbacks() {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
                 r.close_panel();
-                r.session = Session::new();
-                r.parameter_values = parameters::State::new();
+                r.document.session = Session::new();
+                r.document.parameter_values = parameters::State::new();
                 r.toolbar_state.main.open(AnnotationToolbar::new().unwrap());
                 r.canvas_state.annotation_ready = true;
-                r.mode = InteractionMode::Tool(5);
+                r.document.mode = InteractionMode::Tool(5);
                 r.sync_edit_scope();
-                r.selected[5] = 11;
+                r.document.selected[5] = 11;
                 r.sync_edit_scope();
                 r.edit_values(11).shape = 1;
                 r.canvas_state.canvases.clear();
@@ -545,10 +560,10 @@ fn brush_wheel_updates_open_panel_parameters_without_feedback_callbacks() {
                         ),
                     };
                     object.refresh_bounds();
-                    assert!(r.session.add(object));
+                    assert!(r.document.session.add(object));
                 }
                 restore_parameter_projection(r);
-                r.session.objects.first().cloned()
+                r.document.session.objects.first().cloned()
             });
             open_panel(5, false);
             brush_size_scrolled(0, 1.);
@@ -559,7 +574,7 @@ fn brush_wheel_updates_open_panel_parameters_without_feedback_callbacks() {
                 assert_eq!(r.values(11).size, 14);
                 assert_eq!(r.toolbar_state.panel.get().unwrap().get_values().size, 14);
                 if let Some(original) = original {
-                    let Extra::Mosaic(value) = &r.session.objects[0].extra else {
+                    let Extra::Mosaic(value) = &r.document.session.objects[0].extra else {
                         panic!()
                     };
                     assert_eq!(value.diameter, 12. * dpi);
@@ -569,13 +584,13 @@ fn brush_wheel_updates_open_panel_parameters_without_feedback_callbacks() {
                     );
                     assert_eq!(value.strength, 70);
                     r.finish_style_edit();
-                    assert_eq!(r.session.objects, vec![original]);
-                    assert_eq!(r.session.selected, None);
-                    assert!(r.session.undo());
+                    assert_eq!(r.document.session.objects, vec![original]);
+                    assert_eq!(r.document.session.selected, None);
+                    assert!(r.document.session.undo());
                 } else {
                     r.finish_style_edit();
                 }
-                assert!(!r.session.can_undo());
+                assert!(!r.document.session.can_undo());
             });
         }
     }
@@ -583,9 +598,9 @@ fn brush_wheel_updates_open_panel_parameters_without_feedback_callbacks() {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
         r.close_panel();
-        r.session = Session::new();
-        r.parameter_values = parameters::State::new();
-        r.mode = InteractionMode::Tool(6);
+        r.document.session = Session::new();
+        r.document.parameter_values = parameters::State::new();
+        r.document.mode = InteractionMode::Tool(6);
         r.sync_edit_scope();
         r.edit_values(13).shape = 1;
     });
@@ -634,7 +649,7 @@ fn brush_wheel_updates_open_panel_parameters_without_feedback_callbacks() {
                 .get_numeric_value(),
             14
         );
-        assert!(!r.session.can_undo());
+        assert!(!r.document.session.can_undo());
     });
     for _ in 0..110 {
         wheel(120., 120.);
@@ -647,7 +662,7 @@ fn brush_wheel_updates_open_panel_parameters_without_feedback_callbacks() {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
-        let press = eraser::Press::begin(&mut r.session, (0., 0.), true, 1., 1., &[]);
+        let press = eraser::Press::begin(&mut r.document.session, (0., 0.), true, 1., 1., &[]);
         r.gesture = Some(Active::Erasing(press));
     });
     wheel(120., 120.);
@@ -664,13 +679,13 @@ fn brush_wheel_updates_open_panel_parameters_without_feedback_callbacks() {
         };
         assert_eq!(press.diameter, 1., "current stroke diameter remains frozen");
         r.gesture = None;
-        r.session.cancel_drag();
+        r.document.session.cancel_drag();
         r.edit_values(13).shape = 0;
         panel.set_values(r.values(13).clone());
     });
     wheel(162., 120.);
     assert_eq!(panel.get_values().size, 1, "rectangle mode disables wheel");
-    REGISTRY.with(|slot| assert!(!slot.borrow().as_ref().unwrap().session.can_undo()));
+    REGISTRY.with(|slot| assert!(!slot.borrow().as_ref().unwrap().document.session.can_undo()));
     shutdown();
     panel.invoke_numeric_scrolled(-9, 120.); // A retired panel must be harmless.
 }
@@ -704,7 +719,7 @@ fn queued_panel_field_update_preserves_a_later_menu_field() {
         let r = slot.as_mut().unwrap();
         r.toolbar_state.main.open(AnnotationToolbar::new().unwrap());
         r.canvas_state.annotation_ready = true;
-        assert!(r.session.add(Object {
+        assert!(r.document.session.add(Object {
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Rectangle,
@@ -739,11 +754,11 @@ fn queued_panel_field_update_preserves_a_later_menu_field() {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
-        assert_eq!(r.session.objects[0].style.width, 25.);
-        assert_eq!(r.session.objects[0].style.color, [11, 22, 33]);
+        assert_eq!(r.document.session.objects[0].style.width, 25.);
+        assert_eq!(r.document.session.objects[0].style.color, [11, 22, 33]);
         r.finish_style_edit();
-        assert!(r.session.undo());
-        assert_eq!(r.session.objects[0].style, Style::default());
+        assert!(r.document.session.undo());
+        assert_eq!(r.document.session.objects[0].style, Style::default());
     });
     shutdown();
 }
@@ -803,26 +818,34 @@ fn queued_object_panel_requires_the_originating_canvas_selection_and_session() {
         r.canvas_state
             .canvases
             .push(CanvasLayer::new(AnnotationCanvas::new().unwrap(), bounds));
-        assert!(r.session.add(object.clone()));
+        assert!(r.document.session.add(object.clone()));
         r.generation
     });
     queue_geometry_panel(generation, 0);
-    REGISTRY.with(|slot| slot.borrow_mut().as_mut().unwrap().session.selected = None);
+    REGISTRY.with(|slot| {
+        slot.borrow_mut()
+            .as_mut()
+            .unwrap()
+            .document
+            .session
+            .selected = None
+    });
     advance();
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
         assert!(r.toolbar_state.panel.get().is_none());
-        r.session.selected = Some(0);
+        r.document.session.selected = Some(0);
     });
     queue_geometry_panel(generation, 0);
-    REGISTRY.with(|slot| slot.borrow_mut().as_mut().unwrap().mode = InteractionMode::Mouse);
+    REGISTRY
+        .with(|slot| slot.borrow_mut().as_mut().unwrap().document.mode = InteractionMode::Mouse);
     advance();
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
         assert!(r.toolbar_state.panel.get().is_none());
-        r.mode = InteractionMode::Tool(0);
+        r.document.mode = InteractionMode::Tool(0);
         r.sync_edit_scope();
     });
     queue_geometry_panel(generation, 0);
@@ -863,7 +886,7 @@ fn queued_object_panel_requires_the_originating_canvas_selection_and_session() {
         r.canvas_state
             .canvases
             .push(CanvasLayer::new(AnnotationCanvas::new().unwrap(), bounds));
-        assert!(r.session.add(object));
+        assert!(r.document.session.add(object));
     });
     advance();
     REGISTRY.with(|slot| {
@@ -1038,7 +1061,7 @@ fn parameter_panels_ignore_native_dismissal_while_tool_menus_still_close() {
                 assert_eq!(r.toolbar_state.panel.revision(), revision);
                 assert!(r.toolbar_state.panel.get().is_some_and(|p| p.get_menu()));
                 assert!(r.toolbar_state.watermark.get().is_none());
-                assert!(!r.session.can_undo());
+                assert!(!r.document.session.can_undo());
                 assert_eq!(
                     r.values(retired_panel.get_tool() as usize).size,
                     original_size
@@ -1128,7 +1151,7 @@ fn undo_same_object_rejects_queued_parameter_and_menu_edits() {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
         r.toolbar_state.main.open(AnnotationToolbar::new().unwrap());
-        assert!(r.session.add(Object {
+        assert!(r.document.session.add(Object {
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Rectangle,
@@ -1138,7 +1161,7 @@ fn undo_same_object_rejects_queued_parameter_and_menu_edits() {
             extra: Extra::None,
         }));
         adopt_selected_style(r, 0);
-        (r.generation, r.session.objects[0].id)
+        (r.generation, r.document.session.objects[0].id)
     });
     open_panel(0, false);
     // Native placement now requires a known work area; provide one in the fixture.
@@ -1169,7 +1192,7 @@ fn undo_same_object_rejects_queued_parameter_and_menu_edits() {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().unwrap();
         r.finish_style_edit();
-        assert_eq!(r.session.objects[0].style.width, 11.);
+        assert_eq!(r.document.session.objects[0].style.width, 11.);
         r.toolbar_state.panel.revision()
     });
     choice::open(
@@ -1208,9 +1231,12 @@ fn undo_same_object_rejects_queued_parameter_and_menu_edits() {
     REGISTRY.with(|slot| {
         let slot = slot.borrow();
         let r = slot.as_ref().unwrap();
-        assert_eq!(r.session.objects[0].id, identity);
-        assert_eq!(r.session.objects[0].kind, Kind::Rectangle);
-        assert_eq!(r.session.objects[0].style.width, Style::default().width);
+        assert_eq!(r.document.session.objects[0].id, identity);
+        assert_eq!(r.document.session.objects[0].kind, Kind::Rectangle);
+        assert_eq!(
+            r.document.session.objects[0].style.width,
+            Style::default().width
+        );
         assert_eq!(
             r.toolbar_state.panel.get().unwrap().get_values().size,
             Style::default().width as i32
@@ -1221,9 +1247,9 @@ fn undo_same_object_rejects_queued_parameter_and_menu_edits() {
     REGISTRY.with(|slot| {
         let slot = slot.borrow();
         let r = slot.as_ref().unwrap();
-        assert!(r.session.objects.is_empty());
+        assert!(r.document.session.objects.is_empty());
         assert!(
-            !r.session.can_undo(),
+            !r.document.session.can_undo(),
             "retired callbacks added history after undo"
         );
         assert!(r.toolbar_state.panel.get().is_some());
@@ -1290,9 +1316,9 @@ fn mosaic_cancellation_and_long_slider_drag_preserve_document_and_panel() {
                     .window()
                     .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
                 r.canvas_state.annotation_ready = true;
-                r.mode = InteractionMode::Tool(5);
+                r.document.mode = InteractionMode::Tool(5);
                 r.sync_edit_scope();
-                r.selected[5] = 11;
+                r.document.selected[5] = 11;
                 r.sync_edit_scope();
                 r.edit_values(11).shape = shape;
                 r.edit_values(11).strength = 0.;
@@ -1335,9 +1361,11 @@ fn mosaic_cancellation_and_long_slider_drag_preserve_document_and_panel() {
                         gestures::display_draft(&r.gesture, &r.pending_drawing).is_none()
                             && r.gesture().is_none()
                     );
-                    assert!(r.session.objects.is_empty() && !r.session.can_undo());
+                    assert!(
+                        r.document.session.objects.is_empty() && !r.document.session.can_undo()
+                    );
                     assert!(r.render_state.mosaic.pending.is_empty());
-                    r.mode = InteractionMode::Tool(5);
+                    r.document.mode = InteractionMode::Tool(5);
                     r.sync_edit_scope();
                 });
             }
@@ -1384,9 +1412,9 @@ fn mosaic_cancellation_and_long_slider_drag_preserve_document_and_panel() {
                 REGISTRY.with(|slot| {
                     let slot = slot.borrow();
                     let r = slot.as_ref().unwrap();
-                    assert_eq!(r.session.selected, None);
+                    assert_eq!(r.document.session.selected, None);
                     assert_eq!(r.values(11).strength, 80.);
-                    assert!(matches!(&r.session.objects[0].extra,
+                    assert!(matches!(&r.document.session.objects[0].extra,
                             Extra::Mosaic(value) if value.strength == 0));
                 });
                 canvas_pointer(0, 0, 140., 130.);
@@ -1401,11 +1429,13 @@ fn mosaic_cancellation_and_long_slider_drag_preserve_document_and_panel() {
                 REGISTRY.with(|slot| {
                     let mut slot = slot.borrow_mut();
                     let r = slot.as_mut().unwrap();
-                    assert_eq!(r.session.objects.len(), 1);
+                    assert_eq!(r.document.session.objects.len(), 1);
                     assert_eq!(r.values(11).strength, 80.);
                     assert!(r.toolbar_state.panel.get().is_some());
-                    assert!(r.session.undo());
-                    assert!(r.session.objects.is_empty() && !r.session.can_undo());
+                    assert!(r.document.session.undo());
+                    assert!(
+                        r.document.session.objects.is_empty() && !r.document.session.can_undo()
+                    );
                     r.close();
                 });
                 continue;
@@ -1429,8 +1459,10 @@ fn mosaic_cancellation_and_long_slider_drag_preserve_document_and_panel() {
             press_undo();
             REGISTRY.with(|slot| {
                 let slot = slot.borrow();
-                assert!(matches!(&slot.as_ref().unwrap().session.objects[0].extra,
-                        Extra::Mosaic(value) if value.strength == 80));
+                assert!(
+                    matches!(&slot.as_ref().unwrap().document.session.objects[0].extra,
+                        Extra::Mosaic(value) if value.strength == 80)
+                );
             });
             panel.set_parameter_input_active(false);
             press_undo();
@@ -1443,7 +1475,7 @@ fn mosaic_cancellation_and_long_slider_drag_preserve_document_and_panel() {
                         && !r.parameter_edit.dragging()
                         && !r.parameter_edit.active()
                 );
-                let Extra::Mosaic(value) = &r.session.objects[0].extra else {
+                let Extra::Mosaic(value) = &r.document.session.objects[0].extra else {
                     panic!()
                 };
                 assert_eq!(
@@ -1452,30 +1484,30 @@ fn mosaic_cancellation_and_long_slider_drag_preserve_document_and_panel() {
                 );
                 assert_eq!(value.creation_scale, dpi);
             });
-            let placed =
-                REGISTRY.with(|slot| slot.borrow().as_ref().unwrap().session.objects[0].clone());
+            let placed = REGISTRY
+                .with(|slot| slot.borrow().as_ref().unwrap().document.session.objects[0].clone());
             canvas_pointer(0, 0, 140., 130.);
             canvas_pointer(0, 1, 250., 250.);
             REGISTRY.with(|slot| {
                 let slot = slot.borrow();
                 let r = slot.as_ref().unwrap();
                 assert!(matches!(r.gesture(), Some(Gesture::Move)));
-                assert_ne!(r.session.objects[0].bounds, placed.bounds);
+                assert_ne!(r.document.session.objects[0].bounds, placed.bounds);
             });
             canvas_pointer(0, 3, 250., 250.);
             REGISTRY.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
                 assert_eq!(
-                    r.session.objects[0], placed,
+                    r.document.session.objects[0], placed,
                     "capture loss must restore a moved object"
                 );
                 assert!(
                     r.toolbar_state.panel.get().is_some(),
                     "canvas operations must preserve the parameter panel"
                 );
-                assert!(r.session.undo());
-                assert!(r.session.objects.is_empty() && !r.session.can_undo());
+                assert!(r.document.session.undo());
+                assert!(r.document.session.objects.is_empty() && !r.document.session.can_undo());
                 r.close();
             });
             // A destroyed panel's queued callback cannot undo a new session.
@@ -1490,7 +1522,7 @@ fn mosaic_cancellation_and_long_slider_drag_preserve_document_and_panel() {
             };
             let replacement = REGISTRY.with(|slot| {
                 let mut slot = slot.borrow_mut();
-                let session = &mut slot.as_mut().unwrap().session;
+                let session = &mut slot.as_mut().unwrap().document.session;
                 session.add(replacement);
                 session.objects.last().unwrap().clone()
             });
@@ -1499,7 +1531,7 @@ fn mosaic_cancellation_and_long_slider_drag_preserve_document_and_panel() {
             REGISTRY.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
-                assert_eq!(r.session.objects, vec![replacement]);
+                assert_eq!(r.document.session.objects, vec![replacement]);
                 r.close();
             });
         }
@@ -1553,7 +1585,7 @@ fn mosaic_panel_updates_effect_without_converting_existing_geometry() {
         let r = slot.as_mut().unwrap();
         r.toolbar_state.main.open(AnnotationToolbar::new().unwrap());
         assert!(r.set_mode(InteractionMode::Tool(5)));
-        assert!(r.session.add(Object {
+        assert!(r.document.session.add(Object {
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicArea,
@@ -1578,8 +1610,8 @@ fn mosaic_panel_updates_effect_without_converting_existing_geometry() {
     REGISTRY.with(|slot| {
         let slot = slot.borrow();
         let r = slot.as_ref().unwrap();
-        assert_eq!(r.session.objects[0].kind, Kind::MosaicArea);
-        let Extra::Mosaic(value) = &r.session.objects[0].extra else {
+        assert_eq!(r.document.session.objects[0].kind, Kind::MosaicArea);
+        let Extra::Mosaic(value) = &r.document.session.objects[0].extra else {
             panic!()
         };
         assert_eq!(
@@ -1607,9 +1639,9 @@ fn mosaic_panel_updates_effect_without_converting_existing_geometry() {
         };
         assert_eq!(value.creation_scale, 1.25);
         r.finish_style_edit();
-        r.session.begin_drag();
-        r.session.objects[0].move_by(40., 20.);
-        r.session.finish_drag();
+        r.document.session.begin_drag();
+        r.document.session.objects[0].move_by(40., 20.);
+        r.document.session.finish_drag();
         adopt_selected_style(r, 0);
         assert_eq!(r.values(11).strength, 80.);
         assert_eq!(
@@ -1622,7 +1654,7 @@ fn mosaic_panel_updates_effect_without_converting_existing_geometry() {
         assert_eq!(active_kind(r), Some(Kind::MosaicBrush));
         assert_eq!(r.values(11).strength, 80.);
         assert_eq!(r.values(11).mode, 1);
-        r.session.selected = Some(0);
+        r.document.session.selected = Some(0);
         adopt_selected_style(r, 0);
         assert_eq!(active_kind(r), Some(Kind::MosaicBrush));
         assert_eq!(r.values(11).strength, 80.);
@@ -1683,14 +1715,14 @@ fn pending_mosaic_cancel_preserves_unrelated_parameter_undo() {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
                 r.close_panel();
-                r.session = Session::new();
+                r.document.session = Session::new();
                 r.render_state.mosaic = mosaic::State::default();
-                r.parameter_values = parameters::State::new();
-                r.mode = InteractionMode::Tool(0);
+                r.document.parameter_values = parameters::State::new();
+                r.document.mode = InteractionMode::Tool(0);
                 r.sync_edit_scope();
-                r.selected[0] = 2;
+                r.document.selected[0] = 2;
                 r.sync_edit_scope();
-                assert!(r.session.add(Object {
+                assert!(r.document.session.add(Object {
                     erased: Vec::new(),
                     id: ObjectId::DRAFT,
                     kind: Kind::Rectangle,
@@ -1699,9 +1731,9 @@ fn pending_mosaic_cancel_preserves_unrelated_parameter_undo() {
                     points: Vec::new(),
                     extra: Extra::None,
                 }));
-                let baseline = r.session.objects[0].clone();
-                let opacity = r.session.spotlight_opacity;
-                r.selected[0] = 2;
+                let baseline = r.document.session.objects[0].clone();
+                let opacity = r.document.session.spotlight_opacity;
+                r.document.selected[0] = 2;
                 assert!(r.set_mode(InteractionMode::Tool(0)));
                 let panel = AnnotationPanel::new().unwrap();
                 panel.set_tool(2);
@@ -1713,7 +1745,7 @@ fn pending_mosaic_cancel_preserves_unrelated_parameter_undo() {
                 r.finish_style_edit();
                 assert!(r.set_mode(InteractionMode::Tool(5)));
                 r.render_state.mosaic.stage(
-                    &mut r.session,
+                    &mut r.document.session,
                     Object {
                         erased: Vec::new(),
                         id: ObjectId::DRAFT,
@@ -1731,13 +1763,14 @@ fn pending_mosaic_cancel_preserves_unrelated_parameter_undo() {
                 );
                 assert_eq!(r.render_state.mosaic.pending.len(), 1);
                 if operation == 0 {
-                    r.session.selected = None;
+                    r.document.session.selected = None;
                 } else {
-                    let mask = r.session.objects[1].clone();
-                    r.session.begin_drag();
-                    r.gesture = (gestures::GeometryDrag::moving(&r.session, mask.id, (-80., 60.)))
-                        .map(Active::Geometry);
-                    r.session.objects[1].move_by(20., 10.);
+                    let mask = r.document.session.objects[1].clone();
+                    r.document.session.begin_drag();
+                    r.gesture =
+                        (gestures::GeometryDrag::moving(&r.document.session, mask.id, (-80., 60.)))
+                            .map(Active::Geometry);
+                    r.document.session.objects[1].move_by(20., 10.);
                 }
 
                 (baseline, opacity)
@@ -1748,7 +1781,7 @@ fn pending_mosaic_cancel_preserves_unrelated_parameter_undo() {
                 REGISTRY.with(|slot| {
                     let mut slot = slot.borrow_mut();
                     let r = slot.as_mut().unwrap();
-                    r.mode = InteractionMode::Tool(5);
+                    r.document.mode = InteractionMode::Tool(5);
                     r.sync_edit_scope();
                     assert!(r.set_mode(InteractionMode::Tool(0)));
                 });
@@ -1763,18 +1796,18 @@ fn pending_mosaic_cancel_preserves_unrelated_parameter_undo() {
                 assert!(r.geometry_drag().is_none());
                 assert!(r.deferred_parameters.is_empty());
                 assert!(!r.parameter_edit.active());
-                assert_eq!(r.session.objects, vec![baseline.clone()]);
-                assert!((r.session.spotlight_opacity - 0.28).abs() < 0.0001);
+                assert_eq!(r.document.session.objects, vec![baseline.clone()]);
+                assert!((r.document.session.spotlight_opacity - 0.28).abs() < 0.0001);
                 assert!(
-                    r.session.undo(),
+                    r.document.session.undo(),
                     "unrelated parameter history survives mask rejection"
                 );
-                assert_eq!(r.session.spotlight_opacity, opacity);
-                assert_eq!(r.session.objects, vec![baseline]);
-                assert!(r.session.undo());
-                assert!(r.session.objects.is_empty());
+                assert_eq!(r.document.session.spotlight_opacity, opacity);
+                assert_eq!(r.document.session.objects, vec![baseline]);
+                assert!(r.document.session.undo());
+                assert!(r.document.session.objects.is_empty());
                 assert!(
-                    !r.session.can_undo(),
+                    !r.document.session.can_undo(),
                     "rejected masks and their movement leave no history"
                 );
             });
@@ -1998,16 +2031,16 @@ fn tool_group_menus_skip_fonts_parameters_and_keep_final_layout() {
                         let (mode, binding) = REGISTRY.with(|slot| {
                             let mut slot = slot.borrow_mut();
                             let r = slot.as_mut().unwrap();
-                            r.selected[group] = tool;
-                            (r.mode, r.parameter_values.binding().get())
+                            r.document.selected[group] = tool;
+                            (r.document.mode, r.document.parameter_values.binding().get())
                         });
                         open_panel(group, true);
                         let (generation, revision) = REGISTRY.with(|slot| {
                             let slot = slot.borrow();
                             let r = slot.as_ref().unwrap();
                             assert!(!r.fonts.is_loaded(), "picker must not scan installed fonts");
-                            assert_eq!(r.mode, mode);
-                            assert_eq!(r.parameter_values.binding().get(), binding);
+                            assert_eq!(r.document.mode, mode);
+                            assert_eq!(r.document.parameter_values.binding().get(), binding);
                             assert!(!r.parameter_edit.active());
                             let panel = r.toolbar_state.panel.get().unwrap();
                             assert_eq!(panel.get_font_families().row_count(), 0);

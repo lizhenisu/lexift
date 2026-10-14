@@ -526,6 +526,19 @@ pub(super) fn place(
     displays: &[Rect],
 ) {
     let viewport = viewport(bounds, displays);
+    let map_bounds = |b: Bounds| {
+        let a = super::pin_editor::view_point((b.left, b.top), false);
+        let z = super::pin_editor::view_point((b.right, b.bottom), false);
+        Bounds {
+            left: a.0,
+            top: a.1,
+            right: z.0,
+            bottom: z.1,
+        }
+    };
+    let viewport = map_bounds(viewport);
+    let bounds = map_bounds(bounds);
+    let scale = scale * super::pin_editor::view_zoom();
     editor.window().set_position(slint::PhysicalPosition::new(
         viewport.left.floor() as i32,
         viewport.top.floor() as i32,
