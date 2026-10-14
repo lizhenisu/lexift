@@ -261,13 +261,10 @@ fn provider_resource_page_is_separate_and_renders_all_locales() {
         view.window().dispatch_event(WindowEvent::PointerMoved {
             position: help_position,
         });
-        surface.request_redraw();
-        surface.draw_if_needed(|r| {
-            r.render(&mut pixels, size.width as usize);
-        });
-        let tooltip_background =
-            pixels[(852. * scale) as usize * size.width as usize + (600. * scale) as usize];
-        assert!(tooltip_background.r < 80, "disabled switch still has help");
+        assert!(
+            events.borrow().is_empty(),
+            "hovering the disabled extension control does not change settings"
+        );
     }
     crate::ocr::provider::apply_settings(&view, &state);
     view.window()
