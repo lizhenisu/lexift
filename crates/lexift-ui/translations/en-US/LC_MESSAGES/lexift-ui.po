@@ -1660,8 +1660,8 @@ msgstr "Text background"
 msgid "Finish annotation"
 msgstr "Finish annotation"
 
-msgid "Select objects"
-msgstr "Select objects"
+msgid "Mouse mode"
+msgstr "Mouse mode"
 
 msgid "Straight line"
 msgstr "Straight line"

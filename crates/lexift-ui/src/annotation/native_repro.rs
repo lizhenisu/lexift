@@ -251,11 +251,26 @@ impl Runner {
                     let r = s.as_ref().unwrap();
                     r.document.session.objects.len() == 3
                         && r.document.session.can_undo()
+                        && r.document.mode.is_mouse()
+                        && r.document.session.selected.is_none()
+                        && r.document
+                            .session
+                            .objects
+                            .iter()
+                            .all(|o| !r.document.session.can_edit(o))
                         && r.toolbar_state.main.get().unwrap().get_pin_edit_mode()
                         && r.canvas_state.canvases.len() == 1
                 });
                 println!("PIN_EDIT_IMPORTED initial={initial}");
                 self.result.set(self.result.get() && initial);
+                self.probe(self.old, "through-drawing", false);
+                if let Some((_, window)) = crate::pinned_screenshot::diagnostic_windows()
+                    .into_iter()
+                    .find(|(id, _)| *id == self.old)
+                {
+                    println!("MOUSE_MODE_PIN_SCALE={}", window.window().scale_factor());
+                    save_frame(window.window(), "mouse-mode-edit");
+                }
                 REGISTRY.with(|s| {
                     s.borrow_mut().as_mut().unwrap().select_tool_variant(0, 0);
                 });
@@ -292,6 +307,17 @@ impl Runner {
                 });
                 println!("PIN_EDIT_DESKTOP_RESTORED restored={restored}");
                 self.result.set(self.result.get() && restored);
+                let passthrough = REGISTRY.with(|s| {
+                    let slot = s.borrow();
+                    let r = slot.as_ref().unwrap();
+                    (self.probe)(
+                        r.canvas_state.canvases[0].window.window(),
+                        "through-drawing",
+                        false,
+                    )
+                });
+                println!("MOUSE_MODE_DESKTOP_PASSTHROUGH={passthrough}");
+                self.result.set(self.result.get() && passthrough);
                 self.probe(self.old, "menu-hide", false);
                 self.next();
             }
@@ -326,8 +352,45 @@ impl Runner {
                     .with(|s| s.borrow().as_ref().unwrap().document.session.objects.len() == 2);
                 println!("PIN_EDIT_REOPEN history={history} undo={undone}");
                 self.result.set(self.result.get() && history && undone);
+                let secondary = REGISTRY.with(|s| {
+                    let slot = s.borrow();
+                    let r = slot.as_ref().unwrap();
+                    (r.lifecycle.annotation_displays)()
+                        .into_iter()
+                        .find(|b| *b != self.display)
+                });
+                if let Some(display) = secondary {
+                    if let Some((_, window)) = crate::pinned_screenshot::diagnostic_windows()
+                        .into_iter()
+                        .find(|(id, _)| *id == self.old)
+                    {
+                        window.window().set_position(slint::PhysicalPosition::new(
+                            display.left + 80,
+                            display.top + 100,
+                        ));
+                    }
+                    self.step = 25;
+                    self.after = Instant::now();
+                } else {
+                    pin_editor::finish_now();
+                    self.next();
+                }
+            }
+            25 if self.after.elapsed() > Duration::from_millis(600) => {
+                self.probe(self.old, "through-drawing", false);
+                if let Some((_, window)) = crate::pinned_screenshot::diagnostic_windows()
+                    .into_iter()
+                    .find(|(id, _)| *id == self.old)
+                {
+                    println!(
+                        "MOUSE_MODE_SECONDARY_SCALE={}",
+                        window.window().scale_factor()
+                    );
+                    save_frame(window.window(), "mouse-mode-secondary");
+                }
                 pin_editor::finish_now();
-                self.next();
+                self.step = 18;
+                self.after = Instant::now();
             }
             18 if ready() && !pin_editor::active() => {
                 self.probe(self.new, "menu-escape", false);

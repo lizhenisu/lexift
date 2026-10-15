@@ -1660,8 +1660,8 @@ msgstr "文字の背景"
 msgid "Finish annotation"
 msgstr "注釈を終了"
 
-msgid "Select objects"
-msgstr "オブジェクトを選択"
+msgid "Mouse mode"
+msgstr "マウス操作"
 
 msgid "Straight line"
 msgstr "直線"

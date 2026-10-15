@@ -1,7 +1,7 @@
 //! Cursor feedback shares the canvas hit test and locks to an active drag's operation.
 use super::{Gesture, InteractionMode, Registry};
 use crate::AnnotationCursor;
-use lexift_core::domain::annotation::{Bounds, Extra, Hit, Kind, Object, Session};
+use lexift_core::domain::annotation::{Extra, Hit, Kind, Object, Session};
 #[cfg(test)]
 use lexift_core::domain::geometry::Rect;
 use slint::ComponentHandle;
@@ -143,32 +143,33 @@ fn editing_control_cursor(
 
 /// Updating feedback does not enqueue annotation rasterization. Slint applies it only
 /// to the hovered canvas TouchArea, leaving tool windows and click-through apps alone.
-pub(super) fn refresh(r: &Registry) {
-    if let Some(editing) = &r.screenshot
-        && editing.pin.is_none()
-        && r.document.mode.is_mouse()
-    {
-        if let Some(b) = editing.region.bounds() {
-            let geometry = Bounds {
-                left: b.left as f32,
-                top: b.top as f32,
-                right: b.right as f32,
-                bottom: b.bottom as f32,
-            };
-            for layer in &r.canvas_state.canvases {
-                let scale = layer.scale();
-                let handle = layer.last_pointer.and_then(|point| {
-                    geometry.handles().iter().position(|&(x, y)| {
-                        (point.0 - x).abs() <= 9. * scale && (point.1 - y).abs() <= 9. * scale
-                    })
-                });
-                let cursor = handle.map_or(AnnotationCursor::Idle, handle_cursor);
-                layer.window.set_cursor(cursor);
-            }
-        }
-        return;
-    }
+fn region_cursor(r: &Registry, index: usize) -> Option<AnnotationCursor> {
+    use lexift_core::domain::region_selection::RegionAdjustment;
+    let editing = r
+        .screenshot
+        .as_ref()
+        .filter(|e| e.pin.is_none() && r.document.mode.is_mouse())?;
+    let layer = &r.canvas_state.canvases[index];
+    let hit = editing.region.adjustment().or_else(|| {
+        layer.last_pointer.and_then(|p| {
+            editing.region.hit(
+                lexift_core::domain::geometry::Point {
+                    x: p.0.round() as i32,
+                    y: p.1.round() as i32,
+                },
+                layer.scale(),
+                true,
+            )
+        })
+    });
+    Some(match hit {
+        Some(RegionAdjustment::Move) => AnnotationCursor::Moving,
+        Some(RegionAdjustment::Resize(h)) => handle_cursor(h),
+        None => AnnotationCursor::Idle,
+    })
+}
 
+pub(super) fn refresh(r: &Registry) {
     let editing = if r.gesture().is_none() && !r.document.mode.is_mouse() {
         super::editing_text_object(r)
     } else {
@@ -201,19 +202,20 @@ pub(super) fn refresh(r: &Registry) {
             }
             _ => None,
         };
-        let desired = if let Some(cursor) = erase_cursor.or(editing_control) {
-            cursor
-        } else if r.arrow_pending().is_some() {
-            AnnotationCursor::Drawing
-        } else {
-            at_point(
-                &r.document.session,
-                r.document.mode,
-                r.gesture(),
-                layer.last_pointer,
-                layer.scale(),
-            )
-        };
+        let desired =
+            if let Some(cursor) = region_cursor(r, index).or(erase_cursor).or(editing_control) {
+                cursor
+            } else if r.arrow_pending().is_some() {
+                AnnotationCursor::Drawing
+            } else {
+                at_point(
+                    &r.document.session,
+                    r.document.mode,
+                    r.gesture(),
+                    layer.last_pointer,
+                    layer.scale(),
+                )
+            };
         let hovered_text = r.editor.window().is_some()
             && r.gesture().is_none()
             && layer.last_pointer.is_some_and(|point| {
@@ -294,17 +296,22 @@ pub(super) fn refresh(r: &Registry) {
             }
             desired
         };
-        if layer.window.get_cursor() != cursor {
-            layer.window.set_cursor(cursor);
-            // Slint samples TouchArea.mouse-cursor before calling pointer-event.
-            // Re-evaluate the stationary pointer after this event, only on a change.
-            if let Some(point) = layer.last_pointer {
-                let generation = r.generation;
-                let revision = layer.revision();
-                layer
-                    .input()
-                    .post(move || refresh_stationary_pointer(generation, index, revision, point));
-            }
+        set_cursor_feedback(r, index, cursor);
+    }
+}
+
+fn set_cursor_feedback(r: &Registry, index: usize, cursor: AnnotationCursor) {
+    let layer = &r.canvas_state.canvases[index];
+    if layer.window.get_cursor() != cursor {
+        layer.window.set_cursor(cursor);
+        // Slint samples mouse-cursor before pointer-event. Refresh only a changed,
+        // still-current target so first hover does not wait for another mouse move.
+        if let Some(point) = layer.last_pointer {
+            let generation = r.generation;
+            let revision = layer.revision();
+            layer
+                .input()
+                .post(move || refresh_stationary_pointer(generation, index, revision, point));
         }
     }
 }
@@ -312,9 +319,11 @@ pub(super) fn refresh(r: &Registry) {
 fn refresh_stationary_pointer(generation: u64, index: usize, revision: u64, point: (f32, f32)) {
     let target = super::REGISTRY.with(|slot| {
         let slot = slot.borrow();
-        let r = slot
-            .as_ref()
-            .filter(|r| r.generation == generation && !r.document.mode.is_mouse())?;
+        let r = slot.as_ref().filter(|r| {
+            r.generation == generation
+                && (!r.document.mode.is_mouse()
+                    || r.screenshot.as_ref().is_some_and(|e| e.pin.is_none()))
+        })?;
         let layer = r
             .canvas_state
             .canvases
@@ -332,7 +341,8 @@ fn refresh_stationary_pointer(generation: u64, index: usize, revision: u64, poin
         let over_window = |window: &slint::Window| {
             let p = window.position();
             let size = window.size();
-            cursor.x >= p.x
+            window.is_visible()
+                && cursor.x >= p.x
                 && cursor.y >= p.y
                 && cursor.x < p.x + size.width as i32
                 && cursor.y < p.y + size.height as i32

@@ -251,6 +251,39 @@ pub(crate) fn set_annotation_interaction(allowed: bool) {
         apply_policy(id);
     }
 }
+
+/// Editing input is scoped to the target pin; other pins retain their own policy.
+pub(crate) fn set_edit_interaction(id: u64, allowed: bool) -> bool {
+    let context = STATE.with(|s| {
+        let slot = s.borrow();
+        let r = slot.as_ref()?;
+        let p = r.windows.get(&id)?;
+        let w = p.window.get()?.clone_strong();
+        w.get_editing()
+            .then(|| (w, p.gesture.clone(), r.lifecycle.clone()))
+    });
+    let Some((window, gesture, lifecycle)) = context else {
+        return false;
+    };
+    if window.get_interactive() == allowed {
+        return true;
+    }
+    let previous = window.get_interactive();
+    gesture.cancel();
+    window.invoke_close_menu();
+    (lifecycle.cancel_window_interaction)(window.window());
+    window.set_interactive(allowed);
+    if apply_policy(id) {
+        if !allowed {
+            window.set_decoration(slint::Image::default());
+        }
+        true
+    } else {
+        window.set_interactive(previous);
+        apply_policy(id);
+        false
+    }
+}
 pub(crate) fn request_output(id: u64, kind: i32) {
     if !matches!(kind, 0 | 1) {
         return;
@@ -1219,6 +1252,17 @@ mod tests {
                 .clone_strong()
         });
         assert!(first.get_shadow_enabled() && first.get_topmost());
+        edit_window(1, true).unwrap();
+        assert!(set_edit_interaction(1, false));
+        assert!(!first.get_interactive());
+        STATE.with(|s| {
+            let slot = s.borrow();
+            let r = slot.as_ref().unwrap();
+            assert!(r.windows[&2].window.get().unwrap().get_interactive());
+            assert!(r.windows[&3].window.get().unwrap().get_interactive());
+        });
+        assert!(set_edit_interaction(1, true));
+        edit_window(1, false).unwrap();
         first.set_shadow_enabled(false);
         first.invoke_option_requested(0, false);
         first.set_topmost(false);

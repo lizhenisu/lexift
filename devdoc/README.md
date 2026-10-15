@@ -83,6 +83,12 @@
 
 ## 发布
 
+- [鼠标模式语义与穿透回归](releases/mouse-mode-validation.md)
+- [截图选择对象模式回归](releases/screenshot-object-selection.md)
+- [截图选区调整反馈验证](releases/screenshot-region-adjustment.md)
+- [截图尺寸持续显示验证](releases/screenshot-size-label.md)
+- [截图尺寸标签层级验证](releases/screenshot-label-order.md)
+- [截图尺寸同帧呈现验证](releases/screenshot-same-frame.md)
 - [贴图菜单与恢复行为验证](releases/pinned-image-menu-2026-10-14.md)
 - [贴图可编辑标注验证](releases/pinned-image-annotation-2026-10-14.md)
 

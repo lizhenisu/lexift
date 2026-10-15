@@ -1,0 +1,44 @@
+import { Colors } from "design/colors.slint";
+export global SizeLabelStyle {
+    out property <length> font-size: 12px;
+    out property <length> inset: 8px;
+    out property <length> label-height: 28px;
+    out property <length> radius: 4px;
+    out property <length> gap: 8px;
+}
+export component ScreenshotSizeLabel inherits Rectangle {
+    in property <string> text;
+    background: Colors.foreground;
+    border-radius: SizeLabelStyle.radius;
+    Text { x:SizeLabelStyle.inset; y:0px; width:parent.width - 2 * SizeLabelStyle.inset; height:parent.height;
+        text:root.text; font-size:SizeLabelStyle.font-size; color:Colors.surface; vertical-alignment:center; }
+}
+component GlyphCell inherits Rectangle {
+    in property <string> glyph;
+    in property <float> render-scale;
+    out property <length> advance: text.preferred-width;
+    width:24px * root.render-scale; height:SizeLabelStyle.label-height * root.render-scale;
+    text := Text { x:0px; y:0px; height:parent.height; text:root.glyph;
+        font-size:SizeLabelStyle.font-size * root.render-scale; color:Colors.surface; vertical-alignment:center; }
+}
+// Hidden, bounded preparation only. No window is shown or moved during a gesture.
+export component SizeLabelGlyphWindow inherits Window {
+    no-frame:true; background:transparent;
+    in property <float> render-scale:1;
+    width:336px * root.render-scale; height:SizeLabelStyle.label-height * root.render-scale;
+    g0 := GlyphCell { x:0px * root.render-scale; y:0px; glyph:"0"; render-scale:root.render-scale; }
+    g1 := GlyphCell { x:24px * root.render-scale; y:0px; glyph:"1"; render-scale:root.render-scale; }
+    g2 := GlyphCell { x:48px * root.render-scale; y:0px; glyph:"2"; render-scale:root.render-scale; }
+    g3 := GlyphCell { x:72px * root.render-scale; y:0px; glyph:"3"; render-scale:root.render-scale; }
+    g4 := GlyphCell { x:96px * root.render-scale; y:0px; glyph:"4"; render-scale:root.render-scale; }
+    g5 := GlyphCell { x:120px * root.render-scale; y:0px; glyph:"5"; render-scale:root.render-scale; }
+    g6 := GlyphCell { x:144px * root.render-scale; y:0px; glyph:"6"; render-scale:root.render-scale; }
+    g7 := GlyphCell { x:168px * root.render-scale; y:0px; glyph:"7"; render-scale:root.render-scale; }
+    g8 := GlyphCell { x:192px * root.render-scale; y:0px; glyph:"8"; render-scale:root.render-scale; }
+    g9 := GlyphCell { x:216px * root.render-scale; y:0px; glyph:"9"; render-scale:root.render-scale; }
+    g10 := GlyphCell { x:240px * root.render-scale; y:0px; glyph:" "; render-scale:root.render-scale; }
+    g11 := GlyphCell { x:264px * root.render-scale; y:0px; glyph:"×"; render-scale:root.render-scale; }
+    g12 := GlyphCell { x:288px * root.render-scale; y:0px; glyph:"p"; render-scale:root.render-scale; }
+    g13 := GlyphCell { x:312px * root.render-scale; y:0px; glyph:"x"; render-scale:root.render-scale; }
+    out property <[float]> advances: [g0.advance / 1px, g1.advance / 1px, g2.advance / 1px, g3.advance / 1px, g4.advance / 1px, g5.advance / 1px, g6.advance / 1px, g7.advance / 1px, g8.advance / 1px, g9.advance / 1px, g10.advance / 1px, g11.advance / 1px, g12.advance / 1px, g13.advance / 1px];
+}

@@ -10,6 +10,12 @@ pub(super) fn show_main(generation: u64, revision: u64, attempt: u8) {
         else {
             return;
         };
+        if r.screenshot
+            .as_ref()
+            .is_some_and(|e| e.pin.is_none() && e.region.dragging())
+        {
+            return;
+        }
         let Some(main) = r
             .toolbar_state
             .main
@@ -28,13 +34,24 @@ pub(super) fn show_main(generation: u64, revision: u64, attempt: u8) {
         match preparation {
             PassiveWindowPreparation::Ready => {
                 let place_start = Instant::now();
-                let anchor = r.toolbar_state.resume.map_or_else(
-                    || (r.lifecycle.toolbar_cursor_position)().unwrap_or_default(),
-                    |(position, _)| Point {
-                        x: position.x,
-                        y: position.y,
-                    },
-                );
+                let anchor = r
+                    .screenshot
+                    .as_ref()
+                    .filter(|e| e.pin.is_none())
+                    .and_then(|e| e.region.bounds())
+                    .map(|bounds| Point {
+                        x: bounds.left,
+                        y: bounds.bottom,
+                    })
+                    .unwrap_or_else(|| {
+                        r.toolbar_state.resume.map_or_else(
+                            || (r.lifecycle.toolbar_cursor_position)().unwrap_or_default(),
+                            |(position, _)| Point {
+                                x: position.x,
+                                y: position.y,
+                            },
+                        )
+                    });
                 if let Some(area) = (r.lifecycle.popup_work_area)(anchor) {
                     let scale = main.window().scale_factor();
                     let width = (main.get_toolbar_width() * scale)
@@ -52,24 +69,27 @@ pub(super) fn show_main(generation: u64, revision: u64, attempt: u8) {
                         (16. * scale) as i32,
                     )
                     .position;
-                    main.window().set_position(
-                        r.toolbar_state
-                            .resume
-                            .map(|(position, _)| {
-                                slint::PhysicalPosition::new(
-                                    position.x.clamp(
-                                        area.left,
-                                        (area.right - size.width as i32).max(area.left),
-                                    ),
-                                    position.y.clamp(
-                                        area.top,
-                                        (area.bottom - size.height as i32).max(area.top),
-                                    ),
-                                )
-                            })
-                            .unwrap_or(slint::PhysicalPosition::new(p.x, p.y)),
-                    );
+                    if !r.screenshot.as_ref().is_some_and(|e| e.pin.is_none()) {
+                        main.window().set_position(
+                            r.toolbar_state
+                                .resume
+                                .map(|(position, _)| {
+                                    slint::PhysicalPosition::new(
+                                        position.x.clamp(
+                                            area.left,
+                                            (area.right - size.width as i32).max(area.left),
+                                        ),
+                                        position.y.clamp(
+                                            area.top,
+                                            (area.bottom - size.height as i32).max(area.top),
+                                        ),
+                                    )
+                                })
+                                .unwrap_or(slint::PhysicalPosition::new(p.x, p.y)),
+                        );
+                    }
                 }
+                screenshot::position_region_toolbar(r, true);
                 if let Some(timing) = r.canvas_state.cold_open_timing.as_mut() {
                     let elapsed = place_start.elapsed();
                     timing.toolbar_place += elapsed;
@@ -135,12 +155,9 @@ pub(super) fn show_main(generation: u64, revision: u64, attempt: u8) {
                     );
                 }
                 r.canvas_state.annotation_ready = true;
-                if let Some(editing) = &r.screenshot
-                    && let Some(bounds) = if editing.pin.is_some() {
+                if r.screenshot.as_ref().is_some_and(|e| e.pin.is_some())
+                    && let Some(bounds) =
                         r.canvas_state.canvases.first().map(|c| c.display_bounds())
-                    } else {
-                        editing.region.bounds()
-                    }
                 {
                     let size = main.window().size();
                     let area = (r.lifecycle.popup_work_area)(Point {
@@ -286,6 +303,27 @@ pub(super) fn settle_main_position(
 }
 
 pub(super) fn open_panel(group: usize, menu: bool) {
+    open_panel_entry(group, menu, None);
+}
+
+pub(super) fn open_object_panel(target: ObjectId) {
+    let group = REGISTRY.with(|s| {
+        let slot = s.borrow();
+        let r = slot.as_ref()?;
+        let index = r.document.session.object_index(target)?;
+        (r.document.session.selected == Some(index)
+            && r.document
+                .session
+                .can_edit(&r.document.session.objects[index]))
+        .then(|| tools::group(r.document.session.objects[index].kind.tool()))
+    });
+    if let Some(group) = group {
+        open_panel_entry(group, false, Some(target));
+    }
+}
+
+/// Explicit toolbar entry changes drawing mode; an object entry only binds its parameters.
+fn open_panel_entry(group: usize, menu: bool, object: Option<ObjectId>) {
     let requested_at = Instant::now();
     if group >= GROUPS.len() {
         return;
@@ -300,14 +338,30 @@ pub(super) fn open_panel(group: usize, menu: bool) {
         {
             return;
         }
-        if !menu && !r.set_mode(InteractionMode::Tool(group)) {
+        let tool = if let Some(id) = object {
+            let Some(index) = r.document.session.object_index(id).filter(|&i| {
+                r.document.session.selected == Some(i)
+                    && r.document.session.can_edit(&r.document.session.objects[i])
+            }) else {
+                return;
+            };
+            project_object_parameters(r, index);
+            r.document.session.objects[index].kind.tool() as i32
+        } else {
+            r.document.selected[group]
+        };
+        if object.is_none() && !menu && !r.set_mode(InteractionMode::Tool(group)) {
             return;
         }
         let same = r.toolbar_state.group == Some(group)
             && r.toolbar_state
                 .panel
                 .get()
-                .is_some_and(|p| p.get_menu() == menu);
+                .is_some_and(|p| p.get_menu() == menu && p.get_tool() == tool);
+        if same && object.is_some() {
+            refresh_parameter_target(r);
+            return;
+        }
         r.close_panel();
         if same {
             return;
@@ -318,7 +372,6 @@ pub(super) fn open_panel(group: usize, menu: bool) {
         };
         let create = create_at.elapsed();
         crate::theme::apply(&panel);
-        let tool = r.document.selected[group];
         let fonts_at = Instant::now();
         // A tool picker has no font controls or parameter transaction. Keep the
         // installed-font scan on the paths that actually need editable text.
@@ -1303,6 +1356,10 @@ pub(super) fn main_current(generation: u64, revision: u64) -> bool {
             r.generation == generation
                 && r.toolbar_state.main.revision() == revision
                 && r.toolbar_state.main.get().is_some()
+                && !r
+                    .screenshot
+                    .as_ref()
+                    .is_some_and(|e| e.pin.is_none() && e.region.dragging())
         })
     })
 }
@@ -1344,6 +1401,7 @@ pub(super) fn pointer_main(
         Rc::new(move |input| {
             if main_current(generation, revision)
                 && let Some(w) = weak.upgrade()
+                && w.window().is_visible()
             {
                 let moved = REGISTRY.with(|slot| {
                     let mut slot = slot.borrow_mut();
@@ -1506,10 +1564,14 @@ pub(super) fn pointer_panel(
 
 impl Registry {
     pub(super) fn sync_mode_display(&self) {
+        let _guards = self.pause_native_pointer_inputs();
         crate::pinned_screenshot::set_annotation_interaction(
             self.screenshot.as_ref().is_some_and(|e| e.pin.is_some())
                 || (self.document.mode.is_mouse() && self.screenshot.is_none()),
         );
+        if let Some((id, _)) = self.screenshot.as_ref().and_then(|e| e.pin) {
+            crate::pinned_screenshot::set_edit_interaction(id, !self.document.mode.is_mouse());
+        }
         if let Some(main) = self.toolbar_state.main.get() {
             main.set_operate(self.document.mode.is_mouse());
             main.set_active_group(self.document.mode.selected_group());

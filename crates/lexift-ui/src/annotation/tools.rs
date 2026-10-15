@@ -1,5 +1,16 @@
 //! One mapping from toolbar entries to creation and editing permissions.
 use lexift_core::domain::annotation::{EditScope, Kind};
+pub(super) fn group(tool: usize) -> usize {
+    match tool {
+        11 | 12 => 5,
+        10 => 4,
+        8 | 9 => 3,
+        5..=7 => 2,
+        3 | 4 => 1,
+        13 => 6,
+        _ => 0,
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Drawing {
     Object(Kind),

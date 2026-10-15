@@ -27,7 +27,6 @@ struct Flow {
     state: ScreenshotState,
     recovery: Option<Recovery>,
     frames: Option<Arc<Vec<CapturedRegion>>>,
-    label: window::Slot<crate::AnnotationHintWindow>,
     toast: window::Slot<crate::ScreenshotToastWindow>,
     toast_timer: slint::Timer,
 }
@@ -140,6 +139,7 @@ pub(crate) fn show(
     }) {
         return;
     }
+    crate::screen_interaction::size_label::clear();
     crate::pinned_screenshot::set_frozen(true);
     FLOW.with(|s| s.borrow_mut().frames = Some(frames.clone()));
     selection_host::set_screenshot(true);
@@ -168,15 +168,16 @@ pub(crate) fn show(
                         preview: None,
                         revision: 0,
                         presented: 0,
-                        feedback_bounds: None,
+                        feedback_placement: None,
+                        toolbar_adjustment: 0,
                     });
                     r.document.mode = InteractionMode::Mouse;
+                    r.sync_edit_scope();
                     r.lifecycle.annotation_screen_capture = Some(capture.clone());
                     r.lifecycle.annotation_renderer = None;
                 }
             });
             toggle(Instant::now());
-            update_label();
         }
     }));
     selection_host::sync(id, selection_host::HostPhase::Capturing);
@@ -193,11 +194,11 @@ pub(crate) fn restore(id: u64) {
         if s.state.session != id {
             return None;
         };
-        s.label.clear();
         s.frames = None;
         s.recovery.take()
     });
     let Some(recovery) = recovery else { return };
+    crate::screen_interaction::size_label::clear();
     crate::pinned_screenshot::set_frozen(false);
     selection_host::close();
     selection_host::set_handler(Rc::new(|_| {}));
@@ -214,6 +215,7 @@ pub(crate) fn restore(id: u64) {
     toggle(Instant::now());
 }
 pub(crate) fn shutdown() {
+    crate::screen_interaction::size_label::clear();
     selection_host::close();
     selection_host::set_handler(Rc::new(|_| {}));
     REGISTRY.with(|slot| {
@@ -275,8 +277,11 @@ pub(super) fn pointer(r: &mut Registry, index: usize, event: i32, x: f32, y: f32
         x: px.round() as i32,
         y: py.round() as i32,
     };
-    layer.last_pointer = Some((px, py));
+    layer.last_pointer = (event != 4).then_some((px, py));
     if editing.pin.is_some() {
+        if r.document.mode.is_mouse() {
+            return true;
+        }
         let bounds = editing.region.bounds().unwrap();
         return event == 0
             && (point.x < bounds.left
@@ -316,8 +321,10 @@ pub(super) fn pointer(r: &mut Registry, index: usize, event: i32, x: f32, y: f32
                     session: id,
                     bounds,
                 });
-                update_label();
             });
+        }
+        if matches!(event, 2 | 3) {
+            queue_adjustment_toolbar(r);
         }
         return true;
     }
@@ -327,103 +334,86 @@ pub(super) fn pointer(r: &mut Registry, index: usize, event: i32, x: f32, y: f32
         && point.y >= bounds.top
         && point.y < bounds.bottom;
     if r.document.mode.is_mouse() {
-        let object = r.document.session.hit((px, py), scale).is_some();
-        if event == 0 && editing.region.begin(point, scale, !object) {
+        if event == 0 && editing.region.begin(point, scale, true) {
+            queue_adjustment_toolbar(r);
             return true;
         }
-        if !object && r.gesture.is_none() {
-            return true;
-        }
+        return true;
     }
     event == 0 && !inside
 }
 pub(super) fn cancel_region(r: &mut Registry) -> bool {
-    r.screenshot.as_mut().is_some_and(|e| e.region.cancel())
+    let cancelled = r.screenshot.as_mut().is_some_and(|e| e.region.cancel());
+    if cancelled {
+        queue_adjustment_toolbar(r);
+    }
+    cancelled
 }
 
-fn update_label() {
-    let value = REGISTRY.with(|slot| {
-        let slot = slot.borrow();
-        let r = slot.as_ref()?;
-        let editing = r.screenshot.as_ref()?;
-        let b = editing.region.bounds()?;
-        Some((editing.id, b, r.prepare, r.lifecycle.clone()))
-    });
-    let Some((id, b, prepare, lifecycle)) = value else {
+/// Defer native visibility changes until the pointer callback releases the Registry.
+fn queue_adjustment_toolbar(r: &mut Registry) {
+    let Some(editing) = r.screenshot.as_mut().filter(|e| e.pin.is_none()) else {
         return;
     };
-    FLOW.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if slot.state.session != id {
-            return;
-        };
-        slot.label.clear();
-        let Ok(label) =
-            crate::screen_interaction::create(&lifecycle, crate::AnnotationHintWindow::new)
-        else {
-            return;
-        };
-        crate::theme::apply(&label);
-        label.set_text(format!("{} × {} px", b.right - b.left, b.bottom - b.top).into());
-        label.set_limit(240.);
-        slot.label.open(label);
-    });
-    show_label(id, prepare, lifecycle, 0);
-}
-fn show_label(
-    id: u64,
-    prepare: fn(&slint::Window) -> PassiveWindowPreparation,
-    lifecycle: WindowLifecycleCallbacks,
-    attempt: u8,
-) {
-    let bounds = REGISTRY.with(|s| {
-        s.borrow()
-            .as_ref()
-            .and_then(|r| r.screenshot.as_ref())
-            .and_then(|e| e.region.bounds())
-    });
-    let Some(bounds) = bounds else { return };
-    FLOW.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if slot.state.session != id {
-            return;
-        };
-        let Some(label) = slot.label.get() else {
-            return;
-        };
-        match prepare(label.window()) {
-            PassiveWindowPreparation::Ready => {
-                label.window().set_size(slint::LogicalSize::new(
-                    label.get_content_width(),
-                    label.get_content_height(),
-                ));
-                let scale = label.window().scale_factor();
-                let area = (lifecycle.popup_work_area)(Point {
-                    x: bounds.left,
-                    y: bounds.top,
-                });
-                let size = label.window().size();
-                let point = placement::place_toolbar_popup(
-                    bounds,
-                    size.width,
-                    size.height,
-                    area,
-                    (8. * scale) as i32,
-                    placement::Side::Before,
-                );
-                label
-                    .window()
-                    .set_position(slint::PhysicalPosition::new(point.x, point.y));
-                let _ = label.show();
+    editing.toolbar_adjustment = editing.toolbar_adjustment.wrapping_add(1);
+    let (id, epoch, hidden) = (
+        editing.id,
+        editing.toolbar_adjustment,
+        editing.region.dragging(),
+    );
+    let generation = r.generation;
+    let revision = r.toolbar_state.main.revision();
+    r.hints.clear();
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        let restore = REGISTRY.with(|s| {
+            let mut slot = s.borrow_mut();
+            let Some(r) = slot.as_mut().filter(|r| {
+                r.generation == generation && r.toolbar_state.main.revision() == revision
+            }) else {
+                return false;
+            };
+            if !r.screenshot.as_ref().is_some_and(|e| {
+                e.pin.is_none()
+                    && e.id == id
+                    && e.toolbar_adjustment == epoch
+                    && e.region.dragging() == hidden
+            }) {
+                return false;
+            };
+            r.hints.clear();
+            if hidden {
+                let _guards = r.pause_native_pointer_inputs();
+                if let Some(main) = r.toolbar_state.main.get() {
+                    let _ = main.hide();
+                }
+                false
+            } else {
+                true
             }
-            PassiveWindowPreparation::Pending if attempt < 20 => slot
-                .label
-                .prepare_after(Duration::from_millis(16), move || {
-                    show_label(id, prepare, lifecycle.clone(), attempt + 1)
-                }),
-            _ => slot.label.clear(),
+        });
+        if restore {
+            toolbar_workflow::show_main(generation, revision, 0);
         }
     });
+}
+
+/// Immutable feedback travels with the frame job; it never moves a native window.
+pub(super) fn label_feedback(
+    r: &Registry,
+) -> Option<crate::screen_interaction::size_label::Feedback> {
+    let editing = r.screenshot.as_ref().filter(|e| e.pin.is_none())?;
+    let bounds = editing.region.bounds()?;
+    let screens = r
+        .canvas_state
+        .canvases
+        .iter()
+        .map(|c| (c.bounds, c.scale()))
+        .collect::<Vec<_>>();
+    let area = (r.lifecycle.popup_work_area)(Point {
+        x: bounds.left,
+        y: bounds.top,
+    });
+    crate::screen_interaction::size_label::layout(bounds, &screens, area)
 }
 
 pub(crate) fn output_current(session: u64, operation: u64) -> bool {
@@ -555,72 +545,55 @@ pub(super) fn toolbar_ready() {
 }
 
 pub(super) fn sync_region_feedback(r: &mut Registry) {
-    let Some(editing) = r.screenshot.as_mut() else {
-        return;
+    position_region_toolbar(r, false);
+}
+
+/// The sole screenshot toolbar placement path, used before show and for live crop feedback.
+/// Forced preparation bypasses cached placement after native window preparation or DPI changes.
+pub(super) fn position_region_toolbar(r: &mut Registry, force: bool) -> bool {
+    let Some(editing) = r.screenshot.as_ref().filter(|e| e.pin.is_none()) else {
+        return false;
     };
-    if editing.pin.is_some() {
-        return;
-    }
     let Some(bounds) = editing.region.bounds() else {
-        return;
+        return true;
     };
-    if editing.feedback_bounds == Some(bounds) {
-        return;
+    if r.toolbar_state.toolbar_drag.is_some() {
+        return true;
     }
-    editing.feedback_bounds = Some(bounds);
-    let _guards = r.pause_native_pointer_inputs();
-    FLOW.with(|slot| {
-        let slot = slot.borrow();
-        if let Some(label) = slot.label.get() {
-            label.set_text(
-                format!(
-                    "{} × {} px",
-                    bounds.right - bounds.left,
-                    bounds.bottom - bounds.top
-                )
-                .into(),
-            );
-            label.window().set_size(slint::LogicalSize::new(
-                label.get_content_width(),
-                label.get_content_height(),
-            ));
-            let size = label.window().size();
-            let area = (r.lifecycle.popup_work_area)(Point {
-                x: bounds.left,
-                y: bounds.top,
-            });
-            let point = placement::place_toolbar_popup(
-                bounds,
-                size.width,
-                size.height,
-                area,
-                (8. * label.window().scale_factor()) as i32,
-                placement::Side::Before,
-            );
-            label
-                .window()
-                .set_position(slint::PhysicalPosition::new(point.x, point.y));
-        }
+    let Some(main) = r.toolbar_state.main.get() else {
+        return true;
+    };
+    let size = main.window().size();
+    let area = (r.lifecycle.popup_work_area)(Point {
+        x: bounds.left,
+        y: bounds.bottom,
     });
-    if r.toolbar_state.toolbar_drag.is_none()
-        && let Some(main) = r.toolbar_state.main.get()
-    {
-        let size = main.window().size();
-        let area = (r.lifecycle.popup_work_area)(Point {
-            x: bounds.left,
-            y: bounds.bottom,
-        });
-        let point = placement::place_toolbar_popup(
-            bounds,
-            size.width,
-            size.height,
-            area,
-            (8. * main.window().scale_factor()) as i32,
-            placement::Side::After,
-        );
+    let point = region_toolbar_position(bounds, size, area, main.window().scale_factor());
+    let placement = (point, size);
+    if force || editing.feedback_placement != Some(placement) {
+        let _guards = r.pause_native_pointer_inputs();
         main.window()
             .set_position(slint::PhysicalPosition::new(point.x, point.y));
+        r.screenshot.as_mut().unwrap().feedback_placement = Some(placement);
     }
+    true
+}
+
+/// Place the movable toolbar independently of the crop caption.
+fn region_toolbar_position(
+    bounds: Rect,
+    size: slint::PhysicalSize,
+    area: Option<Rect>,
+    scale: f32,
+) -> Point {
+    placement::place_toolbar_popup(
+        bounds,
+        size.width,
+        size.height,
+        area,
+        (8. * scale) as i32,
+        placement::Side::After,
+    )
 }
 
 #[cfg(test)]

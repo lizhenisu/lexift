@@ -1,5 +1,6 @@
 //! Instance-owned screen surfaces shared by annotation and region selection.
 pub(crate) mod selection;
+pub(crate) mod size_label;
 pub(crate) mod window;
 use crate::{PassiveWindowPreparation, WindowLifecycleCallbacks};
 use lexift_core::{domain::geometry::Rect, ports::screen_capture::CapturedRegion};

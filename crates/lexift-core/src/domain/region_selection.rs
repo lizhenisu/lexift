@@ -134,6 +134,13 @@ mod tests {
     }
 }
 
+/// Adjustment selected by the crop hit test, retained throughout the gesture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegionAdjustment {
+    Move,
+    Resize(usize),
+}
+
 /// Mutable crop rectangle. Content remains in screen coordinates when the crop changes.
 #[derive(Default)]
 pub struct RegionEditor {
@@ -153,8 +160,13 @@ impl RegionEditor {
     pub fn dragging(&self) -> bool {
         self.drag.is_some()
     }
-    pub fn begin(&mut self, point: Point, scale: f32, allow_body: bool) -> bool {
-        let Some(b) = self.bounds else { return false };
+    pub fn adjustment(&self) -> Option<RegionAdjustment> {
+        self.drag
+            .map(|(_, _, handle)| handle.map_or(RegionAdjustment::Move, RegionAdjustment::Resize))
+    }
+    /// Shared hit contract for pointer handling and cursor feedback; handles take priority.
+    pub fn hit(&self, point: Point, scale: f32, allow_body: bool) -> Option<RegionAdjustment> {
+        let b = self.bounds?;
         let geometry = super::annotation::Bounds {
             left: b.left as f32,
             top: b.top as f32,
@@ -169,12 +181,20 @@ impl RegionEditor {
             && point.x < b.right
             && point.y >= b.top
             && point.y < b.bottom;
-        if handle.is_some() || body {
-            self.drag = Some((b, point, handle));
-            true
-        } else {
-            false
-        }
+        handle
+            .map(RegionAdjustment::Resize)
+            .or(body.then_some(RegionAdjustment::Move))
+    }
+    pub fn begin(&mut self, point: Point, scale: f32, allow_body: bool) -> bool {
+        let Some(hit) = self.hit(point, scale, allow_body) else {
+            return false;
+        };
+        let handle = match hit {
+            RegionAdjustment::Move => None,
+            RegionAdjustment::Resize(h) => Some(h),
+        };
+        self.drag = Some((self.bounds.unwrap(), point, handle));
+        true
     }
     pub fn update(&mut self, point: Point, desktop: Rect) {
         let Some((b, start, handle)) = self.drag else {
@@ -244,6 +264,19 @@ mod editor_tests {
             };
             let (x, y) = geometry.handles()[handle];
             let mut edit = RegionEditor::new(original);
+            for scale in [1., 1.25] {
+                assert_eq!(
+                    edit.hit(
+                        Point {
+                            x: x as i32,
+                            y: y as i32
+                        },
+                        scale,
+                        true
+                    ),
+                    Some(RegionAdjustment::Resize(handle))
+                );
+            }
             assert!(edit.begin(
                 Point {
                     x: x as i32,
@@ -252,6 +285,7 @@ mod editor_tests {
                 1.25,
                 false
             ));
+            assert_eq!(edit.adjustment(), Some(RegionAdjustment::Resize(handle)));
             edit.update(
                 Point {
                     x: (x + 15.) as i32,
@@ -260,11 +294,16 @@ mod editor_tests {
                 desktop,
             );
             assert_ne!(edit.bounds(), Some(original));
+            assert_eq!(edit.adjustment(), Some(RegionAdjustment::Resize(handle)));
             assert!(edit.cancel());
+            assert_eq!(edit.adjustment(), None);
             assert_eq!(edit.bounds(), Some(original));
         }
         let mut edit = RegionEditor::new(original);
+        assert_eq!(edit.hit(Point { x: 0, y: 0 }, 1., false), None);
+        assert_eq!(edit.hit(Point { x: 90, y: 90 }, 1., true), None);
         assert!(edit.begin(Point { x: 0, y: 0 }, 1., true));
+        assert_eq!(edit.adjustment(), Some(RegionAdjustment::Move));
         edit.update(Point { x: 500, y: 500 }, desktop);
         edit.finish();
         assert_eq!(

@@ -99,7 +99,11 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
         }
         pin_editor::sync_watermark_anchor(r);
         if screenshot::pointer(r, index, event, x, y) {
+            cursor::refresh(r);
             return Some((r.generation, false));
+        }
+        if r.document.mode.is_mouse() {
+            return None;
         }
         let layer = r.canvas_state.canvases.get(index)?;
         let scale = layer.scale();
@@ -608,20 +612,19 @@ pub(super) fn queue_geometry_panel(generation: u64, index: usize) {
             .selected
             .and_then(|selected| r.document.session.objects.get(selected))
             .map(|object| object.id)?;
-        let group = r.document.mode.selected_group().max(0) as usize;
-        Some((layer.input(), layer.revision(), target, group))
+        let mode = r.document.mode;
+        Some((layer.input(), layer.revision(), target, mode))
     });
-    if let Some((input, revision, target, group)) = request {
+    if let Some((input, revision, target, mode)) = request {
         input.post(move || {
             let valid = REGISTRY.with(|slot| {
                 slot.borrow().as_ref().is_some_and(|r| {
                     r.generation == generation
-                        && !r.document.mode.is_mouse()
+                        && r.document.mode == mode
                         && r.canvas_state
                             .canvases
                             .get(index)
                             .is_some_and(|layer| layer.revision() == revision)
-                        && r.document.mode.selected_group().max(0) as usize == group
                         && r.document
                             .session
                             .selected
@@ -630,7 +633,7 @@ pub(super) fn queue_geometry_panel(generation: u64, index: usize) {
                 })
             });
             if valid {
-                open_panel(group, false);
+                open_object_panel(target);
             }
         });
     }
@@ -785,12 +788,14 @@ impl Registry {
 
     /// Keep selection and parameter projection within the active toolbar entry.
     pub(super) fn sync_edit_scope(&mut self) {
+        if self.document.mode.is_mouse() {
+            // Also normalize restored documents, which do not enter through a tool click.
+            self.document.session.finish_rectangle_erase();
+            self.pending_edit_panel = false;
+            self.document.parameter_values.deselect();
+        }
         let scope = if self.document.mode.is_mouse() {
-            if self.screenshot.is_some() {
-                EditScope::All
-            } else {
-                EditScope::None
-            }
+            EditScope::None
         } else {
             tools::scope(
                 self.document.selected[self.document.mode.selected_group() as usize] as usize,
@@ -810,6 +815,15 @@ impl Registry {
     /// Apply the native input policy before exposing a new mode in the toolbar.
     pub(super) fn set_mode(&mut self, mode: InteractionMode) -> bool {
         if self.document.mode == mode {
+            if mode.is_mouse() {
+                cancel_active_gesture(self);
+                self.finish_style_edit();
+                if self.editor.window().is_some() {
+                    finish_text_edit_registry(self, true);
+                }
+                self.close_watermark_input();
+                self.close_panel();
+            }
             self.sync_edit_scope();
             cursor::refresh(self);
             self.sync_mode_display();
@@ -820,6 +834,15 @@ impl Registry {
         self.close_watermark_input();
         if self.editor.window().is_some() {
             finish_text_edit_registry(self, true);
+        }
+        if mode.is_mouse() {
+            self.close_panel();
+        }
+        if let Some((id, _)) = self.screenshot.as_ref().and_then(|e| e.pin) {
+            let _guards = self.pause_native_pointer_inputs();
+            if !crate::pinned_screenshot::set_edit_interaction(id, !mode.is_mouse()) {
+                return false;
+            }
         }
         if self.document.mode.is_mouse() != mode.is_mouse() {
             let mut changed = Vec::new();

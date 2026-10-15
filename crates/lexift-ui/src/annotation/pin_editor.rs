@@ -55,6 +55,7 @@ pub(crate) fn install(
         .unwrap_or_default();
     document.session = document.session.freeze_visible(&request.snapshot.session);
     document.mode = InteractionMode::Mouse;
+    document.session.set_edit_scope(EditScope::None);
     DOCUMENTS.with(|s| {
         s.borrow_mut().insert(
             id,
@@ -137,6 +138,7 @@ pub(crate) fn begin(id: u64, edit: u64) {
         r.close();
         std::mem::swap(&mut r.document, &mut stored.document);
         r.document.mode = InteractionMode::Mouse;
+        r.sync_edit_scope();
         let frames = Arc::new(
             std::iter::once((*stored.base).clone())
                 .chain(stored.samples.regions.iter().cloned())
@@ -158,7 +160,8 @@ pub(crate) fn begin(id: u64, edit: u64) {
             preview: None,
             revision: 0,
             presented: 0,
-            feedback_bounds: None,
+            feedback_placement: None,
+            toolbar_adjustment: 0,
         });
         r.canvas_state.canvases.push(CanvasLayer::pin(
             window.clone_strong(),
@@ -287,8 +290,7 @@ pub(crate) fn end(id: u64, edit: u64) {
         }
         r.document = recovery.document;
         r.lifecycle = recovery.lifecycle;
-        r.document.mode = InteractionMode::Mouse;
-        r.document.session.set_edit_scope(EditScope::All);
+        r.set_mode(InteractionMode::Mouse);
         r.toolbar_state.resume = Some((recovery.position, recovery.collapsed));
     });
     crate::pinned_screenshot::edit_window(id, false);

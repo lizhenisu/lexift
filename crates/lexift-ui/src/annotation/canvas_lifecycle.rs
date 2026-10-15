@@ -192,6 +192,16 @@ pub(super) fn show_canvas(r: &mut Registry, index: usize, attempt: u8) {
     }
     match preparation {
         PassiveWindowPreparation::Ready => {
+            if r.screenshot.as_ref().is_some_and(|e| e.pin.is_none())
+                && crate::screen_interaction::size_label::prepare(
+                    r.canvas_state.canvases[index].scale(),
+                    &r.lifecycle,
+                )
+                .is_err()
+            {
+                r.close();
+                return;
+            }
             r.canvas_state.canvases[index].bootstrap = CanvasBootstrap::Prepared;
         }
         PassiveWindowPreparation::Pending if attempt < 20 => {

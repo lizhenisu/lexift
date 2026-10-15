@@ -1660,8 +1660,8 @@ msgstr "文字背景"
 msgid "Finish annotation"
 msgstr "完成標註"
 
-msgid "Select objects"
-msgstr "選擇物件"
+msgid "Mouse mode"
+msgstr "滑鼠操作"
 
 msgid "Straight line"
 msgstr "直線"

@@ -138,6 +138,9 @@ pub(super) fn refresh_parameter_target(r: &mut Registry) {
 }
 
 pub(super) fn adopt_selected_style(r: &mut Registry, index: usize) -> bool {
+    if r.document.mode.is_mouse() {
+        return false;
+    }
     if !r
         .document
         .session
@@ -149,17 +152,7 @@ pub(super) fn adopt_selected_style(r: &mut Registry, index: usize) -> bool {
     }
     let object = &r.document.session.objects[index];
     let tool = object.kind.tool();
-    let group = if matches!(tool, 11 | 12) {
-        5
-    } else if tool == 10 {
-        4
-    } else if tool == 8 {
-        3
-    } else if tool >= 5 {
-        2
-    } else {
-        usize::from(tool >= 3)
-    };
+    let group = tools::group(tool);
     let preview_color = project_object_parameters(r, index);
     choice::close_if_context_changed(r);
     r.document.selected[group] = tool as i32;

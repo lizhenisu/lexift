@@ -1660,8 +1660,8 @@ msgstr "Fond du texte"
 msgid "Finish annotation"
 msgstr "Terminer l’annotation"
 
-msgid "Select objects"
-msgstr "Sélectionner des objets"
+msgid "Mouse mode"
+msgstr "Mode souris"
 
 msgid "Straight line"
 msgstr "Ligne droite"
