@@ -334,6 +334,7 @@ fn close_from(r: &mut Registry, reason: CloseReason, origin: super::focus::Origi
     if let Some(panel) = r.toolbar_state.panel.get() {
         panel.set_active_choice(-1);
     }
+    super::screenshot::refresh_help(r);
     if r.render_state
         .native_presenter
         .exclusions_changed(&super::capture_exclusions(r))
@@ -461,6 +462,7 @@ pub(super) fn open_watermark(
             target: None,
         });
         input.post(move || show(generation, panel_revision, revision, 0));
+        super::screenshot::refresh_help(r);
     });
 }
 
@@ -838,6 +840,7 @@ fn open_menu(
             target: Some(target),
         });
         input.post(move || show(generation, panel_revision, revision, 0));
+        super::screenshot::refresh_help(r);
     });
 }
 

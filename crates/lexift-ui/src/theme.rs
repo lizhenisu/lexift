@@ -22,6 +22,9 @@ pub(crate) fn from_index(index: i32) -> ThemePreference {
 pub(crate) fn set_current(theme: ThemePreference) {
     CURRENT.set(theme);
 }
+pub(crate) fn current_index() -> i32 {
+    index(CURRENT.get())
+}
 pub(crate) fn apply<T: ComponentHandle>(window: &T)
 where
     for<'a> crate::Colors<'a>: slint::Global<'a, T>,

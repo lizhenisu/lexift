@@ -3,7 +3,7 @@ use slint::platform::{
     Platform, WindowAdapter,
     software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
 };
-struct TestPlatform;
+pub(super) struct TestPlatform;
 impl Platform for TestPlatform {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
         Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer))
@@ -88,7 +88,7 @@ fn rendered_label(r: &Registry) -> crate::screen_interaction::size_label::Feedba
     );
     label
 }
-fn object(bounds: Bounds) -> Object {
+pub(super) fn object(bounds: Bounds) -> Object {
     Object {
         id: ObjectId::DRAFT,
         kind: Kind::Rectangle,
@@ -102,7 +102,7 @@ fn object(bounds: Bounds) -> Object {
         erased: vec![],
     }
 }
-fn lifecycle() -> WindowLifecycleCallbacks {
+pub(super) fn lifecycle() -> WindowLifecycleCallbacks {
     let mut l = WindowLifecycleCallbacks::new(
         |_, _| true,
         |_| true,
@@ -849,6 +849,7 @@ fn frozen_preview_masks_outside_annotations_and_export_excludes_controls() {
             capture: capture.clone(),
             crop,
             label: None,
+            help: None,
             hovered: None,
             crop_handles: true,
             crop_border: true,
@@ -1253,6 +1254,9 @@ fn screenshot_completed_frames_ignore_newer_input_and_reject_late_results() {
             presented: 0,
             feedback_placement: None,
             toolbar_adjustment: 0,
+            keyboard: Default::default(),
+            initial_focus: None,
+            help: Default::default(),
         });
     });
     let old = REGISTRY.with(|s| frame(s.borrow().as_ref().unwrap(), 0).unwrap());

@@ -141,17 +141,26 @@ pub enum RegionAdjustment {
     Resize(usize),
 }
 
+/// A physical-pixel crop operation. Resize keeps the top-left corner fixed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegionNudge {
+    Move { dx: i32, dy: i32 },
+    Resize { dw: i32, dh: i32 },
+}
+
 /// Mutable crop rectangle. Content remains in screen coordinates when the crop changes.
 #[derive(Default)]
 pub struct RegionEditor {
     bounds: Option<Rect>,
     drag: Option<(Rect, Point, Option<usize>)>,
+    keyboard_origin: Option<Rect>,
 }
 impl RegionEditor {
     pub fn new(bounds: Rect) -> Self {
         Self {
             bounds: Some(bounds),
             drag: None,
+            keyboard_origin: None,
         }
     }
     pub fn bounds(&self) -> Option<Rect> {
@@ -186,6 +195,9 @@ impl RegionEditor {
             .or(body.then_some(RegionAdjustment::Move))
     }
     pub fn begin(&mut self, point: Point, scale: f32, allow_body: bool) -> bool {
+        if self.keyboard_origin.is_some() {
+            return false;
+        }
         let Some(hit) = self.hit(point, scale, allow_body) else {
             return false;
         };
@@ -200,30 +212,68 @@ impl RegionEditor {
         let Some((b, start, handle)) = self.drag else {
             return;
         };
+        if handle.is_none() {
+            self.bounds = Some(translated(
+                b,
+                point.x.saturating_sub(start.x),
+                point.y.saturating_sub(start.y),
+                desktop,
+            ));
+            return;
+        }
         let geometry = super::annotation::Bounds {
             left: b.left as f32,
             top: b.top as f32,
             right: b.right as f32,
             bottom: b.bottom as f32,
         };
-        let changed = if let Some(h) = handle {
-            geometry.resized(h, (point.x as f32, point.y as f32))
-        } else {
-            let dx = (point.x - start.x).clamp(desktop.left - b.left, desktop.right - b.right);
-            let dy = (point.y - start.y).clamp(desktop.top - b.top, desktop.bottom - b.bottom);
-            super::annotation::Bounds {
-                left: (b.left + dx) as f32,
-                top: (b.top + dy) as f32,
-                right: (b.right + dx) as f32,
-                bottom: (b.bottom + dy) as f32,
-            }
-        };
+        let changed = geometry.resized(handle.unwrap(), (point.x as f32, point.y as f32));
         self.bounds = Some(Rect {
             left: (changed.left.round() as i32).max(desktop.left),
             top: (changed.top.round() as i32).max(desktop.top),
             right: (changed.right.round() as i32).min(desktop.right),
             bottom: (changed.bottom.round() as i32).min(desktop.bottom),
         });
+    }
+    pub fn keyboard_adjusting(&self) -> bool {
+        self.keyboard_origin.is_some()
+    }
+    pub fn begin_keyboard(&mut self) -> bool {
+        if self.drag.is_some() || self.bounds.is_none() {
+            return false;
+        }
+        if self.keyboard_origin.is_none() {
+            self.keyboard_origin = self.bounds;
+        }
+        true
+    }
+    /// Apply one message without DPI scaling; return whether geometry actually changed.
+    pub fn nudge(&mut self, action: RegionNudge, desktop: Rect) -> bool {
+        if self.keyboard_origin.is_none() {
+            return false;
+        }
+        let b = self.bounds.unwrap();
+        let next = match action {
+            RegionNudge::Move { dx, dy } => translated(b, dx, dy, desktop),
+            RegionNudge::Resize { dw, dh } => Rect {
+                right: b.right.saturating_add(dw).clamp(b.left + 1, desktop.right),
+                bottom: b.bottom.saturating_add(dh).clamp(b.top + 1, desktop.bottom),
+                ..b
+            },
+        };
+        self.bounds = Some(next);
+        next != b
+    }
+    pub fn finish_keyboard(&mut self) {
+        self.keyboard_origin = None;
+    }
+    pub fn cancel_keyboard(&mut self) -> bool {
+        if let Some(original) = self.keyboard_origin.take() {
+            self.bounds = Some(original);
+            true
+        } else {
+            false
+        }
     }
     pub fn finish(&mut self) {
         self.drag = None;
@@ -238,9 +288,138 @@ impl RegionEditor {
     }
 }
 
+fn translated(b: Rect, dx: i32, dy: i32, desktop: Rect) -> Rect {
+    let dx = dx.clamp(desktop.left - b.left, desktop.right - b.right);
+    let dy = dy.clamp(desktop.top - b.top, desktop.bottom - b.bottom);
+    Rect {
+        left: b.left + dx,
+        right: b.right + dx,
+        top: b.top + dy,
+        bottom: b.bottom + dy,
+    }
+}
+
 #[cfg(test)]
 mod editor_tests {
     use super::*;
+    #[test]
+    fn keyboard_physical_steps_limits_and_cancel_snapshot() {
+        let desktop = Rect {
+            left: -1920,
+            top: -200,
+            right: 2560,
+            bottom: 1440,
+        };
+        let original = Rect {
+            left: -30,
+            top: 50,
+            right: 170,
+            bottom: 150,
+        };
+        for step in [1, 10] {
+            for (dx, dy) in [(-step, 0), (step, 0), (0, -step), (0, step)] {
+                let mut e = RegionEditor::new(original);
+                assert!(!e.nudge(RegionNudge::Move { dx, dy }, desktop));
+                assert!(e.begin_keyboard());
+                assert!(e.nudge(RegionNudge::Move { dx, dy }, desktop));
+                let b = e.bounds().unwrap();
+                assert_eq!(
+                    b,
+                    Rect {
+                        left: original.left + dx,
+                        right: original.right + dx,
+                        top: original.top + dy,
+                        bottom: original.bottom + dy
+                    }
+                );
+                assert!(e.begin_keyboard()); // repeats retain the first snapshot
+                assert!(e.nudge(
+                    RegionNudge::Resize {
+                        dw: step,
+                        dh: -step
+                    },
+                    desktop
+                ));
+                assert!(e.cancel_keyboard());
+                assert_eq!(e.bounds(), Some(original));
+                assert!(!e.cancel_keyboard());
+            }
+            for (dw, dh) in [(-step, 0), (step, 0), (0, -step), (0, step)] {
+                let mut e = RegionEditor::new(original);
+                e.begin_keyboard();
+                assert!(e.nudge(RegionNudge::Resize { dw, dh }, desktop));
+                assert_eq!(
+                    e.bounds(),
+                    Some(Rect {
+                        right: original.right + dw,
+                        bottom: original.bottom + dh,
+                        ..original
+                    })
+                );
+                e.finish_keyboard();
+                assert!(!e.cancel_keyboard());
+            }
+        }
+        let mut e = RegionEditor::new(original);
+        e.begin_keyboard();
+        e.nudge(
+            RegionNudge::Move {
+                dx: i32::MIN,
+                dy: i32::MAX,
+            },
+            desktop,
+        );
+        let edge = e.bounds().unwrap();
+        assert_eq!((edge.left, edge.bottom), (desktop.left, desktop.bottom));
+        assert_eq!((edge.right - edge.left, edge.bottom - edge.top), (200, 100));
+        assert!(!e.nudge(RegionNudge::Move { dx: -10, dy: 10 }, desktop));
+        e.nudge(
+            RegionNudge::Resize {
+                dw: i32::MIN,
+                dh: i32::MIN,
+            },
+            desktop,
+        );
+        let tiny = e.bounds().unwrap();
+        assert_eq!((tiny.right - tiny.left, tiny.bottom - tiny.top), (1, 1));
+        assert!(!e.nudge(RegionNudge::Resize { dw: -1, dh: -10 }, desktop));
+        e.nudge(
+            RegionNudge::Resize {
+                dw: i32::MAX,
+                dh: i32::MAX,
+            },
+            desktop,
+        );
+        assert_eq!(
+            e.bounds(),
+            Some(Rect {
+                right: desktop.right,
+                bottom: desktop.bottom,
+                ..tiny
+            })
+        );
+        assert!(!e.nudge(RegionNudge::Resize { dw: 10, dh: 10 }, desktop));
+        e.cancel_keyboard();
+        assert_eq!(e.bounds(), Some(original));
+    }
+    #[test]
+    fn pointer_and_keyboard_transactions_are_exclusive() {
+        let b = Rect {
+            left: 0,
+            top: 0,
+            right: 100,
+            bottom: 100,
+        };
+        let mut e = RegionEditor::new(b);
+        assert!(e.begin(Point { x: 50, y: 50 }, 1., true));
+        assert!(!e.begin_keyboard());
+        e.finish();
+        assert!(e.begin_keyboard());
+        assert!(!e.begin(Point { x: 50, y: 50 }, 1., true));
+        e.finish_keyboard();
+        assert!(e.begin(Point { x: 50, y: 50 }, 1., true));
+        assert!(!RegionEditor::default().begin_keyboard());
+    }
     #[test]
     fn crop_move_resize_all_handles_cancel_and_limits() {
         let original = Rect {

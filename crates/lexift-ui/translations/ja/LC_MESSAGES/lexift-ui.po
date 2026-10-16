@@ -1731,3 +1731,36 @@ msgstr "注釈を付ける"
 
 msgid "Hide annotations"
 msgstr "注釈を非表示"
+
+msgid "Drag"
+msgstr "ドラッグ"
+
+msgid "Mouse"
+msgstr "マウス"
+
+msgid "Drag to select a region"
+msgstr "範囲を選択"
+
+msgid "Cancel, or right-click"
+msgstr "キャンセル、または右クリック"
+
+msgid "Move selection by 1px"
+msgstr "選択範囲を1px移動"
+
+msgid "Move selection by 10px"
+msgstr "選択範囲を10px移動"
+
+msgid "Resize selection by 1px"
+msgstr "サイズを1px変更"
+
+msgid "Resize selection by 10px"
+msgstr "サイズを10px変更"
+
+msgid "Cancel adjustment or exit screenshot"
+msgstr "調整を取り消す／撮影を終了"
+
+msgid "Use the current annotation tool"
+msgstr "現在の注釈ツールを使用"
+
+msgid "Cancel operation or exit screenshot"
+msgstr "操作を取り消す／撮影を終了"

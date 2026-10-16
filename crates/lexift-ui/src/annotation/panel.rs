@@ -6,6 +6,7 @@ use slint::ComponentHandle;
 use std::rc::Rc;
 
 pub(super) enum Input {
+    FocusChanged,
     Finished {
         confirmed: bool,
         origin: Origin,
@@ -38,6 +39,8 @@ pub(super) fn bind_input(
     receive: Rc<dyn Fn(Input)>,
 ) {
     let queue = input.receiver(receive);
+    let focus = queue.clone();
+    panel.on_parameter_input_state_changed(move || focus(Input::FocusChanged));
     let finished = queue.clone();
     let at = origin.clone();
     panel.on_parameter_input_finished(move |confirmed| {

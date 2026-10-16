@@ -1731,3 +1731,36 @@ msgstr "Annotate"
 
 msgid "Hide annotations"
 msgstr "Hide annotations"
+
+msgid "Drag"
+msgstr "Drag"
+
+msgid "Mouse"
+msgstr "Mouse"
+
+msgid "Drag to select a region"
+msgstr "Drag to select a region"
+
+msgid "Cancel, or right-click"
+msgstr "Cancel, or right-click"
+
+msgid "Move selection by 1px"
+msgstr "Move selection by 1px"
+
+msgid "Move selection by 10px"
+msgstr "Move selection by 10px"
+
+msgid "Resize selection by 1px"
+msgstr "Resize selection by 1px"
+
+msgid "Resize selection by 10px"
+msgstr "Resize selection by 10px"
+
+msgid "Cancel adjustment or exit screenshot"
+msgstr "Cancel adjustment or exit screenshot"
+
+msgid "Use the current annotation tool"
+msgstr "Use the current annotation tool"
+
+msgid "Cancel operation or exit screenshot"
+msgstr "Cancel operation or exit screenshot"

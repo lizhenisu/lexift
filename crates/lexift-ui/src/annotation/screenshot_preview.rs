@@ -12,6 +12,7 @@ pub(super) struct Input {
     pub capture: Arc<ScreenCaptureFrame>,
     pub crop: Rect,
     pub label: Option<crate::screen_interaction::size_label::Feedback>,
+    pub help: Option<crate::screen_interaction::screenshot_help::Feedback>,
     pub hovered: Option<usize>,
     pub crop_handles: bool,
     pub crop_border: bool,
@@ -171,6 +172,9 @@ fn paint_cached(
                 snapshot.scale,
             );
         }
+    }
+    if let Some(help) = &input.help {
+        help.paint(&mut pixmap, monitor);
     }
     if let Some(label) = &input.label {
         if label.crop != input.crop {
@@ -418,6 +422,7 @@ mod timing_tests {
                 bottom: 400,
             },
             label: None,
+            help: None,
             hovered: None,
             crop_handles: true,
             crop_border: true,

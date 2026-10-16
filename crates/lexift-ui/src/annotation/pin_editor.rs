@@ -162,6 +162,9 @@ pub(crate) fn begin(id: u64, edit: u64) {
             presented: 0,
             feedback_placement: None,
             toolbar_adjustment: 0,
+            keyboard: Default::default(),
+            initial_focus: None,
+            help: Default::default(),
         });
         r.canvas_state.canvases.push(CanvasLayer::pin(
             window.clone_strong(),

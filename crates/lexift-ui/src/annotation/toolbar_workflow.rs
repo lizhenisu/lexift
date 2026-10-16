@@ -179,7 +179,10 @@ pub(super) fn show_main(generation: u64, revision: u64, attempt: u8) {
                     r.queue_render();
                 }
                 r.canvas_state.pending_displays.clear();
-                slint::Timer::single_shot(Duration::ZERO, screenshot::toolbar_ready);
+                let revision = r.toolbar_state.main.revision();
+                slint::Timer::single_shot(Duration::ZERO, move || {
+                    screenshot::toolbar_ready(generation, revision)
+                });
                 // Build the empty native scene while the canvases are ready,
                 // before the first drag has to pay for software/native handoff.
                 // Submission remains asynchronous; no capture or UI wait is added.
@@ -514,6 +517,7 @@ fn open_panel_entry(group: usize, menu: bool, object: Option<ObjectId>) {
                 .on_font_retry_requested(move || font_workflow::retry(generation, panel_revision));
         }
         r.toolbar_state.group = Some(group);
+        screenshot::refresh_help(r);
         r.toolbar_state
             .panel
             .prepare_after(Duration::ZERO, move || {
@@ -526,6 +530,13 @@ fn open_panel_entry(group: usize, menu: bool, object: Option<ObjectId>) {
 /// remain session decisions rather than component callback responsibilities.
 pub(super) fn apply_panel_input(generation: u64, revision: u64, group: usize, event: panel::Input) {
     match event {
+        panel::Input::FocusChanged => REGISTRY.with(|slot| {
+            if let Some(r) = slot.borrow_mut().as_mut().filter(|r| {
+                r.generation == generation && r.toolbar_state.panel.revision() == revision
+            }) {
+                screenshot::refresh_help(r);
+            }
+        }),
         panel::Input::Finished { confirmed, origin } => REGISTRY.with(|slot| {
             if let Some(r) = slot.borrow().as_ref().filter(|r| {
                 r.generation == generation && r.toolbar_state.panel.revision() == revision
@@ -554,6 +565,7 @@ pub(super) fn apply_panel_input(generation: u64, revision: u64, group: usize, ev
                     r.finish_style_edit();
                 }
                 r.parameter_edit.set_dragging(active);
+                screenshot::refresh_help(r);
                 if !active {
                     r.finish_style_edit();
                     restore_editor_focus_from(r, focus::Activation::UserRequested, origin);
@@ -664,6 +676,7 @@ pub(super) fn open_watermark_input_from(generation: u64, request_origin: focus::
             return;
         };
         let revision = r.toolbar_state.watermark.open(editor);
+        screenshot::refresh_help(r);
         watermark::bind_input(
             r.toolbar_state.watermark.get().unwrap(),
             r.toolbar_state.watermark.input(),
@@ -1587,6 +1600,7 @@ impl Registry {
         });
         choice::close_watermark(self);
         self.toolbar_state.watermark.clear();
+        screenshot::refresh_help(self);
         if self
             .render_state
             .native_presenter
@@ -1616,6 +1630,7 @@ impl Registry {
             }
         }
         self.toolbar_state.panel.clear();
+        screenshot::refresh_help(self);
         if self
             .render_state
             .native_presenter

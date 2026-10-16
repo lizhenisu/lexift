@@ -43,6 +43,7 @@ struct Registry {
     handler: Option<Rc<dyn Fn(SelectionEvent)>>,
     generation: u64,
     screenshot: bool,
+    help: super::screenshot_help::State,
     phase: HostPhase,
     windows: Vec<Host<OcrSelectionWindow>>,
     gesture: RegionSelection,
@@ -62,6 +63,7 @@ pub(crate) fn init(
             handler: None,
             generation: 0,
             screenshot: false,
+            help: Default::default(),
             phase: HostPhase::Idle,
             windows: vec![],
             gesture: RegionSelection::default(),
@@ -93,6 +95,7 @@ pub(crate) fn close() {
         if let Some(r) = s.borrow_mut().as_mut() {
             r.timer.stop();
             r.gesture.cancel();
+            r.help = Default::default();
             r.frames = None;
             r.native_handoff.clear();
             r.windows.clear();
@@ -264,13 +267,37 @@ fn prepare(generation: u64) {
             }
         }
         if r.screenshot {
+            if let Some(point) = (r.lifecycle.toolbar_cursor_position)()
+                && let Some(host) = r.windows.iter().find(|h| {
+                    point.x >= h.bounds.left
+                        && point.x < h.bounds.right
+                        && point.y >= h.bounds.top
+                        && point.y < h.bounds.bottom
+                })
+            {
+                r.help.pointer(host.bounds, Some(point));
+            }
             for host in &r.windows {
+                let area = (r.lifecycle.popup_work_area)(Point {
+                    x: host.bounds.left,
+                    y: host.bounds.top,
+                })
+                .unwrap_or(host.bounds);
                 if super::size_label::prepare(host.window.window().scale_factor(), &r.lifecycle)
+                    .is_err()
+                    || super::screenshot_help::prepare(
+                        host.window.window().scale_factor(),
+                        area,
+                        &r.lifecycle,
+                    )
                     .is_err()
                 {
                     return Some(false);
                 }
             }
+        }
+        if r.screenshot {
+            sync_help(r);
         }
         for (index, host) in r.windows.iter().enumerate() {
             let window = &host.window;
@@ -406,6 +433,26 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
             }
         };
         match event {
+            PopupPointerInput::Moved { x, y }
+            | PopupPointerInput::LeftPressed { x, y }
+            | PopupPointerInput::LeftReleased { x, y } => {
+                let p = point(x, y);
+                let host = r
+                    .windows
+                    .iter()
+                    .find(|h| {
+                        p.x >= h.bounds.left
+                            && p.x < h.bounds.right
+                            && p.y >= h.bounds.top
+                            && p.y < h.bounds.bottom
+                    })
+                    .map_or(bounds, |h| h.bounds);
+                r.help.pointer(host, Some(p));
+            }
+            PopupPointerInput::Exited => r.help.pointer(bounds, None),
+            _ => {}
+        }
+        match event {
             PopupPointerInput::LeftPressed { x, y } => {
                 r.gesture.begin(point(x, y));
             }
@@ -484,10 +531,47 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
             }
             _ => {}
         }
+        if r.screenshot {
+            sync_help(r);
+        }
     });
     if let Some(event) = outcome {
         close();
         emit(event);
+    }
+}
+
+fn sync_help(r: &Registry) {
+    let screens = r
+        .windows
+        .iter()
+        .map(|h| (h.bounds, h.window.window().scale_factor()))
+        .collect::<Vec<_>>();
+    let host = r.help.host().or_else(|| screens.first().map(|s| s.0));
+    let area = host.and_then(|h| {
+        (r.lifecycle.popup_work_area)(Point {
+            x: h.left,
+            y: h.top,
+        })
+    });
+    let help = r.help.feedback(
+        &screens,
+        area,
+        super::screenshot_help::Stage::Select,
+        r.gesture.bounds(),
+        false,
+    );
+    for host in &r.windows {
+        let window = &host.window;
+        window.set_help_visible(false);
+        if let Some(help) = help.as_ref().filter(|h| h.host == host.bounds) {
+            let scale = window.window().scale_factor();
+            window.set_help_left((help.bounds.left - host.bounds.left) as f32 / scale);
+            window.set_help_top((help.bounds.top - host.bounds.top) as f32 / scale);
+            window.set_help_width((help.bounds.right - help.bounds.left) as f32 / scale);
+            window.set_help_height((help.bounds.bottom - help.bounds.top) as f32 / scale);
+            window.set_help_visible(true);
+        }
     }
 }
 
@@ -719,6 +803,77 @@ mod tests {
         ));
         sync(8, HostPhase::Idle);
         show(7, frames);
+        assert!(!active());
+    }
+    #[test]
+    fn screenshot_help_tracks_physical_input_across_capture_hosts_and_avoids_active_crop() {
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        init(|_| PassiveWindowPreparation::Ready, lifecycle());
+        sync(41, HostPhase::Capturing);
+        set_screenshot(true);
+        let a = Rect {
+            left: -800,
+            top: 0,
+            right: 0,
+            bottom: 600,
+        };
+        let b = Rect {
+            left: 0,
+            top: 0,
+            right: 1000,
+            bottom: 800,
+        };
+        show(
+            41,
+            Arc::new(vec![
+                CapturedRegion {
+                    bounds: a,
+                    pixels: vec![180; 800 * 600 * 4],
+                },
+                CapturedRegion {
+                    bounds: b,
+                    pixels: vec![180; 1000 * 800 * 4],
+                },
+            ]),
+        );
+        prepare(41);
+        let visible = || {
+            STATE.with(|s| {
+                s.borrow()
+                    .as_ref()
+                    .unwrap()
+                    .windows
+                    .iter()
+                    .filter(|h| h.window.get_help_visible())
+                    .map(|h| h.bounds)
+                    .collect::<Vec<_>>()
+            })
+        };
+        pointer(41, a, 1., PopupPointerInput::Moved { x: 600., y: 100. });
+        assert_eq!(visible(), vec![a]);
+        // Capture can keep delivering coordinates through A while the physical pointer is on B.
+        pointer(41, a, 1., PopupPointerInput::Moved { x: 1000., y: 100. });
+        assert_eq!(visible(), vec![b]);
+        let (x, y) = STATE.with(|s| {
+            let s = s.borrow();
+            let h = &s.as_ref().unwrap().windows[1];
+            (h.window.get_help_left() + 3., h.window.get_help_top() + 3.)
+        });
+        pointer(41, b, 1., PopupPointerInput::Moved { x, y });
+        assert!(visible().is_empty());
+        pointer(41, b, 1., PopupPointerInput::Moved { x: 700., y: 100. });
+        assert_eq!(visible(), vec![b]);
+        pointer(40, a, 1., PopupPointerInput::Moved { x: 600., y: 100. });
+        assert_eq!(visible(), vec![b]);
+        pointer(41, b, 1., PopupPointerInput::LeftPressed { x, y });
+        pointer(41, b, 1., PopupPointerInput::Moved { x: 700., y: 100. });
+        assert!(
+            visible().is_empty(),
+            "active crop hides help even when the pointer is far away"
+        );
+        close();
+        assert!(!active());
+        pointer(41, b, 1., PopupPointerInput::Moved { x: 700., y: 100. });
         assert!(!active());
     }
     #[test]

@@ -1,8 +1,14 @@
 import { ScreenshotSizeLabel } from "screenshot-size-label.slint";
+import { ScreenshotHelp } from "screenshot-help.slint";
 import { Metrics } from "design/metrics.slint";
 import { RegionPreview, ScreenInteractionHint } from "screen-interaction.slint";
 export component OcrSelectionWindow inherits Window {
     in property <bool> screenshot-mode: false;
+    in property <bool> help-visible;
+    in property <length> help-left;
+    in property <length> help-top;
+    in property <length> help-width;
+    in property <length> help-height;
     in property <string> size-text;
     in property <bool> size-visible;
     in property <length> size-left;
@@ -24,13 +30,16 @@ export component OcrSelectionWindow inherits Window {
         selecting: root.selecting; left: root.selection-left; top: root.selection-top;
         selection-width: root.selection-width; selection-height: root.selection-height;
     }
+    if root.screenshot-mode && root.help-visible: ScreenshotHelp {
+        x: root.help-left; y: root.help-top; width: root.help-width; height: root.help-height; stage: 0;
+    }
     if root.screenshot-mode && root.size-visible: ScreenshotSizeLabel {
         x:root.size-left; y:root.size-top; width:root.size-width; height:root.size-height; text:root.size-text;
     }
-    ScreenInteractionHint {
+    if !root.screenshot-mode: ScreenInteractionHint {
         width: min(parent.width - 32px, Metrics.ocr-hint-max-width);
         x: max(8px,(parent.width - self.width)/2); y: 24px;
-        text: root.screenshot-mode ? @tr("Drag to select. Escape or right-click to cancel.") : @tr("Drag to select. Release to translate. Escape or right-click to cancel.");
+        text: @tr("Drag to select. Release to translate. Escape or right-click to cancel.");
     }
     callback cancelled();
     TouchArea { mouse-cursor: crosshair; pointer-event(event) => { if event.button == PointerEventButton.right && event.kind == PointerEventKind.down { root.cancelled(); } } }

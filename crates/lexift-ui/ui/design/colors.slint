@@ -1,6 +1,10 @@
 import { Palette } from "std-widgets.slint";
 
 export global Colors {
+    out property <color> screen-help-background: #202124ee;
+    out property <color> screen-help-foreground: #ffffff;
+    out property <color> screen-help-key-background: #f1f3f4;
+    out property <color> screen-help-key-foreground: #202124;
     // 0 = Light, 1 = Dark, 2 = System. Keep Palette's native binding intact.
     in property <int> preference: 0;
     out property <bool> dark: preference == 1 || (preference == 2 && Palette.color-scheme == ColorScheme.dark);

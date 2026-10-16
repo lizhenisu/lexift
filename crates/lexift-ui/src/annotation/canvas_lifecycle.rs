@@ -113,6 +113,11 @@ pub(super) fn create_canvas(r: &mut Registry, index: usize) {
         canvas::Surface::Canvas(w) => w,
         canvas::Surface::Pin(_) => unreachable!(),
     };
+    window.on_region_key(screenshot::keyboard::bind(
+        window.window(),
+        generation,
+        screenshot::keyboard::Owner::Canvas(index, revision),
+    ));
     window.on_pointer(move |kind, x, y| {
         if canvas_current(generation, index, revision) {
             canvas_pointer(index, kind, x, y);
@@ -201,6 +206,36 @@ pub(super) fn show_canvas(r: &mut Registry, index: usize, attempt: u8) {
             {
                 r.close();
                 return;
+            }
+            if r.screenshot.as_ref().is_some_and(|e| e.pin.is_none()) {
+                let host = r.canvas_state.canvases[index].bounds;
+                let area = (r.lifecycle.popup_work_area)(Point {
+                    x: host.left,
+                    y: host.top,
+                })
+                .unwrap_or(host);
+                if crate::screen_interaction::screenshot_help::prepare(
+                    r.canvas_state.canvases[index].scale(),
+                    area,
+                    &r.lifecycle,
+                )
+                .is_err()
+                {
+                    r.close();
+                    return;
+                }
+                if let Some(point) = (r.lifecycle.toolbar_cursor_position)()
+                    && point.x >= host.left
+                    && point.x < host.right
+                    && point.y >= host.top
+                    && point.y < host.bottom
+                {
+                    r.screenshot
+                        .as_mut()
+                        .unwrap()
+                        .help
+                        .pointer(host, Some(point));
+                }
             }
             r.canvas_state.canvases[index].bootstrap = CanvasBootstrap::Prepared;
         }

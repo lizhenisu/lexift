@@ -77,6 +77,7 @@ fn fixture(scale: f32) -> Input {
             bottom: 190,
         },
         label: None,
+        help: None,
         hovered: None,
         crop_handles: true,
         crop_border: true,
@@ -89,6 +90,48 @@ fn set_label(input: &mut Input) {
         &[(input.snapshot.monitor, input.snapshot.scale)],
         Some(input.snapshot.monitor),
     );
+}
+
+#[test]
+fn screenshot_help_is_frozen_with_preview_reuses_base_and_never_enters_clean_output() {
+    use crate::screen_interaction::screenshot_help::{self as help, Stage};
+    prepare_font_fixture(1.25, false);
+    let mut input = fixture(1.25);
+    let monitor = input.snapshot.monitor;
+    help::prepare(1.25, monitor, &lifecycle()).unwrap();
+    let mut state = help::State::default();
+    state.pointer(
+        monitor,
+        Some(lexift_core::domain::geometry::Point { x: 480, y: -60 }),
+    );
+    input.help = state.feedback(&[(monitor, 1.25)], None, Stage::Mouse, None, false);
+    let b = input.help.as_ref().unwrap().bounds;
+    let x = (b.left - monitor.left + 20) as u32;
+    let y = (b.top - monitor.top + 10) as u32;
+    let mut cache = Cache::default();
+    let cancelled = AtomicBool::new(false);
+    let visible = paint_cached(&input, &cancelled, &mut cache, true).unwrap();
+    let clean = paint_cached(&input, &cancelled, &mut cache, false).unwrap();
+    assert_ne!(visible.pixel(x, y), clean.pixel(x, y));
+    // A completed frame retains the old pixels; later mouse input cannot alter that frame.
+    state.pointer(
+        monitor,
+        Some(lexift_core::domain::geometry::Point {
+            x: b.left,
+            y: b.top,
+        }),
+    );
+    input.help = state.feedback(&[(monitor, 1.25)], None, Stage::Mouse, None, false);
+    assert!(input.help.is_none());
+    let hidden = paint_cached(&input, &cancelled, &mut cache, true).unwrap();
+    assert_ne!(hidden.pixel(x, y), visible.pixel(x, y));
+    assert_eq!(
+        cache.builds, 1,
+        "help visibility must not rebuild annotations or effects"
+    );
+    let clean_after = paint_cached(&input, &cancelled, &mut cache, false).unwrap();
+    assert_eq!(clean.data(), clean_after.data());
+    help::clear();
 }
 fn label_pixel(input: &Input, frame: &tiny_skia::Pixmap, dark: bool) {
     let label = input.label.as_ref().unwrap();

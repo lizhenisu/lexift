@@ -1731,3 +1731,36 @@ msgstr "标注"
 
 msgid "Hide annotations"
 msgstr "隐藏标注"
+
+msgid "Drag"
+msgstr "拖动"
+
+msgid "Mouse"
+msgstr "鼠标"
+
+msgid "Drag to select a region"
+msgstr "框选区域"
+
+msgid "Cancel, or right-click"
+msgstr "取消，也可右键取消"
+
+msgid "Move selection by 1px"
+msgstr "移动选区 1px"
+
+msgid "Move selection by 10px"
+msgstr "移动选区 10px"
+
+msgid "Resize selection by 1px"
+msgstr "调整尺寸 1px"
+
+msgid "Resize selection by 10px"
+msgstr "调整尺寸 10px"
+
+msgid "Cancel adjustment or exit screenshot"
+msgstr "取消调整或退出截图"
+
+msgid "Use the current annotation tool"
+msgstr "使用当前标注工具"
+
+msgid "Cancel operation or exit screenshot"
+msgstr "取消操作或退出截图"

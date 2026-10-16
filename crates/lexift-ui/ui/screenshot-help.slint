@@ -1,0 +1,71 @@
+import { Colors } from "design/colors.slint";
+import { Metrics } from "design/metrics.slint";
+
+struct HelpRow { key: string, description: string }
+// Read-only feedback shared by the live selection host and cached editor textures.
+export component ScreenshotHelp inherits Rectangle {
+    in property <int> stage;
+    in property <float> render-scale: 1;
+    private property <length> key-width: (root.stage == 1 ? Metrics.screen-help-key-width : Metrics.screen-help-small-key-width) * root.render-scale;
+    private property <[HelpRow]> rows: root.stage == 0 ? [
+        { key: @tr("Drag"), description: @tr("Drag to select a region") },
+        { key: "Esc", description: @tr("Cancel, or right-click") },
+    ] : root.stage == 1 ? [
+        { key: "← ↑ ↓ →", description: @tr("Move selection by 1px") },
+        { key: "Shift + ← ↑ ↓ →", description: @tr("Move selection by 10px") },
+        { key: "Ctrl + ← ↑ ↓ →", description: @tr("Resize selection by 1px") },
+        { key: "Ctrl+Shift+←↑↓→", description: @tr("Resize selection by 10px") },
+        { key: "Esc", description: @tr("Cancel adjustment or exit screenshot") },
+    ] : [
+        { key: @tr("Mouse"), description: @tr("Use the current annotation tool") },
+        { key: "Ctrl + Z", description: @tr("Undo") },
+        { key: "Esc", description: @tr("Cancel operation or exit screenshot") },
+    ];
+    background: Colors.screen-help-background;
+    out property <length> natural-width: root.key-width + (2 * Metrics.screen-help-inset + Metrics.screen-help-gap) * root.render-scale + max(m0.preferred-width,m1.preferred-width,m2.preferred-width,m3.preferred-width,m4.preferred-width);
+    m0 := Text { visible:false; text:root.rows[0].description; font-size:Metrics.screen-help-font-size * root.render-scale; }
+    m1 := Text { visible:false; text:root.rows[1].description; font-size:Metrics.screen-help-font-size * root.render-scale; }
+    m2 := Text { visible:false; text:root.rows.length > 2 ? root.rows[2].description : ""; font-size:Metrics.screen-help-font-size * root.render-scale; }
+    m3 := Text { visible:false; text:root.rows.length > 3 ? root.rows[3].description : ""; font-size:Metrics.screen-help-font-size * root.render-scale; }
+    m4 := Text { visible:false; text:root.rows.length > 4 ? root.rows[4].description : ""; font-size:Metrics.screen-help-font-size * root.render-scale; }
+    border-radius: Metrics.screen-help-radius * root.render-scale;
+    preferred-height: body.preferred-height + 2 * Metrics.screen-help-inset * root.render-scale;
+    body := VerticalLayout {
+        x: Metrics.screen-help-inset * root.render-scale;
+        y: Metrics.screen-help-inset * root.render-scale;
+        width: parent.width - 2 * self.x;
+        height: parent.height - 2 * self.y;
+        spacing: 6px * root.render-scale;
+        for row in root.rows: HorizontalLayout {
+            spacing: Metrics.screen-help-gap * root.render-scale;
+            Rectangle {
+                width: root.key-width;
+                height: max(22px * root.render-scale, description.preferred-height);
+                background: transparent;
+                Rectangle {
+                    width: parent.width; height: 22px * root.render-scale;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 4px * root.render-scale;
+                    background: Colors.screen-help-key-background;
+                    Text { text: row.key; font-size: Metrics.screen-help-font-size * root.render-scale;
+                        color: Colors.screen-help-key-foreground; horizontal-alignment: center;
+                        vertical-alignment: center; width: parent.width; height: parent.height; }
+                }
+            }
+            description := Text {
+                text: row.description; wrap: word-wrap; vertical-alignment: center;
+                font-size: Metrics.screen-help-font-size * root.render-scale;
+                color: Colors.screen-help-foreground;
+            }
+        }
+    }
+}
+// Used only for hidden, bounded preparation; never shown or retained as a visible HWND.
+export component ScreenshotHelpTextureWindow inherits Window {
+    no-frame: true; background: transparent;
+    in property <int> stage;
+    in property <float> render-scale: 1;
+    out property <float> content-height: panel.preferred-height / 1px;
+    out property <float> content-width: panel.natural-width / 1px;
+    panel := ScreenshotHelp { width: parent.width; height: parent.height; stage: root.stage; render-scale: root.render-scale; }
+}

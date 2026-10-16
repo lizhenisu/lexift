@@ -16,6 +16,9 @@ use std::sync::atomic::AtomicBool;
 
 pub(super) use super::frozen_editor::{Editing, frame, render};
 
+#[path = "screenshot_keyboard.rs"]
+pub(super) mod keyboard;
+
 struct Recovery {
     document: editor_document::EditorDocument,
     position: slint::PhysicalPosition,
@@ -57,11 +60,14 @@ pub(crate) fn sync(state: &ScreenshotState) {
         slint::Timer::single_shot(Duration::ZERO, move || show_feedback(&state));
     }
     REGISTRY.with(|slot| {
-        if let Some(r) = slot.borrow().as_ref()
-            && let Some(main) = r.toolbar_state.main.get()
-        {
-            main.set_output_busy(state.phase == ScreenshotPhase::Output);
-            main.set_feedback(state.error.as_deref().unwrap_or("").into());
+        if let Some(r) = slot.borrow_mut().as_mut() {
+            if let Some(main) = r.toolbar_state.main.get() {
+                main.set_output_busy(state.phase == ScreenshotPhase::Output);
+                main.set_feedback(state.error.as_deref().unwrap_or("").into());
+            }
+            if r.screenshot.is_some() {
+                r.queue_render();
+            }
         }
     });
 }
@@ -140,6 +146,7 @@ pub(crate) fn show(
         return;
     }
     crate::screen_interaction::size_label::clear();
+    crate::screen_interaction::screenshot_help::clear();
     crate::pinned_screenshot::set_frozen(true);
     FLOW.with(|s| s.borrow_mut().frames = Some(frames.clone()));
     selection_host::set_screenshot(true);
@@ -149,6 +156,7 @@ pub(crate) fn show(
             emit(ScreenshotEvent::Failed { session: id, error })
         }
         selection_host::SelectionEvent::SelectionSubmitted { selection } => {
+            let activation = current_focus_origin();
             emit(ScreenshotEvent::Selected {
                 session: id,
                 bounds: selection.bounds,
@@ -170,6 +178,9 @@ pub(crate) fn show(
                         presented: 0,
                         feedback_placement: None,
                         toolbar_adjustment: 0,
+                        keyboard: Default::default(),
+                        initial_focus: Some(activation),
+                        help: Default::default(),
                     });
                     r.document.mode = InteractionMode::Mouse;
                     r.sync_edit_scope();
@@ -199,6 +210,7 @@ pub(crate) fn restore(id: u64) {
     });
     let Some(recovery) = recovery else { return };
     crate::screen_interaction::size_label::clear();
+    crate::screen_interaction::screenshot_help::clear();
     crate::pinned_screenshot::set_frozen(false);
     selection_host::close();
     selection_host::set_handler(Rc::new(|_| {}));
@@ -216,6 +228,7 @@ pub(crate) fn restore(id: u64) {
 }
 pub(crate) fn shutdown() {
     crate::screen_interaction::size_label::clear();
+    crate::screen_interaction::screenshot_help::clear();
     selection_host::close();
     selection_host::set_handler(Rc::new(|_| {}));
     REGISTRY.with(|slot| {
@@ -226,6 +239,7 @@ pub(crate) fn shutdown() {
     FLOW.with(|s| *s.borrow_mut() = Flow::default());
 }
 pub(super) fn output(kind: ScreenshotOutput) {
+    keyboard::commit_current();
     let state = FLOW.with(|s| s.borrow().state.clone());
     if state.phase != ScreenshotPhase::Editing {
         return;
@@ -264,6 +278,10 @@ pub(super) fn output(kind: ScreenshotOutput) {
     }
 }
 pub(super) fn pointer(r: &mut Registry, index: usize, event: i32, x: f32, y: f32) -> bool {
+    pointer_help(r, index, event, x, y);
+    if event == 0 {
+        keyboard::finish(r);
+    }
     let Some(editing) = r.screenshot.as_mut() else {
         return false;
     };
@@ -341,6 +359,115 @@ pub(super) fn pointer(r: &mut Registry, index: usize, event: i32, x: f32, y: f32
         return true;
     }
     event == 0 && !inside
+}
+fn pointer_help(r: &mut Registry, index: usize, event: i32, x: f32, y: f32) {
+    let before = help_feedback(r).map(|h| (h.host, h.bounds));
+    let Some(e) = r.screenshot.as_mut().filter(|e| e.pin.is_none()) else {
+        return;
+    };
+    let Some(layer) = r.canvas_state.canvases.get(index) else {
+        return;
+    };
+    let (px, py) =
+        crate::screen_interaction::screen_point(layer.bounds, (x, y), layer.input_scale());
+    let point = Point {
+        x: px.round() as i32,
+        y: py.round() as i32,
+    };
+    let host = r
+        .canvas_state
+        .canvases
+        .iter()
+        .find(|c| {
+            point.x >= c.bounds.left
+                && point.x < c.bounds.right
+                && point.y >= c.bounds.top
+                && point.y < c.bounds.bottom
+        })
+        .map_or(layer.bounds, |c| c.bounds);
+    e.help.pointer(
+        if event == 4 { layer.bounds } else { host },
+        (event != 4).then_some(point),
+    );
+    if before != help_feedback(r).map(|h| (h.host, h.bounds)) {
+        r.queue_render();
+    }
+}
+
+/// Freeze help placement, visibility and pixels with the same geometry as the preview job.
+pub(super) fn help_feedback(
+    r: &Registry,
+) -> Option<crate::screen_interaction::screenshot_help::Feedback> {
+    use crate::screen_interaction::screenshot_help::Stage;
+    let e = r.screenshot.as_ref().filter(|e| e.pin.is_none())?;
+    let screens = r
+        .canvas_state
+        .canvases
+        .iter()
+        .map(|c| (c.bounds, c.scale()))
+        .collect::<Vec<_>>();
+    let host = e.help.host().or_else(|| screens.first().map(|s| s.0))?;
+    let area = (r.lifecycle.popup_work_area)(Point {
+        x: host.left,
+        y: host.top,
+    });
+    let active = if e.region.dragging() || e.region.keyboard_adjusting() {
+        e.region.bounds()
+    } else {
+        let bounds = gestures::display_draft(&r.gesture, &r.pending_drawing)
+            .map(|o| o.bounds)
+            .or_else(|| {
+                r.gesture.as_ref().and_then(|_| {
+                    r.document
+                        .session
+                        .selected
+                        .and_then(|i| r.document.session.objects.get(i).map(|o| o.bounds))
+                })
+            })
+            .or_else(|| {
+                r.gesture.as_ref().and_then(|_| {
+                    r.document
+                        .session
+                        .rectangle_erase_geometry()
+                        .map(|g| g.bounds)
+                })
+            });
+        bounds.map(|b| Rect {
+            left: b.left.floor() as i32,
+            top: b.top.floor() as i32,
+            right: b.right.ceil() as i32,
+            bottom: b.bottom.ceil() as i32,
+        })
+    };
+    let blocked = r.editor.window().is_some()
+        || r.parameter_edit.dragging()
+        || r.toolbar_state.watermark.get().is_some()
+        || r.toolbar_state
+            .panel
+            .get()
+            .is_some_and(|p| p.get_menu() || p.get_parameter_input_active())
+        || r.toolbar_state.menus.current.is_some()
+        || FLOW.with(|s| {
+            let s = s.borrow();
+            s.state.session != e.id || s.state.phase != ScreenshotPhase::Editing
+        });
+    e.help.feedback(
+        &screens,
+        area,
+        if r.document.mode.is_mouse() {
+            Stage::Mouse
+        } else {
+            Stage::Draw
+        },
+        active,
+        blocked,
+    )
+}
+/// Window/control changes need feedback even when the immutable document did not change.
+pub(super) fn refresh_help(r: &mut Registry) {
+    if r.screenshot.as_ref().is_some_and(|e| e.pin.is_none()) {
+        r.queue_render();
+    }
 }
 pub(super) fn cancel_region(r: &mut Registry) -> bool {
     let cancelled = r.screenshot.as_mut().is_some_and(|e| e.region.cancel());
@@ -530,7 +657,18 @@ fn show_toast(
     });
 }
 
-pub(super) fn toolbar_ready() {
+pub(super) fn toolbar_ready(generation: u64, revision: u64) {
+    let live = REGISTRY.with(|s| {
+        s.borrow().as_ref().is_some_and(|r| {
+            r.generation == generation
+                && r.toolbar_state.main.revision() == revision
+                && r.toolbar_state.main.get().is_some()
+        })
+    });
+    if !live {
+        return;
+    }
+    keyboard::activate_initial();
     let state = FLOW.with(|s| {
         let s = s.borrow();
         if s.state.error.is_some() && s.toast.get().is_none() {
@@ -557,7 +695,7 @@ pub(super) fn position_region_toolbar(r: &mut Registry, force: bool) -> bool {
     let Some(bounds) = editing.region.bounds() else {
         return true;
     };
-    if r.toolbar_state.toolbar_drag.is_some() {
+    if r.toolbar_state.toolbar_drag.is_some() || editing.region.keyboard_adjusting() {
         return true;
     }
     let Some(main) = r.toolbar_state.main.get() else {

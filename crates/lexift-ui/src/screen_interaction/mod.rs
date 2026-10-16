@@ -1,4 +1,5 @@
 //! Instance-owned screen surfaces shared by annotation and region selection.
+pub(crate) mod screenshot_help;
 pub(crate) mod selection;
 pub(crate) mod size_label;
 pub(crate) mod window;

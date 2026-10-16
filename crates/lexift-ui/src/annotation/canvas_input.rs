@@ -814,6 +814,7 @@ impl Registry {
 
     /// Apply the native input policy before exposing a new mode in the toolbar.
     pub(super) fn set_mode(&mut self, mode: InteractionMode) -> bool {
+        screenshot::keyboard::invalidate(self);
         if self.document.mode == mode {
             if mode.is_mouse() {
                 cancel_active_gesture(self);
@@ -868,6 +869,7 @@ impl Registry {
         }
         self.document.session.finish_rectangle_erase();
         self.document.mode = mode;
+        screenshot::refresh_help(self);
         self.sync_edit_scope();
         if mode != InteractionMode::Tool(5) {
             mosaic::cancel_pending(self);

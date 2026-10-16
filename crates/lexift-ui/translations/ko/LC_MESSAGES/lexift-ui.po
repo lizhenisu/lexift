@@ -1731,3 +1731,36 @@ msgstr "주석 추가"
 
 msgid "Hide annotations"
 msgstr "주석 숨기기"
+
+msgid "Drag"
+msgstr "드래그"
+
+msgid "Mouse"
+msgstr "마우스"
+
+msgid "Drag to select a region"
+msgstr "영역 선택"
+
+msgid "Cancel, or right-click"
+msgstr "취소 또는 오른쪽 클릭"
+
+msgid "Move selection by 1px"
+msgstr "선택 영역 1px 이동"
+
+msgid "Move selection by 10px"
+msgstr "선택 영역 10px 이동"
+
+msgid "Resize selection by 1px"
+msgstr "크기 1px 조정"
+
+msgid "Resize selection by 10px"
+msgstr "크기 10px 조정"
+
+msgid "Cancel adjustment or exit screenshot"
+msgstr "조정 취소 또는 캡처 종료"
+
+msgid "Use the current annotation tool"
+msgstr "현재 주석 도구 사용"
+
+msgid "Cancel operation or exit screenshot"
+msgstr "작업 취소 또는 캡처 종료"

@@ -119,6 +119,7 @@ export component AnnotationToolbar inherits Window {
     callback drag-requested();
     callback finish-requested();
     callback escape-requested();
+    callback region-key(string, bool, bool, bool) -> bool;
     forward-focus: keys;
     keys := FocusScope {
         key-pressed(event) => {
@@ -127,6 +128,11 @@ export component AnnotationToolbar inherits Window {
             if event.text == Key.Return { root.finish-path-requested(); return accept; }
             if event.text == Key.Backspace { root.backspace-requested(); return accept; }
             if event.text == "z" && event.modifiers.control { root.undo-requested(); return accept; }
+            if !event.modifiers.alt && !event.modifiers.meta && root.region-key(event.text, true, event.modifiers.control, event.modifiers.shift) { return accept; }
+            return reject;
+        }
+        key-released(event) => {
+            if root.region-key(event.text, false, event.modifiers.control, event.modifiers.shift) { return accept; }
             return reject;
         }
     Rectangle {
@@ -213,6 +219,8 @@ export component AnnotationPanel inherits Window {
         if !root.confirmed-input-exit { root.parameter-input-finished(false); }
     }
     in-out property <bool> parameter-input-active: false;
+    callback parameter-input-state-changed();
+    changed parameter-input-active => { root.parameter-input-state-changed(); }
     out property <float> parameter-input-x;
     out property <float> parameter-input-y;
     out property <float> parameter-input-width;

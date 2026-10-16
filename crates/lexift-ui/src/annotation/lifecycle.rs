@@ -39,6 +39,14 @@ pub(super) fn escape() {
 }
 
 pub(super) fn escape_from(origin: focus::Origin) {
+    if REGISTRY.with(|s| {
+        s.borrow_mut()
+            .as_mut()
+            .is_some_and(screenshot::keyboard::escape)
+    }) {
+        return;
+    }
+
     let crop_cancelled = REGISTRY.with(|s| {
         s.borrow_mut()
             .as_mut()
@@ -226,6 +234,11 @@ pub(crate) fn toggle(requested_at: Instant) {
             later_main(&input, generation, revision, toggle_toolbar_collapse)
         });
         let input = r.toolbar_state.main.input();
+        main.on_region_key(screenshot::keyboard::bind(
+            main.window(),
+            generation,
+            screenshot::keyboard::Owner::Toolbar(revision),
+        ));
         main.on_operate_requested(move || {
             later_main(&input, generation, revision, activate_mouse_mode)
         });
@@ -362,6 +375,7 @@ impl Registry {
     }
 
     pub(super) fn close(&mut self) {
+        screenshot::keyboard::invalidate(self);
         let _pointer_guards = self.pause_native_pointer_inputs();
         crate::pinned_screenshot::set_annotation_interaction(true);
         if let Some(editing) = self.screenshot.take() {
