@@ -1,0 +1,101 @@
+import { Colors } from "design/colors.slint";
+import { Spacing } from "design/spacing.slint";
+import { Metrics } from "design/metrics.slint";
+import { WindowHeaderButton } from "design/window-header.slint";
+import { AnnotationHintTarget } from "annotation-hint.slint";
+import { LineEdit } from "annotation-fields.slint";
+import { SettingsButton } from "settings-controls.slint";
+
+// The title band moves the window; fields remain independent crop-size drafts.
+export component ScreenshotSizeInput inherits Window {
+    title: @tr("Screenshot size"); no-frame: true; always-on-top: true;
+    background: transparent;
+    out property <length> content-width: max(Metrics.compact-panel-width,
+        title-metrics.preferred-width + 2 * (Metrics.compact-header-button + Metrics.compact-panel-inset),
+        width-label.preferred-width + height-label.preferred-width + 2 * Metrics.compact-panel-inset + 64px,
+        cancel-button.width + apply-button.width + 2 * Metrics.compact-panel-inset + Spacing.small);
+    out property <length> content-height: Metrics.compact-header-height + 2 * Metrics.compact-panel-inset
+        + 16px + 4px + 2 * Metrics.compact-control-height + Spacing.small;
+    preferred-width: root.content-width; preferred-height: root.content-height;
+    in-out property <string> width-text;
+    in-out property <string> height-text;
+    in property <bool> valid: true;
+    callback draft-changed(string, string);
+    callback apply(string, string);
+    callback cancel();
+    callback escape-pressed();
+    callback escape-released();
+    callback header-drag-requested(float, float);
+    callback focus-width();
+    focus-width => { width-input.focus-and-select(); }
+    changed width-text => { root.draft-changed(root.width-text, root.height-text); }
+    changed height-text => { root.draft-changed(root.width-text, root.height-text); }
+    title-metrics := Text { visible: false; text: @tr("Screenshot size"); font-size: 13px; }
+    forward-focus: keys;
+    keys := FocusScope {
+        forward-focus: width-input;
+        capture-key-pressed(event) => {
+            if event.text == Key.Escape { root.escape-pressed(); return accept; }
+            if event.text == Key.Return {
+                if root.valid { root.apply(root.width-text, root.height-text); }
+                return accept;
+            }
+            return reject;
+        }
+        capture-key-released(event) => {
+            if event.text == Key.Escape { root.escape-released(); return accept; }
+            return reject;
+        }
+        Rectangle {
+            width: 100%; height: 100%; background: Colors.surface;
+            border-width: 1px; border-color: Colors.outline; border-radius: Metrics.popup-native-corner-radius;
+            header := Rectangle {
+                x: 0px; y: 0px; width: 100%; height: Metrics.compact-header-height;
+                accessible-role: window-title-bar; accessible-label: @tr("Screenshot size");
+                Text { x: Metrics.compact-header-button + 4px; y: 0px; width: parent.width - 2 * self.x; height: 100%;
+                    text: @tr("Screenshot size"); font-size: 13px; color: Colors.foreground;
+                    horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea {
+                    x: 0px; y: 0px; width: parent.width - Metrics.compact-header-button - 4px; height: 100%;
+                    pointer-event(event) => {
+                        if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                            root.header-drag-requested(self.mouse-x / 1px, self.mouse-y / 1px);
+                        }
+                    }
+                }
+                close-button := WindowHeaderButton {
+                    x: parent.width - self.width - 4px; y: (parent.height - self.height) / 2;
+                    width: Metrics.compact-header-button; height: self.width; border-radius: 4px;
+                    icon: @image-url("assets/icons/close.svg"); label: @tr("Close"); clicked => { root.cancel(); }
+                }
+                AnnotationHintTarget { x: close-button.x; y: close-button.y; width: close-button.width; height: close-button.height;
+                    text: @tr("Close"); hovered: close-button.hovered; pressed: close-button.pressed; }
+            }
+            body := Rectangle {
+                x: Metrics.compact-panel-inset; y: header.height + Metrics.compact-panel-inset;
+                width: parent.width - 2 * self.x; height: 16px + 4px + Metrics.compact-control-height;
+                private property <length> field-width: (self.width - 44px) / 2;
+                width-label := Text { x: 0px; y: 0px; width: parent.field-width; height: 16px; text: @tr("Width"); font-size: 12px; color: Colors.secondary-foreground; }
+                height-label := Text { x: parent.field-width + 22px; y: 0px; width: parent.field-width; height: 16px; text: @tr("Height"); font-size: 12px; color: Colors.secondary-foreground; }
+                width-input := LineEdit { x: 0px; y: 20px; width: parent.field-width; height: Metrics.compact-control-height;
+                    text <=> root.width-text; accessible-role: text-input; accessible-label: @tr("Width"); }
+                Text { x: parent.field-width; y: 20px; width: 22px; height: Metrics.compact-control-height; text: "×";
+                    color: Colors.secondary-foreground; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                LineEdit { x: parent.field-width + 22px; y: 20px; width: parent.field-width; height: Metrics.compact-control-height;
+                    text <=> root.height-text; accessible-role: text-input; accessible-label: @tr("Height"); }
+                Text { x: parent.width - 18px; y: 20px; width: 18px; height: Metrics.compact-control-height; text: "px";
+                    color: Colors.secondary-foreground; font-size: 12px; horizontal-alignment: right; vertical-alignment: center; }
+            }
+            apply-button := SettingsButton {
+                x: parent.width - Metrics.compact-panel-inset - self.width; y: body.y + body.height + Spacing.small;
+                label: @tr("Apply"); primary: true; compact: true; height: Metrics.compact-control-height; border-radius: 4px;
+                enabled: root.valid; clicked => { root.apply(root.width-text, root.height-text); }
+            }
+            cancel-button := SettingsButton {
+                x: apply-button.x - self.width - Spacing.small; y: apply-button.y;
+                label: @tr("Cancel"); compact: true; height: Metrics.compact-control-height; border-radius: 4px;
+                clicked => { root.cancel(); }
+            }
+        }
+    }
+}

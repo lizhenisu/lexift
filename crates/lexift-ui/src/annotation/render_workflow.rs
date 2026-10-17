@@ -703,6 +703,12 @@ pub(super) fn capture_exclusions(r: &Registry) -> Vec<lexift_core::ports::magnif
         .canvases
         .iter()
         .map(|layer| layer.window.window())
+        .chain(
+            r.screenshot
+                .as_ref()
+                .and_then(|e| e.size_input.window())
+                .map(ComponentHandle::window),
+        )
         .chain(r.hints.window.get().map(ComponentHandle::window))
         .chain(r.toolbar_state.main.get().map(ComponentHandle::window))
         .chain(r.toolbar_state.panel.get().map(ComponentHandle::window))

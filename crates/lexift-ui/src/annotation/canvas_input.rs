@@ -814,6 +814,7 @@ impl Registry {
 
     /// Apply the native input policy before exposing a new mode in the toolbar.
     pub(super) fn set_mode(&mut self, mode: InteractionMode) -> bool {
+        screenshot::size_input::close(self);
         screenshot::keyboard::invalidate(self);
         if self.document.mode == mode {
             if mode.is_mouse() {

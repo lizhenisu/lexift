@@ -5,6 +5,8 @@ export component WindowHeaderButton inherits Rectangle {
     in property <image> icon;
     in property <bool> active: false;
     in property <string> label;
+    out property <bool> hovered: touch.has-hover;
+    out property <bool> pressed: touch.pressed;
     callback clicked();
     width: Metrics.auxiliary-header-button;
     height: Metrics.auxiliary-header-button;

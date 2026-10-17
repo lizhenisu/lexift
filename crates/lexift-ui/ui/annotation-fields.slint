@@ -3,6 +3,7 @@ import { Colors } from "design/colors.slint";
 export component LineEdit inherits Rectangle {
     in-out property <string> text;
     in property <string> placeholder-text;
+    public function focus-and-select() { input.focus(); input.select-all(); }
     height: 30px; background: Colors.background; border-radius: 5px;
     border-width: 1px; border-color: input.has-focus ? Colors.primary : Colors.outline;
     forward-focus: input;

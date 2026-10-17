@@ -255,12 +255,29 @@ impl RegionEditor {
         let b = self.bounds.unwrap();
         let next = match action {
             RegionNudge::Move { dx, dy } => translated(b, dx, dy, desktop),
-            RegionNudge::Resize { dw, dh } => Rect {
-                right: b.right.saturating_add(dw).clamp(b.left + 1, desktop.right),
-                bottom: b.bottom.saturating_add(dh).clamp(b.top + 1, desktop.bottom),
-                ..b
-            },
+            RegionNudge::Resize { dw, dh } => resized(
+                b,
+                i64::from(b.right) - i64::from(b.left) + i64::from(dw),
+                i64::from(b.bottom) - i64::from(b.top) + i64::from(dh),
+                desktop,
+            ),
         };
+        self.bounds = Some(next);
+        next != b
+    }
+    /// Set physical dimensions atomically, keeping the origin and clamping to the desktop.
+    /// Active pointer/keyboard transactions must be finished before applying a draft.
+    pub fn set_size(&mut self, width: u64, height: u64, desktop: Rect) -> bool {
+        if self.drag.is_some() || self.keyboard_origin.is_some() {
+            return false;
+        }
+        let Some(b) = self.bounds else { return false };
+        let next = resized(
+            b,
+            width.min(i64::MAX as u64) as i64,
+            height.min(i64::MAX as u64) as i64,
+            desktop,
+        );
         self.bounds = Some(next);
         next != b
     }
@@ -288,6 +305,18 @@ impl RegionEditor {
     }
 }
 
+fn resized(b: Rect, width: i64, height: i64, desktop: Rect) -> Rect {
+    Rect {
+        right: (i64::from(b.left)
+            + width.clamp(1, (i64::from(desktop.right) - i64::from(b.left)).max(1)))
+            as i32,
+        bottom: (i64::from(b.top)
+            + height.clamp(1, (i64::from(desktop.bottom) - i64::from(b.top)).max(1)))
+            as i32,
+        ..b
+    }
+}
+
 fn translated(b: Rect, dx: i32, dy: i32, desktop: Rect) -> Rect {
     let dx = dx.clamp(desktop.left - b.left, desktop.right - b.right);
     let dy = dy.clamp(desktop.top - b.top, desktop.bottom - b.bottom);
@@ -302,6 +331,66 @@ fn translated(b: Rect, dx: i32, dy: i32, desktop: Rect) -> Rect {
 #[cfg(test)]
 mod editor_tests {
     use super::*;
+    #[test]
+    fn absolute_size_shares_resize_limits_and_preserves_transactions() {
+        let desktop = Rect {
+            left: -1920,
+            top: -200,
+            right: 2560,
+            bottom: 1440,
+        };
+        let original = Rect {
+            left: -50,
+            top: -10,
+            right: 150,
+            bottom: 90,
+        };
+        let mut e = RegionEditor::new(original);
+        assert!(!e.set_size(200, 100, desktop));
+        assert!(e.set_size(0, 0, desktop));
+        assert_eq!(
+            e.bounds(),
+            Some(Rect {
+                right: -49,
+                bottom: -9,
+                ..original
+            })
+        );
+        assert!(e.set_size(u64::MAX, u64::MAX, desktop));
+        assert_eq!(
+            e.bounds(),
+            Some(Rect {
+                right: desktop.right,
+                bottom: desktop.bottom,
+                ..original
+            })
+        );
+        assert!(!e.set_size(u64::MAX, u64::MAX, desktop));
+        for (w, h) in [(1, 1), (201, 110), (999999, 999999)] {
+            let mut absolute = RegionEditor::new(original);
+            absolute.set_size(w, h, desktop);
+            let mut relative = RegionEditor::new(original);
+            relative.begin_keyboard();
+            relative.nudge(
+                RegionNudge::Resize {
+                    dw: w as i32 - 200,
+                    dh: h as i32 - 100,
+                },
+                desktop,
+            );
+            assert_eq!(absolute.bounds(), relative.bounds());
+        }
+        e = RegionEditor::new(original);
+        e.begin_keyboard();
+        assert!(!e.set_size(20, 30, desktop));
+        e.cancel_keyboard();
+        assert_eq!(e.bounds(), Some(original));
+        assert!(e.begin(Point { x: 0, y: 0 }, 1., true));
+        assert!(!e.set_size(20, 30, desktop));
+        e.cancel();
+        assert_eq!(e.bounds(), Some(original));
+    }
+
     #[test]
     fn keyboard_physical_steps_limits_and_cancel_snapshot() {
         let desktop = Rect {

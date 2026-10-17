@@ -307,6 +307,7 @@ pub(super) struct Job {
     pub session: u64,
     pub revision: u64,
     pub inputs: Vec<Input>,
+    pub canvases: Vec<u64>,
 }
 struct Queue {
     job: Mutex<Option<Job>>,
@@ -354,12 +355,28 @@ impl Preview {
                     if worker.cancelled.load(Ordering::Acquire) {
                         break;
                     }
+                    let labels = job
+                        .canvases
+                        .iter()
+                        .copied()
+                        .zip(job.inputs.iter().map(|input| {
+                            input
+                                .label
+                                .as_ref()
+                                .filter(|_| input.crop_handles)
+                                .map(|l| super::screenshot::size_input::Hit {
+                                    crop: input.crop,
+                                    bounds: l.bounds,
+                                })
+                        }))
+                        .collect();
                     let _ = slint::invoke_from_event_loop(move || {
                         super::frozen_editor::present(
                             job.generation,
                             job.session,
                             job.revision,
                             frames,
+                            labels,
                         )
                     });
                 }

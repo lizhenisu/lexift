@@ -318,6 +318,12 @@ pub(super) fn render_initial_canvas(r: &mut Registry, index: usize) {
         r.close();
         return;
     };
+    let label = screenshot::label_feedback(r)
+        .filter(|l| l.host == r.canvas_state.canvases[index].bounds && r.document.mode.is_mouse())
+        .map(|l| screenshot::size_input::Hit {
+            crop: l.crop,
+            bounds: l.bounds,
+        });
     let layer = &mut r.canvas_state.canvases[index];
     if let Some(timing) = r.canvas_state.cold_open_timing.as_mut() {
         let elapsed = raster_start.elapsed();
@@ -343,6 +349,11 @@ pub(super) fn render_initial_canvas(r: &mut Registry, index: usize) {
     if !presented {
         r.close();
         return;
+    }
+    if let Some(e) = r.screenshot.as_mut() {
+        e.size_input
+            .presented
+            .insert(r.canvas_state.canvases[index].revision(), label);
     }
     r.canvas_state.canvases[index].signature = Some(render_signature(
         &r.document.session,

@@ -7,6 +7,7 @@ use crate::{AnnotationHintWindow, AnnotationHints};
 pub(super) enum Owner {
     Toolbar(u64),
     Panel(u64),
+    SizeInput(u64),
 }
 #[derive(Clone)]
 struct Request {
@@ -38,6 +39,7 @@ fn owner_window(r: &Registry, owner: Owner) -> Option<&slint::Window> {
         Owner::Panel(id) if id == r.toolbar_state.panel.revision() => {
             r.toolbar_state.panel.get().map(ComponentHandle::window)
         }
+        Owner::SizeInput(id) => screenshot::size_input::hint_window(r, id),
         _ => None,
     }
 }
@@ -61,6 +63,7 @@ macro_rules! bind {
 }
 bind!(bind_toolbar, AnnotationToolbar);
 bind!(bind_panel, AnnotationPanel);
+bind!(bind_size_input, crate::ScreenshotSizeInput);
 fn request(generation: u64, owner: Owner, text: slint::SharedString, anchor: [f32; 4]) {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
@@ -137,6 +140,7 @@ fn show(generation: u64, revision: u64, attempt: u8) {
         if !owner.is_visible()
             || owner.position() != request.origin
             || r.toolbar_state.toolbar_drag.is_some()
+            || screenshot::size_input::dragging(r)
         {
             r.hints.clear();
             return;

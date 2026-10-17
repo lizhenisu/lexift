@@ -84,6 +84,8 @@
 ## 发布
 
 - [截图操作提示验证](releases/screenshot-help.md)
+- [截图紧凑尺寸面板与拖动验证](releases/screenshot-size-panel.md)
+- [截图手动宽高输入验证](releases/screenshot-size-input.md)
 - [截图选区键盘精确调整验证](releases/screenshot-keyboard-adjustment.md)
 - [鼠标模式语义与穿透回归](releases/mouse-mode-validation.md)
 - [截图选择对象模式回归](releases/screenshot-object-selection.md)

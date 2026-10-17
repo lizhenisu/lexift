@@ -2,7 +2,7 @@
 
 研究日期：2026-10-16。Lexift 实现状态更新：2026-10-16。状态：已完成功能研究、局部静态调用链、Lexift 逐项实现拆解及原生自动化主流程取证；竞品硬件组合与高级功能的未实测范围见第 5 节，Lexift 新增能力的验证边界见下表。
 
-主要结论：Lexift 已具备静态截图和可编辑贴图的基础，不应重新实现一套编辑器。选区键盘微调及左下角操作提示已完成；接下来建议补手动宽高输入、比例锁定，再推进冻结帧取色及窗口候选。长截图和录制需要独立的连续采集与处理生命周期。本机 PixPin 的截图→标注→贴图→拖动→PNG／复制已自动跑通，复制与 PNG 像素一致。
+主要结论：Lexift 已具备静态截图和可编辑贴图的基础，不应重新实现一套编辑器。选区键盘微调、手动宽高输入及左下角操作提示已完成；接下来建议确认比例锁定，再推进冻结帧取色及窗口候选。长截图和录制需要独立的连续采集与处理生命周期。本机 PixPin 的截图→标注→贴图→拖动→PNG／复制已自动跑通，复制与 PNG 像素一致。
 
 ### Lexift 后续实施进度
 
@@ -12,7 +12,8 @@
 | --- | --- | --- |
 | 截图选区键盘微调 | 已实现并完成项目 Release 实测 | 方向键移动 1px、Shift 10px、Ctrl 调整宽高，支持连续按键、取消及失焦清理；仅截图编辑的鼠标模式生效，不进入标注撤销历史。见[键盘微调验证](../releases/screenshot-keyboard-adjustment.md) |
 | 左下角操作提示与接近隐藏 | 已实现并完成项目 Release 实测 | 框选／鼠标／绘制三组提示，16px 隐藏、24px 恢复；与选区同帧，不进入图片输出。完成双屏、菜单及矩形绘制检查，12 种语言与浅深主题组件渲染；未穷尽全部原生工具交错。见[操作提示验证](../releases/screenshot-help.md) |
-| 手动宽高输入、比例锁定 | 待实现 | 键盘微调不代表这两项已完成；继续复用 RegionEditor 及物理像素边界规则 |
+| 手动宽高输入 | 已实现 | 点击尺寸标签编辑宽高草稿，确认后固定左上角应用，超出桌面自动截断；与键盘共用边界，不影响标注历史；紧凑面板支持标题栏拖动，见 [面板验证](../releases/screenshot-size-panel.md)。见 [宽高输入验证](../releases/screenshot-size-input.md) |
+| 比例锁定 | 待实现 | 手动宽高不含比例约束；锚点、舍入及混合输入行为须单独确认 |
 | 冻结帧取色／像素放大、窗口候选、截图历史、长截图与录制 | 待实现 | 后文保留方案与能力边界；竞品菜单或静态字符串不代表 Lexift 已具备这些能力 |
 
 ## 1. 阅读边界与证据
@@ -122,7 +123,8 @@ flowchart LR
 | UI 元素/窗口吸附，滚轮切换层级（D1/D2） | Platform 后台查询元素及窗口矩形；Core 接收候选身份/范围；UI 只画候选，保留手动回退。不能同步阻塞鼠标热路径 | 不提供可访问接口、权限不同、目标关闭、旧查询晚到 |
 | 自由、多边形、多窗口和区域加减（S1；3.5.5.1 正式更新说明，尚未实测） | 扩展 Core RegionGeometry 为路径/组合区域；预览和输出共享覆盖计算；不要仅改选择框外观 | 多区域并集/差集、孔洞、透明裁切、跨屏输出一致 |
 | 像素级键盘微调（D1；Lexift 已实现） | RegionEditor 已提供物理像素移动、固定左上角调整尺寸及取消快照；UI 按会话与窗口转发未消费按键，不注册全局方向键钩子 | 1px／10px、边界、极小选区、多键与修饰键、取消；选区不进入标注撤销历史。验证见本文进度表 |
-| 比例锁定、手动尺寸（D1；待实现） | 在既有微调模型上补数值输入和比例约束，与鼠标缩放共享边界及取消语义；不是另起一套选区状态 | 输入校验、锚点、比例舍入、越界、混合鼠标／键盘操作 |
+| 手动尺寸（D1；Lexift 已实现） | 鼠标模式点击同帧尺寸标签打开宽高草稿，确认后固定左上角应用；RegionEditor 与键盘缩放共用边界限制 | 整数校验、1px 最小值、自动截断、取消、过期帧命中；见 [验证记录](../releases/screenshot-size-input.md) |
+| 比例锁定（D1；待实现） | 在既有选区模型上补比例约束，与鼠标及数值调整共用边界；具体锚点和锁定期间输入行为须另行确认 | 比例舍入、越界、混合鼠标／键盘／数值操作 |
 | 尺寸标签、辅助线、像素放大与取色（D1/D2） | 标签已有；取色从冻结帧按物理坐标采样，邻域最近邻放大；颜色格式为纯转换，复制经 ClipboardPort | 标签不入输出；边缘采样；125% 下不误采逻辑像素 |
 | 阶段操作提示与接近隐藏（用户提供的 PixPin 截图；Lexift 已实现） | 共用 Slint 提示组件和缓存纹理；只按鼠标及活动几何避让，框选宿主与编辑交互帧复用，不创建独立可见提示窗口 | 跨屏单份显示、16px／24px 迟滞、结束操作恢复、模式／输入变化、输出不含提示；不把参考图中的未实现快捷键一并加入 |
 | 光标是否进入图片（D1/D2） | 采集结果单独携带光标图像、热点与位置，在合成阶段可选叠加，不能截工具条自身光标装饰 | 热点、跨屏、透明光标、导出与预览一致 |
@@ -188,7 +190,7 @@ flowchart LR
 | 复用边界 | 源码证据 | 明确限制 |
 | --- | --- | --- |
 | 标注模型和工具域编辑 | [annotation.rs](../../crates/lexift-core/src/domain/annotation.rs) 的 `Kind/Style/Session/EditScope`；[canvas_input.rs](../../crates/lexift-ui/src/annotation/canvas_input.rs) 的 `sync_edit_scope` | 鼠标模式为 None；Pencil/MosaicBrush/StickerBrush 完成后不支持对象编辑，不能统称“全部对象均可再选中” |
-| 选区键盘调整 | [region_selection.rs](../../crates/lexift-core/src/domain/region_selection.rs) 的 `RegionNudge` 与键盘调整快照；[screenshot_keyboard.rs](../../crates/lexift-ui/src/annotation/screenshot_keyboard.rs) 的局部按键／焦点路由 | 仅截图编辑的鼠标模式；未实现手动宽高与比例锁定，不修改标注对象或撤销历史 |
+| 选区键盘调整 | [region_selection.rs](../../crates/lexift-core/src/domain/region_selection.rs) 的 `RegionNudge` 与键盘调整快照；[screenshot_keyboard.rs](../../crates/lexift-ui/src/annotation/screenshot_keyboard.rs) 的局部按键／焦点路由 | 仅截图编辑的鼠标模式；已补手动宽高输入，比例锁定待实现，不修改标注对象或撤销历史 |
 | 截图操作提示 | [screenshot_help.rs](../../crates/lexift-ui/src/screen_interaction/screenshot_help.rs) 的纹理缓存／避让；[screenshot-help.slint](../../crates/lexift-ui/ui/screenshot-help.slint) 的三组提示组件 | 只提示已有操作；静止内容不持续触发隐藏，不避让可移动工具条；普通标注与贴图编辑不显示 |
 | 样式与文字 | [parameter_transaction.rs](../../crates/lexift-ui/src/annotation/parameter_transaction.rs)、[font_service.rs](../../crates/lexift-ui/src/annotation/font_service.rs)、[text_workflow.rs](../../crates/lexift-ui/src/annotation/text_workflow.rs) | 复用事务和后台字体；仅确认 undo，不能推断已有 redo |
 | 效果 | [mosaic.rs](../../crates/lexift-core/src/domain/annotation/mosaic.rs) 的 `MosaicEffect`、`sample_padding` | Pixelate 和 Blur 已有；图像修复/自动重复目标遮挡尚未发现 |
@@ -220,7 +222,7 @@ Lexift 的取舍应基于自身用户需求：保留已经确认的鼠标穿透�
 ## 4. 建议落地顺序
 
 1. 持续回归已有静态截图、同帧反馈、工具、输出及可编辑贴图；复用现有夹具和像素对照，不把已完成的键盘微调与操作提示重新列为开发项。
-2. 下一步建议补手动宽高输入和比例锁定，分别制定交互与验收；随后做冻结帧取色／像素放大。复用既有选区模型、取消快照和输出链路，具体交互仍需单独确认。
+2. 手动宽高输入已完成，见 [验证记录](../releases/screenshot-size-input.md)。下一步建议单独确认比例锁定的交互与验收；随后做冻结帧取色／像素放大。复用既有选区模型、取消快照和输出链路，具体交互仍需单独确认。
 3. 再补窗口/元素候选、截图 OCR 输出和格式；每项独立引入请求身份与失败回退。
 4. 最后做长截图、历史及录屏。三者分别涉及连续采集、敏感持久化、媒体时间轴，不能仅靠增加工具条按钮交付。
 

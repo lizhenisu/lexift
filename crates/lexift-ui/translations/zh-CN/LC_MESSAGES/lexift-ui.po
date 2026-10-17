@@ -1764,3 +1764,9 @@ msgstr "使用当前标注工具"
 
 msgid "Cancel operation or exit screenshot"
 msgstr "取消操作或退出截图"
+
+msgid "Screenshot size"
+msgstr "截图尺寸"
+
+msgid "Height"
+msgstr "高度"

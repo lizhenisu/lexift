@@ -1764,3 +1764,9 @@ msgstr "Usa lo strumento di annotazione attuale"
 
 msgid "Cancel operation or exit screenshot"
 msgstr "Annulla l’operazione o esci dalla cattura"
+
+msgid "Screenshot size"
+msgstr "Dimensioni della cattura"
+
+msgid "Height"
+msgstr "Altezza"

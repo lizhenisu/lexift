@@ -9,6 +9,9 @@ impl Platform for TestPlatform {
         Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer))
     }
 }
+pub(super) fn position_platform() -> Box<dyn Platform> {
+    Box::new(PositionPlatform(Default::default()))
+}
 // Records both the final position and the position at the moment a window is shown.
 struct PositionPlatform(Rc<RefCell<Vec<std::rc::Weak<PositionWindow>>>>);
 struct PositionWindow {
@@ -400,13 +403,11 @@ fn screenshot_toolbars_are_exclusive_and_restore_document_undo_after_failed_outp
         ] {
             for end in [2, 3, -1, 0] {
                 REGISTRY.with(|s| {
-                    s.borrow_mut()
-                        .as_mut()
-                        .unwrap()
-                        .screenshot
-                        .as_mut()
-                        .unwrap()
-                        .region = RegionEditor::new(edge)
+                    let mut slot = s.borrow_mut();
+                    let r = slot.as_mut().unwrap();
+                    r.screenshot.as_mut().unwrap().region = RegionEditor::new(edge);
+                    // Direct fixture geometry changes must also present their label hit map.
+                    super::super::render_initial_canvas(r, 0);
                 });
                 canvas_pointer(0, 0, x, y);
                 pump("edge adjustment hidden", || !main.window().is_visible());
@@ -1257,6 +1258,7 @@ fn screenshot_completed_frames_ignore_newer_input_and_reject_late_results() {
             keyboard: Default::default(),
             initial_focus: None,
             help: Default::default(),
+            size_input: Default::default(),
         });
     });
     let old = REGISTRY.with(|s| frame(s.borrow().as_ref().unwrap(), 0).unwrap());
@@ -1290,17 +1292,25 @@ fn screenshot_completed_frames_ignore_newer_input_and_reject_late_results() {
             bottom: 170,
         })
     });
-    super::super::frozen_editor::present(42, 51, 2, Some(vec![new.clone()]));
+    let metadata = || {
+        REGISTRY.with(|s| {
+            vec![(
+                s.borrow().as_ref().unwrap().canvas_state.canvases[0].revision(),
+                None,
+            )]
+        })
+    };
+    super::super::frozen_editor::present(42, 51, 2, Some(vec![new.clone()]), metadata());
     assert_eq!(presented.borrow().as_slice(), &[new.data().to_vec()]);
-    super::super::frozen_editor::present(42, 51, 1, Some(vec![old.clone()]));
-    super::super::frozen_editor::present(42, 50, 3, Some(vec![old.clone()]));
+    super::super::frozen_editor::present(42, 51, 1, Some(vec![old.clone()]), metadata());
+    super::super::frozen_editor::present(42, 50, 3, Some(vec![old.clone()]), metadata());
     assert_eq!(
         presented.borrow().len(),
         1,
         "old completion or another session must not overwrite a full frame"
     );
     REGISTRY.with(|s| s.borrow_mut().as_mut().unwrap().close());
-    super::super::frozen_editor::present(42, 51, 3, Some(vec![old]));
+    super::super::frozen_editor::present(42, 51, 3, Some(vec![old]), vec![]);
     assert_eq!(
         presented.borrow().len(),
         1,

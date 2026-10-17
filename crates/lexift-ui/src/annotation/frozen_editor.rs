@@ -18,6 +18,7 @@ pub(super) struct Editing {
     pub(super) toolbar_adjustment: u64,
     pub(super) keyboard: screenshot::keyboard::State,
     pub(super) initial_focus: Option<focus::Origin>,
+    pub(super) size_input: screenshot::size_input::State,
     pub(super) help: crate::screen_interaction::screenshot_help::State,
 }
 fn input(r: &Registry, index: usize) -> Option<screenshot_preview::Input> {
@@ -86,6 +87,12 @@ pub(super) fn render(r: &mut Registry) {
             generation: r.generation,
             session: editing.id,
             revision: editing.revision,
+            canvases: r
+                .canvas_state
+                .canvases
+                .iter()
+                .map(|c| c.revision())
+                .collect(),
             inputs,
         });
 }
@@ -94,6 +101,7 @@ pub(super) fn present(
     id: u64,
     revision: u64,
     frames: Option<Vec<tiny_skia::Pixmap>>,
+    labels: Vec<(u64, Option<screenshot::size_input::Hit>)>,
 ) {
     let mut failed = false;
     REGISTRY.with(|slot| {
@@ -125,8 +133,19 @@ pub(super) fn present(
         if frames.len() != r.canvas_state.canvases.len() {
             return;
         };
+        if labels.len() != frames.len()
+            || r.canvas_state
+                .canvases
+                .iter()
+                .zip(&labels)
+                .any(|(c, (rev, _))| c.revision() != *rev)
+        {
+            return;
+        }
         editing.presented = revision;
-        for (layer, frame) in r.canvas_state.canvases.iter_mut().zip(frames) {
+        for ((layer, frame), (canvas, label)) in
+            r.canvas_state.canvases.iter_mut().zip(frames).zip(labels)
+        {
             let window = layer.window.clone_strong();
             if !layer.presented.submit(frame, |frame| {
                 (r.lifecycle.annotation_frame_presenter)(
@@ -137,6 +156,8 @@ pub(super) fn present(
                 )
             }) {
                 failed = true;
+            } else {
+                editing.size_input.presented.insert(canvas, label);
             }
         }
     });

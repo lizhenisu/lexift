@@ -165,6 +165,7 @@ pub(crate) fn begin(id: u64, edit: u64) {
             keyboard: Default::default(),
             initial_focus: None,
             help: Default::default(),
+            size_input: Default::default(),
         });
         r.canvas_state.canvases.push(CanvasLayer::pin(
             window.clone_strong(),

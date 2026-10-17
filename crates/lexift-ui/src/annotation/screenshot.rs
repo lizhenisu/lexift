@@ -18,6 +18,8 @@ pub(super) use super::frozen_editor::{Editing, frame, render};
 
 #[path = "screenshot_keyboard.rs"]
 pub(super) mod keyboard;
+#[path = "screenshot_size_input.rs"]
+pub(super) mod size_input;
 
 struct Recovery {
     document: editor_document::EditorDocument,
@@ -66,6 +68,9 @@ pub(crate) fn sync(state: &ScreenshotState) {
                 main.set_feedback(state.error.as_deref().unwrap_or("").into());
             }
             if r.screenshot.is_some() {
+                if state.phase != ScreenshotPhase::Editing {
+                    size_input::close(r);
+                }
                 r.queue_render();
             }
         }
@@ -181,6 +186,7 @@ pub(crate) fn show(
                         keyboard: Default::default(),
                         initial_focus: Some(activation),
                         help: Default::default(),
+                        size_input: Default::default(),
                     });
                     r.document.mode = InteractionMode::Mouse;
                     r.sync_edit_scope();
@@ -239,6 +245,11 @@ pub(crate) fn shutdown() {
     FLOW.with(|s| *s.borrow_mut() = Flow::default());
 }
 pub(super) fn output(kind: ScreenshotOutput) {
+    REGISTRY.with(|s| {
+        if let Some(r) = s.borrow_mut().as_mut() {
+            size_input::close(r);
+        }
+    });
     keyboard::commit_current();
     let state = FLOW.with(|s| s.borrow().state.clone());
     if state.phase != ScreenshotPhase::Editing {
@@ -278,7 +289,12 @@ pub(super) fn output(kind: ScreenshotOutput) {
     }
 }
 pub(super) fn pointer(r: &mut Registry, index: usize, event: i32, x: f32, y: f32) -> bool {
+    // Keep the input host/pointer current even while the numeric popup consumes
+    // gestures, so dismissed input cannot restore a hint underneath the cursor.
     pointer_help(r, index, event, x, y);
+    if size_input::pointer(r, index, event, x, y) {
+        return true;
+    }
     if event == 0 {
         keyboard::finish(r);
     }
@@ -439,7 +455,8 @@ pub(super) fn help_feedback(
             bottom: b.bottom.ceil() as i32,
         })
     };
-    let blocked = r.editor.window().is_some()
+    let blocked = size_input::busy(r)
+        || r.editor.window().is_some()
         || r.parameter_edit.dragging()
         || r.toolbar_state.watermark.get().is_some()
         || r.toolbar_state

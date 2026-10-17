@@ -36,7 +36,8 @@ fn allowed(r: &Registry) -> bool {
                 let s = s.borrow();
                 s.state.session == e.id && s.state.phase == ScreenshotPhase::Editing
             })
-    }) && r.document.mode.is_mouse()
+    }) && !super::size_input::busy(r)
+        && r.document.mode.is_mouse()
         && r.editor.window().is_none()
         && r.toolbar_state.watermark.get().is_none()
         && r.toolbar_state.panel.get().is_none()
@@ -375,6 +376,7 @@ mod tests {
                     keyboard: Default::default(),
                     initial_focus: None,
                     help: Default::default(),
+                    size_input: Default::default(),
                 });
                 Owner::Canvas(0, r.canvas_state.canvases[0].revision())
             });

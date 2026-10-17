@@ -1764,3 +1764,9 @@ msgstr "Aktuelles Anmerkungswerkzeug verwenden"
 
 msgid "Cancel operation or exit screenshot"
 msgstr "Aktion abbrechen oder Screenshot beenden"
+
+msgid "Screenshot size"
+msgstr "Screenshot-Größe"
+
+msgid "Height"
+msgstr "Höhe"

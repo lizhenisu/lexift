@@ -42,6 +42,13 @@ pub(super) fn escape_from(origin: focus::Origin) {
     if REGISTRY.with(|s| {
         s.borrow_mut()
             .as_mut()
+            .is_some_and(screenshot::size_input::close)
+    }) {
+        return;
+    }
+    if REGISTRY.with(|s| {
+        s.borrow_mut()
+            .as_mut()
             .is_some_and(screenshot::keyboard::escape)
     }) {
         return;
@@ -375,6 +382,7 @@ impl Registry {
     }
 
     pub(super) fn close(&mut self) {
+        screenshot::size_input::close(self);
         screenshot::keyboard::invalidate(self);
         let _pointer_guards = self.pause_native_pointer_inputs();
         crate::pinned_screenshot::set_annotation_interaction(true);
