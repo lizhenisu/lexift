@@ -84,6 +84,7 @@
 ## 发布
 
 - [截图操作提示验证](releases/screenshot-help.md)
+- [截图比例锁定验证](releases/screenshot-aspect-lock.md)
 - [截图紧凑尺寸面板与拖动验证](releases/screenshot-size-panel.md)
 - [截图手动宽高输入验证](releases/screenshot-size-input.md)
 - [截图选区键盘精确调整验证](releases/screenshot-keyboard-adjustment.md)

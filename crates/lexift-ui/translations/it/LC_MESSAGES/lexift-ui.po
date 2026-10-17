@@ -1770,3 +1770,6 @@ msgstr "Dimensioni della cattura"
 
 msgid "Height"
 msgstr "Altezza"
+
+msgid "Lock aspect ratio"
+msgstr "Blocca proporzioni"

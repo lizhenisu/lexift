@@ -1,5 +1,8 @@
 //! Reusable physical-pixel rectangle gesture; independent of any window or OCR engine.
 use super::geometry::{Point, Rect};
+#[path = "region_aspect.rs"]
+mod aspect;
+pub use aspect::{AspectRatio, SizeAxis};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SelectionContext {
@@ -152,6 +155,7 @@ pub enum RegionNudge {
 #[derive(Default)]
 pub struct RegionEditor {
     bounds: Option<Rect>,
+    aspect: Option<AspectRatio>,
     drag: Option<(Rect, Point, Option<usize>)>,
     keyboard_origin: Option<Rect>,
 }
@@ -159,12 +163,16 @@ impl RegionEditor {
     pub fn new(bounds: Rect) -> Self {
         Self {
             bounds: Some(bounds),
+            aspect: None,
             drag: None,
             keyboard_origin: None,
         }
     }
     pub fn bounds(&self) -> Option<Rect> {
         self.bounds
+    }
+    pub fn aspect(&self) -> Option<AspectRatio> {
+        self.aspect
     }
     pub fn dragging(&self) -> bool {
         self.drag.is_some()
@@ -221,6 +229,10 @@ impl RegionEditor {
             ));
             return;
         }
+        if let Some(aspect) = self.aspect {
+            self.bounds = Some(aspect.dragged(b, start, point, handle.unwrap(), desktop));
+            return;
+        }
         let geometry = super::annotation::Bounds {
             left: b.left as f32,
             top: b.top as f32,
@@ -255,10 +267,15 @@ impl RegionEditor {
         let b = self.bounds.unwrap();
         let next = match action {
             RegionNudge::Move { dx, dy } => translated(b, dx, dy, desktop),
-            RegionNudge::Resize { dw, dh } => resized(
+            RegionNudge::Resize { dw, dh } => self.resized(
                 b,
                 i64::from(b.right) - i64::from(b.left) + i64::from(dw),
                 i64::from(b.bottom) - i64::from(b.top) + i64::from(dh),
+                if dw != 0 {
+                    SizeAxis::Width
+                } else {
+                    SizeAxis::Height
+                },
                 desktop,
             ),
         };
@@ -272,14 +289,66 @@ impl RegionEditor {
             return false;
         }
         let Some(b) = self.bounds else { return false };
-        let next = resized(
+        let next = self.resized(
             b,
             width.min(i64::MAX as u64) as i64,
             height.min(i64::MAX as u64) as i64,
+            SizeAxis::Width,
             desktop,
         );
         self.bounds = Some(next);
         next != b
+    }
+    /// Atomically apply a numeric draft and its constraint, outside active gestures.
+    /// The return value reports geometry changes; constraint-only changes return false.
+    pub fn apply_size(
+        &mut self,
+        width: u64,
+        height: u64,
+        aspect: Option<AspectRatio>,
+        axis: SizeAxis,
+        desktop: Rect,
+    ) -> bool {
+        if self.dragging() || self.keyboard_adjusting() || self.bounds.is_none() {
+            return false;
+        }
+        let b = self.bounds.unwrap();
+        if self.aspect == aspect
+            && width == (i64::from(b.right) - i64::from(b.left)) as u64
+            && height == (i64::from(b.bottom) - i64::from(b.top)) as u64
+        {
+            return false;
+        }
+        self.aspect = aspect;
+        let next = self.resized(
+            b,
+            width.min(i64::MAX as u64) as i64,
+            height.min(i64::MAX as u64) as i64,
+            axis,
+            desktop,
+        );
+        self.bounds = Some(next);
+        next != b
+    }
+    fn resized(&self, b: Rect, width: i64, height: i64, axis: SizeAxis, desktop: Rect) -> Rect {
+        let Some(aspect) = self.aspect else {
+            return resized(b, width, height, desktop);
+        };
+        let (w, h) = aspect.fit(
+            axis,
+            match axis {
+                SizeAxis::Width => width,
+                SizeAxis::Height => height,
+            }
+            .max(1) as u64,
+            (i64::from(desktop.right) - i64::from(b.left)).max(1) as u64,
+            (i64::from(desktop.bottom) - i64::from(b.top)).max(1) as u64,
+        );
+        Rect {
+            right: (i64::from(b.left) + w as i64) as i32,
+            bottom: (i64::from(b.top) + h as i64) as i32,
+            ..b
+        }
     }
     pub fn finish_keyboard(&mut self) {
         self.keyboard_origin = None;

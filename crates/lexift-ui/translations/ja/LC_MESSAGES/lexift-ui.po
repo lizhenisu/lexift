@@ -1770,3 +1770,6 @@ msgstr "スクリーンショットのサイズ"
 
 msgid "Height"
 msgstr "高さ"
+
+msgid "Lock aspect ratio"
+msgstr "縦横比を固定"

@@ -289,24 +289,29 @@ export component SettingsComboBox inherits Rectangle {
 }
 
 export component SettingsSwitch inherits Rectangle {
+    in property <bool> compact: false;
     in property <bool> checked;
     in property <string> label;
     in property <bool> enabled: true;
     callback toggled(bool);
     public function focus-switch() { keyboard.focus-target(); }
-    width: 52px; height: 32px; horizontal-stretch: 0; vertical-stretch: 0; border-radius: 16px;
+    width: root.compact ? Metrics.compact-switch-width : 52px;
+    height: root.compact ? Metrics.compact-switch-height : 32px;
+    horizontal-stretch: 0; vertical-stretch: 0; border-radius: self.height / 2;
     opacity: root.enabled ? 1 : Metrics.disabled-opacity;
     background: root.checked ? (switch-touch.pressed ? SettingsColors.primary-pressed : switch-touch.has-hover ? SettingsColors.primary-hover : SettingsColors.accent) : SettingsColors.switch-off;
     accessible-role: switch; accessible-label: root.label;
     accessible-checkable: true; accessible-checked: root.checked; accessible-enabled: root.enabled;
     accessible-action-default => { if root.enabled { root.toggled(!root.checked); } }
     Rectangle {
-        x: root.checked ? parent.width - self.width - 4px : 4px; y: 4px;
-        width: 24px; height: 24px; border-radius: 12px; background: root.checked ? SettingsColors.switch-thumb-on : SettingsColors.switch-thumb-off;
+        private property <length> inset: root.compact ? 3px : 4px;
+        x: root.checked ? parent.width - self.width - self.inset : self.inset; y: self.inset;
+        width: parent.height - 2 * self.inset; height: self.width; border-radius: self.height / 2;
+        background: root.checked ? SettingsColors.switch-thumb-on : SettingsColors.switch-thumb-off;
     }
     // Focus is separate from hover so keyboard navigation never looks like a held click.
     Rectangle { x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px;
-        border-radius: 19px; border-width: keyboard.focus-visible ? 1px : 0px;
+        border-radius: self.height / 2; border-width: keyboard.focus-visible ? 1px : 0px;
         border-color: Colors.primary; background: transparent;
     }
     keyboard := SettingsFocusScope { enabled: root.enabled;

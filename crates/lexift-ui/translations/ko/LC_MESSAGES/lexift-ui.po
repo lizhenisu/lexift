@@ -1770,3 +1770,6 @@ msgstr "스크린샷 크기"
 
 msgid "Height"
 msgstr "높이"
+
+msgid "Lock aspect ratio"
+msgstr "가로세로 비율 잠금"

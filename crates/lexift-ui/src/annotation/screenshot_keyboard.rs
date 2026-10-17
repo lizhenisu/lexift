@@ -403,6 +403,76 @@ mod tests {
         }
     }
     #[test]
+    fn locked_crop_keyboard_routes_keep_anchor_and_escape_restores_geometry_only() {
+        use lexift_core::domain::region_selection::{AspectRatio, SizeAxis};
+        let f = Fixture::new();
+        REGISTRY.with(|s| {
+            let mut slot = s.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            r.screenshot.as_mut().unwrap().region.apply_size(
+                160,
+                120,
+                Some(AspectRatio::new(4, 3)),
+                SizeAxis::Width,
+                Rect {
+                    left: 0,
+                    top: 0,
+                    right: 300,
+                    bottom: 200,
+                },
+            );
+        });
+        assert!(f.key(Key::RightArrow, true, true, false, false));
+        assert_eq!(
+            f.bounds(),
+            Rect {
+                right: 201,
+                bottom: 161,
+                ..ORIGINAL
+            }
+        );
+        assert!(f.key(Key::RightArrow, false, true, false, false));
+        assert!(f.key(Key::DownArrow, true, true, true, false));
+        assert_eq!(
+            f.bounds(),
+            Rect {
+                right: 215,
+                bottom: 171,
+                ..ORIGINAL
+            }
+        );
+        REGISTRY.with(|s| assert!(escape(s.borrow_mut().as_mut().unwrap())));
+        assert_eq!(
+            f.bounds(),
+            Rect {
+                right: 201,
+                bottom: 161,
+                ..ORIGINAL
+            }
+        );
+        assert!(f.key(Key::DownArrow, true, true, true, true));
+        assert_eq!(
+            f.bounds(),
+            Rect {
+                right: 201,
+                bottom: 161,
+                ..ORIGINAL
+            }
+        );
+        f.key(Key::DownArrow, false, true, false, false);
+        REGISTRY.with(|s| {
+            let mut slot = s.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            assert_eq!(
+                r.screenshot.as_ref().unwrap().region.aspect(),
+                Some(AspectRatio::new(4, 3))
+            );
+            assert_eq!(r.document.session.objects.len(), 1);
+            assert!(r.document.session.undo());
+            assert!(r.document.session.objects.is_empty());
+        });
+    }
+    #[test]
     fn keyboard_repeats_modifiers_multiple_arrows_and_escape_share_one_snapshot() {
         let f = Fixture::new();
         assert!(f.key(Key::RightArrow, true, false, false, false));

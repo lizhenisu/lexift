@@ -4,23 +4,27 @@ import { Metrics } from "design/metrics.slint";
 import { WindowHeaderButton } from "design/window-header.slint";
 import { AnnotationHintTarget } from "annotation-hint.slint";
 import { LineEdit } from "annotation-fields.slint";
-import { SettingsButton } from "settings-controls.slint";
+import { SettingsButton, SettingsSwitch } from "settings-controls.slint";
 
-// The title band moves the window; fields remain independent crop-size drafts.
+// The title band moves the window; dimensions and aspect lock remain drafts until applied.
 export component ScreenshotSizeInput inherits Window {
     title: @tr("Screenshot size"); no-frame: true; always-on-top: true;
     background: transparent;
     out property <length> content-width: max(Metrics.compact-panel-width,
         title-metrics.preferred-width + 2 * (Metrics.compact-header-button + Metrics.compact-panel-inset),
         width-label.preferred-width + height-label.preferred-width + 2 * Metrics.compact-panel-inset + 64px,
+        lock-label.preferred-width + Metrics.compact-switch-width + 2 * Metrics.compact-panel-inset + Spacing.small,
         cancel-button.width + apply-button.width + 2 * Metrics.compact-panel-inset + Spacing.small);
     out property <length> content-height: Metrics.compact-header-height + 2 * Metrics.compact-panel-inset
-        + 16px + 4px + 2 * Metrics.compact-control-height + Spacing.small;
+        + 16px + 4px + 2 * Metrics.compact-control-height + Metrics.compact-switch-height + 2 * Spacing.small;
     preferred-width: root.content-width; preferred-height: root.content-height;
     in-out property <string> width-text;
     in-out property <string> height-text;
     in property <bool> valid: true;
+    in property <bool> locked;
     callback draft-changed(string, string);
+    callback dimension-edited(int);
+    callback lock-requested(bool);
     callback apply(string, string);
     callback cancel();
     callback escape-pressed();
@@ -78,16 +82,28 @@ export component ScreenshotSizeInput inherits Window {
                 width-label := Text { x: 0px; y: 0px; width: parent.field-width; height: 16px; text: @tr("Width"); font-size: 12px; color: Colors.secondary-foreground; }
                 height-label := Text { x: parent.field-width + 22px; y: 0px; width: parent.field-width; height: 16px; text: @tr("Height"); font-size: 12px; color: Colors.secondary-foreground; }
                 width-input := LineEdit { x: 0px; y: 20px; width: parent.field-width; height: Metrics.compact-control-height;
-                    text <=> root.width-text; accessible-role: text-input; accessible-label: @tr("Width"); }
+                    text <=> root.width-text; accessible-role: text-input; accessible-label: @tr("Width");
+                    edited => { root.dimension-edited(0); } }
                 Text { x: parent.field-width; y: 20px; width: 22px; height: Metrics.compact-control-height; text: "×";
                     color: Colors.secondary-foreground; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
                 LineEdit { x: parent.field-width + 22px; y: 20px; width: parent.field-width; height: Metrics.compact-control-height;
-                    text <=> root.height-text; accessible-role: text-input; accessible-label: @tr("Height"); }
+                    text <=> root.height-text; accessible-role: text-input; accessible-label: @tr("Height");
+                    edited => { root.dimension-edited(1); } }
                 Text { x: parent.width - 18px; y: 20px; width: 18px; height: Metrics.compact-control-height; text: "px";
                     color: Colors.secondary-foreground; font-size: 12px; horizontal-alignment: right; vertical-alignment: center; }
             }
+            lock-row := Rectangle {
+                x: Metrics.compact-panel-inset; y: body.y + body.height + Spacing.small;
+                width: parent.width - 2 * self.x; height: Metrics.compact-switch-height;
+                lock-label := Text { x: 0px; y: 0px; height: parent.height;
+                    text: @tr("Lock aspect ratio"); font-size: 12px; color: Colors.secondary-foreground;
+                    vertical-alignment: center; }
+                SettingsSwitch { x: parent.width - self.width; y: 0px; compact: true;
+                    label: @tr("Lock aspect ratio"); checked: root.locked; enabled: root.locked || root.valid;
+                    toggled(value) => { root.lock-requested(value); } }
+            }
             apply-button := SettingsButton {
-                x: parent.width - Metrics.compact-panel-inset - self.width; y: body.y + body.height + Spacing.small;
+                x: parent.width - Metrics.compact-panel-inset - self.width; y: lock-row.y + lock-row.height + Spacing.small;
                 label: @tr("Apply"); primary: true; compact: true; height: Metrics.compact-control-height; border-radius: 4px;
                 enabled: root.valid; clicked => { root.apply(root.width-text, root.height-text); }
             }

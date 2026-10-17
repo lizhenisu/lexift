@@ -4,7 +4,9 @@ use crate::{
     ScreenshotSizeInput,
     bridge::{PopupPointerInput, dispatch_pointer_input},
 };
+use lexift_core::domain::region_selection::{AspectRatio, SizeAxis};
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
+use std::cell::Cell;
 use std::collections::HashMap;
 #[path = "screenshot_size_drag.rs"]
 mod drag;
@@ -45,6 +47,12 @@ struct Popup {
     cancel_interaction: CancelInteraction,
     shown: std::cell::Cell<bool>,
     drag: drag::State,
+    draft: Rc<SizeDraft>,
+}
+#[derive(Default)]
+struct SizeDraft {
+    aspect: Cell<Option<AspectRatio>>,
+    axis: Cell<SizeAxis>,
 }
 impl Drop for Popup {
     fn drop(&mut self) {
@@ -221,6 +229,55 @@ fn valid(r: &Registry, q: Request, revision: u64) -> bool {
             .and_then(|e| e.size_input.popup.as_ref())
             .is_some_and(|p| p.revision == revision && p.request.token == q.token)
 }
+/// Only a user edit chooses the driving axis. Programmatic counterpart updates do not.
+fn draft_target(q: Request, revision: u64) -> Option<(ScreenshotSizeInput, Rc<SizeDraft>)> {
+    REGISTRY.with(|s| {
+        let slot = s.try_borrow().ok()?;
+        let r = slot.as_ref().filter(|r| valid(r, q, revision))?;
+        let p = r.screenshot.as_ref()?.size_input.popup.as_ref()?;
+        Some((p.window.clone_strong(), p.draft.clone()))
+    })
+}
+fn edit_dimension(q: Request, revision: u64, axis: SizeAxis) {
+    let Some((window, draft)) = draft_target(q, revision) else {
+        return;
+    };
+    draft.axis.set(axis);
+    if let Some(ratio) = draft.aspect.get() {
+        let source = match axis {
+            SizeAxis::Width => window.get_width_text(),
+            SizeAxis::Height => window.get_height_text(),
+        };
+        if let Some(value) = integer(&source) {
+            let (w, h) = ratio.dimensions(axis, value);
+            match axis {
+                SizeAxis::Width => window.set_height_text(h.to_string().into()),
+                SizeAxis::Height => window.set_width_text(w.to_string().into()),
+            }
+        }
+    }
+    window.set_valid(
+        integer(&window.get_width_text()).is_some() && integer(&window.get_height_text()).is_some(),
+    );
+}
+fn lock_draft(q: Request, revision: u64, locked: bool) {
+    let Some((window, draft)) = draft_target(q, revision) else {
+        return;
+    };
+    let ratio = if locked {
+        let (Some(w), Some(h)) = (
+            integer(&window.get_width_text()),
+            integer(&window.get_height_text()),
+        ) else {
+            return;
+        };
+        Some(AspectRatio::new(w, h))
+    } else {
+        None
+    };
+    draft.aspect.set(ratio);
+    window.set_locked(locked);
+}
 fn open(q: Request) {
     REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
@@ -240,14 +297,33 @@ fn open(q: Request) {
         crate::theme::apply(&window);
         window.set_width_text((q.hit.crop.right - q.hit.crop.left).to_string().into());
         window.set_height_text((q.hit.crop.bottom - q.hit.crop.top).to_string().into());
+        let draft = Rc::new(SizeDraft {
+            aspect: Cell::new(r.screenshot.as_ref().unwrap().region.aspect()),
+            axis: Default::default(),
+        });
+        window.set_locked(draft.aspect.get().is_some());
         let revision = window::next_revision();
         let input = window::InputWork::new();
         let weak = window.as_weak();
         window.on_draft_changed(move |w, h| {
-            if let Some(window) = weak.upgrade() {
+            if draft_target(q, revision).is_some()
+                && let Some(window) = weak.upgrade()
+            {
                 window.set_valid(integer(w.as_str()).is_some() && integer(h.as_str()).is_some());
             }
         });
+        window.on_dimension_edited(move |axis| {
+            edit_dimension(
+                q,
+                revision,
+                if axis == 0 {
+                    SizeAxis::Width
+                } else {
+                    SizeAxis::Height
+                },
+            )
+        });
+        window.on_lock_requested(move |locked| lock_draft(q, revision, locked));
         let work = input.clone();
         window.on_apply(move |w, h| {
             work.post(move || finish(q, revision, Some((w.to_string(), h.to_string())), true));
@@ -294,6 +370,7 @@ fn open(q: Request) {
             cancel_interaction: r.lifecycle.cancel_window_interaction.clone(),
             shown: Default::default(),
             drag: Default::default(),
+            draft,
         });
         r.hints.clear();
         r.queue_render();
@@ -497,7 +574,9 @@ fn finish(q: Request, revision: u64, values: Option<(String, String)>, restore: 
                 desktop.right = desktop.right.max(f.bounds.right);
                 desktop.bottom = desktop.bottom.max(f.bounds.bottom);
             }
-            e.region.set_size(w, h, desktop)
+            let draft = &e.size_input.popup.as_ref().unwrap().draft;
+            e.region
+                .apply_size(w, h, draft.aspect.get(), draft.axis.get(), desktop)
         } else {
             false
         };
@@ -715,6 +794,198 @@ mod tests {
         assert_eq!(integer(&"9".repeat(2000)), Some(u64::MAX));
     }
     #[test]
+    fn aspect_drafts_link_only_user_edits_and_apply_atomically() {
+        let f = Fixture::new();
+        let (w, revision) = f.open();
+        w.set_width_text("320".into());
+        w.invoke_dimension_edited(0);
+        assert_eq!(w.get_height_text(), "90");
+        w.set_height_text("200".into());
+        w.invoke_lock_requested(true);
+        assert!(w.get_locked());
+        w.set_width_text("400".into());
+        w.invoke_dimension_edited(0);
+        assert_eq!(w.get_height_text(), "250");
+        w.set_height_text("300".into());
+        w.invoke_dimension_edited(1);
+        assert_eq!(w.get_width_text(), "480");
+        assert_eq!(f.bounds(), ORIGINAL);
+        assert!(f.events.borrow().is_empty());
+        finish(
+            f.q,
+            revision,
+            Some((
+                w.get_width_text().to_string(),
+                w.get_height_text().to_string(),
+            )),
+            true,
+        );
+        assert_eq!(
+            f.bounds(),
+            Rect {
+                right: 540,
+                bottom: 360,
+                ..ORIGINAL
+            }
+        );
+        assert_eq!(f.events.borrow().len(), 1);
+        REGISTRY.with(|s| {
+            let mut slot = s.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            assert_eq!(
+                r.screenshot.as_ref().unwrap().region.aspect(),
+                Some(AspectRatio::new(8, 5))
+            );
+            assert_eq!(r.document.session.objects.len(), 1);
+            assert!(r.document.session.undo());
+            assert!(r.document.session.objects.is_empty());
+        });
+    }
+    #[test]
+    fn aspect_only_commit_reopen_and_cancel_preserve_the_session_constraint() {
+        let f = Fixture::new();
+        let (w, revision) = f.open();
+        w.invoke_lock_requested(true);
+        finish(f.q, revision, Some(("120".into(), "90".into())), true);
+        assert!(f.events.borrow().is_empty());
+        assert_eq!(f.bounds(), ORIGINAL);
+        let (old, revision) = f.open();
+        assert!(old.get_locked());
+        old.invoke_lock_requested(false);
+        old.set_width_text("200".into());
+        old.invoke_dimension_edited(0);
+        assert_eq!(old.get_height_text(), "90");
+        finish(f.q, revision, None, true);
+        let (next, _) = f.open();
+        assert!(next.get_locked());
+        old.invoke_lock_requested(true);
+        old.invoke_dimension_edited(0);
+        old.invoke_apply("1".into(), "1".into());
+        slint::platform::update_timers_and_animations();
+        assert_eq!(next.get_width_text(), "120");
+        assert_eq!(f.bounds(), ORIGINAL);
+        REGISTRY.with(|s| {
+            let mut slot = s.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            r.set_mode(InteractionMode::Tool(0));
+            assert_eq!(
+                r.screenshot.as_ref().unwrap().region.aspect(),
+                Some(AspectRatio::new(4, 3))
+            );
+        });
+    }
+    #[test]
+    fn aspect_invalid_recovery_and_relocking_do_not_rewrite_the_active_field() {
+        let f = Fixture::new();
+        let (w, revision) = f.open();
+        w.set_width_text("".into());
+        w.invoke_dimension_edited(0);
+        w.invoke_lock_requested(true);
+        assert!(!w.get_locked());
+        w.set_width_text("120".into());
+        w.invoke_lock_requested(true);
+        w.set_width_text("".into());
+        w.invoke_dimension_edited(0);
+        assert!(!w.get_valid());
+        assert_eq!(w.get_height_text(), "90");
+        w.set_width_text("00100".into());
+        w.invoke_dimension_edited(0);
+        assert!(w.get_valid());
+        assert_eq!(w.get_width_text(), "00100");
+        assert_eq!(w.get_height_text(), "75");
+        w.invoke_lock_requested(false);
+        w.set_height_text("50".into());
+        w.invoke_dimension_edited(1);
+        assert_eq!(w.get_width_text(), "00100");
+        w.invoke_lock_requested(true);
+        w.set_width_text("200".into());
+        w.invoke_dimension_edited(0);
+        assert_eq!(w.get_height_text(), "100");
+        w.set_width_text("9".repeat(2000).into());
+        w.invoke_dimension_edited(0);
+        assert_eq!(integer(&w.get_height_text()), Some(9223372036854775808));
+        finish(
+            f.q,
+            revision,
+            Some((
+                w.get_width_text().to_string(),
+                w.get_height_text().to_string(),
+            )),
+            true,
+        );
+        assert_eq!(
+            f.bounds(),
+            Rect {
+                right: 800,
+                bottom: 430,
+                ..ORIGINAL
+            }
+        );
+    }
+    #[test]
+    fn locked_crop_pointer_routes_all_handles_and_output_uses_confirmed_bounds() {
+        let f = Fixture::new();
+        let (w, revision) = f.open();
+        w.invoke_lock_requested(true);
+        finish(f.q, revision, Some(("120".into(), "90".into())), true);
+        for (handle, (x, y)) in [
+            (60., 60.),
+            (120., 60.),
+            (180., 60.),
+            (60., 105.),
+            (180., 105.),
+            (60., 150.),
+            (120., 150.),
+            (180., 150.),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            REGISTRY.with(|s| {
+                let mut slot = s.borrow_mut();
+                let r = slot.as_mut().unwrap();
+                // Restore the gesture origin after testing a handle with a different anchor.
+                r.screenshot.as_mut().unwrap().region = RegionEditor::new(ORIGINAL);
+                r.screenshot.as_mut().unwrap().region.apply_size(
+                    120,
+                    90,
+                    Some(AspectRatio::new(4, 3)),
+                    SizeAxis::Width,
+                    Rect {
+                        left: 0,
+                        top: 0,
+                        right: 800,
+                        bottom: 600,
+                    },
+                );
+                let dx = if matches!(handle, 1 | 6) {
+                    0.
+                } else if matches!(handle, 0 | 3 | 5) {
+                    -40.
+                } else {
+                    40.
+                };
+                let dy = if matches!(handle, 3 | 4) {
+                    0.
+                } else if handle <= 2 {
+                    -30.
+                } else {
+                    30.
+                };
+                assert!(super::super::pointer(r, 0, 0, x, y));
+                assert!(r.screenshot.as_ref().unwrap().region.dragging());
+                assert!(super::super::pointer(r, 0, 1, x + dx, y + dy));
+                assert!(super::super::pointer(r, 0, 2, x + dx, y + dy));
+                let b = r.screenshot.as_ref().unwrap().region.bounds().unwrap();
+                assert_eq!((b.right - b.left, b.bottom - b.top), (160, 120));
+                assert!(!r.screenshot.as_ref().unwrap().region.dragging());
+            });
+        }
+        let expected = f.bounds();
+        output(lexift_core::domain::screenshot::ScreenshotOutput::Copy);
+        assert!(f.events.borrow().iter().any(|e|matches!(e,ScreenshotEvent::Output{request,..} if request.snapshot.monitor==expected)));
+    }
+    #[test]
     fn confirm_is_atomic_clamped_and_does_not_add_document_history() {
         let f = Fixture::new();
         let (w, revision) = f.open();
@@ -896,6 +1167,7 @@ mod tests {
             s.borrow_mut().as_mut().unwrap().prepare = |_| PassiveWindowPreparation::Ready
         });
         let (w, _) = f.open();
+        w.invoke_lock_requested(true);
         w.set_width_text("1".into());
         output(lexift_core::domain::screenshot::ScreenshotOutput::Copy);
         assert_eq!(f.bounds(), ORIGINAL);
@@ -989,9 +1261,19 @@ mod tests {
             send_pointer(&w, false, x, y);
         }
         // Clicking Apply can confirm a no-op, but must never start a window drag.
-        send_pointer(&w, true, w.get_content_width() - 45., 110.);
+        send_pointer(
+            &w,
+            true,
+            w.get_content_width() - 45.,
+            w.get_content_height() - 26.,
+        );
         REGISTRY.with(|s| assert!(!dragging(s.borrow().as_ref().unwrap())));
-        send_pointer(&w, false, w.get_content_width() - 45., 110.);
+        send_pointer(
+            &w,
+            false,
+            w.get_content_width() - 45.,
+            w.get_content_height() - 26.,
+        );
         slint::platform::update_timers_and_animations();
         assert_eq!(f.bounds(), ORIGINAL);
         assert!(f.events.borrow().is_empty());
@@ -1118,6 +1400,7 @@ mod tests {
                     crate::theme::apply(&window);
                     window.set_width_text("1920".into());
                     window.set_height_text("1080".into());
+                    window.set_locked(true);
                     window.window().dispatch_event(
                         slint::platform::WindowEvent::ScaleFactorChanged {
                             scale_factor: scale,
@@ -1136,13 +1419,13 @@ mod tests {
                     assert!(
                         window.get_content_width() >= 288. && window.get_content_width() <= 340.
                     );
-                    assert!(window.get_content_height() <= 144.);
+                    assert!(window.get_content_height() <= 174.);
                     assert!(image.as_slice().iter().any(|p| p.a > 0 && p.r != p.g));
                     if std::env::var_os("LEXIFT_SIZE_INPUT_RENDER").is_some() {
                         crate::i18n::write_test_bitmap(
                             concat!(
                                 env!("CARGO_MANIFEST_DIR"),
-                                "/../../target/screenshot-size-panel/render"
+                                "/../../target/screenshot-aspect/render"
                             ),
                             &format!("{}-{}-{}", language.code(), dark, (scale * 100.) as i32),
                             image.width(),

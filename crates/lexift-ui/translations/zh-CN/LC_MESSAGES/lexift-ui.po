@@ -1770,3 +1770,6 @@ msgstr "截图尺寸"
 
 msgid "Height"
 msgstr "高度"
+
+msgid "Lock aspect ratio"
+msgstr "锁定比例"
