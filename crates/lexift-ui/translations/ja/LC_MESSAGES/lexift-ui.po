@@ -1788,3 +1788,24 @@ msgstr "ピクセル拡大鏡"
 
 msgid "Click to select a window, or drag to select a region"
 msgstr "クリックでウィンドウを選択、ドラッグで範囲を選択"
+
+msgid "Recognize text"
+msgstr "文字を認識"
+
+msgid "Processing screenshot"
+msgstr "スクリーンショットを処理中"
+
+msgid "Recognized text copied"
+msgstr "認識した文字をコピーしました"
+
+msgid "No text recognized"
+msgstr "文字が見つかりませんでした"
+
+msgid "OCR resources unavailable. Manage them in Settings."
+msgstr "OCR リソースを利用できません。設定で管理してください。"
+
+msgid "Text recognition failed"
+msgstr "文字認識に失敗しました"
+
+msgid "Could not copy recognized text"
+msgstr "認識した文字をコピーできませんでした"

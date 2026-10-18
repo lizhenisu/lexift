@@ -1788,3 +1788,24 @@ msgstr "像素放大鏡"
 
 msgid "Click to select a window, or drag to select a region"
 msgstr "按一下選取視窗，拖曳框選區域"
+
+msgid "Recognize text"
+msgstr "辨識文字"
+
+msgid "Processing screenshot"
+msgstr "正在處理截圖"
+
+msgid "Recognized text copied"
+msgstr "辨識文字已複製"
+
+msgid "No text recognized"
+msgstr "未辨識到文字"
+
+msgid "OCR resources unavailable. Manage them in Settings."
+msgstr "OCR 資源無法使用，請在設定中管理。"
+
+msgid "Text recognition failed"
+msgstr "文字辨識失敗"
+
+msgid "Could not copy recognized text"
+msgstr "辨識文字複製失敗"

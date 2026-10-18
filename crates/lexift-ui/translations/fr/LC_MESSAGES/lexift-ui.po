@@ -1788,3 +1788,24 @@ msgstr "Loupe de pixels"
 
 msgid "Click to select a window, or drag to select a region"
 msgstr "Cliquez pour sélectionner une fenêtre ou faites glisser pour sélectionner une zone"
+
+msgid "Recognize text"
+msgstr "Reconnaître le texte"
+
+msgid "Processing screenshot"
+msgstr "Traitement de la capture"
+
+msgid "Recognized text copied"
+msgstr "Texte reconnu copié"
+
+msgid "No text recognized"
+msgstr "Aucun texte reconnu"
+
+msgid "OCR resources unavailable. Manage them in Settings."
+msgstr "Ressources OCR indisponibles. Gérez-les dans les paramètres."
+
+msgid "Text recognition failed"
+msgstr "Échec de la reconnaissance du texte"
+
+msgid "Could not copy recognized text"
+msgstr "Impossible de copier le texte reconnu"

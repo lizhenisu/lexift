@@ -1,4 +1,6 @@
 import { Colors } from "design/colors.slint";
+import { Metrics } from "design/metrics.slint";
+import { Spacing } from "design/spacing.slint";
 import { AppToast } from "design/toast.slint";
 import { MenuMetrics } from "design/menu.slint";
 import { AnnotationCursor } from "annotation-canvas.slint";
@@ -76,7 +78,14 @@ export component PinnedScreenshotWindow inherits Window {
 }
 export component ScreenshotToastWindow inherits Window {
     title:""; no-frame:true; always-on-top:true; background:transparent;
+    in property <bool> error:true;
+    in property <bool> passive:false;
+    out property <length> screen-margin:Spacing.medium;
     in property <string> message; callback dismissed();
-    preferred-width:320px; height:toast.height;
-    toast := AppToast { width:parent.width; adaptive-height:true; height-limit:200px; error:true; message:root.message; dismissed=>{root.dismissed();} }
+    out property <length> content-width:Metrics.toast-width;
+    out property <length> content-height:toast.height;
+    preferred-width:root.content-width; preferred-height:root.content-height;
+    min-width:root.content-width; max-width:root.content-width;
+    min-height:root.content-height; max-height:root.content-height;
+    toast := AppToast { width:parent.width; adaptive-height:true; height-limit:200px; error:root.error; dismissible:!root.passive; message:root.message; dismissed=>{root.dismissed();} }
 }

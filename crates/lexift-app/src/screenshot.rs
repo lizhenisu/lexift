@@ -71,6 +71,45 @@ impl ScreenshotRuntime {
             pin_samples: Default::default(),
         }
     }
+    /// Crop the immutable capture, infer off-thread, then serialize the final clipboard write.
+    fn recognize_text(
+        &self,
+        frames: &[CapturedRegion],
+        bounds: lexift_core::domain::geometry::Rect,
+        cancel: &AtomicBool,
+        recognize: impl FnOnce(
+            CapturedRegion,
+        ) -> std::result::Result<
+            String,
+            lexift_core::domain::screenshot::OcrOutcome,
+        >,
+    ) -> Option<lexift_core::domain::screenshot::OcrOutcome> {
+        use lexift_core::domain::screenshot::OcrOutcome;
+        if cancel.load(Ordering::Acquire) {
+            return None;
+        }
+        let recognized = crop_frames(frames, bounds)
+            .map_err(|_| OcrOutcome::RecognitionFailed)
+            .and_then(recognize);
+        if cancel.load(Ordering::Acquire) {
+            return None;
+        }
+        let outcome = match recognized {
+            Ok(text) if text.trim().is_empty() => OcrOutcome::Empty,
+            Ok(text) => {
+                let _serial = self.color_serial.blocking_lock();
+                if cancel.load(Ordering::Acquire) {
+                    return None;
+                }
+                match self.clipboard.write_text(&text) {
+                    Ok(()) => OcrOutcome::Copied,
+                    Err(_) => OcrOutcome::CopyFailed,
+                }
+            }
+            Err(outcome) => outcome,
+        };
+        (!cancel.load(Ordering::Acquire)).then_some(outcome)
+    }
     pub fn sync(&self, state: &lexift_core::domain::screenshot::ScreenshotState, quitting: bool) {
         let mut color = self.color_job.lock().unwrap_or_else(|p| p.into_inner());
         if color.as_ref().is_some_and(|(s, id, _)| {
@@ -327,6 +366,42 @@ impl ScreenshotRuntime {
     }
     pub fn execute(self: &Arc<Self>, controller: &Arc<AppController>, command: ScreenshotCommand) {
         match command {
+            ScreenshotCommand::Recognize {
+                session,
+                operation,
+                bounds,
+                strategy,
+            } => {
+                let job = self
+                    .session
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .as_ref()
+                    .filter(|s| s.id == session)
+                    .and_then(|s| s.frames.clone().map(|f| (f, s.cancelled.clone())));
+                let Some((frames, cancel)) = job else {
+                    return;
+                };
+                let this = self.clone();
+                let c = controller.clone();
+                controller.runtime.spawn_blocking(move || {
+                    let outcome = this.recognize_text(&frames, bounds, &cancel, |image| {
+                        c.ocr
+                            .as_ref()
+                            .ok_or(
+                                lexift_core::domain::screenshot::OcrOutcome::ResourcesUnavailable,
+                            )
+                            .and_then(|ocr| ocr.recognize_screenshot(&c, image, &strategy, &cancel))
+                    });
+                    if let Some(outcome) = outcome {
+                        c.dispatch(AppEvent::Screenshot(ScreenshotEvent::Recognized {
+                            session,
+                            operation,
+                            outcome,
+                        }));
+                    }
+                });
+            }
             ScreenshotCommand::CopyColor { session, request } => {
                 let cancel = Arc::new(AtomicBool::new(false));
                 if let Some((_, _, old)) = self
@@ -616,6 +691,97 @@ mod tests {
         ports::annotation_save::PngSaveRequest,
     };
     struct Save;
+    #[test]
+    fn screenshot_ocr_uses_frozen_cross_screen_pixels_and_never_copies_empty_failed_or_cancelled_text()
+     {
+        use lexift_core::domain::{geometry::Rect, screenshot::OcrOutcome};
+        struct Texts(Mutex<Vec<String>>, AtomicBool);
+        impl ClipboardPort for Texts {
+            fn read_text(&self) -> Result<Option<String>> {
+                Ok(None)
+            }
+            fn write_text(&self, text: &str) -> Result<()> {
+                if self.1.load(Ordering::Acquire) {
+                    return Err(Error::new("fixture"));
+                }
+                self.0.lock().unwrap().push(text.into());
+                Ok(())
+            }
+        }
+        let clipboard = Arc::new(Texts(Mutex::new(vec![]), AtomicBool::new(false)));
+        let runtime = ScreenshotRuntime::new(
+            || None,
+            Arc::new(Save),
+            Arc::new(lexift_ui::SoftwareExportRenderer),
+            clipboard.clone(),
+        );
+        let bounds = Rect {
+            left: -1,
+            top: 0,
+            right: 1,
+            bottom: 1,
+        };
+        let frames = vec![
+            CapturedRegion {
+                bounds: Rect {
+                    left: -2,
+                    top: 0,
+                    right: 0,
+                    bottom: 1,
+                },
+                pixels: [10, 20, 30, 255].repeat(2),
+            },
+            CapturedRegion {
+                bounds: Rect {
+                    left: 0,
+                    top: 0,
+                    right: 2,
+                    bottom: 1,
+                },
+                pixels: [40, 50, 60, 255].repeat(2),
+            },
+        ];
+        let cancel = AtomicBool::new(false);
+        let result = runtime.recognize_text(&frames, bounds, &cancel, |image| {
+            assert_eq!(image.bounds, bounds);
+            assert_eq!(image.pixels, [10, 20, 30, 255, 40, 50, 60, 255]);
+            Ok("line one\nline two".into())
+        });
+        assert_eq!(result, Some(OcrOutcome::Copied));
+        assert_eq!(&*clipboard.0.lock().unwrap(), &["line one\nline two"]);
+        for result in [
+            Ok(" \r\n\t".into()),
+            Err(OcrOutcome::RecognitionFailed),
+            Err(OcrOutcome::ResourcesUnavailable),
+        ] {
+            let expected = match &result {
+                Ok(_) => OcrOutcome::Empty,
+                Err(e) => *e,
+            };
+            assert_eq!(
+                runtime.recognize_text(&frames, bounds, &cancel, |_| result),
+                Some(expected)
+            );
+        }
+        clipboard.1.store(true, Ordering::Release);
+        assert_eq!(
+            runtime.recognize_text(&frames, bounds, &cancel, |_| Ok("text".into())),
+            Some(OcrOutcome::CopyFailed)
+        );
+        clipboard.1.store(false, Ordering::Release);
+        assert_eq!(
+            runtime.recognize_text(&frames, bounds, &cancel, |_| {
+                cancel.store(true, Ordering::Release);
+                Ok("stale".into())
+            }),
+            None
+        );
+        assert_eq!(
+            runtime.recognize_text(&frames, bounds, &cancel, |_| panic!("cancelled inference")),
+            None
+        );
+        assert_eq!(clipboard.0.lock().unwrap().len(), 1);
+    }
     #[test]
     fn color_writes_run_off_thread_and_cancel_before_the_service_gate() {
         use lexift_core::domain::screen_snapshot::Rgb;

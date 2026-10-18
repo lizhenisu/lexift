@@ -10,7 +10,7 @@ use lexift_core::{
 };
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 
 struct Work {
@@ -23,6 +23,7 @@ pub(crate) struct OcrRuntime {
     capture: Arc<dyn ScreenCapturePort>,
     work: Mutex<Work>,
     idle: Arc<AtomicU64>,
+    active: Arc<AtomicUsize>,
     resource: Mutex<(u64, Arc<AtomicBool>)>,
 }
 impl OcrRuntime {
@@ -47,8 +48,62 @@ impl OcrRuntime {
                 frames: None,
             }),
             idle: Arc::new(AtomicU64::new(0)),
+            active: Arc::new(AtomicUsize::new(0)),
             resource: Mutex::new((0, Arc::new(AtomicBool::new(false)))),
         }
+    }
+    /// Both OCR entry points share inference ownership and the cancellable idle release.
+    fn recognize_image(
+        self: &Arc<Self>,
+        controller: &Arc<AppController>,
+        image: CapturedRegion,
+        strategy: &lexift_core::domain::ocr::OcrRecognitionStrategy,
+        cancel: &AtomicBool,
+    ) -> lexift_core::Result<String> {
+        self.active.fetch_add(1, Ordering::AcqRel);
+        self.idle.fetch_add(1, Ordering::AcqRel);
+        let result = if cancel.load(Ordering::Acquire) {
+            Err(lexift_core::Error::new("OCR cancelled"))
+        } else {
+            self.port.recognize(image, strategy, cancel)
+        };
+        self.active.fetch_sub(1, Ordering::AcqRel);
+        let version = self.idle.fetch_add(1, Ordering::AcqRel) + 1;
+        let this = self.clone();
+        controller.runtime.spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+            if this.idle.load(Ordering::Acquire) == version
+                && this.active.load(Ordering::Acquire) == 0
+            {
+                let _ = tokio::task::spawn_blocking(move || this.port.release()).await;
+            }
+        });
+        result
+    }
+    pub(crate) fn recognize_screenshot(
+        self: &Arc<Self>,
+        controller: &Arc<AppController>,
+        image: CapturedRegion,
+        strategy: &lexift_core::domain::ocr::OcrRecognitionStrategy,
+        cancel: &AtomicBool,
+    ) -> std::result::Result<String, lexift_core::domain::screenshot::OcrOutcome> {
+        use lexift_core::{domain::screenshot::OcrOutcome, ports::ocr::OcrResourceStatus};
+        let info = self
+            .port
+            .resources()
+            .map_err(|_| OcrOutcome::ResourcesUnavailable)?;
+        if !info.ready
+            || info.status != OcrResourceStatus::Ready
+            || (strategy.requires_korean()
+                && !info
+                    .korean
+                    .as_ref()
+                    .is_some_and(|k| k.ready && k.status == OcrResourceStatus::Ready))
+        {
+            return Err(OcrOutcome::ResourcesUnavailable);
+        }
+        self.recognize_image(controller, image, strategy, cancel)
+            .map_err(|_| OcrOutcome::RecognitionFailed)
     }
     pub fn sync(&self, state: &AppState) {
         let mut resource = self.resource.lock().unwrap_or_else(|p| p.into_inner());
@@ -148,7 +203,6 @@ impl OcrRuntime {
             let w = self.work.lock().unwrap_or_else(|p| p.into_inner());
             (w.generation, w.cancel.clone())
         };
-        let idle_version = self.idle.fetch_add(1, Ordering::AcqRel) + 1;
         controller.runtime.spawn_blocking(move || {
             let result: lexift_core::Result<()> = (|| {
                 match command {
@@ -214,7 +268,7 @@ impl OcrRuntime {
                         let image =
                             lexift_core::domain::screen_snapshot::crop_frames(&frames, bounds)?;
                         drop(frames);
-                        let text = this.port.recognize(image, &strategy, &cancel)?;
+                        let text = this.recognize_image(&c, image, &strategy, &cancel)?;
                         c.dispatch(AppEvent::Ocr(OcrEvent::Recognized { generation, text }));
                     }
                     _ => {}
@@ -229,14 +283,6 @@ impl OcrRuntime {
                     error: e.to_string(),
                 }));
             }
-            let port = this.port.clone();
-            let idle = this.idle.clone();
-            c.runtime.spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(120)).await;
-                if idle.load(Ordering::Acquire) == idle_version {
-                    let _ = tokio::task::spawn_blocking(move || port.release()).await;
-                }
-            });
         });
     }
 }

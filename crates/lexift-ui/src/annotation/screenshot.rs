@@ -27,6 +27,11 @@ struct Recovery {
     collapsed: bool,
     lifecycle: WindowLifecycleCallbacks,
 }
+struct OcrFeedbackContext {
+    prepare: fn(&slint::Window) -> PassiveWindowPreparation,
+    lifecycle: WindowLifecycleCallbacks,
+    bounds: Rect,
+}
 #[derive(Default)]
 struct Flow {
     activation: Option<Option<lexift_core::ports::magnifier::WindowToken>>,
@@ -35,6 +40,8 @@ struct Flow {
     frames: Option<Arc<Vec<CapturedRegion>>>,
     toast: window::Slot<crate::ScreenshotToastWindow>,
     toast_timer: slint::Timer,
+    toast_measurement: Option<(u64, slint::PhysicalSize)>,
+    ocr_context: Option<OcrFeedbackContext>,
 }
 thread_local! { static FLOW:RefCell<Flow>=RefCell::new(Flow::default()); }
 pub(crate) fn active() -> bool {
@@ -53,6 +60,11 @@ pub(crate) fn sync(state: &ScreenshotState) {
     crate::screen_interaction::pixel_picker::sync(state);
     let feedback = FLOW.with(|slot| {
         let mut slot = slot.borrow_mut();
+        if slot.state.session != state.session {
+            slot.toast_timer.stop();
+            slot.toast.clear();
+            slot.ocr_context = None;
+        }
         let changed = slot.state.error != state.error
             || slot.state.session != state.session
             || slot.state.operation != state.operation;
@@ -66,7 +78,10 @@ pub(crate) fn sync(state: &ScreenshotState) {
     REGISTRY.with(|slot| {
         if let Some(r) = slot.borrow_mut().as_mut() {
             if let Some(main) = r.toolbar_state.main.get() {
-                main.set_output_busy(state.phase == ScreenshotPhase::Output);
+                main.set_output_busy(matches!(
+                    state.phase,
+                    ScreenshotPhase::Output | ScreenshotPhase::Recognizing
+                ));
                 main.set_feedback(state.error.as_deref().unwrap_or("").into());
             }
             if r.screenshot.is_some() {
@@ -83,6 +98,12 @@ pub(super) fn request() {
     if active() || crate::ocr::screen_busy() {
         return;
     }
+    FLOW.with(|s| {
+        let mut s = s.borrow_mut();
+        s.toast_timer.stop();
+        s.toast.clear();
+        s.ocr_context = None;
+    });
     let request = REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut()?;
@@ -254,6 +275,7 @@ pub(crate) fn restore(id: u64) {
         }
     });
     toggle(Instant::now());
+    show_ocr_feedback(id);
 }
 pub(crate) fn shutdown() {
     crate::screen_interaction::pixel_picker::clear();
@@ -267,6 +289,70 @@ pub(crate) fn shutdown() {
         }
     });
     FLOW.with(|s| *s.borrow_mut() = Flow::default());
+}
+pub(super) fn recognizing() -> bool {
+    FLOW.with(|s| s.borrow().state.phase == ScreenshotPhase::Recognizing)
+}
+/// Freeze only crop identity here; OCR pixels are owned by the App capture session.
+pub(super) fn recognize_text() {
+    if FLOW.with(|s| s.borrow().state.phase != ScreenshotPhase::Editing) {
+        return;
+    }
+    keyboard::commit_current();
+    let request = REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let r = slot.as_mut()?;
+        let editing = r
+            .screenshot
+            .as_ref()
+            .filter(|e| e.pin.is_none() && !e.region.dragging())?;
+        let (id, bounds) = (editing.id, editing.region.bounds()?);
+        // The invoking toolbar selects the feedback display even for cross-screen crops.
+        let main = r.toolbar_state.main.get()?;
+        let p = main.window().position();
+        let size = main.window().size();
+        let anchor = Rect {
+            left: p.x,
+            top: p.y,
+            right: p.x + size.width as i32,
+            bottom: p.y + size.height as i32,
+        };
+        let point = (r.lifecycle.toolbar_cursor_position)()
+            .filter(|p| {
+                p.x >= anchor.left && p.x < anchor.right && p.y >= anchor.top && p.y < anchor.bottom
+            })
+            .unwrap_or(Point {
+                x: anchor.left + (anchor.right - anchor.left) / 2,
+                y: anchor.top + (anchor.bottom - anchor.top) / 2,
+            });
+        let context = OcrFeedbackContext {
+            prepare: r.prepare,
+            lifecycle: r.lifecycle.clone(),
+            bounds: Rect {
+                left: point.x,
+                top: point.y,
+                right: point.x.saturating_add(1),
+                bottom: point.y.saturating_add(1),
+            },
+        };
+        size_input::close(r);
+        finish_text_edit_registry(r, true);
+        cancel_active_gesture(r);
+        r.finish_style_edit();
+        r.close_watermark_input();
+        r.close_panel();
+        deselect_object(r);
+        FLOW.with(|s| s.borrow_mut().ocr_context = Some(context));
+        Some(ScreenshotEvent::Recognize {
+            session: id,
+            bounds,
+        })
+    });
+    if let Some(event) = request {
+        // Block queued input immediately, before the Core snapshot returns through the UI queue.
+        FLOW.with(|s| s.borrow_mut().state.phase = ScreenshotPhase::Recognizing);
+        emit(event);
+    }
 }
 pub(super) fn output(kind: ScreenshotOutput) {
     REGISTRY.with(|s| {
@@ -313,6 +399,9 @@ pub(super) fn output(kind: ScreenshotOutput) {
     }
 }
 pub(super) fn pointer(r: &mut Registry, index: usize, event: i32, x: f32, y: f32) -> bool {
+    if recognizing() {
+        return true;
+    }
     // Keep the input host/pointer current even while the numeric popup consumes
     // gestures, so dismissed input cannot restore a hint underneath the cursor.
     pointer_help(r, index, event, x, y);
@@ -637,6 +726,35 @@ pub(crate) fn output_current(session: u64, operation: u64) -> bool {
     })
 }
 
+fn show_ocr_feedback(id: u64) {
+    let context = FLOW.with(|slot| {
+        let mut s = slot.borrow_mut();
+        if s.state.session != id || s.state.phase != ScreenshotPhase::Idle {
+            return None;
+        }
+        let OcrFeedbackContext {
+            prepare,
+            lifecycle,
+            bounds,
+        } = s.ocr_context.take()?;
+        let outcome = s.state.ocr_result?;
+        s.toast_timer.stop();
+        s.toast.clear();
+        let toast =
+            crate::screen_interaction::create(&lifecycle, crate::ScreenshotToastWindow::new)
+                .ok()?;
+        crate::theme::apply(&toast);
+        toast.set_message(crate::i18n::tr(outcome.message()).into());
+        toast.set_passive(true);
+        toast.set_error(outcome != lexift_core::domain::screenshot::OcrOutcome::Copied);
+        s.toast.open(toast);
+        Some((prepare, lifecycle, bounds, s.toast.revision()))
+    });
+    if let Some((prepare, lifecycle, bounds, revision)) = context {
+        show_toast(id, bounds, prepare, lifecycle, true, revision, 0);
+    }
+}
+
 fn show_feedback(state: &ScreenshotState) {
     let Some(message) = state.error.as_ref() else {
         return;
@@ -681,47 +799,131 @@ fn show_feedback(state: &ScreenshotState) {
         });
         slot.toast.open(toast);
     });
-    show_toast(state.session, bounds, prepare, lifecycle, 0);
+    let revision = FLOW.with(|s| s.borrow().toast.revision());
+    show_toast(
+        state.session,
+        bounds,
+        prepare,
+        lifecycle,
+        false,
+        revision,
+        0,
+    );
 }
 fn show_toast(
     id: u64,
     bounds: Rect,
     prepare: fn(&slint::Window) -> PassiveWindowPreparation,
     lifecycle: WindowLifecycleCallbacks,
+    ocr: bool,
+    revision: u64,
     attempt: u8,
 ) {
     FLOW.with(|slot| {
         let mut slot = slot.borrow_mut();
-        if slot.state.session != id {
+        if slot.state.session != id || slot.toast.revision() != revision {
             return;
         };
-        let revision = slot.toast.revision();
         let Some(toast) = slot.toast.get() else {
             return;
         };
+        if ocr
+            && let Some(area) = (lifecycle.popup_work_area)(Point {
+                x: bounds.left,
+                y: bounds.top,
+            })
+        {
+            // Establish the destination monitor before measuring logical toast content.
+            toast.window().set_position(slint::PhysicalPosition::new(
+                area.left + (area.right - area.left) / 2,
+                area.bottom - 250,
+            ));
+        }
         match prepare(toast.window()) {
             PassiveWindowPreparation::Ready => {
+                // Winit can begin at its 10px fallback width. Measure at the token width
+                // while hidden, rather than wrapping text against that native placeholder.
+                for _ in 0..3 {
+                    let size = slint::LogicalSize::new(
+                        toast.get_content_width(),
+                        toast.get_content_height(),
+                    );
+                    toast.window().set_size(size);
+                    let _ = toast.window().take_snapshot();
+                    if (toast.get_content_height() - size.height).abs() < 0.1 {
+                        break;
+                    }
+                }
+                toast.window().set_size(slint::LogicalSize::new(
+                    toast.get_content_width(),
+                    toast.get_content_height(),
+                ));
                 let scale = toast.window().scale_factor();
                 let area = (lifecycle.popup_work_area)(Point {
                     x: bounds.left,
                     y: bounds.top,
                 });
-                let size = toast.window().size();
-                let point = placement::place_toolbar_popup(
-                    bounds,
-                    size.width,
-                    size.height,
-                    area,
-                    (8. * scale) as i32,
-                    placement::Side::Before,
+                // Native WM_SIZE can still report the pre-measurement height here.
+                // Position from the same settled logical dimensions submitted above.
+                let size = slint::PhysicalSize::new(
+                    (toast.get_content_width() * scale).round().max(1.) as u32,
+                    (toast.get_content_height() * scale).round().max(1.) as u32,
                 );
+                // A cross-DPI resize reaches Slint through the next event-loop turn.
+                // Require a stable hidden layout on consecutive preparation turns.
+                if ocr && slot.toast_measurement != Some((revision, size)) {
+                    slot.toast_measurement = Some((revision, size));
+                    if attempt < 20 {
+                        slot.toast
+                            .prepare_after(Duration::from_millis(16), move || {
+                                show_toast(
+                                    id,
+                                    bounds,
+                                    prepare,
+                                    lifecycle.clone(),
+                                    ocr,
+                                    revision,
+                                    attempt + 1,
+                                )
+                            });
+                    } else {
+                        slot.toast.clear();
+                    }
+                    return;
+                }
+                let point = if ocr {
+                    let Some(area) = area else {
+                        slot.toast.clear();
+                        return;
+                    };
+                    if !(lifecycle.configure_hint_window)(toast.window()) {
+                        slot.toast.clear();
+                        return;
+                    }
+                    Point {
+                        x: area.left + ((area.right - area.left - size.width as i32) / 2).max(0),
+                        y: (area.bottom
+                            - size.height as i32
+                            - (toast.get_screen_margin() * scale) as i32)
+                            .max(area.top),
+                    }
+                } else {
+                    placement::place_toolbar_popup(
+                        bounds,
+                        size.width,
+                        size.height,
+                        area,
+                        (8. * scale) as i32,
+                        placement::Side::Before,
+                    )
+                };
                 toast
                     .window()
                     .set_position(slint::PhysicalPosition::new(point.x, point.y));
                 let _ = toast.show();
                 slot.toast_timer.start(
                     slint::TimerMode::SingleShot,
-                    Duration::from_secs(5),
+                    Duration::from_secs(if ocr { 3 } else { 5 }),
                     move || {
                         FLOW.with(|s| {
                             let mut s = s.borrow_mut();
@@ -732,11 +934,20 @@ fn show_toast(
                     },
                 );
             }
-            PassiveWindowPreparation::Pending if attempt < 20 => slot
-                .toast
-                .prepare_after(Duration::from_millis(16), move || {
-                    show_toast(id, bounds, prepare, lifecycle.clone(), attempt + 1)
-                }),
+            PassiveWindowPreparation::Pending if attempt < 20 => {
+                slot.toast
+                    .prepare_after(Duration::from_millis(16), move || {
+                        show_toast(
+                            id,
+                            bounds,
+                            prepare,
+                            lifecycle.clone(),
+                            ocr,
+                            revision,
+                            attempt + 1,
+                        )
+                    })
+            }
             _ => slot.toast.clear(),
         }
     });

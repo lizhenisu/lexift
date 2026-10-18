@@ -7,6 +7,7 @@ import { ScrollView } from "std-widgets.slint";
 export component AppToast inherits Rectangle {
     in property <string> message;
     in property <bool> error: false;
+    in property <bool> dismissible: true;
     in property <bool> adaptive-height: false;
     in property <length> height-limit: Metrics.toast-height;
     callback dismissed();
@@ -37,7 +38,7 @@ export component AppToast inherits Rectangle {
     message-label := Text {
         visible: !root.adaptive-height;
         x: Spacing.medium + Metrics.icon-size + Spacing.small;
-        width: parent.width - 2 * Spacing.medium - 2 * Metrics.icon-size - 2 * Spacing.small;
+        width: parent.width - 2 * Spacing.medium - Metrics.icon-size - Spacing.small - (root.dismissible ? Metrics.icon-size + Spacing.small : 0px);
         height: parent.height;
         text: root.message;
         color: Colors.foreground;
@@ -60,6 +61,7 @@ export component AppToast inherits Rectangle {
     }
 
     close-button := Rectangle {
+        visible: root.dismissible;
         x: parent.width - Spacing.small - Metrics.icon-button-size;
         y: (parent.height - Metrics.icon-button-size) / 2;
         width: Metrics.icon-button-size;

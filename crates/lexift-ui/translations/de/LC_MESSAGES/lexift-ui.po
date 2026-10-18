@@ -1788,3 +1788,24 @@ msgstr "Pixel-Lupe"
 
 msgid "Click to select a window, or drag to select a region"
 msgstr "Klicken, um ein Fenster auszuwählen, oder ziehen, um einen Bereich auszuwählen"
+
+msgid "Recognize text"
+msgstr "Text erkennen"
+
+msgid "Processing screenshot"
+msgstr "Screenshot wird verarbeitet"
+
+msgid "Recognized text copied"
+msgstr "Erkannten Text kopiert"
+
+msgid "No text recognized"
+msgstr "Kein Text erkannt"
+
+msgid "OCR resources unavailable. Manage them in Settings."
+msgstr "OCR-Ressourcen nicht verfügbar. In den Einstellungen verwalten."
+
+msgid "Text recognition failed"
+msgstr "Texterkennung fehlgeschlagen"
+
+msgid "Could not copy recognized text"
+msgstr "Erkannter Text konnte nicht kopiert werden"

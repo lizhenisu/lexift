@@ -1788,3 +1788,24 @@ msgstr "픽셀 돋보기"
 
 msgid "Click to select a window, or drag to select a region"
 msgstr "클릭하여 창을 선택하거나 드래그하여 영역 선택"
+
+msgid "Recognize text"
+msgstr "텍스트 인식"
+
+msgid "Processing screenshot"
+msgstr "스크린샷 처리 중"
+
+msgid "Recognized text copied"
+msgstr "인식한 텍스트를 복사했습니다"
+
+msgid "No text recognized"
+msgstr "인식된 텍스트가 없습니다"
+
+msgid "OCR resources unavailable. Manage them in Settings."
+msgstr "OCR 리소스를 사용할 수 없습니다. 설정에서 관리하세요."
+
+msgid "Text recognition failed"
+msgstr "텍스트 인식 실패"
+
+msgid "Could not copy recognized text"
+msgstr "인식한 텍스트를 복사하지 못했습니다"

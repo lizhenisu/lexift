@@ -1321,3 +1321,68 @@ fn screenshot_completed_frames_ignore_newer_input_and_reject_late_results() {
     );
     super::super::shutdown();
 }
+
+#[test]
+fn screenshot_ocr_toasts_render_all_locales_themes_and_dpi() {
+    use slint::platform::WindowEvent;
+    struct RenderPlatform(Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>);
+    impl Platform for RenderPlatform {
+        fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+            let adapter = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+            self.0.borrow_mut().push(adapter.clone());
+            Ok(adapter)
+        }
+    }
+    let adapters = Rc::new(RefCell::new(vec![]));
+    slint::platform::set_platform(Box::new(RenderPlatform(adapters.clone()))).unwrap();
+    let toast = crate::ScreenshotToastWindow::new().unwrap();
+    toast.set_passive(true);
+    let adapter = adapters.borrow()[0].clone();
+    use lexift_core::domain::screenshot::OcrOutcome;
+    for language in lexift_core::domain::ui_language::UiLanguage::ALL {
+        crate::i18n::select(language);
+        for dark in [false, true] {
+            toast
+                .global::<crate::Colors>()
+                .set_preference(i32::from(dark));
+            for scale in [1., 1.25] {
+                adapter
+                    .window()
+                    .dispatch_event(WindowEvent::ScaleFactorChanged {
+                        scale_factor: scale,
+                    });
+                for (index, outcome) in [
+                    OcrOutcome::Copied,
+                    OcrOutcome::Empty,
+                    OcrOutcome::ResourcesUnavailable,
+                    OcrOutcome::RecognitionFailed,
+                    OcrOutcome::CopyFailed,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    toast.set_message(crate::i18n::tr(outcome.message()).into());
+                    toast.set_error(outcome != OcrOutcome::Copied);
+                    let width = (toast.get_content_width() * scale) as u32;
+                    let height = (100. * scale) as u32;
+                    adapter.set_size(slint::PhysicalSize::new(width, height));
+                    let mut pixels = vec![slint::Rgb8Pixel::default(); (width * height) as usize];
+                    adapter.request_redraw();
+                    adapter.draw_if_needed(|renderer| {
+                        renderer.render(&mut pixels, width as usize);
+                    });
+                    assert!(pixels.windows(2).any(|p| p[0] != p[1]));
+                    if let Ok(directory) = std::env::var("LEXIFT_SCREENSHOT_SNAPSHOT_DIR") {
+                        crate::i18n::write_test_bitmap(
+                            &directory,
+                            &format!("ocr-toast-{}-{dark}-{scale}-{index}", language.code()),
+                            width,
+                            height,
+                            pixels.iter().map(|p| [p.r, p.g, p.b, 255]),
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

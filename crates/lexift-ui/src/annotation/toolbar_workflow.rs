@@ -306,6 +306,9 @@ pub(super) fn settle_main_position(
 }
 
 pub(super) fn open_panel(group: usize, menu: bool) {
+    if screenshot::recognizing() {
+        return;
+    }
     open_panel_entry(group, menu, None);
 }
 

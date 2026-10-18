@@ -918,4 +918,124 @@ mod tests {
         assert!(!f.key(Key::RightArrow, true, false, false, false));
         assert_eq!(f.bounds(), latest);
     }
+    #[test]
+    fn ocr_commits_keyboard_crop_blocks_mutation_and_owns_post_capture_feedback() {
+        use lexift_core::domain::screenshot::OcrOutcome;
+        let f = Fixture::new();
+        f.key(Key::RightArrow, true, false, false, false);
+        let expected = REGISTRY.with(|s| {
+            s.borrow()
+                .as_ref()
+                .unwrap()
+                .screenshot
+                .as_ref()
+                .unwrap()
+                .region
+                .bounds()
+                .unwrap()
+        });
+        super::super::recognize_text();
+        assert!(f.events.borrow().iter().any(
+            |e| matches!(e, ScreenshotEvent::Recognize {session:51,bounds} if *bounds == expected)
+        ));
+        REGISTRY.with(|s| {
+            let s = s.borrow();
+            let r = s.as_ref().unwrap();
+            assert!(r.toolbar_state.panel.get().is_none());
+            assert!(r.editor.window().is_none());
+        });
+        let recovery = REGISTRY.with(|s| {
+            let s = s.borrow();
+            let r = s.as_ref().unwrap();
+            super::super::Recovery {
+                document: r.document.clone(),
+                position: slint::PhysicalPosition::new(10, 10),
+                collapsed: true,
+                lifecycle: r.lifecycle.clone(),
+            }
+        });
+        FLOW.with(|s| s.borrow_mut().recovery = Some(recovery));
+        let objects = REGISTRY.with(|s| {
+            s.borrow()
+                .as_ref()
+                .unwrap()
+                .document
+                .session
+                .objects
+                .clone()
+        });
+        let mut busy = FLOW.with(|s| s.borrow().state.clone());
+        busy.phase = ScreenshotPhase::Recognizing;
+        super::super::sync(&busy);
+        assert!(!f.key(Key::RightArrow, true, false, false, true));
+        super::super::super::undo();
+        super::super::super::delete_selected();
+        super::super::recognize_text();
+        super::super::request(); // Repeated screenshot request must preserve the feedback context.
+        REGISTRY.with(|s| {
+            let mut s = s.borrow_mut();
+            let r = s.as_mut().unwrap();
+            assert!(!r.set_mode(InteractionMode::Tool(0)));
+            assert!(super::super::pointer(r, 0, 0, 70., 70.));
+            assert!(super::super::pointer(r, 0, 1, 100., 100.));
+            assert!(super::super::pointer(r, 0, 2, 100., 100.));
+            assert_eq!(r.document.session.objects, objects);
+            assert_eq!(
+                r.screenshot.as_ref().unwrap().region.bounds(),
+                Some(expected)
+            );
+            assert!(r.toolbar_state.main.get().unwrap().get_output_busy());
+        });
+        super::super::super::escape_from(focus::Origin::Unobserved);
+        assert!(matches!(
+            f.events.borrow().last(),
+            Some(ScreenshotEvent::Cancelled { session: 51 })
+        ));
+        let mut done = busy;
+        done.phase = ScreenshotPhase::Idle;
+        done.ocr_result = Some(OcrOutcome::Copied);
+        super::super::sync(&done);
+        super::super::restore(51);
+        REGISTRY.with(|s| {
+            let s = s.borrow();
+            let r = s.as_ref().unwrap();
+            assert!(r.screenshot.is_none());
+            assert_eq!(r.document.session.objects, objects);
+            assert!(r.document.mode.is_mouse());
+        });
+        for _ in 0..5 {
+            std::thread::sleep(Duration::from_millis(20));
+            slint::platform::update_timers_and_animations();
+            if FLOW.with(|s| {
+                s.borrow()
+                    .toast
+                    .get()
+                    .is_some_and(|t| t.window().is_visible())
+            }) {
+                break;
+            }
+        }
+        FLOW.with(|s| {
+            let s = s.borrow();
+            let toast = s.toast.get().unwrap();
+            assert_eq!(
+                toast.get_message(),
+                crate::i18n::tr(OcrOutcome::Copied.message())
+            );
+            assert!(!toast.get_error());
+            assert!(toast.window().is_visible());
+            assert!(
+                toast.window().size().width >= 320,
+                "toast must not use Winit's 10px initial width"
+            );
+        });
+        // New session retires the independent toast and all delayed show work.
+        super::super::sync(&ScreenshotState {
+            session: 52,
+            phase: ScreenshotPhase::Preparing,
+            ..Default::default()
+        });
+        assert!(FLOW.with(|s| s.borrow().toast.get().is_none()));
+        super::super::super::shutdown();
+    }
 }

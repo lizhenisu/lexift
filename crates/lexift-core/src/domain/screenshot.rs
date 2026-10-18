@@ -24,6 +24,27 @@ pub enum ScreenshotPhase {
     Selecting,
     Editing,
     Output,
+    Recognizing,
+}
+/// Terminal screenshot OCR feedback never retains recognized text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OcrOutcome {
+    Copied,
+    Empty,
+    ResourcesUnavailable,
+    RecognitionFailed,
+    CopyFailed,
+}
+impl OcrOutcome {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Copied => "Recognized text copied",
+            Self::Empty => "No text recognized",
+            Self::ResourcesUnavailable => "OCR resources unavailable. Manage them in Settings.",
+            Self::RecognitionFailed => "Text recognition failed",
+            Self::CopyFailed => "Could not copy recognized text",
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScreenshotOutput {
@@ -39,6 +60,7 @@ pub struct ScreenshotState {
     pub operation: u64,
     pub bounds: Option<Rect>,
     pub error: Option<String>,
+    pub ocr_result: Option<OcrOutcome>,
     pub color_sequence: u64,
     pub color_pending: Option<ColorRequest>,
     pub color_result: Option<ColorResult>,
@@ -50,6 +72,15 @@ impl ScreenshotState {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotEvent {
+    Recognize {
+        session: u64,
+        bounds: Rect,
+    },
+    Recognized {
+        session: u64,
+        operation: u64,
+        outcome: OcrOutcome,
+    },
     CopyColor {
         session: u64,
         point: Point,
@@ -90,6 +121,12 @@ pub enum ScreenshotEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotCommand {
+    Recognize {
+        session: u64,
+        operation: u64,
+        bounds: Rect,
+        strategy: super::ocr::OcrRecognitionStrategy,
+    },
     CopyColor {
         session: u64,
         request: ColorRequest,
@@ -115,6 +152,48 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
     let command = |command| vec![AppCommand::Screenshot(command)];
     let s = &mut state.screenshot;
     match event {
+        ScreenshotEvent::Recognize { session, bounds }
+            if s.session == session
+                && s.phase == ScreenshotPhase::Editing
+                && s.bounds == Some(bounds) =>
+        {
+            let mut strategy = super::ocr::OcrRecognitionStrategy::from_settings(
+                state.settings.ocr_language.as_deref(),
+                state.settings.ui_language.code(),
+            );
+            if state.settings.ocr_korean_auto
+                && strategy == super::ocr::OcrRecognitionStrategy::Automatic
+            {
+                strategy = super::ocr::OcrRecognitionStrategy::AutomaticKorean;
+            }
+            s.operation = s
+                .operation
+                .checked_add(1)
+                .expect("screenshot operation exhausted");
+            s.phase = ScreenshotPhase::Recognizing;
+            s.color_pending = None;
+            s.color_result = None;
+            s.error = None;
+            s.ocr_result = None;
+            command(ScreenshotCommand::Recognize {
+                session,
+                operation: s.operation,
+                bounds,
+                strategy,
+            })
+        }
+        ScreenshotEvent::Recognized {
+            session,
+            operation,
+            outcome,
+        } if s.session == session
+            && s.operation == operation
+            && s.phase == ScreenshotPhase::Recognizing =>
+        {
+            s.phase = ScreenshotPhase::Idle;
+            s.ocr_result = Some(outcome);
+            command(ScreenshotCommand::Restore { session })
+        }
         ScreenshotEvent::CopyColor {
             session,
             point,
@@ -168,6 +247,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.source_session = request.session;
             s.phase = ScreenshotPhase::Preparing;
             s.operation = 0;
+            s.ocr_result = None;
             s.bounds = None;
             s.error = None;
             s.color_pending = None;
@@ -320,6 +400,122 @@ mod tests {
             AppCommand::Screenshot(ScreenshotCommand::Prepare { session: 1, .. })
         ));
         s
+    }
+    #[test]
+    fn ocr_freezes_strategy_rejects_duplicates_and_closes_for_every_outcome() {
+        for outcome in [
+            OcrOutcome::Copied,
+            OcrOutcome::Empty,
+            OcrOutcome::ResourcesUnavailable,
+            OcrOutcome::RecognitionFailed,
+            OcrOutcome::CopyFailed,
+        ] {
+            let mut s = begin();
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
+                session: 1,
+                result: Ok(()),
+            }));
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::Selected {
+                session: 1,
+                bounds: bounds(),
+            }));
+            s.settings.ocr_language = Some("auto".into());
+            s.settings.ocr_korean_auto = true;
+            let event = ScreenshotEvent::Recognize {
+                session: 1,
+                bounds: bounds(),
+            };
+            let commands = s.reduce(AppEvent::Screenshot(event.clone()));
+            assert!(matches!(
+                &commands[..],
+                [AppCommand::Screenshot(ScreenshotCommand::Recognize {
+                    session: 1,
+                    operation: 1,
+                    strategy: super::super::ocr::OcrRecognitionStrategy::AutomaticKorean,
+                    ..
+                })]
+            ));
+            assert_eq!(s.screenshot.phase, ScreenshotPhase::Recognizing);
+            assert!(s.reduce(AppEvent::Screenshot(event)).is_empty());
+            assert!(
+                s.reduce(AppEvent::Screenshot(ScreenshotEvent::Selected {
+                    session: 1,
+                    bounds: Rect {
+                        right: 1,
+                        ..bounds()
+                    }
+                }))
+                .is_empty()
+            );
+            assert!(
+                s.reduce(AppEvent::Screenshot(ScreenshotEvent::Recognized {
+                    session: 1,
+                    operation: 0,
+                    outcome
+                }))
+                .is_empty()
+            );
+            let commands = s.reduce(AppEvent::Screenshot(ScreenshotEvent::Recognized {
+                session: 1,
+                operation: 1,
+                outcome,
+            }));
+            assert!(matches!(
+                &commands[..],
+                [AppCommand::Screenshot(ScreenshotCommand::Restore {
+                    session: 1
+                })]
+            ));
+            assert_eq!(s.screenshot.phase, ScreenshotPhase::Idle);
+            assert_eq!(s.screenshot.ocr_result, Some(outcome));
+            assert!(
+                s.reduce(AppEvent::Screenshot(ScreenshotEvent::Recognized {
+                    session: 1,
+                    operation: 1,
+                    outcome
+                }))
+                .is_empty()
+            );
+        }
+    }
+    #[test]
+    fn cancelled_ocr_cannot_finish_or_override_a_new_screenshot() {
+        let mut s = begin();
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
+            session: 1,
+            result: Ok(()),
+        }));
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::Selected {
+            session: 1,
+            bounds: bounds(),
+        }));
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::Recognize {
+            session: 1,
+            bounds: bounds(),
+        }));
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::Cancelled {
+            session: 1,
+        }));
+        assert!(
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::Recognized {
+                session: 1,
+                operation: 1,
+                outcome: OcrOutcome::Copied
+            }))
+            .is_empty()
+        );
+        assert_eq!(s.screenshot.ocr_result, None);
+        s.screenshot.session = 2;
+        s.screenshot.phase = ScreenshotPhase::Editing;
+        assert!(
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::Recognized {
+                session: 1,
+                operation: 1,
+                outcome: OcrOutcome::Copied
+            }))
+            .is_empty()
+        );
+        assert_eq!(s.screenshot.phase, ScreenshotPhase::Editing);
     }
     #[test]
     fn color_copy_has_independent_identity_and_never_finishes_a_screenshot() {

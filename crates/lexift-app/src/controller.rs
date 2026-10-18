@@ -235,7 +235,7 @@ pub(crate) struct AppController {
     clipboard: Option<Arc<dyn ClipboardPort>>,
     speech: Option<Arc<dyn SpeechPort>>,
     pub(crate) ui: Arc<dyn ViewPort>,
-    ocr: Option<Arc<crate::ocr::OcrRuntime>>,
+    pub(crate) ocr: Option<Arc<crate::ocr::OcrRuntime>>,
     selection_capture_in_flight: AtomicBool,
     #[cfg(not(feature = "m1-demo"))]
     selection_toolbar_enabled: AtomicBool,

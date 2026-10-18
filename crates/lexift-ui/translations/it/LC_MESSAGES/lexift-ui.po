@@ -1788,3 +1788,24 @@ msgstr "Lente pixel"
 
 msgid "Click to select a window, or drag to select a region"
 msgstr "Fai clic per selezionare una finestra o trascina per selezionare un'area"
+
+msgid "Recognize text"
+msgstr "Riconosci testo"
+
+msgid "Processing screenshot"
+msgstr "Elaborazione schermata"
+
+msgid "Recognized text copied"
+msgstr "Testo riconosciuto copiato"
+
+msgid "No text recognized"
+msgstr "Nessun testo riconosciuto"
+
+msgid "OCR resources unavailable. Manage them in Settings."
+msgstr "Risorse OCR non disponibili. Gestiscile nelle impostazioni."
+
+msgid "Text recognition failed"
+msgstr "Riconoscimento del testo non riuscito"
+
+msgid "Could not copy recognized text"
+msgstr "Impossibile copiare il testo riconosciuto"

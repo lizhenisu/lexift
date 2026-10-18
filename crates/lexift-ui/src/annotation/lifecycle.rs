@@ -39,6 +39,10 @@ pub(super) fn escape() {
 }
 
 pub(super) fn escape_from(origin: focus::Origin) {
+    if screenshot::recognizing() {
+        screenshot::cancel();
+        return;
+    }
     if REGISTRY.with(|s| {
         s.borrow_mut()
             .as_mut()
@@ -160,6 +164,9 @@ pub(super) fn escape_from(origin: focus::Origin) {
 }
 
 pub(super) fn finish_polyline() {
+    if screenshot::recognizing() {
+        return;
+    }
     let generation = REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut()?;
@@ -179,6 +186,9 @@ pub(super) fn finish_polyline() {
 }
 
 pub(super) fn backspace_polyline() {
+    if screenshot::recognizing() {
+        return;
+    }
     let generation = REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut()?;
@@ -276,6 +286,10 @@ pub(crate) fn toggle(requested_at: Instant) {
                     screenshot::output(lexift_core::domain::screenshot::ScreenshotOutput::Copy)
                 }
             })
+        });
+        let input = r.toolbar_state.main.input();
+        main.on_recognize_text_requested(move || {
+            later_main(&input, generation, revision, screenshot::recognize_text)
         });
         let input = r.toolbar_state.main.input();
         main.on_pin_screenshot_requested(move || {

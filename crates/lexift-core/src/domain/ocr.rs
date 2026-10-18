@@ -211,10 +211,11 @@ pub(crate) fn reduce(state: &mut AppState, event: OcrEvent) -> Vec<AppCommand> {
     let cmd = |c| vec![AppCommand::Ocr(c)];
     match event {
         ManageResources(operation) => {
-            let active = matches!(
-                state.ocr.phase,
-                OcrPhase::Checking | OcrPhase::Capturing | OcrPhase::Recognizing
-            );
+            let active = state.screenshot.phase == super::screenshot::ScreenshotPhase::Recognizing
+                || matches!(
+                    state.ocr.phase,
+                    OcrPhase::Checking | OcrPhase::Capturing | OcrPhase::Recognizing
+                );
             let pending =
                 state.ocr.resources.info.as_ref().is_some_and(|r| {
                     r.status == crate::ports::ocr::OcrResourceStatus::PendingRemoval

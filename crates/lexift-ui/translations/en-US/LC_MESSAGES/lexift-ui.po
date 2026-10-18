@@ -1788,3 +1788,24 @@ msgstr "Pixel magnifier"
 
 msgid "Click to select a window, or drag to select a region"
 msgstr "Click to select a window, or drag to select a region"
+
+msgid "Recognize text"
+msgstr "Recognize text"
+
+msgid "Processing screenshot"
+msgstr "Processing screenshot"
+
+msgid "Recognized text copied"
+msgstr "Recognized text copied"
+
+msgid "No text recognized"
+msgstr "No text recognized"
+
+msgid "OCR resources unavailable. Manage them in Settings."
+msgstr "OCR resources unavailable. Manage them in Settings."
+
+msgid "Text recognition failed"
+msgstr "Text recognition failed"
+
+msgid "Could not copy recognized text"
+msgstr "Could not copy recognized text"

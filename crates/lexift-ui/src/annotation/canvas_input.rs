@@ -31,6 +31,9 @@ pub(super) fn scroll_eraser_size(r: &mut Registry, delta: f32) {
 }
 
 pub(super) fn brush_size_scrolled(index: usize, delta: f32) {
+    if screenshot::recognizing() {
+        return;
+    }
     let generation = REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut()?;
@@ -670,6 +673,9 @@ pub(super) fn refresh_hovered(r: &mut Registry) {
 }
 
 pub(super) fn activate_mouse_mode() {
+    if screenshot::recognizing() {
+        return;
+    }
     let generation = REGISTRY.with(|s| {
         if let Some(r) = s.borrow_mut().as_mut() {
             if r.document.mode == InteractionMode::Mouse {
@@ -693,6 +699,9 @@ pub(super) fn activate_mouse_mode() {
 }
 
 pub(super) fn undo() {
+    if screenshot::recognizing() {
+        return;
+    }
     let generation = REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
         let r = slot.as_mut()?;
@@ -732,6 +741,9 @@ pub(super) fn undo() {
     }
 }
 pub(super) fn delete_selected() {
+    if screenshot::recognizing() {
+        return;
+    }
     let generation = REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
         let r = slot.as_mut()?;
@@ -814,6 +826,9 @@ impl Registry {
 
     /// Apply the native input policy before exposing a new mode in the toolbar.
     pub(super) fn set_mode(&mut self, mode: InteractionMode) -> bool {
+        if screenshot::recognizing() {
+            return false;
+        }
         screenshot::size_input::close(self);
         screenshot::keyboard::invalidate(self);
         if self.document.mode == mode {
