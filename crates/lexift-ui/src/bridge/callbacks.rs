@@ -9,6 +9,7 @@ pub enum PopupDismissCause {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PopupPointerInput {
+    FramePresented,
     RightPressed {
         x: f32,
         y: f32,

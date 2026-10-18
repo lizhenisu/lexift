@@ -1,5 +1,8 @@
 //! Checked physical-pixel operations on stable desktop snapshots.
 use super::geometry::Rect;
+#[path = "pixel_sample.rs"]
+mod pixel;
+pub use pixel::{PixelSample, Rgb, sample_pixels};
 
 /// Preserve source monitor DPI when a frozen image crosses display boundaries.
 pub fn render_partitions(

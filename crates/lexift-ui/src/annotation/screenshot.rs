@@ -29,6 +29,7 @@ struct Recovery {
 }
 #[derive(Default)]
 struct Flow {
+    activation: Option<Option<lexift_core::ports::magnifier::WindowToken>>,
     state: ScreenshotState,
     recovery: Option<Recovery>,
     frames: Option<Arc<Vec<CapturedRegion>>>,
@@ -49,6 +50,7 @@ pub(crate) fn emit(event: ScreenshotEvent) {
     }
 }
 pub(crate) fn sync(state: &ScreenshotState) {
+    crate::screen_interaction::pixel_picker::sync(state);
     let feedback = FLOW.with(|slot| {
         let mut slot = slot.borrow_mut();
         let changed = slot.state.error != state.error
@@ -84,6 +86,9 @@ pub(super) fn request() {
     let request = REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut()?;
+        FLOW.with(|s| {
+            s.borrow_mut().activation = r.lifecycle.annotation_foreground.as_ref().map(|q| q())
+        });
         if r.export.pending() {
             return None;
         }
@@ -154,6 +159,20 @@ pub(crate) fn show(
     crate::screen_interaction::screenshot_help::clear();
     crate::pinned_screenshot::set_frozen(true);
     FLOW.with(|s| s.borrow_mut().frames = Some(frames.clone()));
+    crate::screen_interaction::pixel_picker::begin(
+        id,
+        frames.clone(),
+        Rc::new(|| {
+            selection_host::refresh_picker();
+            REGISTRY.with(|s| {
+                if let Some(r) = s.borrow_mut().as_mut()
+                    && r.screenshot.is_some()
+                {
+                    r.queue_render();
+                }
+            });
+        }),
+    );
     selection_host::set_screenshot(true);
     selection_host::set_handler(Rc::new(move |event| match event {
         selection_host::SelectionEvent::Cancelled => cancel(),
@@ -199,7 +218,8 @@ pub(crate) fn show(
     }));
     selection_host::sync(id, selection_host::HostPhase::Capturing);
     let frames = FLOW.with(|s| s.borrow().frames.clone().unwrap());
-    selection_host::show(id, frames);
+    let origin = FLOW.with(|s| s.borrow().activation);
+    selection_host::show_with_origin(id, frames, origin);
 }
 pub(crate) fn cancel() {
     let id = FLOW.with(|s| s.borrow().state.session);
@@ -215,6 +235,7 @@ pub(crate) fn restore(id: u64) {
         s.recovery.take()
     });
     let Some(recovery) = recovery else { return };
+    crate::screen_interaction::pixel_picker::clear();
     crate::screen_interaction::size_label::clear();
     crate::screen_interaction::screenshot_help::clear();
     crate::pinned_screenshot::set_frozen(false);
@@ -233,6 +254,7 @@ pub(crate) fn restore(id: u64) {
     toggle(Instant::now());
 }
 pub(crate) fn shutdown() {
+    crate::screen_interaction::pixel_picker::clear();
     crate::screen_interaction::size_label::clear();
     crate::screen_interaction::screenshot_help::clear();
     selection_host::close();
@@ -390,6 +412,22 @@ fn pointer_help(r: &mut Registry, index: usize, event: i32, x: f32, y: f32) {
         x: px.round() as i32,
         y: py.round() as i32,
     };
+    let picker_changed = if event == 4 {
+        crate::screen_interaction::pixel_picker::location().is_some_and(|p| {
+            p.x >= layer.bounds.left
+                && p.x < layer.bounds.right
+                && p.y >= layer.bounds.top
+                && p.y < layer.bounds.bottom
+        }) && crate::screen_interaction::pixel_picker::point(e.id, None)
+    } else {
+        crate::screen_interaction::pixel_picker::point(
+            e.id,
+            Some(Point {
+                x: px.floor() as i32,
+                y: py.floor() as i32,
+            }),
+        )
+    };
     let host = r
         .canvas_state
         .canvases
@@ -405,7 +443,7 @@ fn pointer_help(r: &mut Registry, index: usize, event: i32, x: f32, y: f32) {
         if event == 4 { layer.bounds } else { host },
         (event != 4).then_some(point),
     );
-    if before != help_feedback(r).map(|h| (h.host, h.bounds)) {
+    if picker_changed || before != help_feedback(r).map(|h| (h.host, h.bounds)) {
         r.queue_render();
     }
 }
@@ -485,6 +523,34 @@ pub(super) fn refresh_help(r: &mut Registry) {
     if r.screenshot.as_ref().is_some_and(|e| e.pin.is_none()) {
         r.queue_render();
     }
+}
+pub(super) fn picker_feedback(
+    r: &Registry,
+) -> Option<crate::screen_interaction::pixel_picker::Feedback> {
+    let e = r.screenshot.as_ref().filter(|e| e.pin.is_none())?;
+    if !r.document.mode.is_mouse()
+        || size_input::busy(r)
+        || r.editor.window().is_some()
+        || r.parameter_edit.dragging()
+        || r.toolbar_state.watermark.get().is_some()
+        || r.toolbar_state.panel.get().is_some()
+        || r.toolbar_state.menus.current.is_some()
+        || FLOW.with(|s| s.borrow().state.phase != ScreenshotPhase::Editing)
+    {
+        return None;
+    }
+    let screens = r
+        .canvas_state
+        .canvases
+        .iter()
+        .map(|c| (c.bounds, c.scale()))
+        .collect::<Vec<_>>();
+    let point = crate::screen_interaction::pixel_picker::location()?;
+    let _ = e;
+    crate::screen_interaction::pixel_picker::feedback(
+        &screens,
+        (r.lifecycle.popup_work_area)(point),
+    )
 }
 pub(super) fn cancel_region(r: &mut Registry) -> bool {
     let cancelled = r.screenshot.as_mut().is_some_and(|e| e.region.cancel());

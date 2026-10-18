@@ -1,7 +1,20 @@
 //! Screenshot workflow identities; image ownership and native resources stay in adapters.
 use super::{annotation_export::ExportRequest, geometry::Rect};
+use super::{geometry::Point, screen_snapshot::Rgb};
 use crate::ports::annotation_save::SaveOutcome;
 use crate::{AppCommand, AppState, Result};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ColorRequest {
+    pub id: u64,
+    pub point: Point,
+    pub color: Rgb,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ColorResult {
+    pub request: ColorRequest,
+    pub success: bool,
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ScreenshotPhase {
@@ -26,6 +39,9 @@ pub struct ScreenshotState {
     pub operation: u64,
     pub bounds: Option<Rect>,
     pub error: Option<String>,
+    pub color_sequence: u64,
+    pub color_pending: Option<ColorRequest>,
+    pub color_result: Option<ColorResult>,
 }
 impl ScreenshotState {
     pub fn active(&self) -> bool {
@@ -34,6 +50,16 @@ impl ScreenshotState {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotEvent {
+    CopyColor {
+        session: u64,
+        point: Point,
+        color: Rgb,
+    },
+    ColorCopied {
+        session: u64,
+        request: u64,
+        result: Result<()>,
+    },
     Requested(ExportRequest),
     Prepared {
         session: u64,
@@ -64,6 +90,10 @@ pub enum ScreenshotEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotCommand {
+    CopyColor {
+        session: u64,
+        request: ColorRequest,
+    },
     Prepare {
         session: u64,
         request: ExportRequest,
@@ -85,6 +115,47 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
     let command = |command| vec![AppCommand::Screenshot(command)];
     let s = &mut state.screenshot;
     match event {
+        ScreenshotEvent::CopyColor {
+            session,
+            point,
+            color,
+        } if s.session == session
+            && matches!(
+                s.phase,
+                ScreenshotPhase::Selecting | ScreenshotPhase::Editing
+            )
+            && s.color_pending.is_none() =>
+        {
+            s.color_sequence = s
+                .color_sequence
+                .checked_add(1)
+                .expect("color identity exhausted");
+            let request = ColorRequest {
+                id: s.color_sequence,
+                point,
+                color,
+            };
+            s.color_pending = Some(request);
+            s.color_result = None;
+            command(ScreenshotCommand::CopyColor { session, request })
+        }
+        ScreenshotEvent::ColorCopied {
+            session,
+            request,
+            result,
+        } if s.session == session
+            && matches!(
+                s.phase,
+                ScreenshotPhase::Selecting | ScreenshotPhase::Editing
+            )
+            && s.color_pending.is_some_and(|p| p.id == request) =>
+        {
+            s.color_result = s.color_pending.take().map(|request| ColorResult {
+                request,
+                success: result.is_ok(),
+            });
+            vec![]
+        }
         ScreenshotEvent::Requested(request)
             if !s.active()
                 && state.annotation_export.session == Some(request.session)
@@ -99,6 +170,8 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.operation = 0;
             s.bounds = None;
             s.error = None;
+            s.color_pending = None;
+            s.color_result = None;
             state.toolbar_selection = None;
             command(ScreenshotCommand::Prepare {
                 session: s.session,
@@ -147,6 +220,8 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         {
             s.operation = operation;
             s.phase = ScreenshotPhase::Output;
+            s.color_pending = None;
+            s.color_result = None;
             s.error = None;
             command(ScreenshotCommand::Output {
                 session,
@@ -186,6 +261,8 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 s.error = Some(error);
             }
             s.phase = ScreenshotPhase::Idle;
+            s.color_pending = None;
+            s.color_result = None;
             command(ScreenshotCommand::Restore { session })
         }
         _ => vec![],
@@ -243,6 +320,69 @@ mod tests {
             AppCommand::Screenshot(ScreenshotCommand::Prepare { session: 1, .. })
         ));
         s
+    }
+    #[test]
+    fn color_copy_has_independent_identity_and_never_finishes_a_screenshot() {
+        let mut s = begin();
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
+            session: 1,
+            result: Ok(()),
+        }));
+        let event = ScreenshotEvent::CopyColor {
+            session: 1,
+            point: Point { x: -10, y: 20 },
+            color: Rgb(10, 20, 30),
+        };
+        assert!(matches!(
+            s.reduce(AppEvent::Screenshot(event.clone())).as_slice(),
+            [AppCommand::Screenshot(ScreenshotCommand::CopyColor {
+                request: ColorRequest { id: 1, .. },
+                ..
+            })]
+        ));
+        assert_eq!(s.screenshot.operation, 0);
+        assert!(s.reduce(AppEvent::Screenshot(event.clone())).is_empty());
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::ColorCopied {
+            session: 1,
+            request: 99,
+            result: Ok(()),
+        }));
+        assert!(s.screenshot.color_pending.is_some());
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::Selected {
+            session: 1,
+            bounds: bounds(),
+        }));
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::ColorCopied {
+            session: 1,
+            request: 1,
+            result: Ok(()),
+        }));
+        assert_eq!(s.screenshot.phase, ScreenshotPhase::Editing);
+        assert!(s.screenshot.color_result.unwrap().success);
+        assert_eq!(s.screenshot.bounds, Some(bounds()));
+        s.reduce(AppEvent::Screenshot(event.clone()));
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::ColorCopied {
+            session: 1,
+            request: 2,
+            result: Err(crate::Error::new("fixture")),
+        }));
+        assert!(!s.screenshot.color_result.unwrap().success);
+        assert!(s.screenshot.error.is_none());
+        s.reduce(AppEvent::Screenshot(event));
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::Output {
+            session: 1,
+            operation: 1,
+            kind: ScreenshotOutput::Copy,
+            request: request(1, 1, bounds()),
+        }));
+        assert!(s.screenshot.color_pending.is_none());
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::ColorCopied {
+            session: 1,
+            request: 3,
+            result: Ok(()),
+        }));
+        assert!(s.screenshot.color_result.is_none());
+        assert_eq!(s.screenshot.phase, ScreenshotPhase::Output);
     }
     #[test]
     fn screenshot_rejects_duplicates_old_source_and_late_results() {

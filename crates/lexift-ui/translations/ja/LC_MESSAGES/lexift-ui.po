@@ -1773,3 +1773,15 @@ msgstr "高さ"
 
 msgid "Lock aspect ratio"
 msgstr "縦横比を固定"
+
+msgid "C: Copy HEX"
+msgstr "C: HEX をコピー"
+
+msgid "Color copied"
+msgstr "色をコピーしました"
+
+msgid "Color copy failed"
+msgstr "色をコピーできませんでした"
+
+msgid "Pixel magnifier"
+msgstr "ピクセル拡大鏡"

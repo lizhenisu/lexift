@@ -34,6 +34,8 @@ pub(crate) struct ScreenshotRuntime {
     render: Arc<dyn AnnotationExportRenderPort>,
     clipboard: Arc<dyn ClipboardPort>,
     session: Mutex<Option<Session>>,
+    color_job: Mutex<Option<(u64, u64, Arc<AtomicBool>)>>,
+    color_serial: tokio::sync::Mutex<()>,
     pin_pending: Mutex<BTreeMap<(u64, u64), Arc<CapturedRegion>>>,
     pin_images: Mutex<BTreeMap<u64, Arc<CapturedRegion>>>,
     pin_jobs: Mutex<BTreeMap<u64, Arc<AtomicBool>>>,
@@ -54,6 +56,8 @@ impl ScreenshotRuntime {
             render,
             clipboard,
             session: Mutex::new(None),
+            color_job: Mutex::new(None),
+            color_serial: Default::default(),
             pin_pending: Default::default(),
             pin_images: Default::default(),
             pin_jobs: Default::default(),
@@ -63,6 +67,21 @@ impl ScreenshotRuntime {
         }
     }
     pub fn sync(&self, state: &lexift_core::domain::screenshot::ScreenshotState, quitting: bool) {
+        let mut color = self.color_job.lock().unwrap_or_else(|p| p.into_inner());
+        if color.as_ref().is_some_and(|(s, id, _)| {
+            quitting
+                || *s != state.session
+                || !matches!(
+                    state.phase,
+                    lexift_core::domain::screenshot::ScreenshotPhase::Selecting
+                        | lexift_core::domain::screenshot::ScreenshotPhase::Editing
+                )
+                || state.color_pending.is_none_or(|p| p.id != *id)
+        }) && let Some((_, _, cancel)) = color.take()
+        {
+            cancel.store(true, Ordering::Release);
+        }
+        drop(color);
         self.pin_pending_samples.lock().unwrap().retain(|key, _| {
             !quitting && state.active() && *key == (state.session, state.operation)
         });
@@ -264,10 +283,7 @@ impl ScreenshotRuntime {
             return Ok(SaveOutcome::Cancelled);
         }
         match kind {
-            PinOutput::Copy => self
-                .clipboard
-                .write_image(image)
-                .map(|_| SaveOutcome::Saved),
+            PinOutput::Copy => self.write_image(image, cancel).map(|_| SaveOutcome::Saved),
             PinOutput::Save => self.save.save_png(
                 PngSaveRequest {
                     image: image.clone(),
@@ -279,8 +295,56 @@ impl ScreenshotRuntime {
             ),
         }
     }
+    /// A service gate orders writes; no runtime-state lock is held across the clipboard Port.
+    async fn write_color(
+        &self,
+        color: lexift_core::domain::screen_snapshot::Rgb,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<()> {
+        let _gate = self.color_serial.lock().await;
+        let clipboard = self.clipboard.clone();
+        tokio::task::spawn_blocking(move || {
+            if cancel.load(Ordering::Acquire) {
+                return Err(Error::new("Color copy cancelled"));
+            }
+            clipboard.write_text(&color.hex())
+        })
+        .await
+        .unwrap_or_else(|_| Err(Error::new("Color copy worker failed")))
+    }
+    /// Image output follows any color write that has already entered the clipboard Port.
+    fn write_image(&self, image: &CapturedRegion, cancelled: &AtomicBool) -> Result<()> {
+        let _gate = self.color_serial.blocking_lock();
+        if cancelled.load(Ordering::Acquire) {
+            return Err(Error::new("Screenshot cancelled"));
+        }
+        self.clipboard.write_image(image)
+    }
     pub fn execute(self: &Arc<Self>, controller: &Arc<AppController>, command: ScreenshotCommand) {
         match command {
+            ScreenshotCommand::CopyColor { session, request } => {
+                let cancel = Arc::new(AtomicBool::new(false));
+                if let Some((_, _, old)) = self
+                    .color_job
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .replace((session, request.id, cancel.clone()))
+                {
+                    old.store(true, Ordering::Release);
+                }
+                let runtime = self.clone();
+                let controller = controller.clone();
+                let task_runtime = controller.runtime.clone();
+                task_runtime.spawn(async move {
+                    let result = runtime.write_color(request.color, cancel).await;
+                    controller.dispatch(AppEvent::Screenshot(ScreenshotEvent::ColorCopied {
+                        session,
+                        request: request.id,
+                        result,
+                    }));
+                });
+            }
+
             ScreenshotCommand::Restore { session } => {
                 controller.ui.restore_screenshot(session);
             }
@@ -369,7 +433,7 @@ impl ScreenshotRuntime {
                                 }
                                 match kind {
                                     ScreenshotOutput::Copy => {
-                                        this.clipboard.write_image(&image)?;
+                                        this.write_image(&image, &cancelled)?;
                                         Ok(SaveOutcome::Saved)
                                     }
                                     ScreenshotOutput::Save => this.save.save_png(
@@ -513,6 +577,14 @@ impl ScreenshotRuntime {
 }
 impl Drop for ScreenshotRuntime {
     fn drop(&mut self) {
+        if let Some((_, _, cancel)) = self
+            .color_job
+            .get_mut()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+        {
+            cancel.store(true, Ordering::Release);
+        }
         if let Some(s) = self
             .session
             .get_mut()
@@ -532,6 +604,66 @@ mod tests {
         ports::annotation_save::PngSaveRequest,
     };
     struct Save;
+    #[test]
+    fn color_writes_run_off_thread_and_cancel_before_the_service_gate() {
+        use lexift_core::domain::screen_snapshot::Rgb;
+        struct Colors(Mutex<Vec<(String, std::thread::ThreadId)>>, AtomicBool);
+        impl ClipboardPort for Colors {
+            fn read_text(&self) -> Result<Option<String>> {
+                Ok(None)
+            }
+            fn write_text(&self, text: &str) -> Result<()> {
+                if self.1.load(Ordering::Acquire) {
+                    return Err(Error::new("fixture"));
+                }
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push((text.into(), std::thread::current().id()));
+                Ok(())
+            }
+        }
+        let clipboard = Arc::new(Colors(Mutex::new(vec![]), AtomicBool::new(false)));
+        let runtime = Arc::new(ScreenshotRuntime::new(
+            || None,
+            Arc::new(Save),
+            Arc::new(lexift_ui::SoftwareExportRenderer),
+            clipboard.clone(),
+        ));
+        let origin = std::thread::current().id();
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                runtime
+                    .write_color(Rgb(1, 2, 3), Arc::new(AtomicBool::new(false)))
+                    .await
+                    .unwrap();
+                assert_eq!(clipboard.0.lock().unwrap()[0].0, "#010203");
+                assert_ne!(clipboard.0.lock().unwrap()[0].1, origin);
+                let gate = runtime.color_serial.lock().await;
+                let cancel = Arc::new(AtomicBool::new(false));
+                *runtime.color_job.lock().unwrap() = Some((1, 2, cancel.clone()));
+                let worker = runtime.clone();
+                let task =
+                    tokio::spawn(async move { worker.write_color(Rgb(4, 5, 6), cancel).await });
+                runtime.sync(
+                    &lexift_core::domain::screenshot::ScreenshotState::default(),
+                    false,
+                );
+                drop(gate);
+                assert!(task.await.unwrap().is_err());
+                assert_eq!(clipboard.0.lock().unwrap().len(), 1);
+                clipboard.1.store(true, Ordering::Release);
+                assert!(
+                    runtime
+                        .write_color(Rgb(7, 8, 9), Arc::new(AtomicBool::new(false)))
+                        .await
+                        .is_err()
+                );
+            });
+    }
     impl AnnotationSavePort for Save {
         fn is_available(&self) -> bool {
             true

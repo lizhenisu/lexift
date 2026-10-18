@@ -1,9 +1,31 @@
+import { ScreenshotPixelPicker } from "screenshot-pixel-picker.slint";
 import { ScreenshotSizeLabel } from "screenshot-size-label.slint";
 import { ScreenshotHelp } from "screenshot-help.slint";
 import { Metrics } from "design/metrics.slint";
 import { RegionPreview, ScreenInteractionHint } from "screen-interaction.slint";
 export component OcrSelectionWindow inherits Window {
     in property <bool> screenshot-mode: false;
+    in property <bool> picker-visible;
+    in property <length> picker-left;
+    in property <length> picker-top;
+    in property <length> picker-width;
+    in property <length> picker-height;
+    in property <image> picker-grid;
+    in property <string> picker-coordinates;
+    in property <string> picker-hex;
+    in property <string> picker-rgb;
+    in property <int> picker-status;
+    callback color-copy() -> bool;
+    forward-focus: keys;
+    keys := FocusScope {
+        key-pressed(event) => {
+            if root.screenshot-mode && (event.text == "c" || event.text == "C") && !event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt && !event.modifiers.meta {
+                if root.color-copy() { return accept; }
+            }
+            return reject;
+        }
+    }
+
     in property <bool> help-visible;
     in property <length> help-left;
     in property <length> help-top;
@@ -32,6 +54,10 @@ export component OcrSelectionWindow inherits Window {
     }
     if root.screenshot-mode && root.help-visible: ScreenshotHelp {
         x: root.help-left; y: root.help-top; width: root.help-width; height: root.help-height; stage: 0;
+    }
+    if root.screenshot-mode && root.picker-visible: ScreenshotPixelPicker {
+        x:root.picker-left;y:root.picker-top;width:root.picker-width;height:root.picker-height;
+        grid:root.picker-grid;coordinates:root.picker-coordinates;hex:root.picker-hex;rgb:root.picker-rgb;status:root.picker-status;
     }
     if root.screenshot-mode && root.size-visible: ScreenshotSizeLabel {
         x:root.size-left; y:root.size-top; width:root.size-width; height:root.size-height; text:root.size-text;

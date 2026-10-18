@@ -3,6 +3,7 @@ use super::window_shell_policy as shell_policy;
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
+    rc::Rc,
     sync::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicU64, Ordering},
@@ -847,7 +848,7 @@ fn hwnd_from_key(key: usize) -> windows::Win32::Foundation::HWND {
 const BEGIN_MOVE_MESSAGE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 0x54;
 
 struct PopupInputBridge {
-    handler: PopupPointerHandler,
+    handler: Rc<dyn Fn(PopupPointerEvent)>,
     last_position: (f32, f32),
     pressed: bool,
     tracking_leave: bool,
@@ -906,6 +907,22 @@ fn scale_dip_to_physical(dip: f32, dpi: u32) -> i32 {
     ((dip * dpi.max(96) as f32) / 96.0).round().max(1.0) as i32
 }
 
+/// Retain the callback independently: delivering a view event may retire its HWND bridge.
+pub(super) fn notify_frame_presented(hwnd: windows::Win32::Foundation::HWND) {
+    use windows::{Win32::UI::WindowsAndMessaging::GetPropW, core::w};
+    let handler = unsafe {
+        let data = GetPropW(hwnd, w!("Lexift.PopupInputBridge")).0;
+        if data.is_null() {
+            None
+        } else {
+            Some((*(data as *const PopupInputBridge)).handler.clone())
+        }
+    };
+    if let Some(handler) = handler {
+        handler(PopupPointerEvent::FramePresented);
+    }
+}
+
 fn native_top_resize_hit_test(rect: PopupWindowRect, x: i32, y: i32, dpi: u32) -> bool {
     let strip = scale_dip_to_physical(8.0, dpi);
     let corner = scale_dip_to_physical(36.0, dpi);
@@ -918,7 +935,7 @@ fn native_top_resize_hit_test(rect: PopupWindowRect, x: i32, y: i32, dpi: u32) -
 impl PopupInputBridge {
     fn new(handler: PopupPointerHandler, activate_on_click: bool) -> Self {
         Self {
-            handler,
+            handler: handler.into(),
             last_position: (0.0, 0.0),
             pressed: false,
             tracking_leave: false,
@@ -930,7 +947,7 @@ impl PopupInputBridge {
     }
 
     fn replace_handler(&mut self, handler: PopupPointerHandler, activate_on_click: bool) {
-        self.handler = handler;
+        self.handler = handler.into();
         self.last_position = (0.0, 0.0);
         self.pressed = false;
         self.tracking_leave = false;

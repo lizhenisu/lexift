@@ -244,6 +244,11 @@ unsafe extern "system" fn subclass(
         }
         WM_NCCALCSIZE => return LRESULT(0),
         WM_NCPAINT => return LRESULT(0),
+        WM_NCACTIVATE => {
+            // Winit still needs the activation transition for keyboard focus;
+            // -1 prevents DefWindowProc from painting a native caption over our frame.
+            return unsafe { DefSubclassProc(hwnd, message, wp, LPARAM(-1)) };
+        }
         WM_ERASEBKGND => {
             unsafe {
                 paint(hwnd, HDC(wp.0 as _), &*(data as *const Surface));
@@ -313,6 +318,7 @@ unsafe extern "system" fn subclass(
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 tracing::debug!("Region initial frame handed off after visible paint");
+                super::popup::notify_frame_presented(hwnd);
             }
             return LRESULT(0);
         }
@@ -367,6 +373,21 @@ mod tests {
     }
     #[test]
     fn hidden_native_surface_has_exact_client_bounds_and_guards_backend_rewrites() {
+        unsafe extern "system" fn observe_activation(
+            hwnd: HWND,
+            message: u32,
+            wp: WPARAM,
+            lp: LPARAM,
+            _id: usize,
+            data: usize,
+        ) -> LRESULT {
+            if message == WM_NCACTIVATE {
+                let events = unsafe { &*(data as *const std::cell::RefCell<Vec<(usize, isize)>>) };
+                events.borrow_mut().push((wp.0, lp.0));
+            }
+            unsafe { DefSubclassProc(hwnd, message, wp, lp) }
+        }
+        let activations = std::cell::RefCell::new(Vec::<(usize, isize)>::new());
         let foreground = unsafe { GetForegroundWindow() };
         let window = OwnedWindow(
             unsafe {
@@ -396,6 +417,17 @@ mod tests {
             },
             pixels: vec![255; 96 * 48 * 4],
         };
+        assert!(
+            unsafe {
+                SetWindowSubclass(
+                    window.0,
+                    Some(observe_activation),
+                    SUBCLASS + 1,
+                    &activations as *const _ as usize,
+                )
+            }
+            .as_bool()
+        );
         prepare_native(&window, &frame).unwrap();
         assert!(!unsafe { IsWindowVisible(window.0) }.as_bool());
         unsafe {
@@ -416,6 +448,25 @@ mod tests {
         assert_eq!(ex & WS_EX_APPWINDOW.0, 0);
         assert_ne!(ex & WS_EX_TOOLWINDOW.0, 0);
         assert_ne!(ex & WS_EX_NOACTIVATE.0, 0);
+        for active in [1, 0, 1] {
+            unsafe {
+                SendMessageW(
+                    window.0,
+                    WM_NCACTIVATE,
+                    Some(WPARAM(active)),
+                    Some(LPARAM(0x1234)),
+                );
+            }
+        }
+        assert_eq!(
+            *activations.borrow(),
+            [(1, -1), (0, -1), (1, -1)],
+            "activation must reach the backend without default non-client painting"
+        );
+        assert_eq!(
+            unsafe { GetWindowLongPtrW(window.0, GWL_STYLE) } as u32,
+            style
+        );
         let mut bounds = windows::Win32::Foundation::RECT::default();
         let mut origin = windows::Win32::Foundation::POINT::default();
         unsafe { GetClientRect(window.0, &mut bounds) }.unwrap();
@@ -425,6 +476,26 @@ mod tests {
         assert!(!complete(&window).unwrap());
         let data = reference(window.0).unwrap();
         assert!(unsafe { &*data }.bootstrap.is_some());
+        let frames = std::rc::Rc::new(std::cell::Cell::new(0));
+        let count = frames.clone();
+        super::super::popup::enable_passive_interaction(
+            &window,
+            Box::new(move |event| {
+                if event == crate::PopupPointerEvent::FramePresented {
+                    count.set(count.get() + 1);
+                }
+            }),
+        )
+        .unwrap();
+        // Control the completion point independently of the machine's paint queue.
+        unsafe {
+            (*data).visible_paint = true;
+            (*data).rendered = true;
+            let instance = (*data).instance;
+            SendMessageW(window.0, HANDOFF, Some(WPARAM(instance)), Some(LPARAM(0)));
+            SendMessageW(window.0, HANDOFF, Some(WPARAM(instance)), Some(LPARAM(0)));
+        }
+        assert_eq!(frames.get(), 1);
         let hwnd = window.0;
         drop(window);
         assert!(reference(hwnd).is_none());

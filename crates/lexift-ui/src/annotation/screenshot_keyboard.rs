@@ -131,6 +131,32 @@ fn handle(
     repeat: bool,
 ) -> bool {
     let (owner, epoch) = source;
+    if text.eq_ignore_ascii_case("c") && !control && !shift {
+        let eligible = REGISTRY.with(|s| {
+            let slot = s.borrow();
+            slot.as_ref().is_some_and(|r| {
+                let foreground = r
+                    .lifecycle
+                    .annotation_foreground
+                    .as_ref()
+                    .is_none_or(|query| {
+                        query().is_some_and(|token| {
+                            r.canvas_state.canvases.iter().any(|c| {
+                                (r.lifecycle.annotation_window_token)(c.window.window())
+                                    == Some(token)
+                            }) || r.toolbar_state.main.get().is_some_and(|w| {
+                                (r.lifecycle.annotation_window_token)(w.window()) == Some(token)
+                            })
+                        })
+                    });
+                current(r, generation, owner) && foreground && super::picker_feedback(r).is_some()
+            })
+        });
+        if eligible && down && !repeat {
+            crate::screen_interaction::pixel_picker::copy();
+        }
+        return eligible;
+    }
     let Some(direction) = direction(text) else {
         return false;
     };
@@ -278,6 +304,7 @@ pub(in crate::annotation) fn activate_initial() {
         }
         let origin = e.initial_focus.take()?;
         let b = e.region.bounds()?;
+        tracing::debug!(?origin, current=?r.lifecycle.annotation_foreground.as_ref().and_then(|q|q()), "Screenshot editor input activation considered");
         if !permits_focus_activation(r, origin) {
             return None;
         };
@@ -401,6 +428,46 @@ mod tests {
         fn drop(&mut self) {
             super::super::super::shutdown();
         }
+    }
+    #[test]
+    fn color_key_uses_raw_pixels_during_crop_drag_and_rejects_repeat_tools_and_foreign_focus() {
+        let f = Fixture::new();
+        use crate::screen_interaction::pixel_picker as picker;
+        let (frames, core) = REGISTRY.with(|s| {
+            let mut slot = s.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            let e = r.screenshot.as_mut().unwrap();
+            assert!(e.region.begin(Point { x: 100, y: 100 }, 1., true));
+            (e.frames.clone(), FLOW.with(|s| s.borrow().state.clone()))
+        });
+        picker::begin(51, frames, Rc::new(|| {}));
+        picker::sync(&core);
+        picker::prepare(1., &lifecycle()).unwrap();
+        picker::point(51, Some(Point { x: 80, y: 80 }));
+        let send = |repeat| handle(42, (f.owner, 0), "c", true, false, false, repeat);
+        assert!(send(false));
+        assert!(send(true));
+        assert!(matches!(
+            f.events.borrow().as_slice(),
+            [ScreenshotEvent::CopyColor {
+                color: lexift_core::domain::screen_snapshot::Rgb(120, 160, 180),
+                point: Point { x: 80, y: 80 },
+                ..
+            }]
+        ));
+        assert_eq!(f.bounds(), ORIGINAL);
+        REGISTRY
+            .with(|s| s.borrow_mut().as_mut().unwrap().document.mode = InteractionMode::Tool(0));
+        assert!(!send(false));
+        REGISTRY.with(|s| {
+            let mut slot = s.borrow_mut();
+            let r = slot.as_mut().unwrap();
+            r.document.mode = InteractionMode::Mouse;
+            r.lifecycle.annotation_foreground = Some(Rc::new(|| None));
+        });
+        assert!(!send(false));
+        assert_eq!(f.events.borrow().len(), 1);
+        picker::clear();
     }
     #[test]
     fn locked_crop_keyboard_routes_keep_anchor_and_escape_restores_geometry_only() {

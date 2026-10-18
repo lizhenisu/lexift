@@ -148,6 +148,8 @@ pub enum PopupDismissCause {
 /// its logical coordinate system before dispatching them to the rendering backend.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PopupPointerEvent {
+    /// The region host released its first-frame bootstrap after a visible native paint.
+    FramePresented,
     RightPressed {
         x: f32,
         y: f32,

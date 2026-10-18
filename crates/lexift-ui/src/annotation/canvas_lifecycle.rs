@@ -197,6 +197,14 @@ pub(super) fn show_canvas(r: &mut Registry, index: usize, attempt: u8) {
     }
     match preparation {
         PassiveWindowPreparation::Ready => {
+            // Native pixel presentation bypasses Slint rendering. Prepare its input
+            // tree while hidden so hit testing and root keyboard focus are ready.
+            if r.screenshot.as_ref().is_some_and(|e| e.pin.is_none())
+                && layer.window.window().take_snapshot().is_err()
+            {
+                r.close();
+                return;
+            }
             if r.screenshot.as_ref().is_some_and(|e| e.pin.is_none())
                 && crate::screen_interaction::size_label::prepare(
                     r.canvas_state.canvases[index].scale(),
@@ -208,6 +216,15 @@ pub(super) fn show_canvas(r: &mut Registry, index: usize, attempt: u8) {
                 return;
             }
             if r.screenshot.as_ref().is_some_and(|e| e.pin.is_none()) {
+                if crate::screen_interaction::pixel_picker::prepare(
+                    r.canvas_state.canvases[index].scale(),
+                    &r.lifecycle,
+                )
+                .is_err()
+                {
+                    r.close();
+                    return;
+                }
                 let host = r.canvas_state.canvases[index].bounds;
                 let area = (r.lifecycle.popup_work_area)(Point {
                     x: host.left,
@@ -235,6 +252,10 @@ pub(super) fn show_canvas(r: &mut Registry, index: usize, attempt: u8) {
                         .unwrap()
                         .help
                         .pointer(host, Some(point));
+                    crate::screen_interaction::pixel_picker::point(
+                        r.screenshot.as_ref().unwrap().id,
+                        Some(point),
+                    );
                 }
             }
             r.canvas_state.canvases[index].bootstrap = CanvasBootstrap::Prepared;

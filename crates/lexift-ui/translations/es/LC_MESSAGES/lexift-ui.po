@@ -1773,3 +1773,15 @@ msgstr "Altura"
 
 msgid "Lock aspect ratio"
 msgstr "Bloquear relación de aspecto"
+
+msgid "C: Copy HEX"
+msgstr "C: Copiar HEX"
+
+msgid "Color copied"
+msgstr "Color copiado"
+
+msgid "Color copy failed"
+msgstr "No se pudo copiar el color"
+
+msgid "Pixel magnifier"
+msgstr "Lupa de píxeles"

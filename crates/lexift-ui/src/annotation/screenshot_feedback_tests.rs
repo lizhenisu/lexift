@@ -78,11 +78,50 @@ fn fixture(scale: f32) -> Input {
         },
         label: None,
         help: None,
+        picker: None,
         hovered: None,
         crop_handles: true,
         crop_border: true,
         erase: None,
     }
+}
+
+#[test]
+fn frozen_pixel_feedback_reuses_document_cache_and_never_enters_output() {
+    use crate::screen_interaction::pixel_picker as picker;
+    prepare_font_fixture(1.25, false);
+    let mut input = fixture(1.25);
+    let monitor = input.snapshot.monitor;
+    picker::begin(9, Arc::new(input.capture.regions.clone()), Rc::new(|| {}));
+    picker::prepare(1.25, &lifecycle()).unwrap();
+    picker::point(9, Some(Point { x: 50, y: 70 }));
+    let first = picker::feedback(&[(monitor, 1.25)], Some(monitor)).unwrap();
+    input.picker = Some(first.clone());
+    let mut cache = Cache::default();
+    let cancelled = AtomicBool::new(false);
+    let old = paint_frames(&input, &cancelled, &mut cache).unwrap();
+    picker::point(9, Some(Point { x: 90, y: 100 }));
+    input.picker = picker::feedback(&[(monitor, 1.25)], Some(monitor));
+    let new = paint_frames(&input, &cancelled, &mut cache).unwrap();
+    assert_eq!(cache.builds, 1);
+    assert_ne!(old[0].data(), new[0].data());
+    assert_eq!(first.sample.point, Point { x: 50, y: 70 });
+    assert_eq!(first.sample.color.hex(), "#78A0B4");
+    let output = crate::annotation_export_render::compose(
+        &input.snapshot,
+        input.capture.clone(),
+        &cancelled,
+    )
+    .unwrap();
+    assert!(
+        output
+            .pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|p| *p == [120, 160, 180, 255])
+    );
+    picker::clear();
 }
 fn set_label(input: &mut Input) {
     input.label = size_label::layout(

@@ -1773,3 +1773,15 @@ msgstr "高度"
 
 msgid "Lock aspect ratio"
 msgstr "锁定比例"
+
+msgid "C: Copy HEX"
+msgstr "C：复制 HEX"
+
+msgid "Color copied"
+msgstr "颜色已复制"
+
+msgid "Color copy failed"
+msgstr "颜色复制失败"
+
+msgid "Pixel magnifier"
+msgstr "像素放大镜"

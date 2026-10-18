@@ -1773,3 +1773,15 @@ msgstr "Height"
 
 msgid "Lock aspect ratio"
 msgstr "Lock aspect ratio"
+
+msgid "C: Copy HEX"
+msgstr "C: Copy HEX"
+
+msgid "Color copied"
+msgstr "Color copied"
+
+msgid "Color copy failed"
+msgstr "Color copy failed"
+
+msgid "Pixel magnifier"
+msgstr "Pixel magnifier"

@@ -38,6 +38,8 @@ pub(crate) enum SelectionEvent {
 }
 thread_local! { static STATE: RefCell<Option<Registry>> = const { RefCell::new(None) }; }
 struct Registry {
+    activation_origin: Option<Option<lexift_core::ports::magnifier::WindowToken>>,
+    activation_done: bool,
     prepare: fn(&slint::Window) -> PassiveWindowPreparation,
     lifecycle: WindowLifecycleCallbacks,
     handler: Option<Rc<dyn Fn(SelectionEvent)>>,
@@ -58,6 +60,8 @@ pub(crate) fn init(
 ) {
     STATE.with(|s| {
         *s.borrow_mut() = Some(Registry {
+            activation_origin: None,
+            activation_done: false,
             prepare,
             lifecycle,
             handler: None,
@@ -119,6 +123,13 @@ pub(crate) fn sync(generation: u64, phase: HostPhase) {
     });
 }
 pub(crate) fn show(generation: u64, frames: Arc<Vec<CapturedRegion>>) {
+    show_with_origin(generation, frames, None);
+}
+pub(crate) fn show_with_origin(
+    generation: u64,
+    frames: Arc<Vec<CapturedRegion>>,
+    origin: Option<Option<lexift_core::ports::magnifier::WindowToken>>,
+) {
     if !STATE.with(|s| {
         s.borrow()
             .as_ref()
@@ -132,6 +143,8 @@ pub(crate) fn show(generation: u64, frames: Arc<Vec<CapturedRegion>>) {
         let mut slot = s.borrow_mut();
         let r = slot.as_mut().ok_or(())?;
         r.generation = generation;
+        r.activation_origin = origin;
+        r.activation_done = false;
         r.attempts = 0;
         r.frames = Some(frames.clone());
         for frame in frames.iter() {
@@ -139,6 +152,42 @@ pub(crate) fn show(generation: u64, frames: Arc<Vec<CapturedRegion>>) {
                 .map_err(|_| ())?;
             window.set_screenshot_mode(r.screenshot);
             let b = frame.bounds;
+            let key_weak = window.as_weak();
+            let repeat = Rc::new(std::cell::Cell::new(false));
+            let native_repeat = repeat.clone();
+            use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
+            window.window().on_winit_window_event(move |_, event| {
+                if let winit::event::WindowEvent::KeyboardInput { event, .. } = event {
+                    native_repeat.set(event.repeat);
+                }
+                EventResult::Propagate
+            });
+            window.on_color_copy(move || {
+                let current = STATE.with(|s| {
+                    let slot = s.borrow();
+                    let Some(r) = slot.as_ref() else {
+                        return false;
+                    };
+                    let Some(w) = key_weak.upgrade() else {
+                        return false;
+                    };
+                    r.generation == generation
+                        && r.screenshot
+                        && !repeat.get()
+                        && r.windows
+                            .iter()
+                            .any(|h| h.bounds == b && std::ptr::eq(h.window.window(), w.window()))
+                        && r.lifecycle.annotation_foreground.as_ref().is_none_or(|q| {
+                            q().is_some_and(|token| {
+                                r.windows.iter().any(|h| {
+                                    (r.lifecycle.annotation_window_token)(h.window.window())
+                                        == Some(token)
+                                })
+                            })
+                        })
+                });
+                current && super::pixel_picker::copy()
+            });
             let cancel_window = window.as_weak();
             window.on_cancelled(move || {
                 let Some(window) = cancel_window.upgrade() else {
@@ -276,6 +325,7 @@ fn prepare(generation: u64) {
                 })
             {
                 r.help.pointer(host.bounds, Some(point));
+                super::pixel_picker::point(generation, Some(point));
             }
             for host in &r.windows {
                 let area = (r.lifecycle.popup_work_area)(Point {
@@ -284,6 +334,11 @@ fn prepare(generation: u64) {
                 })
                 .unwrap_or(host.bounds);
                 if super::size_label::prepare(host.window.window().scale_factor(), &r.lifecycle)
+                    .is_err()
+                    || super::pixel_picker::prepare(
+                        host.window.window().scale_factor(),
+                        &r.lifecycle,
+                    )
                     .is_err()
                     || super::screenshot_help::prepare(
                         host.window.window().scale_factor(),
@@ -298,6 +353,7 @@ fn prepare(generation: u64) {
         }
         if r.screenshot {
             sync_help(r);
+            sync_picker(r);
         }
         for (index, host) in r.windows.iter().enumerate() {
             let window = &host.window;
@@ -391,6 +447,27 @@ fn finish_handoff(
 }
 
 pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPointerInput) {
+    if event == PopupPointerInput::FramePresented {
+        let current = STATE.with(|s| {
+            let slot = s.borrow();
+            let Some(r) = slot.as_ref().filter(|r| r.generation == generation) else {
+                return false;
+            };
+            if let Some(host) = r.windows.iter().find(|h| h.bounds == bounds) {
+                host.presented();
+                true
+            } else {
+                false
+            }
+        });
+        if current {
+            activate(generation, bounds, false);
+        }
+        return;
+    }
+    if matches!(event, PopupPointerInput::LeftPressed { .. }) {
+        slint::Timer::single_shot(Duration::ZERO, move || activate(generation, bounds, true));
+    }
     // Native passive input owns capture; forward hover only so Slint can select its crosshair.
     if let Some(window) = STATE.with(|s| {
         s.borrow()
@@ -448,8 +525,30 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
                     })
                     .map_or(bounds, |h| h.bounds);
                 r.help.pointer(host, Some(p));
+                if r.screenshot {
+                    let (px, py) = crate::screen_interaction::screen_point(bounds, (x, y), 1.);
+                    super::pixel_picker::point(
+                        generation,
+                        Some(Point {
+                            x: px.floor() as i32,
+                            y: py.floor() as i32,
+                        }),
+                    );
+                }
             }
-            PopupPointerInput::Exited => r.help.pointer(bounds, None),
+            PopupPointerInput::Exited => {
+                r.help.pointer(bounds, None);
+                if r.screenshot
+                    && super::pixel_picker::location().is_some_and(|p| {
+                        p.x >= bounds.left
+                            && p.x < bounds.right
+                            && p.y >= bounds.top
+                            && p.y < bounds.bottom
+                    })
+                {
+                    super::pixel_picker::point(generation, None);
+                }
+            }
             _ => {}
         }
         match event {
@@ -533,11 +632,96 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
         }
         if r.screenshot {
             sync_help(r);
+            sync_picker(r);
         }
     });
     if let Some(event) = outcome {
         close();
         emit(event);
+    }
+}
+
+fn activate(generation: u64, bounds: Rect, explicit: bool) {
+    let action = STATE.with(|s| {
+        let mut slot = s.borrow_mut();
+        let r = slot.as_mut()?;
+        tracing::debug!(generation,explicit,done=r.activation_done,screenshot=r.screenshot,?bounds,"Screenshot input activation considered");
+        if r.generation != generation || !r.screenshot || (!explicit && r.activation_done) {
+            return None;
+        }
+        let target =
+            (r.lifecycle.toolbar_cursor_position)().map_or(r.windows.first()?.bounds, |p| {
+                r.windows
+                    .iter()
+                    .find(|h| {
+                        p.x >= h.bounds.left
+                            && p.x < h.bounds.right
+                            && p.y >= h.bounds.top
+                            && p.y < h.bounds.bottom
+                    })
+                    .map_or(bounds, |h| h.bounds)
+            });
+        if !explicit && bounds != target {
+            tracing::debug!(?target,"Screenshot input awaits its pointer host frame");
+            return None;
+        }
+        r.activation_done = true;
+        let current = r.lifecycle.annotation_foreground.as_ref().and_then(|q| q());
+        let permitted = explicit
+            || r.activation_origin.is_none_or(|origin| {
+                current.is_some()
+                    && (current == origin
+                        || r.windows.iter().any(|h| {
+                            (r.lifecycle.annotation_window_token)(h.window.window()) == current
+                        }))
+            });
+        tracing::debug!(?current,origin=?r.activation_origin,permitted,"Screenshot input activation eligibility");
+        if !permitted {
+            return None;
+        }
+        let w = r
+            .windows
+            .iter()
+            .find(|h| h.bounds == bounds)?
+            .window
+            .clone_strong();
+        Some((w, r.lifecycle.activate_user_requested_window))
+    });
+    if let Some((w, activate)) = action {
+        activate(w.window());
+    }
+}
+pub(crate) fn refresh_picker() {
+    STATE.with(|s| {
+        if let Some(r) = s.borrow().as_ref().filter(|r| r.screenshot) {
+            sync_picker(r);
+        }
+    });
+}
+fn sync_picker(r: &Registry) {
+    let screens = r
+        .windows
+        .iter()
+        .map(|h| (h.bounds, h.window.window().scale_factor()))
+        .collect::<Vec<_>>();
+    let feedback = super::pixel_picker::location()
+        .and_then(|p| super::pixel_picker::feedback(&screens, (r.lifecycle.popup_work_area)(p)));
+    for h in &r.windows {
+        let w = &h.window;
+        w.set_picker_visible(false);
+        if let Some(f) = feedback.as_ref().filter(|f| f.host == h.bounds) {
+            let scale = f.scale();
+            w.set_picker_grid(f.image());
+            w.set_picker_coordinates(f.coordinates().into());
+            w.set_picker_hex(f.sample.color.hex().into());
+            w.set_picker_rgb(f.rgb().into());
+            w.set_picker_status(f.status);
+            w.set_picker_left((f.bounds.left - h.bounds.left) as f32 / scale);
+            w.set_picker_top((f.bounds.top - h.bounds.top) as f32 / scale);
+            w.set_picker_width((f.bounds.right - f.bounds.left) as f32 / scale);
+            w.set_picker_height((f.bounds.bottom - f.bounds.top) as f32 / scale);
+            w.set_picker_visible(true);
+        }
     }
 }
 
@@ -643,6 +827,104 @@ mod tests {
             },
         ])
     }
+    #[test]
+    fn presented_frame_activates_only_the_requested_host_once_and_rejects_stale_sessions() {
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        use lexift_core::ports::magnifier::WindowToken;
+        thread_local! { static CALLS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) }; }
+        let calls = || CALLS.with(|c| c.get());
+        let mut l = lifecycle();
+        l.toolbar_cursor_position = Rc::new(|| Some(Point { x: 10, y: 20 }));
+        l.annotation_foreground = Some(Rc::new(|| Some(WindowToken(17))));
+        l.activate_user_requested_window = |_| {
+            CALLS.with(|c| c.set(c.get() + 1));
+            true
+        };
+        init(|_| PassiveWindowPreparation::Ready, l);
+        sync(31, HostPhase::Capturing);
+        set_screenshot(true);
+        show_with_origin(31, frames(), Some(Some(WindowToken(17))));
+        pointer(
+            31,
+            frames()[0].bounds,
+            1.,
+            PopupPointerInput::FramePresented,
+        );
+        assert_eq!(calls(), 0);
+        pointer(
+            31,
+            frames()[1].bounds,
+            1.,
+            PopupPointerInput::FramePresented,
+        );
+        pointer(
+            31,
+            frames()[1].bounds,
+            1.,
+            PopupPointerInput::FramePresented,
+        );
+        assert_eq!(calls(), 1);
+        sync(32, HostPhase::Capturing);
+        show_with_origin(32, frames(), Some(Some(WindowToken(99))));
+        pointer(
+            31,
+            frames()[1].bounds,
+            1.,
+            PopupPointerInput::FramePresented,
+        );
+        pointer(
+            32,
+            frames()[1].bounds,
+            1.,
+            PopupPointerInput::FramePresented,
+        );
+        assert_eq!(calls(), 1);
+        activate(32, frames()[1].bounds, true);
+        assert_eq!(calls(), 2);
+        set_screenshot(false);
+        show(32, frames());
+        pointer(
+            32,
+            frames()[1].bounds,
+            1.,
+            PopupPointerInput::FramePresented,
+        );
+        assert_eq!(calls(), 2);
+        close();
+    }
+
+    #[test]
+    fn old_host_exit_does_not_clear_the_new_host_sample() {
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        init(|_| PassiveWindowPreparation::Ready, lifecycle());
+        sync(43, HostPhase::Capturing);
+        set_screenshot(true);
+        let captured = frames();
+        super::super::pixel_picker::begin(43, captured.clone(), Rc::new(|| {}));
+        show(43, captured.clone());
+        pointer(
+            43,
+            captured[0].bounds,
+            1.,
+            PopupPointerInput::Moved { x: 50., y: 20. },
+        );
+        pointer(
+            43,
+            captured[1].bounds,
+            1.,
+            PopupPointerInput::Moved { x: 20., y: 20. },
+        );
+        pointer(43, captured[0].bounds, 1., PopupPointerInput::Exited);
+        assert_eq!(
+            super::super::pixel_picker::location(),
+            Some(Point { x: 20, y: 20 })
+        );
+        pointer(43, captured[1].bounds, 1., PopupPointerInput::Exited);
+        assert_eq!(super::super::pixel_picker::location(), None);
+        close();
+        super::super::pixel_picker::clear();
+    }
+
     #[test]
     fn any_native_preparation_failure_destroys_the_group_before_showing() {
         slint::platform::set_platform(Box::new(TestPlatform)).unwrap();

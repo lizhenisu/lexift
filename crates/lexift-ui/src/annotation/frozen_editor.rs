@@ -43,6 +43,14 @@ fn input(r: &Registry, index: usize) -> Option<screenshot_preview::Input> {
         crop: editing.region.bounds()?,
         label: screenshot::label_feedback(r).filter(|label| label.host == layer.bounds),
         help: screenshot::help_feedback(r).filter(|help| help.host == layer.bounds),
+        picker: crate::screen_interaction::pixel_picker::location()
+            .filter(|p| {
+                p.x >= layer.bounds.left
+                    && p.x < layer.bounds.right
+                    && p.y >= layer.bounds.top
+                    && p.y < layer.bounds.bottom
+            })
+            .and_then(|_| screenshot::picker_feedback(r)),
         hovered: r.hovered,
         crop_handles: r.document.mode.is_mouse() && editing.pin.is_none(),
         crop_border: editing.pin.is_none(),

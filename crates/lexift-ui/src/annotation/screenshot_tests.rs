@@ -851,6 +851,7 @@ fn frozen_preview_masks_outside_annotations_and_export_excludes_controls() {
             crop,
             label: None,
             help: None,
+            picker: None,
             hovered: None,
             crop_handles: true,
             crop_border: true,

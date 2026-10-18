@@ -1773,3 +1773,15 @@ msgstr "높이"
 
 msgid "Lock aspect ratio"
 msgstr "가로세로 비율 잠금"
+
+msgid "C: Copy HEX"
+msgstr "C: HEX 복사"
+
+msgid "Color copied"
+msgstr "색상 복사됨"
+
+msgid "Color copy failed"
+msgstr "색상 복사 실패"
+
+msgid "Pixel magnifier"
+msgstr "픽셀 돋보기"

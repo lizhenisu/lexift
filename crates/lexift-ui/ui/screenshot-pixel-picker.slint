@@ -1,0 +1,82 @@
+import { Colors } from "design/colors.slint";
+export global PixelPickerStyle {
+    out property <length> width:184px;
+    out property <length> height:184px;
+    out property <length> cell:10px;
+    out property <length> inset:8px;
+    out property <length> line:18px;
+    out property <length> text-top:104px;
+    out property <length> gap:16px;
+    out property <length> font-size:12px;
+}
+export component ScreenshotPixelPicker inherits Rectangle {
+    accessible-role:image; accessible-label:@tr("Pixel magnifier");
+    in property <image> grid;
+    in property <string> coordinates;
+    in property <string> hex;
+    in property <string> rgb;
+    in property <int> status;
+    in property <float> render-scale:1;
+    out property <length> content-width:max(PixelPickerStyle.width * root.render-scale,m0.preferred-width + 16px * root.render-scale,m1.preferred-width + 16px * root.render-scale,m2.preferred-width + 16px * root.render-scale);
+    m0 := Text {visible:false; text:@tr("C: Copy HEX");font-size:PixelPickerStyle.font-size * root.render-scale;}
+    m1 := Text {visible:false; text:@tr("Color copied");font-size:PixelPickerStyle.font-size * root.render-scale;}
+    m2 := Text {visible:false; text:@tr("Color copy failed");font-size:PixelPickerStyle.font-size * root.render-scale;}
+    background:Colors.screen-help-background; border-radius:4px * root.render-scale;
+    Image { x:(parent.width - self.width)/2; y:PixelPickerStyle.inset * root.render-scale;
+        width:15 * PixelPickerStyle.cell * root.render-scale; height:9 * PixelPickerStyle.cell * root.render-scale;
+        source:root.grid; image-fit:fill; image-rendering:pixelated; }
+    for value[i] in [root.coordinates,root.hex,root.rgb]: Text {
+        x:PixelPickerStyle.inset * root.render-scale; y:(PixelPickerStyle.text-top + i * PixelPickerStyle.line) * root.render-scale;
+        width:parent.width - 2*self.x;height:PixelPickerStyle.line * root.render-scale;
+        text:value; font-size:PixelPickerStyle.font-size * root.render-scale;color:Colors.screen-help-foreground;vertical-alignment:center;
+    }
+    Text { x:PixelPickerStyle.inset * root.render-scale; y:(PixelPickerStyle.text-top + 3 * PixelPickerStyle.line) * root.render-scale;
+        width:parent.width - 2*self.x;height:PixelPickerStyle.line * root.render-scale;
+        text:root.status == 1 ? @tr("Color copied") : root.status == 2 ? @tr("Color copy failed") : @tr("C: Copy HEX");
+        font-size:PixelPickerStyle.font-size * root.render-scale;color:Colors.screen-help-foreground;vertical-alignment:center;
+    }
+}
+export component PixelPickerTextureWindow inherits Window {
+    no-frame:true;background:transparent;
+    in property <float> render-scale:1;
+    in property <int> status;
+    out property <length> content-width:picker.content-width;
+    picker := ScreenshotPixelPicker { width:parent.width;height:parent.height;render-scale:root.render-scale;status:root.status; }
+}
+component GlyphCell inherits Rectangle {
+    in property <string> glyph;
+    in property <float> render-scale;
+    out property <length> advance:text.preferred-width;
+    width:24px * root.render-scale;height:PixelPickerStyle.line * root.render-scale;
+    text := Text { x:0px;y:0px;height:parent.height;text:root.glyph;
+        font-size:PixelPickerStyle.font-size * root.render-scale;color:Colors.screen-help-foreground;vertical-alignment:center; }
+}
+export component PixelPickerGlyphWindow inherits Window {
+    no-frame:true;background:transparent;
+    in property <float> render-scale:1;
+    g0 := GlyphCell { x:0px * root.render-scale;y:0px;glyph:"0";render-scale:root.render-scale; }
+    g1 := GlyphCell { x:24px * root.render-scale;y:0px;glyph:"1";render-scale:root.render-scale; }
+    g2 := GlyphCell { x:48px * root.render-scale;y:0px;glyph:"2";render-scale:root.render-scale; }
+    g3 := GlyphCell { x:72px * root.render-scale;y:0px;glyph:"3";render-scale:root.render-scale; }
+    g4 := GlyphCell { x:96px * root.render-scale;y:0px;glyph:"4";render-scale:root.render-scale; }
+    g5 := GlyphCell { x:120px * root.render-scale;y:0px;glyph:"5";render-scale:root.render-scale; }
+    g6 := GlyphCell { x:144px * root.render-scale;y:0px;glyph:"6";render-scale:root.render-scale; }
+    g7 := GlyphCell { x:168px * root.render-scale;y:0px;glyph:"7";render-scale:root.render-scale; }
+    g8 := GlyphCell { x:192px * root.render-scale;y:0px;glyph:"8";render-scale:root.render-scale; }
+    g9 := GlyphCell { x:216px * root.render-scale;y:0px;glyph:"9";render-scale:root.render-scale; }
+    g10 := GlyphCell { x:240px * root.render-scale;y:0px;glyph:"A";render-scale:root.render-scale; }
+    g11 := GlyphCell { x:264px * root.render-scale;y:0px;glyph:"B";render-scale:root.render-scale; }
+    g12 := GlyphCell { x:288px * root.render-scale;y:0px;glyph:"C";render-scale:root.render-scale; }
+    g13 := GlyphCell { x:312px * root.render-scale;y:0px;glyph:"D";render-scale:root.render-scale; }
+    g14 := GlyphCell { x:336px * root.render-scale;y:0px;glyph:"E";render-scale:root.render-scale; }
+    g15 := GlyphCell { x:360px * root.render-scale;y:0px;glyph:"F";render-scale:root.render-scale; }
+    g16 := GlyphCell { x:384px * root.render-scale;y:0px;glyph:" ";render-scale:root.render-scale; }
+    g17 := GlyphCell { x:408px * root.render-scale;y:0px;glyph:"R";render-scale:root.render-scale; }
+    g18 := GlyphCell { x:432px * root.render-scale;y:0px;glyph:"G";render-scale:root.render-scale; }
+    g19 := GlyphCell { x:456px * root.render-scale;y:0px;glyph:"#";render-scale:root.render-scale; }
+    g20 := GlyphCell { x:480px * root.render-scale;y:0px;glyph:"(";render-scale:root.render-scale; }
+    g21 := GlyphCell { x:504px * root.render-scale;y:0px;glyph:")";render-scale:root.render-scale; }
+    g22 := GlyphCell { x:528px * root.render-scale;y:0px;glyph:",";render-scale:root.render-scale; }
+    g23 := GlyphCell { x:552px * root.render-scale;y:0px;glyph:"-";render-scale:root.render-scale; }
+    out property <[float]> advances:[g0.advance / 1px, g1.advance / 1px, g2.advance / 1px, g3.advance / 1px, g4.advance / 1px, g5.advance / 1px, g6.advance / 1px, g7.advance / 1px, g8.advance / 1px, g9.advance / 1px, g10.advance / 1px, g11.advance / 1px, g12.advance / 1px, g13.advance / 1px, g14.advance / 1px, g15.advance / 1px, g16.advance / 1px, g17.advance / 1px, g18.advance / 1px, g19.advance / 1px, g20.advance / 1px, g21.advance / 1px, g22.advance / 1px, g23.advance / 1px];
+}

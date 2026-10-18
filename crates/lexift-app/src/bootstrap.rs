@@ -581,6 +581,9 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
 
 fn map_pointer_event(event: lexift_platform::PopupPointerEvent) -> lexift_ui::PopupPointerInput {
     match event {
+        lexift_platform::PopupPointerEvent::FramePresented => {
+            lexift_ui::PopupPointerInput::FramePresented
+        }
         lexift_platform::PopupPointerEvent::LeftCancelled { x, y } => {
             lexift_ui::PopupPointerInput::LeftCancelled { x, y }
         }
