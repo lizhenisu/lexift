@@ -97,6 +97,12 @@ impl WindowsScreenCapturePort {
 }
 
 impl ScreenCapturePort for WindowsScreenCapturePort {
+    fn screenshot_windows(
+        &self,
+        excluded: &[lexift_core::ports::magnifier::WindowToken],
+    ) -> Result<Vec<lexift_core::domain::window_candidate::WindowCandidate>> {
+        capture::screenshot_windows(excluded)
+    }
     fn freeze_desktop(&self) -> Result<Vec<lexift_core::ports::screen_capture::CapturedRegion>> {
         super::ocr_capture::freeze()
     }

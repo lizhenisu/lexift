@@ -23,10 +23,15 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 type CaptureFactory = fn() -> Option<Arc<dyn ScreenCapturePort>>;
+struct PreparedScreenshot {
+    frames: Vec<CapturedRegion>,
+    windows: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
+}
 struct Session {
     id: u64,
     cancelled: Arc<AtomicBool>,
     frames: Option<Arc<Vec<CapturedRegion>>>,
+    windows: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
 }
 pub(crate) struct ScreenshotRuntime {
     capture: CaptureFactory,
@@ -355,12 +360,12 @@ impl ScreenshotRuntime {
                     .unwrap_or_else(|p| p.into_inner())
                     .as_ref()
                     .filter(|s| s.id == session)
-                    .and_then(|s| s.frames.clone());
-                if let Some(frames) = frames {
+                    .and_then(|s| s.frames.clone().map(|f| (f, s.windows.clone())));
+                if let Some((frames, windows)) = frames {
                     let capture = Arc::new(lexift_ui::FrozenCapture::new(frames.clone()));
                     controller
                         .ui
-                        .show_screenshot_capture(session, frames, capture);
+                        .show_screenshot_capture(session, frames, capture, windows);
                 }
             }
             ScreenshotCommand::Prepare { session, request } => {
@@ -374,6 +379,7 @@ impl ScreenshotRuntime {
                         id: session,
                         cancelled: cancelled.clone(),
                         frames: None,
+                        windows: Vec::new(),
                     });
                 if let Some(old) = old {
                     old.cancelled.store(true, Ordering::Release);
@@ -384,13 +390,14 @@ impl ScreenshotRuntime {
                     .name("screenshot-prepare".into())
                     .spawn(move || {
                         let result = this.prepare(&request, &cancelled);
-                        let result = result.and_then(|frames| {
+                        let result = result.and_then(|prepared| {
                             let mut slot = this.session.lock().unwrap_or_else(|p| p.into_inner());
                             let s = slot
                                 .as_mut()
                                 .filter(|s| s.id == session && !s.cancelled.load(Ordering::Acquire))
                                 .ok_or_else(|| Error::new("Screenshot cancelled"))?;
-                            s.frames = Some(Arc::new(frames));
+                            s.frames = Some(Arc::new(prepared.frames));
+                            s.windows = prepared.windows;
                             Ok(())
                         });
                         worker_controller.dispatch(AppEvent::Screenshot(
@@ -528,16 +535,16 @@ impl ScreenshotRuntime {
         &self,
         request: &ExportRequest,
         cancelled: &AtomicBool,
-    ) -> Result<Vec<CapturedRegion>> {
+    ) -> Result<PreparedScreenshot> {
         let snapshot = &request.snapshot;
-        let frame = crate::annotation_export::capture(
+        let captured = crate::annotation_export::capture_screenshot(
             self.capture,
             snapshot.monitors.iter().map(|(r, _)| *r).collect(),
             snapshot.excluded.clone(),
             cancelled,
         )?
         .ok_or_else(|| Error::new("Screenshot cancelled"))?;
-        snapshot
+        let frames = snapshot
             .monitors
             .iter()
             .map(|(bounds, scale)| {
@@ -547,9 +554,14 @@ impl ScreenshotRuntime {
                 let mut snapshot = (**snapshot).clone();
                 snapshot.monitor = *bounds;
                 snapshot.scale = *scale;
-                self.render.compose(&snapshot, frame.clone(), cancelled)
+                self.render
+                    .compose(&snapshot, captured.frame.clone(), cancelled)
             })
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        Ok(PreparedScreenshot {
+            frames,
+            windows: captured.windows,
+        })
     }
     fn output_image(
         &self,

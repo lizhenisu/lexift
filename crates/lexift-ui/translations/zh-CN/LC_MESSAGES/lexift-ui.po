@@ -1785,3 +1785,6 @@ msgstr "颜色复制失败"
 
 msgid "Pixel magnifier"
 msgstr "像素放大镜"
+
+msgid "Click to select a window, or drag to select a region"
+msgstr "单击选择窗口，拖动框选区域"

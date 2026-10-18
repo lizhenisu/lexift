@@ -142,6 +142,67 @@ fn windows(request: &ScreenCaptureRequest) -> windows::core::Result<Vec<WindowIn
     Ok(enumeration.windows)
 }
 
+/// Reuse capture's visibility, cloak, physical DWM frame and overlay exclusions.
+pub(super) fn screenshot_windows(
+    excluded: &[lexift_core::ports::magnifier::WindowToken],
+) -> lexift_core::Result<Vec<lexift_core::domain::window_candidate::WindowCandidate>> {
+    use windows::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, GetClassNameW, GetWindowLongPtrW};
+    let request = ScreenCaptureRequest {
+        revision: 0,
+        regions: vec![Rect {
+            left: i32::MIN,
+            top: i32::MIN,
+            right: i32::MAX,
+            bottom: i32::MAX,
+        }],
+        paused_regions: vec![],
+        excluded_windows: excluded.to_vec(),
+    };
+    let frames = windows(&request).map_err(|e| lexift_core::Error::new(e.to_string()))?;
+    Ok(frames
+        .into_iter()
+        .rev()
+        .filter_map(|frame| {
+            let hwnd = HWND(frame.token as _);
+            let mut name = [0u16; 128];
+            let length = unsafe { GetClassNameW(hwnd, &mut name) }.max(0) as usize;
+            let class = String::from_utf16_lossy(&name[..length]);
+            if length == 0
+                || frame.opacity == 0
+                || !candidate_class(unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) }, &class)
+            {
+                return None;
+            }
+            let b = frame.bounds;
+            (b.right > b.left && b.bottom > b.top).then_some(
+                lexift_core::domain::window_candidate::WindowCandidate {
+                    window: lexift_core::ports::magnifier::WindowToken(frame.token),
+                    bounds: b,
+                    order: 0,
+                },
+            )
+        })
+        .enumerate()
+        .map(|(order, mut candidate)| {
+            candidate.order = order as u32;
+            candidate
+        })
+        .collect())
+}
+
+fn candidate_class(style: isize, class: &str) -> bool {
+    style & WS_EX_TOOLWINDOW.0 as isize == 0
+        && !matches!(
+            class,
+            "Progman"
+                | "WorkerW"
+                | "Shell_TrayWnd"
+                | "Shell_SecondaryTrayWnd"
+                | "#32768"
+                | "tooltips_class32"
+        )
+}
+
 /// Reference and isolated-source modes exist only for controlled comparisons.
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -964,6 +1025,102 @@ impl Drop for WindowCapture {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn screenshot_candidates_reject_shell_surfaces_and_auxiliary_windows() {
+        assert!(candidate_class(0, "NormalApp"));
+        assert!(candidate_class(WS_EX_APPWINDOW.0 as isize, "NormalApp"));
+        assert!(!candidate_class(WS_EX_TOOLWINDOW.0 as isize, "NormalApp"));
+        for class in [
+            "Progman",
+            "WorkerW",
+            "Shell_TrayWnd",
+            "Shell_SecondaryTrayWnd",
+            "#32768",
+            "tooltips_class32",
+        ] {
+            assert!(!candidate_class(0, class));
+        }
+    }
+
+    #[test]
+    fn screenshot_native_candidates_exclude_hidden_minimized_and_tools_without_shifting_rank() {
+        use lexift_core::ports::magnifier::WindowToken;
+        use windows::core::w;
+        struct Owned(HWND);
+        impl Drop for Owned {
+            fn drop(&mut self) {
+                let _ = unsafe { DestroyWindow(self.0) };
+            }
+        }
+        let make = |tool| {
+            Owned(
+                unsafe {
+                    CreateWindowExW(
+                        if tool {
+                            WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
+                        } else {
+                            WS_EX_NOACTIVATE
+                        },
+                        w!("STATIC"),
+                        w!("Candidate regression"),
+                        WS_POPUP,
+                        20,
+                        20,
+                        96,
+                        64,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                }
+                .unwrap(),
+            )
+        };
+        let normal = make(false);
+        let tool = make(true);
+        let token = WindowToken(normal.0.0 as isize);
+        assert!(
+            screenshot_windows(&[])
+                .unwrap()
+                .iter()
+                .all(|w| w.window != token)
+        );
+        unsafe {
+            let _ = ShowWindow(normal.0, SW_SHOWNOACTIVATE);
+        }
+        let before = screenshot_windows(&[]).unwrap();
+        let rank = before
+            .iter()
+            .find(|w| w.window == token)
+            .expect("visible normal window")
+            .order;
+        unsafe {
+            let _ = ShowWindow(tool.0, SW_SHOWNOACTIVATE);
+        }
+        let after = screenshot_windows(&[]).unwrap();
+        assert_eq!(
+            after.iter().find(|w| w.window == token).unwrap().order,
+            rank
+        );
+        assert!(after.iter().all(|w| w.window.0 != tool.0.0 as isize));
+        assert!(
+            screenshot_windows(&[token])
+                .unwrap()
+                .iter()
+                .all(|w| w.window != token)
+        );
+        unsafe {
+            let _ = ShowWindow(normal.0, SW_SHOWMINNOACTIVE);
+        }
+        assert!(
+            screenshot_windows(&[])
+                .unwrap()
+                .iter()
+                .all(|w| w.window != token)
+        );
+    }
 
     #[test]
     #[ignore = "owned opaque toolbar and changing source; requires interactive Windows WGC"]

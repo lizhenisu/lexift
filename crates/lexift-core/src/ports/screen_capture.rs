@@ -28,7 +28,21 @@ pub struct ScreenCaptureFrame {
     pub regions: Vec<CapturedRegion>,
 }
 
+/// Frozen pixels and window metadata owned by one screenshot preparation.
+pub struct ScreenshotCapture {
+    pub frame: Arc<ScreenCaptureFrame>,
+    pub windows: Vec<crate::domain::window_candidate::WindowCandidate>,
+}
+
 pub trait ScreenCapturePort: Send + Sync {
+    /// Snapshot window metadata alongside background screenshot capture. Unsupported
+    /// adapters return no candidates; callers retain the existing manual selection.
+    fn screenshot_windows(
+        &self,
+        _excluded: &[WindowToken],
+    ) -> Result<Vec<crate::domain::window_candidate::WindowCandidate>> {
+        Ok(Vec::new())
+    }
     /// One-shot physical desktop capture, performed before selection overlays are shown.
     /// Independent instances must not disturb annotation sampling.
     fn freeze_desktop(&self) -> Result<Vec<CapturedRegion>> {

@@ -172,8 +172,49 @@ fn capture_with_timeout(
     cancelled: &AtomicBool,
     timeout: Duration,
 ) -> Result<Option<Arc<ScreenCaptureFrame>>> {
-    let deadline = Instant::now() + timeout;
     let port = factory().ok_or_else(|| Error::new("Screen capture unavailable"))?;
+    capture_port(port, regions, excluded_windows, cancelled, timeout)
+}
+
+/// A screenshot freezes metadata around the same excluded-window pixel capture.
+pub(crate) fn capture_screenshot(
+    factory: CaptureFactory,
+    regions: Vec<Rect>,
+    excluded_windows: Vec<WindowToken>,
+    cancelled: &AtomicBool,
+) -> Result<Option<lexift_core::ports::screen_capture::ScreenshotCapture>> {
+    let port = factory().ok_or_else(|| Error::new("Screen capture unavailable"))?;
+    let before = port
+        .screenshot_windows(&excluded_windows)
+        .unwrap_or_default();
+    let frame = capture_port(
+        port.clone(),
+        regions,
+        excluded_windows.clone(),
+        cancelled,
+        Duration::from_secs(5),
+    )?;
+    let after = port
+        .screenshot_windows(&excluded_windows)
+        .unwrap_or_default();
+    let windows = lexift_core::domain::window_candidate::stable(&before, &after);
+    tracing::debug!(
+        before = before.len(),
+        after = after.len(),
+        stable = windows.len(),
+        "Screenshot window snapshot"
+    );
+    Ok(frame.map(|frame| lexift_core::ports::screen_capture::ScreenshotCapture { frame, windows }))
+}
+
+fn capture_port(
+    port: Arc<dyn ScreenCapturePort>,
+    regions: Vec<Rect>,
+    excluded_windows: Vec<WindowToken>,
+    cancelled: &AtomicBool,
+    timeout: Duration,
+) -> Result<Option<Arc<ScreenCaptureFrame>>> {
+    let deadline = Instant::now() + timeout;
     if !port.is_available() {
         return Err(Error::new("Screen capture unavailable"));
     }
@@ -250,6 +291,93 @@ mod tests {
             owner: None,
             name: "test.png".into(),
             title: String::new(),
+        }
+    }
+    #[test]
+    fn screenshot_metadata_uses_the_pixel_capture_exclusions_and_falls_back_on_failure() {
+        use lexift_core::domain::window_candidate::WindowCandidate;
+        use std::sync::atomic::AtomicUsize;
+        struct Capture {
+            reads: AtomicUsize,
+            failed: bool,
+        }
+        impl ScreenCapturePort for Capture {
+            fn is_available(&self) -> bool {
+                true
+            }
+            fn request(&self, request: ScreenCaptureRequest) -> Result<()> {
+                assert_eq!(request.excluded_windows, vec![WindowToken(100)]);
+                Ok(())
+            }
+            fn latest(&self) -> Result<Option<Arc<ScreenCaptureFrame>>> {
+                Ok(Some(frame(fixture().monitor, [7, 8, 9, 255])))
+            }
+            fn clear(&self) {}
+            fn screenshot_windows(&self, excluded: &[WindowToken]) -> Result<Vec<WindowCandidate>> {
+                assert_eq!(excluded, [WindowToken(100)]);
+                if self.failed {
+                    return Err(Error::new("fixture"));
+                }
+                let after = self.reads.fetch_add(1, Ordering::Relaxed) > 0;
+                Ok(vec![
+                    WindowCandidate {
+                        window: WindowToken(1),
+                        bounds: fixture().monitor,
+                        order: 0,
+                    },
+                    WindowCandidate {
+                        window: WindowToken(2),
+                        bounds: if after {
+                            Rect {
+                                left: 0,
+                                top: 0,
+                                right: 1,
+                                bottom: 1,
+                            }
+                        } else {
+                            fixture().monitor
+                        },
+                        order: 1,
+                    },
+                ])
+            }
+        }
+        for failed in [false, true] {
+            let factory: CaptureFactory = if failed {
+                || {
+                    Some(Arc::new(Capture {
+                        reads: AtomicUsize::new(0),
+                        failed: true,
+                    }))
+                }
+            } else {
+                || {
+                    Some(Arc::new(Capture {
+                        reads: AtomicUsize::new(0),
+                        failed: false,
+                    }))
+                }
+            };
+            let result = capture_screenshot(
+                factory,
+                vec![fixture().monitor],
+                vec![WindowToken(100)],
+                &AtomicBool::new(false),
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(result.frame.regions[0].pixels[0], 7);
+            assert_eq!(result.windows.len(), usize::from(!failed));
+            assert!(
+                capture_screenshot(
+                    factory,
+                    vec![fixture().monitor],
+                    vec![WindowToken(100)],
+                    &AtomicBool::new(true)
+                )
+                .unwrap()
+                .is_none()
+            );
         }
     }
     fn frame(bounds: Rect, color: [u8; 4]) -> Arc<ScreenCaptureFrame> {

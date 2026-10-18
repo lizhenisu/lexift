@@ -28,22 +28,45 @@ pub struct RegionSelectionResult {
 pub struct RegionSelection {
     start: Option<Point>,
     current: Option<Point>,
+    candidate: Option<Rect>,
+    threshold: f64,
 }
 impl RegionSelection {
     pub fn begin(&mut self, point: Point) {
+        self.candidate = None;
         self.start = Some(point);
         self.current = Some(point);
     }
+    /// Small click jitter retains the pressed candidate; a drag never snaps back.
+    pub fn begin_candidate(&mut self, point: Point, candidate: Option<Rect>, scale: f32) {
+        self.begin(point);
+        self.candidate = candidate;
+        self.threshold = 4. * f64::from(scale.max(f32::EPSILON));
+    }
     pub fn update(&mut self, point: Point) {
         if self.start.is_some() {
+            if let Some(start) = self.start {
+                let dx = (i64::from(point.x) - i64::from(start.x)).abs();
+                let dy = (i64::from(point.y) - i64::from(start.y)).abs();
+                if dx.max(dy) as f64 > self.threshold {
+                    self.candidate = None;
+                }
+            }
             self.current = Some(point);
         }
     }
     pub fn cancel(&mut self) {
         self.start = None;
         self.current = None;
+        self.candidate = None;
+    }
+    pub fn active(&self) -> bool {
+        self.start.is_some()
     }
     pub fn bounds(&self) -> Option<Rect> {
+        if let Some(bounds) = self.candidate {
+            return Some(bounds);
+        }
         let a = self.start?;
         let b = self.current?;
         Some(Rect {
@@ -78,6 +101,67 @@ impl RegionSelection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn window_click_jitter_and_drag_threshold_preserve_the_original_origin() {
+        let window = Rect {
+            left: -100,
+            top: -50,
+            right: 200,
+            bottom: 150,
+        };
+        let start = Point { x: -20, y: 10 };
+        let context = SelectionContext::standalone(7);
+        for scale in [1., 1.25] {
+            let threshold = (4. * scale) as i32;
+            let mut g = RegionSelection::default();
+            g.begin_candidate(start, Some(window), scale);
+            assert_eq!(g.bounds(), Some(window));
+            assert_eq!(
+                g.finish(
+                    Point {
+                        x: start.x + threshold,
+                        y: start.y
+                    },
+                    context
+                )
+                .unwrap()
+                .bounds,
+                window
+            );
+            assert!(!g.active());
+            g.begin_candidate(start, Some(window), scale);
+            g.update(Point {
+                x: start.x + threshold + 1,
+                y: start.y + 20,
+            });
+            g.update(Point {
+                x: start.x + 1,
+                y: start.y + 2,
+            });
+            assert_eq!(
+                g.finish(
+                    Point {
+                        x: start.x + 1,
+                        y: start.y + 2
+                    },
+                    context
+                )
+                .unwrap()
+                .bounds,
+                Rect {
+                    left: -20,
+                    top: 10,
+                    right: -19,
+                    bottom: 12
+                }
+            );
+            g.begin_candidate(start, Some(window), scale);
+            g.cancel();
+            assert_eq!(g.finish(start, context), None);
+            g.begin_candidate(start, None, scale);
+            assert!(g.finish(Point { x: -19, y: 11 }, context).is_some());
+        }
+    }
     #[test]
     fn four_directions_cross_negative_origin_and_clip_each_monitor() {
         let context = SelectionContext {

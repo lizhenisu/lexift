@@ -1785,3 +1785,6 @@ msgstr "Copia del colore non riuscita"
 
 msgid "Pixel magnifier"
 msgstr "Lente pixel"
+
+msgid "Click to select a window, or drag to select a region"
+msgstr "Fai clic per selezionare una finestra o trascina per selezionare un'area"

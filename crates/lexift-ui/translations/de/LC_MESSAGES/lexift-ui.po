@@ -1785,3 +1785,6 @@ msgstr "Farbe konnte nicht kopiert werden"
 
 msgid "Pixel magnifier"
 msgstr "Pixel-Lupe"
+
+msgid "Click to select a window, or drag to select a region"
+msgstr "Klicken, um ein Fenster auszuwählen, oder ziehen, um einen Bereich auszuwählen"

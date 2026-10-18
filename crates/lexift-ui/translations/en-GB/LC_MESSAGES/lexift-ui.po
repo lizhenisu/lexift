@@ -1785,3 +1785,6 @@ msgstr "Colour copy failed"
 
 msgid "Pixel magnifier"
 msgstr "Pixel magnifier"
+
+msgid "Click to select a window, or drag to select a region"
+msgstr "Click to select a window, or drag to select a region"

@@ -18,6 +18,7 @@ pub mod clipboard_history;
 pub mod copy_feedback;
 
 pub mod region_selection;
+pub mod window_candidate;
 
 pub mod screen_snapshot;
 

@@ -271,6 +271,7 @@ fn screenshot_toolbars_are_exclusive_and_restore_document_undo_after_failed_outp
         id,
         frames.clone(),
         Arc::new(crate::FrozenCapture::new(frames.clone())),
+        Vec::new(),
     );
     assert!(!super::super::is_open());
     selection_host::pointer(
@@ -783,6 +784,7 @@ fn screenshot_toolbars_are_exclusive_and_restore_document_undo_after_failed_outp
         cancelled,
         cancelled_frames.clone(),
         Arc::new(crate::FrozenCapture::new(cancelled_frames.clone())),
+        Vec::new(),
     );
     cancel();
     restore(cancelled);

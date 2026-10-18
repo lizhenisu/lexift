@@ -148,6 +148,7 @@ pub(crate) fn show(
     id: u64,
     frames: Arc<Vec<CapturedRegion>>,
     capture: Arc<dyn lexift_core::ports::screen_capture::ScreenCapturePort>,
+    windows: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
 ) {
     if !FLOW.with(|s| {
         let s = s.borrow();
@@ -220,6 +221,7 @@ pub(crate) fn show(
     let frames = FLOW.with(|s| s.borrow().frames.clone().unwrap());
     let origin = FLOW.with(|s| s.borrow().activation);
     selection_host::show_with_origin(id, frames, origin);
+    selection_host::set_candidates(id, windows);
 }
 pub(crate) fn cancel() {
     let id = FLOW.with(|s| s.borrow().state.session);

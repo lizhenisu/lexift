@@ -485,9 +485,10 @@ impl UiHandle {
         session: u64,
         frames: Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>,
         capture: Arc<dyn lexift_core::ports::screen_capture::ScreenCapturePort>,
+        windows: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
     ) {
         let _ = slint::invoke_from_event_loop(move || {
-            crate::annotation::screenshot::show(session, frames, capture)
+            crate::annotation::screenshot::show(session, frames, capture, windows)
         });
     }
     pub fn close_pinned_image(&self, id: u64) {

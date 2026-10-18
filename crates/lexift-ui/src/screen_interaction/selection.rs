@@ -45,6 +45,8 @@ struct Registry {
     handler: Option<Rc<dyn Fn(SelectionEvent)>>,
     generation: u64,
     screenshot: bool,
+    candidates: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
+    hover: Option<Rect>,
     help: super::screenshot_help::State,
     phase: HostPhase,
     windows: Vec<Host<OcrSelectionWindow>>,
@@ -67,6 +69,8 @@ pub(crate) fn init(
             handler: None,
             generation: 0,
             screenshot: false,
+            candidates: Vec::new(),
+            hover: None,
             help: Default::default(),
             phase: HostPhase::Idle,
             windows: vec![],
@@ -85,6 +89,56 @@ pub(crate) fn set_handler(handler: Rc<dyn Fn(SelectionEvent)>) {
         }
     });
 }
+pub(crate) fn set_candidates(
+    generation: u64,
+    candidates: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
+) {
+    let point = STATE.with(|s| {
+        let mut slot = s.borrow_mut();
+        let r = slot
+            .as_mut()
+            .filter(|r| r.generation == generation && r.screenshot)?;
+        r.candidates = candidates;
+        let p = (r.lifecycle.toolbar_cursor_position)()?;
+        let b = r
+            .windows
+            .iter()
+            .find(|h| {
+                p.x >= h.bounds.left
+                    && p.x < h.bounds.right
+                    && p.y >= h.bounds.top
+                    && p.y < h.bounds.bottom
+            })?
+            .bounds;
+        Some((p, b))
+    });
+    if let Some((p, b)) = point {
+        pointer(
+            generation,
+            b,
+            1.,
+            PopupPointerInput::Moved {
+                x: (p.x - b.left) as f32,
+                y: (p.y - b.top) as f32,
+            },
+        );
+    }
+}
+
+fn candidate_at(r: &Registry, point: Point) -> Option<Rect> {
+    if !r.screenshot {
+        return None;
+    }
+    let first = r.windows.first()?.bounds;
+    let desktop = r.windows.iter().fold(first, |a, h| Rect {
+        left: a.left.min(h.bounds.left),
+        top: a.top.min(h.bounds.top),
+        right: a.right.max(h.bounds.right),
+        bottom: a.bottom.max(h.bounds.bottom),
+    });
+    lexift_core::domain::window_candidate::at(&r.candidates, point, desktop)
+}
+
 pub(crate) fn active() -> bool {
     STATE.with(|s| s.borrow().as_ref().is_some_and(|r| !r.windows.is_empty()))
 }
@@ -99,6 +153,8 @@ pub(crate) fn close() {
         if let Some(r) = s.borrow_mut().as_mut() {
             r.timer.stop();
             r.gesture.cancel();
+            r.candidates.clear();
+            r.hover = None;
             r.help = Default::default();
             r.frames = None;
             r.native_handoff.clear();
@@ -514,6 +570,7 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
             | PopupPointerInput::LeftPressed { x, y }
             | PopupPointerInput::LeftReleased { x, y } => {
                 let p = point(x, y);
+                r.hover = candidate_at(r, p);
                 let host = r
                     .windows
                     .iter()
@@ -547,13 +604,19 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
                     })
                 {
                     super::pixel_picker::point(generation, None);
+                    r.hover = None;
                 }
             }
             _ => {}
         }
         match event {
             PopupPointerInput::LeftPressed { x, y } => {
-                r.gesture.begin(point(x, y));
+                let scale = r
+                    .windows
+                    .iter()
+                    .find(|h| h.bounds == bounds)
+                    .map_or(1., |h| h.window.window().scale_factor());
+                r.gesture.begin_candidate(point(x, y), r.hover, scale);
             }
             PopupPointerInput::LeftReleased { x, y } => {
                 if let Some(selection) = r
@@ -575,61 +638,10 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
             }
             PopupPointerInput::Moved { x, y } => {
                 r.gesture.update(point(x, y));
-                let feedback = r
-                    .gesture
-                    .bounds()
-                    .filter(|_| r.screenshot)
-                    .and_then(|bounds| {
-                        let screens = r
-                            .windows
-                            .iter()
-                            .map(|h| (h.bounds, h.window.window().scale_factor()))
-                            .collect::<Vec<_>>();
-                        super::size_label::layout(
-                            bounds,
-                            &screens,
-                            (r.lifecycle.popup_work_area)(Point {
-                                x: bounds.left,
-                                y: bounds.top,
-                            }),
-                        )
-                    });
-                for Host {
-                    window, bounds: b, ..
-                } in &r.windows
-                {
-                    window.set_size_visible(false);
-                    if let Some(label) = feedback.as_ref().filter(|label| label.host == *b) {
-                        let scale = label.scale();
-                        window.set_size_visible(true);
-                        window.set_size_text(label.text.clone().into());
-                        window.set_size_left((label.bounds.left - b.left) as f32 / scale);
-                        window.set_size_top((label.bounds.top - b.top) as f32 / scale);
-                        window.set_size_width(
-                            (label.bounds.right - label.bounds.left) as f32 / scale,
-                        );
-                        window.set_size_height(
-                            (label.bounds.bottom - label.bounds.top) as f32 / scale,
-                        );
-                    }
-
-                    if let Some(preview) = r.gesture.preview(*b) {
-                        let scale = window.window().scale_factor();
-                        window.set_selecting(true);
-                        let (left, top) = crate::screen_interaction::local_point(
-                            *b,
-                            (preview.left as f32, preview.top as f32),
-                            scale,
-                        );
-                        window.set_selection_left(left);
-                        window.set_selection_top(top);
-                        window.set_selection_width((preview.right - preview.left) as f32 / scale);
-                        window.set_selection_height((preview.bottom - preview.top) as f32 / scale);
-                    }
-                }
             }
             _ => {}
         }
+        sync_region(r);
         if r.screenshot {
             sync_help(r);
             sync_picker(r);
@@ -638,6 +650,63 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
     if let Some(event) = outcome {
         close();
         emit(event);
+    }
+}
+
+fn sync_region(r: &Registry) {
+    let region = r.gesture.bounds().or(r.hover);
+    let feedback = region.filter(|_| r.screenshot).and_then(|bounds| {
+        let screens = r
+            .windows
+            .iter()
+            .map(|h| (h.bounds, h.window.window().scale_factor()))
+            .collect::<Vec<_>>();
+        super::size_label::layout(
+            bounds,
+            &screens,
+            (r.lifecycle.popup_work_area)(Point {
+                x: bounds.left,
+                y: bounds.top,
+            }),
+        )
+    });
+    for Host {
+        window, bounds: b, ..
+    } in &r.windows
+    {
+        window.set_size_visible(false);
+        if let Some(label) = feedback.as_ref().filter(|label| label.host == *b) {
+            let scale = label.scale();
+            window.set_size_visible(true);
+            window.set_size_text(label.text.clone().into());
+            window.set_size_left((label.bounds.left - b.left) as f32 / scale);
+            window.set_size_top((label.bounds.top - b.top) as f32 / scale);
+            window.set_size_width((label.bounds.right - label.bounds.left) as f32 / scale);
+            window.set_size_height((label.bounds.bottom - label.bounds.top) as f32 / scale);
+        }
+
+        window.set_selecting(false);
+        if let Some(preview) = region
+            .map(|region| Rect {
+                left: region.left.max(b.left),
+                top: region.top.max(b.top),
+                right: region.right.min(b.right),
+                bottom: region.bottom.min(b.bottom),
+            })
+            .filter(|p| p.right > p.left && p.bottom > p.top)
+        {
+            let scale = window.window().scale_factor();
+            window.set_selecting(true);
+            let (left, top) = crate::screen_interaction::local_point(
+                *b,
+                (preview.left as f32, preview.top as f32),
+                scale,
+            );
+            window.set_selection_left(left);
+            window.set_selection_top(top);
+            window.set_selection_width((preview.right - preview.left) as f32 / scale);
+            window.set_selection_height((preview.bottom - preview.top) as f32 / scale);
+        }
     }
 }
 
@@ -923,6 +992,95 @@ mod tests {
         assert_eq!(super::super::pixel_picker::location(), None);
         close();
         super::super::pixel_picker::clear();
+    }
+
+    #[test]
+    fn frozen_windows_hover_across_hosts_click_with_jitter_and_retire_on_close() {
+        use lexift_core::{
+            domain::window_candidate::WindowCandidate, ports::magnifier::WindowToken,
+        };
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        init(|_| PassiveWindowPreparation::Ready, lifecycle());
+        sync(71, HostPhase::Capturing);
+        set_screenshot(true);
+        show(71, frames());
+        let selected = Rc::new(RefCell::new(Vec::new()));
+        let results = selected.clone();
+        set_handler(Rc::new(move |event| {
+            if let SelectionEvent::SelectionSubmitted { selection } = event {
+                results.borrow_mut().push(selection.bounds);
+            }
+        }));
+        let expected = Rect {
+            left: -50,
+            top: 10,
+            right: 70,
+            bottom: 80,
+        };
+        set_candidates(
+            71,
+            vec![WindowCandidate {
+                window: WindowToken(1),
+                bounds: expected,
+                order: 0,
+            }],
+        );
+        pointer(
+            71,
+            frames()[0].bounds,
+            1.,
+            PopupPointerInput::Moved { x: 80., y: 30. },
+        );
+        STATE.with(|s| {
+            let slot = s.borrow();
+            let r = slot.as_ref().unwrap();
+            assert_eq!(r.hover, Some(expected));
+            assert!(r.windows.iter().all(|h| h.window.get_selecting()));
+            assert!(!r.gesture.active());
+        });
+        pointer(
+            71,
+            frames()[0].bounds,
+            1.,
+            PopupPointerInput::LeftPressed { x: 80., y: 30. },
+        );
+        pointer(
+            71,
+            frames()[0].bounds,
+            1.,
+            PopupPointerInput::LeftReleased { x: 82., y: 31. },
+        );
+        assert_eq!(*selected.borrow(), vec![expected]);
+        assert!(!active());
+        STATE.with(|s| assert!(s.borrow().as_ref().unwrap().candidates.is_empty()));
+        sync(72, HostPhase::Capturing);
+        show(72, frames());
+        set_candidates(
+            71,
+            vec![WindowCandidate {
+                window: WindowToken(2),
+                bounds: expected,
+                order: 0,
+            }],
+        );
+        STATE.with(|s| assert!(s.borrow().as_ref().unwrap().candidates.is_empty()));
+        set_screenshot(false);
+        set_candidates(
+            72,
+            vec![WindowCandidate {
+                window: WindowToken(2),
+                bounds: expected,
+                order: 0,
+            }],
+        );
+        pointer(
+            72,
+            frames()[1].bounds,
+            1.,
+            PopupPointerInput::Moved { x: 20., y: 20. },
+        );
+        STATE.with(|s| assert_eq!(s.borrow().as_ref().unwrap().hover, None));
+        close();
     }
 
     #[test]

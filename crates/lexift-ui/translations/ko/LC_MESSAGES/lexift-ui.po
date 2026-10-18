@@ -1785,3 +1785,6 @@ msgstr "색상 복사 실패"
 
 msgid "Pixel magnifier"
 msgstr "픽셀 돋보기"
+
+msgid "Click to select a window, or drag to select a region"
+msgstr "클릭하여 창을 선택하거나 드래그하여 영역 선택"

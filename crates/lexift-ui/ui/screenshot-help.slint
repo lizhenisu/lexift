@@ -8,7 +8,7 @@ export component ScreenshotHelp inherits Rectangle {
     in property <float> render-scale: 1;
     private property <length> key-width: (root.stage == 1 ? Metrics.screen-help-key-width : Metrics.screen-help-small-key-width) * root.render-scale;
     private property <[HelpRow]> rows: root.stage == 0 ? [
-        { key: @tr("Drag"), description: @tr("Drag to select a region") },
+        { key: @tr("Mouse"), description: @tr("Click to select a window, or drag to select a region") },
         { key: "Esc", description: @tr("Cancel, or right-click") },
     ] : root.stage == 1 ? [
         { key: "← ↑ ↓ →", description: @tr("Move selection by 1px") },
