@@ -1,5 +1,5 @@
 import { ScreenshotPixelPicker } from "screenshot-pixel-picker.slint";
-import { ScreenshotSizeLabel } from "screenshot-size-label.slint";
+import { ScreenshotSizeLabel, SizeLabelStyle } from "screenshot-size-label.slint";
 import { ScreenshotHelp } from "screenshot-help.slint";
 import { Metrics } from "design/metrics.slint";
 import { RegionPreview, ScreenInteractionHint } from "screen-interaction.slint";
@@ -19,6 +19,10 @@ export component OcrSelectionWindow inherits Window {
     forward-focus: keys;
     keys := FocusScope {
         key-pressed(event) => {
+            if root.screenshot-mode && event.text == Key.Escape {
+                root.cancelled();
+                return accept;
+            }
             if root.screenshot-mode && (event.text == "c" || event.text == "C") && !event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt && !event.modifiers.meta {
                 if root.color-copy() { return accept; }
             }
@@ -67,6 +71,16 @@ export component OcrSelectionWindow inherits Window {
         x: max(8px,(parent.width - self.width)/2); y: 24px;
         text: @tr("Drag to select. Release to translate. Escape or right-click to cancel.");
     }
+    // Measure in the existing host; first selection needs no texture-preparation HWND.
+    measure-size := Text { visible:false; text:root.size-text; font-size:SizeLabelStyle.font-size; }
+    measure-help := ScreenshotHelp { visible:false; stage:0; width:min(400px,max(1px,parent.width - 16px)); }
+    measure-picker := ScreenshotPixelPicker { visible:false; }
+    out property <float> measured-size-width: (measure-size.preferred-width + 2 * SizeLabelStyle.inset) / 1px;
+    out property <float> measured-size-height: SizeLabelStyle.label-height / 1px;
+    out property <float> measured-help-width: measure-help.natural-width / 1px;
+    out property <float> measured-help-height: measure-help.preferred-height / 1px;
+    out property <float> measured-picker-width: measure-picker.content-width / 1px;
+    out property <float> measured-picker-height: 184;
     callback cancelled();
     TouchArea { mouse-cursor: crosshair; pointer-event(event) => { if event.button == PointerEventButton.right && event.kind == PointerEventKind.down { root.cancelled(); } } }
 }

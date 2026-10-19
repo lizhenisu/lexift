@@ -9,7 +9,6 @@ thread_local! { static ATLASES: RefCell<HashMap<u32, Arc<Atlas>>> = RefCell::new
 pub(crate) struct Atlas {
     glyphs: Vec<Pixmap>,
     advances: Vec<f32>,
-    scale: f32,
     inset: f32,
     height: f32,
     radius: f32,
@@ -77,7 +76,6 @@ pub(crate) fn prepare(
     let atlas = Arc::new(Atlas {
         glyphs,
         advances,
-        scale,
         inset: style.get_inset() * scale,
         height: style.get_label_height() * scale,
         radius: style.get_radius() * scale,
@@ -143,7 +141,7 @@ pub(crate) fn layout(crop: Rect, screens: &[(Rect, f32)], area: Option<Rect>) ->
 }
 /// Fixed order: above, left, right, below; otherwise inset near the crop's top-left.
 /// Only the alignment axis is clamped for external candidates, preserving separation.
-fn label_position(
+pub(crate) fn label_position(
     crop: Rect,
     size: (u32, u32),
     area: Rect,
@@ -216,9 +214,6 @@ impl Feedback {
             );
             at += self.atlas.advances[index];
         }
-    }
-    pub(crate) fn scale(&self) -> f32 {
-        self.atlas.scale
     }
 }
 

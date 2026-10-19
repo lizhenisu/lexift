@@ -1809,3 +1809,12 @@ msgstr "文字识别失败"
 
 msgid "Could not copy recognized text"
 msgstr "识别文字复制失败"
+
+msgid "Click a region, or drag to select freely"
+msgstr "单击选择区域，或拖动自由框选"
+
+msgid "Wheel"
+msgstr "滚轮"
+
+msgid "Scroll to switch regions"
+msgstr "滚动切换区域"

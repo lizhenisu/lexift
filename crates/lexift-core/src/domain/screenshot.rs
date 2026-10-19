@@ -61,6 +61,8 @@ pub struct ScreenshotState {
     pub bounds: Option<Rect>,
     pub error: Option<String>,
     pub ocr_result: Option<OcrOutcome>,
+    pub element_sequence: u64,
+    pub element_pending: Option<super::element_candidate::ElementQuery>,
     pub color_sequence: u64,
     pub color_pending: Option<ColorRequest>,
     pub color_result: Option<ColorResult>,
@@ -90,6 +92,12 @@ pub enum ScreenshotEvent {
         session: u64,
         request: u64,
         result: Result<()>,
+    },
+    QueryElements(super::element_candidate::ElementQuery),
+    ElementsPrepared(super::element_candidate::ElementQueryResult),
+    CancelElements {
+        session: u64,
+        request: u64,
     },
     Requested(ExportRequest),
     Prepared {
@@ -121,6 +129,11 @@ pub enum ScreenshotEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotCommand {
+    QueryElements(super::element_candidate::ElementQuery),
+    UpdateElements(super::element_candidate::ElementQueryResult),
+    CancelElements {
+        session: u64,
+    },
     Recognize {
         session: u64,
         operation: u64,
@@ -246,6 +259,8 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 .expect("screenshot identity exhausted");
             s.source_session = request.session;
             s.phase = ScreenshotPhase::Preparing;
+            s.element_sequence = 0;
+            s.element_pending = None;
             s.operation = 0;
             s.ocr_result = None;
             s.bounds = None;
@@ -257,6 +272,29 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 session: s.session,
                 request,
             })
+        }
+        ScreenshotEvent::QueryElements(query)
+            if query.session == s.session
+                && s.phase == ScreenshotPhase::Selecting
+                && query.request > s.element_sequence =>
+        {
+            s.element_sequence = query.request;
+            s.element_pending = Some(query.clone());
+            command(ScreenshotCommand::QueryElements(query))
+        }
+        ScreenshotEvent::CancelElements { session, request }
+            if session == s.session && request >= s.element_sequence =>
+        {
+            s.element_sequence = request;
+            s.element_pending = None;
+            command(ScreenshotCommand::CancelElements { session })
+        }
+        ScreenshotEvent::ElementsPrepared(result)
+            if s.phase == ScreenshotPhase::Selecting
+                && s.element_pending.as_ref() == Some(&result.query) =>
+        {
+            s.element_pending = None;
+            command(ScreenshotCommand::UpdateElements(result))
         }
         ScreenshotEvent::Prepared { session, result }
             if s.session == session && s.phase == ScreenshotPhase::Preparing =>
@@ -284,6 +322,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         {
             s.bounds = Some(bounds);
             s.phase = ScreenshotPhase::Editing;
+            s.element_pending = None;
             vec![]
         }
         ScreenshotEvent::Output {
@@ -341,6 +380,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 s.error = Some(error);
             }
             s.phase = ScreenshotPhase::Idle;
+            s.element_pending = None;
             s.color_pending = None;
             s.color_result = None;
             command(ScreenshotCommand::Restore { session })
@@ -401,6 +441,78 @@ mod tests {
         ));
         s
     }
+    #[test]
+    fn point_queries_replace_pending_and_ignore_cancelled_or_late_results() {
+        use super::super::{
+            element_candidate::{ElementQuery, ElementQueryResult},
+            window_candidate::WindowCandidate,
+        };
+        use crate::ports::magnifier::WindowToken;
+        let mut state = begin();
+        let query = |request| ElementQuery {
+            session: 1,
+            request,
+            host: 9,
+            point: Point { x: 0, y: 0 },
+            window: WindowCandidate {
+                process_id: 0,
+                window: WindowToken(7),
+                bounds: bounds(),
+                order: 0,
+            },
+        };
+        let result = |request| {
+            AppEvent::Screenshot(ScreenshotEvent::ElementsPrepared(ElementQueryResult {
+                query: query(request),
+                elements: vec![],
+                leaf: false,
+            }))
+        };
+        assert!(
+            state
+                .reduce(AppEvent::Screenshot(ScreenshotEvent::QueryElements(query(
+                    1
+                ))))
+                .is_empty()
+        );
+        state.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
+            session: 1,
+            result: Ok(()),
+        }));
+        assert!(
+            !state
+                .reduce(AppEvent::Screenshot(ScreenshotEvent::QueryElements(query(
+                    1
+                ))))
+                .is_empty()
+        );
+        state.reduce(AppEvent::Screenshot(ScreenshotEvent::QueryElements(query(
+            2,
+        ))));
+        assert!(state.reduce(result(1)).is_empty());
+        assert!(matches!(
+            &state.reduce(result(2))[0],
+            AppCommand::Screenshot(ScreenshotCommand::UpdateElements(_))
+        ));
+        assert!(state.reduce(result(2)).is_empty());
+        state.reduce(AppEvent::Screenshot(ScreenshotEvent::QueryElements(query(
+            3,
+        ))));
+        state.reduce(AppEvent::Screenshot(ScreenshotEvent::CancelElements {
+            session: 1,
+            request: 4,
+        }));
+        assert!(state.reduce(result(3)).is_empty());
+        state.reduce(AppEvent::Screenshot(ScreenshotEvent::QueryElements(query(
+            5,
+        ))));
+        state.reduce(AppEvent::Screenshot(ScreenshotEvent::Selected {
+            session: 1,
+            bounds: bounds(),
+        }));
+        assert!(state.reduce(result(5)).is_empty());
+    }
+
     #[test]
     fn ocr_freezes_strategy_rejects_duplicates_and_closes_for_every_outcome() {
         for outcome in [

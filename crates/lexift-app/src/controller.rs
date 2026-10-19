@@ -40,7 +40,18 @@ pub(crate) trait ViewPort: Send + Sync {
         work_area: Option<Rect>,
     );
     fn hide_popup(&self, session_id: PopupSessionId);
-    fn suspend_for_screenshot(&self, _session: u64) {}
+    fn suspend_for_screenshot(
+        &self,
+        _session: u64,
+        ready: Box<dyn FnOnce(lexift_core::Result<Option<Point>>) + Send>,
+    ) {
+        ready(Ok(None));
+    }
+    fn update_screenshot_elements(
+        &self,
+        _result: lexift_core::domain::element_candidate::ElementQueryResult,
+    ) {
+    }
     fn restore_screenshot(&self, _session: u64) {}
     fn show_screenshot_capture(
         &self,
@@ -127,8 +138,18 @@ impl ViewPort for lexift_ui::UiHandle {
     ) {
         self.show_editable_pinned_screenshot(session, operation, image, base, samples, document);
     }
-    fn suspend_for_screenshot(&self, session: u64) {
-        self.suspend_for_screenshot(session);
+    fn suspend_for_screenshot(
+        &self,
+        session: u64,
+        ready: Box<dyn FnOnce(lexift_core::Result<Option<Point>>) + Send>,
+    ) {
+        self.suspend_for_screenshot(session, ready);
+    }
+    fn update_screenshot_elements(
+        &self,
+        result: lexift_core::domain::element_candidate::ElementQueryResult,
+    ) {
+        self.update_screenshot_elements(result);
     }
     fn restore_screenshot(&self, session: u64) {
         self.restore_screenshot(session);

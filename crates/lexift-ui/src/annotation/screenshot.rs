@@ -165,6 +165,21 @@ pub(crate) fn suspend(id: u64) {
         });
     }
 }
+pub(crate) fn suspended_pointer(
+    id: u64,
+) -> lexift_core::Result<Option<lexift_core::domain::geometry::Point>> {
+    FLOW.with(|s| {
+        let s = s.borrow();
+        if s.state.session != id || s.state.phase != ScreenshotPhase::Preparing {
+            return Err(lexift_core::Error::new("Screenshot suspension expired"));
+        }
+        let recovery = s
+            .recovery
+            .as_ref()
+            .ok_or_else(|| lexift_core::Error::new("Screenshot suspension failed"))?;
+        Ok((recovery.lifecycle.toolbar_cursor_position)())
+    })
+}
 pub(crate) fn show(
     id: u64,
     frames: Arc<Vec<CapturedRegion>>,
@@ -197,6 +212,12 @@ pub(crate) fn show(
     );
     selection_host::set_screenshot(true);
     selection_host::set_handler(Rc::new(move |event| match event {
+        selection_host::SelectionEvent::QueryElements(query) => {
+            emit(ScreenshotEvent::QueryElements(query))
+        }
+        selection_host::SelectionEvent::CancelElements { session, request } => {
+            emit(ScreenshotEvent::CancelElements { session, request })
+        }
         selection_host::SelectionEvent::Cancelled => cancel(),
         selection_host::SelectionEvent::Failed { error, .. } => {
             emit(ScreenshotEvent::Failed { session: id, error })
@@ -241,8 +262,7 @@ pub(crate) fn show(
     selection_host::sync(id, selection_host::HostPhase::Capturing);
     let frames = FLOW.with(|s| s.borrow().frames.clone().unwrap());
     let origin = FLOW.with(|s| s.borrow().activation);
-    selection_host::show_with_origin(id, frames, origin);
-    selection_host::set_candidates(id, windows);
+    selection_host::show_screenshot_with_candidates(id, frames, origin, windows);
 }
 pub(crate) fn cancel() {
     let id = FLOW.with(|s| s.borrow().state.session);

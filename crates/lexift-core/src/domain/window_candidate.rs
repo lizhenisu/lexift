@@ -5,6 +5,8 @@ use crate::ports::magnifier::WindowToken;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowCandidate {
     pub window: WindowToken,
+    /// Process owning the native window at pixel capture; zero only in synthetic fixtures.
+    pub process_id: u32,
     pub bounds: Rect,
     /// Lower ranks are closer to the foreground.
     pub order: u32,
@@ -53,11 +55,13 @@ mod tests {
             bottom: 150,
         };
         let back = WindowCandidate {
+            process_id: 0,
             window: WindowToken(1),
             bounds: desktop,
             order: 3,
         };
         let front = WindowCandidate {
+            process_id: 0,
             window: WindowToken(2),
             bounds: Rect {
                 left: -200,
@@ -79,6 +83,7 @@ mod tests {
         assert_eq!(at(&[front], Point { x: 90, y: 10 }, desktop), None);
         assert_eq!(at(&[front], Point { x: 50, y: 10 }, desktop), None);
         let moved = WindowCandidate {
+            process_id: 0,
             bounds: desktop,
             ..front
         };

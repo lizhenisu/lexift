@@ -31,7 +31,18 @@ struct Session {
     id: u64,
     cancelled: Arc<AtomicBool>,
     frames: Option<Arc<Vec<CapturedRegion>>>,
+    element_port: Option<Arc<dyn ScreenCapturePort>>,
     windows: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
+}
+impl Session {
+    /// Retire native preparation and accessibility ownership outside the session lock.
+    fn retire(self) {
+        self.cancelled.store(true, Ordering::Release);
+        if let Some(port) = self.element_port {
+            port.cancel_screenshot_elements(self.id);
+        }
+        lexift_platform::clear_screenshot_surface_pixels(self.id);
+    }
 }
 pub(crate) struct ScreenshotRuntime {
     capture: CaptureFactory,
@@ -132,13 +143,30 @@ impl ScreenshotRuntime {
         self.pin_pending.lock().unwrap().retain(|key, _| {
             !quitting && state.active() && *key == (state.session, state.operation)
         });
-        let mut session = self.session.lock().unwrap_or_else(|p| p.into_inner());
-        if session
-            .as_ref()
-            .is_some_and(|s| quitting || s.id != state.session || !state.active())
-            && let Some(s) = session.take()
-        {
-            s.cancelled.store(true, Ordering::Release);
+        if state.phase != lexift_core::domain::screenshot::ScreenshotPhase::Selecting {
+            let port = self
+                .session
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .as_ref()
+                .map(|s| (s.id, s.element_port.clone()));
+            if let Some((id, Some(port))) = port {
+                port.cancel_screenshot_elements(id);
+            }
+        }
+        let retired = {
+            let mut session = self.session.lock().unwrap_or_else(|p| p.into_inner());
+            if session
+                .as_ref()
+                .is_some_and(|s| quitting || s.id != state.session || !state.active())
+            {
+                session.take()
+            } else {
+                None
+            }
+        };
+        if let Some(s) = retired {
+            s.retire();
         }
     }
     pub fn sync_pins(&self, pins: &PinStates, quitting: bool) {
@@ -425,6 +453,42 @@ impl ScreenshotRuntime {
                 });
             }
 
+            ScreenshotCommand::QueryElements(query) => {
+                let owned = self
+                    .session
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .as_ref()
+                    .filter(|s| s.id == query.session && !s.cancelled.load(Ordering::Acquire))
+                    .and_then(|s| s.element_port.clone().map(|p| (p, s.cancelled.clone())));
+                if let Some((port, cancelled)) = owned {
+                    let controller = controller.clone();
+                    let _ = port.query_screenshot_elements(
+                        query,
+                        cancelled,
+                        Box::new(move |result| {
+                            controller.dispatch(AppEvent::Screenshot(
+                                ScreenshotEvent::ElementsPrepared(result),
+                            ));
+                        }),
+                    );
+                }
+            }
+            ScreenshotCommand::CancelElements { session } => {
+                let port = self
+                    .session
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .as_ref()
+                    .filter(|s| s.id == session)
+                    .and_then(|s| s.element_port.clone());
+                if let Some(port) = port {
+                    port.cancel_screenshot_elements(session);
+                }
+            }
+            ScreenshotCommand::UpdateElements(result) => {
+                controller.ui.update_screenshot_elements(result);
+            }
             ScreenshotCommand::Restore { session } => {
                 controller.ui.restore_screenshot(session);
             }
@@ -444,8 +508,8 @@ impl ScreenshotRuntime {
                 }
             }
             ScreenshotCommand::Prepare { session, request } => {
-                controller.ui.suspend_for_screenshot(session);
                 let cancelled = Arc::new(AtomicBool::new(false));
+                let element_port = (self.capture)();
                 let old = self
                     .session
                     .lock()
@@ -454,38 +518,86 @@ impl ScreenshotRuntime {
                         id: session,
                         cancelled: cancelled.clone(),
                         frames: None,
+                        element_port,
                         windows: Vec::new(),
                     });
                 if let Some(old) = old {
-                    old.cancelled.store(true, Ordering::Release);
+                    old.retire();
                 }
                 let this = self.clone();
                 let worker_controller = controller.clone();
-                let spawned = std::thread::Builder::new()
-                    .name("screenshot-prepare".into())
-                    .spawn(move || {
-                        let result = this.prepare(&request, &cancelled);
-                        let result = result.and_then(|prepared| {
-                            let mut slot = this.session.lock().unwrap_or_else(|p| p.into_inner());
-                            let s = slot
-                                .as_mut()
-                                .filter(|s| s.id == session && !s.cancelled.load(Ordering::Acquire))
-                                .ok_or_else(|| Error::new("Screenshot cancelled"))?;
-                            s.frames = Some(Arc::new(prepared.frames));
-                            s.windows = prepared.windows;
-                            Ok(())
-                        });
-                        worker_controller.dispatch(AppEvent::Screenshot(
-                            ScreenshotEvent::Prepared { session, result },
-                        ));
-                    });
-                if let Err(error) = spawned {
-                    controller.dispatch(AppEvent::Screenshot(ScreenshotEvent::Failed {
-                        session,
-                        error: error.to_string(),
-                    }));
-                }
+                controller.ui.suspend_for_screenshot(
+                    session,
+                    Box::new(move |ready| {
+                        if cancelled.load(Ordering::Acquire) {
+                            return;
+                        }
+                        let pointer = match ready {
+                            Ok(pointer) => pointer,
+                            Err(error) => {
+                                worker_controller.dispatch(AppEvent::Screenshot(
+                                    ScreenshotEvent::Prepared {
+                                        session,
+                                        result: Err(error),
+                                    },
+                                ));
+                                return;
+                            }
+                        };
+                        let failure_controller = worker_controller.clone();
+                        let spawned = std::thread::Builder::new()
+                            .name("screenshot-prepare".into())
+                            .spawn(move || {
+                                let started = std::time::Instant::now();
+                                let result = this.prepare(&request, &cancelled, pointer, session);
+                                match result {
+                                    Ok(prepared) => {
+                                        {
+                                            let mut slot = this
+                                                .session
+                                                .lock()
+                                                .unwrap_or_else(|p| p.into_inner());
+                                            let Some(s) = slot.as_mut().filter(|s| {
+                                                s.id == session
+                                                    && !s.cancelled.load(Ordering::Acquire)
+                                            }) else {
+                                                return;
+                                            };
+                                            s.frames = Some(Arc::new(prepared.frames));
+                                            s.windows = prepared.windows;
+                                        }
+                                        tracing::debug!(
+                                            session,
+                                            elapsed_ms = started.elapsed().as_millis(),
+                                            "Screenshot first frame dispatched"
+                                        );
+                                        worker_controller.dispatch(AppEvent::Screenshot(
+                                            ScreenshotEvent::Prepared {
+                                                session,
+                                                result: Ok(()),
+                                            },
+                                        ));
+                                    }
+                                    Err(error) => worker_controller.dispatch(AppEvent::Screenshot(
+                                        ScreenshotEvent::Prepared {
+                                            session,
+                                            result: Err(error),
+                                        },
+                                    )),
+                                }
+                            });
+                        if let Err(error) = spawned {
+                            failure_controller.dispatch(AppEvent::Screenshot(
+                                ScreenshotEvent::Failed {
+                                    session,
+                                    error: error.to_string(),
+                                },
+                            ));
+                        }
+                    }),
+                );
             }
+
             ScreenshotCommand::Output {
                 session,
                 operation,
@@ -610,15 +722,19 @@ impl ScreenshotRuntime {
         &self,
         request: &ExportRequest,
         cancelled: &AtomicBool,
+        pointer: Option<lexift_core::domain::geometry::Point>,
+        session: u64,
     ) -> Result<PreparedScreenshot> {
         let snapshot = &request.snapshot;
-        let captured = crate::annotation_export::capture_screenshot(
+        let prepared = crate::annotation_export::capture_screenshot_frame(
             self.capture,
             snapshot.monitors.iter().map(|(r, _)| *r).collect(),
             snapshot.excluded.clone(),
             cancelled,
+            pointer,
         )?
         .ok_or_else(|| Error::new("Screenshot cancelled"))?;
+        let captured = prepared.capture;
         let frames = snapshot
             .monitors
             .iter()
@@ -633,6 +749,7 @@ impl ScreenshotRuntime {
                     .compose(&snapshot, captured.frame.clone(), cancelled)
             })
             .collect::<Result<Vec<_>>>()?;
+        lexift_platform::prepare_screenshot_surface_pixels(session, &frames, cancelled)?;
         Ok(PreparedScreenshot {
             frames,
             windows: captured.windows,
@@ -678,7 +795,7 @@ impl Drop for ScreenshotRuntime {
             .unwrap_or_else(|p| p.into_inner())
             .take()
         {
-            s.cancelled.store(true, Ordering::Release);
+            s.retire();
         }
     }
 }

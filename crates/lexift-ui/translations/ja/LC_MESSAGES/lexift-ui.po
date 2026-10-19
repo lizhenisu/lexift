@@ -1809,3 +1809,12 @@ msgstr "文字認識に失敗しました"
 
 msgid "Could not copy recognized text"
 msgstr "認識した文字をコピーできませんでした"
+
+msgid "Click a region, or drag to select freely"
+msgstr "領域をクリック、またはドラッグして自由に選択"
+
+msgid "Wheel"
+msgstr "ホイール"
+
+msgid "Scroll to switch regions"
+msgstr "スクロールして領域を切り替え"

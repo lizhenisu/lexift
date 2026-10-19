@@ -388,6 +388,14 @@ pub(super) fn render_initial_canvas(r: &mut Registry, index: usize) {
     ));
     r.canvas_state.canvases[index].host.presented();
     r.canvas_state.canvases[index].bootstrap = CanvasBootstrap::Ready;
+    if r.canvas_state
+        .canvases
+        .iter()
+        .all(|layer| matches!(layer.bootstrap, CanvasBootstrap::Ready))
+        && let Some(editing) = r.screenshot.as_ref().filter(|e| e.pin.is_none())
+    {
+        crate::screen_interaction::selection::finish_selection(editing.id);
+    }
 }
 
 pub(super) fn settle_canvas(r: &Registry, index: usize, revision: u64, remaining: u8) {

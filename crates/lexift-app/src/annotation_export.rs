@@ -176,35 +176,79 @@ fn capture_with_timeout(
     capture_port(port, regions, excluded_windows, cancelled, timeout)
 }
 
-/// A screenshot freezes metadata around the same excluded-window pixel capture.
-pub(crate) fn capture_screenshot(
+/// Preparation contains only frozen pixels and stable top-level window geometry.
+pub(crate) struct PreparedCapture {
+    pub capture: lexift_core::ports::screen_capture::ScreenshotCapture,
+}
+pub(crate) fn capture_screenshot_frame(
     factory: CaptureFactory,
     regions: Vec<Rect>,
     excluded_windows: Vec<WindowToken>,
     cancelled: &AtomicBool,
-) -> Result<Option<lexift_core::ports::screen_capture::ScreenshotCapture>> {
+    _pointer: Option<lexift_core::domain::geometry::Point>,
+) -> Result<Option<PreparedCapture>> {
+    if cancelled.load(Ordering::Acquire) {
+        return Ok(None);
+    }
+    let started = Instant::now();
     let port = factory().ok_or_else(|| Error::new("Screen capture unavailable"))?;
     let before = port
         .screenshot_windows(&excluded_windows)
         .unwrap_or_default();
-    let frame = capture_port(
-        port.clone(),
-        regions,
-        excluded_windows.clone(),
-        cancelled,
-        Duration::from_secs(5),
-    )?;
+    let window_ms = started.elapsed().as_millis();
+    let request = ScreenCaptureRequest {
+        revision: 1,
+        regions: regions.clone(),
+        paused_regions: vec![],
+        excluded_windows: excluded_windows.clone(),
+    };
+    let fast = port
+        .try_freeze_screenshot(&request, cancelled)
+        .ok()
+        .flatten();
+    let fast_path = fast.is_some();
+    let frame = if let Some(frame) = fast {
+        Some(frame)
+    } else {
+        capture_port(
+            port.clone(),
+            regions,
+            excluded_windows.clone(),
+            cancelled,
+            Duration::from_secs(5),
+        )?
+    };
     let after = port
         .screenshot_windows(&excluded_windows)
         .unwrap_or_default();
     let windows = lexift_core::domain::window_candidate::stable(&before, &after);
+    if cancelled.load(Ordering::Acquire) {
+        return Ok(None);
+    }
     tracing::debug!(
-        before = before.len(),
-        after = after.len(),
-        stable = windows.len(),
-        "Screenshot window snapshot"
+        elapsed_ms = started.elapsed().as_millis(),
+        window_ms,
+        fast_path,
+        "Screenshot frozen pixels ready"
     );
-    Ok(frame.map(|frame| lexift_core::ports::screen_capture::ScreenshotCapture { frame, windows }))
+    Ok(frame.map(|frame| PreparedCapture {
+        capture: lexift_core::ports::screen_capture::ScreenshotCapture {
+            frame,
+            windows: windows.clone(),
+        },
+    }))
+}
+#[cfg(test)]
+pub(crate) fn capture_screenshot(
+    factory: CaptureFactory,
+    regions: Vec<Rect>,
+    excluded: Vec<WindowToken>,
+    cancelled: &AtomicBool,
+) -> Result<Option<lexift_core::ports::screen_capture::ScreenshotCapture>> {
+    Ok(
+        capture_screenshot_frame(factory, regions, excluded, cancelled, None)?
+            .map(|prepared| prepared.capture),
+    )
 }
 
 fn capture_port(
@@ -313,6 +357,16 @@ mod tests {
                 Ok(Some(frame(fixture().monitor, [7, 8, 9, 255])))
             }
             fn clear(&self) {}
+            fn query_screenshot_elements(
+                &self,
+                _: lexift_core::domain::element_candidate::ElementQuery,
+                _: Arc<AtomicBool>,
+                _: Box<
+                    dyn FnOnce(lexift_core::domain::element_candidate::ElementQueryResult) + Send,
+                >,
+            ) -> Result<()> {
+                panic!("pixel preparation must not wait on accessibility")
+            }
             fn screenshot_windows(&self, excluded: &[WindowToken]) -> Result<Vec<WindowCandidate>> {
                 assert_eq!(excluded, [WindowToken(100)]);
                 if self.failed {
@@ -321,11 +375,13 @@ mod tests {
                 let after = self.reads.fetch_add(1, Ordering::Relaxed) > 0;
                 Ok(vec![
                     WindowCandidate {
+                        process_id: 0,
                         window: WindowToken(1),
                         bounds: fixture().monitor,
                         order: 0,
                     },
                     WindowCandidate {
+                        process_id: 0,
                         window: WindowToken(2),
                         bounds: if after {
                             Rect {
@@ -378,6 +434,80 @@ mod tests {
                 .unwrap()
                 .is_none()
             );
+        }
+    }
+    #[test]
+    fn pixel_preparation_never_queries_accessibility_and_fast_path_failure_falls_back() {
+        use lexift_core::domain::window_candidate::WindowCandidate;
+        use std::sync::atomic::AtomicUsize;
+        static READS: AtomicUsize = AtomicUsize::new(0);
+        static SHOWN: AtomicBool = AtomicBool::new(false);
+        struct Capture {
+            fast: bool,
+        }
+        impl ScreenCapturePort for Capture {
+            fn is_available(&self) -> bool {
+                true
+            }
+            fn request(&self, _: ScreenCaptureRequest) -> Result<()> {
+                assert!(!self.fast);
+                Ok(())
+            }
+            fn latest(&self) -> Result<Option<Arc<ScreenCaptureFrame>>> {
+                assert!(!self.fast);
+                Ok(Some(frame(fixture().monitor, [1, 2, 3, 255])))
+            }
+            fn clear(&self) {}
+            fn try_freeze_screenshot(
+                &self,
+                _: &ScreenCaptureRequest,
+                _: &AtomicBool,
+            ) -> Result<Option<Arc<ScreenCaptureFrame>>> {
+                if self.fast {
+                    Ok(Some(frame(fixture().monitor, [1, 2, 3, 255])))
+                } else {
+                    Err(Error::new("fixture fast path unavailable"))
+                }
+            }
+            fn screenshot_windows(&self, _: &[WindowToken]) -> Result<Vec<WindowCandidate>> {
+                Ok(vec![WindowCandidate {
+                    process_id: 0,
+                    window: WindowToken(1),
+                    bounds: fixture().monitor,
+                    order: 0,
+                }])
+            }
+            fn query_screenshot_elements(
+                &self,
+                _: lexift_core::domain::element_candidate::ElementQuery,
+                _: Arc<AtomicBool>,
+                _: Box<
+                    dyn FnOnce(lexift_core::domain::element_candidate::ElementQueryResult) + Send,
+                >,
+            ) -> Result<()> {
+                panic!("pixel preparation must not wait on accessibility")
+            }
+        }
+        for fast in [false, true] {
+            READS.store(0, Ordering::Release);
+            SHOWN.store(false, Ordering::Release);
+            let factory: CaptureFactory = if fast {
+                || Some(Arc::new(Capture { fast: true }))
+            } else {
+                || Some(Arc::new(Capture { fast: false }))
+            };
+            let result = capture_screenshot_frame(
+                factory,
+                vec![fixture().monitor],
+                vec![],
+                &AtomicBool::new(false),
+                Some(lexift_core::domain::geometry::Point { x: -1, y: -1 }),
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(READS.load(Ordering::Acquire), 0);
+            assert_eq!(result.capture.frame.regions[0].pixels[0], 1);
+            SHOWN.store(true, Ordering::Release);
         }
     }
     fn frame(bounds: Rect, color: [u8; 4]) -> Arc<ScreenCaptureFrame> {

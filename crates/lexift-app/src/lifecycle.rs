@@ -3,5 +3,6 @@ pub(crate) fn on_start() {
 }
 
 pub(crate) fn on_exit() {
+    lexift_platform::shutdown_screenshot_element_queries();
     tracing::info!("Lexift stopped");
 }

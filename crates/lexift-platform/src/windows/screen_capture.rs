@@ -7,6 +7,7 @@ mod compose;
 mod crops;
 #[cfg(test)]
 pub(crate) mod diagnostics;
+pub(crate) mod elements;
 pub(crate) mod regions;
 mod runtime;
 
@@ -89,6 +90,7 @@ impl WindowsScreenCapturePort {
         if !activation::supported().ok()? {
             return None;
         }
+        elements::initialize();
         Some(Self {
             shared: Arc::new((Mutex::new(State::default()), Condvar::new())),
             worker: Mutex::new(None),
@@ -96,13 +98,106 @@ impl WindowsScreenCapturePort {
     }
 }
 
+/// GPU surface retirement is asynchronous; never photograph a still-visible original annotation.
+fn screenshot_surfaces_retired(excluded: &[lexift_core::ports::magnifier::WindowToken]) -> bool {
+    use windows::Win32::{
+        Foundation::{HWND, LPARAM},
+        System::Threading::GetCurrentProcessId,
+        UI::WindowsAndMessaging::*,
+    };
+    use windows::core::BOOL;
+    unsafe extern "system" fn visit(hwnd: HWND, context: LPARAM) -> BOOL {
+        unsafe {
+            let mut pid = 0;
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            if pid == GetCurrentProcessId() && IsWindowVisible(hwnd).as_bool() {
+                let mut name = [0u16; 80];
+                let n = GetClassNameW(hwnd, &mut name) as usize;
+                if String::from_utf16_lossy(&name[..n]) == "Lexift.Annotation.GpuSurface" {
+                    *(context.0 as *mut bool) = true;
+                }
+            }
+        }
+        BOOL(1)
+    }
+    if excluded
+        .iter()
+        .any(|w| unsafe { IsWindowVisible(HWND(w.0 as *mut _)) }.as_bool())
+    {
+        return false;
+    }
+    let mut visible = false;
+    unsafe { EnumWindows(Some(visit), LPARAM((&mut visible as *mut bool) as isize)) }.is_ok()
+        && !visible
+}
+
 impl ScreenCapturePort for WindowsScreenCapturePort {
+    fn query_screenshot_elements(
+        &self,
+        query: lexift_core::domain::element_candidate::ElementQuery,
+        cancelled: Arc<std::sync::atomic::AtomicBool>,
+        completed: Box<
+            dyn FnOnce(lexift_core::domain::element_candidate::ElementQueryResult) + Send,
+        >,
+    ) -> Result<()> {
+        elements::query(query, cancelled, completed)
+    }
+    fn cancel_screenshot_elements(&self, session: u64) {
+        elements::cancel(session);
+    }
+
     fn screenshot_windows(
         &self,
         excluded: &[lexift_core::ports::magnifier::WindowToken],
     ) -> Result<Vec<lexift_core::domain::window_candidate::WindowCandidate>> {
         capture::screenshot_windows(excluded)
     }
+    fn try_freeze_screenshot(
+        &self,
+        request: &ScreenCaptureRequest,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<Option<Arc<ScreenCaptureFrame>>> {
+        use windows::Win32::Graphics::Dwm::DwmFlush;
+        let eligible = || {
+            !cancel.load(std::sync::atomic::Ordering::Acquire)
+                && screenshot_surfaces_retired(&request.excluded_windows)
+        };
+        if !eligible() || unsafe { DwmFlush() }.is_err() || !eligible() {
+            return Ok(None);
+        }
+        use windows::Win32::UI::HiDpi::{
+            DPI_AWARENESS_CONTEXT, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+            SetThreadDpiAwarenessContext,
+        };
+        struct RestoreDpi(DPI_AWARENESS_CONTEXT);
+        impl Drop for RestoreDpi {
+            fn drop(&mut self) {
+                unsafe {
+                    SetThreadDpiAwarenessContext(self.0);
+                }
+            }
+        }
+        let _dpi = RestoreDpi(unsafe {
+            SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+        });
+        let regions = super::ocr_capture::freeze()?;
+        if request
+            .regions
+            .iter()
+            .any(|bounds| !regions.iter().any(|r| r.bounds == *bounds))
+        {
+            return Ok(None);
+        }
+        if !eligible() {
+            return Ok(None);
+        }
+        Ok(Some(Arc::new(ScreenCaptureFrame {
+            revision: request.revision,
+            serial: 1,
+            regions,
+        })))
+    }
+
     fn freeze_desktop(&self) -> Result<Vec<lexift_core::ports::screen_capture::CapturedRegion>> {
         super::ocr_capture::freeze()
     }
@@ -318,6 +413,40 @@ mod tests {
         regions[0].bounds.right -= 1;
         state.publish(3, regions, &mut serial);
         assert_eq!(serial, first.serial + 2);
+    }
+
+    #[test]
+    fn fast_screenshot_rejects_visible_exclusions_before_any_pixels_are_read() {
+        use windows::{Win32::UI::WindowsAndMessaging::*, core::w};
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WS_EX_TOOLWINDOW,
+                w!("STATIC"),
+                w!("Lexift screenshot retirement fixture"),
+                WS_POPUP,
+                -10000,
+                -10000,
+                8,
+                8,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .unwrap();
+        let excluded = [lexift_core::ports::magnifier::WindowToken(hwnd.0 as isize)];
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        }
+        assert!(!screenshot_surfaces_retired(&excluded));
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+        assert!(screenshot_surfaces_retired(&excluded));
+        unsafe {
+            DestroyWindow(hwnd).unwrap();
+        }
     }
 
     #[test]

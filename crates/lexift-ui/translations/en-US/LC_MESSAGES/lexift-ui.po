@@ -1809,3 +1809,12 @@ msgstr "Text recognition failed"
 
 msgid "Could not copy recognized text"
 msgstr "Could not copy recognized text"
+
+msgid "Click a region, or drag to select freely"
+msgstr "Click a region, or drag to select freely"
+
+msgid "Wheel"
+msgstr "Wheel"
+
+msgid "Scroll to switch regions"
+msgstr "Scroll to switch regions"

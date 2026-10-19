@@ -229,6 +229,14 @@ mod tests {
             title: String::new(),
         }
     }
+    #[test]
+    fn empty_document_preserves_source_pixels_and_rejects_cancelled_export() {
+        let snapshot = fixture();
+        let source = frame(snapshot.monitor, [31, 62, 93, 255]);
+        let image = compose(&snapshot, source.clone(), &AtomicBool::new(false)).unwrap();
+        assert_eq!(image.pixels, source.regions[0].pixels);
+        assert!(compose(&snapshot, source, &AtomicBool::new(true)).is_err());
+    }
     fn rectangle(a: (f32, f32), b: (f32, f32), color: [u8; 3]) -> Object {
         Object {
             id: Default::default(),

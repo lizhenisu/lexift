@@ -33,7 +33,7 @@ pub(crate) struct State {
 pub(crate) struct Feedback {
     pub host: Rect,
     pub bounds: Rect,
-    image: Arc<Pixmap>,
+    image: Option<Arc<Pixmap>>,
 }
 fn key(scale: f32, area: Rect, stage: Stage) -> Key {
     let width = ((area.right - area.left) as f32 / scale - 16.).clamp(1., 400.);
@@ -117,6 +117,23 @@ impl State {
     pub(crate) fn host(&self) -> Option<Rect> {
         self.host
     }
+    pub(crate) fn live_feedback(
+        &self,
+        host: Rect,
+        work: Rect,
+        size: (u32, u32),
+        scale: f32,
+        active: Option<Rect>,
+    ) -> Option<Feedback> {
+        let bounds = position(work, size, (8. * scale).round() as i32)?;
+        let hidden = avoid(bounds, self.pointer, active, scale, self.hidden.get());
+        self.hidden.set(hidden);
+        (!hidden).then_some(Feedback {
+            host,
+            bounds,
+            image: None,
+        })
+    }
     pub(crate) fn feedback(
         &self,
         screens: &[(Rect, f32)],
@@ -148,7 +165,7 @@ impl State {
         (!blocked && !hidden).then_some(Feedback {
             host,
             bounds,
-            image,
+            image: Some(image),
         })
     }
 }
@@ -183,11 +200,13 @@ fn avoid(
 }
 impl Feedback {
     pub(crate) fn paint(&self, frame: &mut Pixmap, host: Rect) {
-        if self.host == host {
+        if self.host == host
+            && let Some(image) = &self.image
+        {
             frame.draw_pixmap(
                 self.bounds.left - host.left,
                 self.bounds.top - host.top,
-                self.image.as_ref().as_ref(),
+                image.as_ref().as_ref(),
                 &PixmapPaint::default(),
                 Transform::identity(),
                 None,
@@ -289,14 +308,14 @@ mod tests {
                             .unwrap();
                         assert!(f.bounds.top >= screen.top && f.bounds.left >= screen.left);
                         assert_eq!(screen.bottom - f.bounds.bottom, (8. * scale) as i32);
-                        assert!(f.image.height() > (40. * scale) as u32);
-                        let frozen = f.image.clone();
+                        assert!(f.image.as_ref().unwrap().height() > (40. * scale) as u32);
+                        let frozen = f.image.as_ref().unwrap().clone();
                         for x in [-100, -120, -140] {
                             state.pointer(screen, Some(Point { x, y: 0 }));
                             let next = state
                                 .feedback(&[(screen, scale)], None, stage, None, false)
                                 .unwrap();
-                            assert!(Arc::ptr_eq(&frozen, &next.image));
+                            assert!(Arc::ptr_eq(&frozen, next.image.as_ref().unwrap()));
                         }
                         let mut frame = Pixmap::new(800, 700).unwrap();
                         f.paint(&mut frame, screen);
@@ -306,9 +325,16 @@ mod tests {
                                 "/../../target/screenshot-help/render"
                             ),
                             &format!("{}-{}-{}-{}", language.code(), dark, scale, stage as i32),
-                            f.image.width(),
-                            f.image.height(),
-                            f.image.data().as_chunks::<4>().0.iter().copied(),
+                            f.image.as_ref().unwrap().width(),
+                            f.image.as_ref().unwrap().height(),
+                            f.image
+                                .as_ref()
+                                .unwrap()
+                                .data()
+                                .as_chunks::<4>()
+                                .0
+                                .iter()
+                                .copied(),
                         );
                         state.pointer(
                             screen,

@@ -15,14 +15,158 @@ use windows::{
 use winit::platform::windows::WindowExtWindows;
 const SUBCLASS: usize = 0x4c58_5253;
 const HANDOFF: u32 = WM_APP + 0x52;
+const FEEDBACK: u32 = WM_APP + 0x53;
 static NEXT_SURFACE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
 struct Surface {
     instance: usize,
+    group: Option<(u64, usize)>,
     width: i32,
     height: i32,
     bootstrap: Option<Vec<u8>>,
     visible_paint: bool,
     rendered: bool,
+    feedback_queued: bool,
+    feedback_notified: bool,
+}
+// Prepared pixel ownership is independent of HWNDs; cancellation releases it before display.
+struct PreparedPixels {
+    session: u64,
+    count: usize,
+    bounds: lexift_core::domain::geometry::Rect,
+    key: usize,
+    pixels: Vec<u8>,
+}
+static PIXELS: std::sync::Mutex<Vec<PreparedPixels>> = std::sync::Mutex::new(Vec::new());
+thread_local! {static GROUPS:std::cell::RefCell<std::collections::HashMap<u64,Vec<(HWND,usize)>>> = std::cell::RefCell::new(std::collections::HashMap::new());}
+fn bootstrap_pixels(frame: &CapturedRegion) -> Result<Vec<u8>> {
+    let width = frame
+        .bounds
+        .right
+        .checked_sub(frame.bounds.left)
+        .filter(|v| *v > 0)
+        .ok_or_else(|| Error::new("Invalid region width"))?;
+    let height = frame
+        .bounds
+        .bottom
+        .checked_sub(frame.bounds.top)
+        .filter(|v| *v > 0)
+        .ok_or_else(|| Error::new("Invalid region height"))?;
+    if (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|v| v.checked_mul(4))
+        != Some(frame.pixels.len())
+    {
+        return Err(Error::new("Invalid region pixels"));
+    }
+    let mut pixels = Vec::with_capacity(frame.pixels.len());
+    for p in frame.pixels.as_chunks::<4>().0 {
+        pixels.extend_from_slice(&[
+            (u16::from(p[2]) * 119 / 255) as u8,
+            (u16::from(p[1]) * 119 / 255) as u8,
+            (u16::from(p[0]) * 119 / 255) as u8,
+            255,
+        ]);
+    }
+    Ok(pixels)
+}
+pub(crate) fn prepare_pixels(
+    session: u64,
+    frames: &[CapturedRegion],
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<()> {
+    let started = std::time::Instant::now();
+    let mut result = vec![];
+    for frame in frames {
+        if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+            return Ok(());
+        }
+        result.push(PreparedPixels {
+            session,
+            count: frames.len(),
+            bounds: frame.bounds,
+            key: frame.pixels.as_ptr() as usize,
+            pixels: bootstrap_pixels(frame)?,
+        });
+    }
+    let mut cache = PIXELS.lock().unwrap_or_else(|p| p.into_inner());
+    if !cancelled.load(std::sync::atomic::Ordering::Acquire) {
+        cache.retain(|p| p.session != session);
+        cache.extend(result);
+    }
+    tracing::debug!(
+        session,
+        elapsed_ms = started.elapsed().as_millis(),
+        "Screenshot bootstrap pixels prepared"
+    );
+    Ok(())
+}
+pub(crate) fn clear_pixels(session: u64) {
+    PIXELS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .retain(|p| p.session != session);
+}
+/// Each group crosses its native desktop barrier once per phase, never once per monitor.
+fn complete_group(hwnd: HWND, data: *mut Surface, feedback: bool) -> bool {
+    let members = if let Some((group, count)) = unsafe { (*data).group } {
+        let values = GROUPS.with(|g| g.borrow().get(&group).cloned().unwrap_or_default());
+        if values.len() != count {
+            return false;
+        }
+        values
+    } else {
+        vec![(hwnd, unsafe { (*data).instance })]
+    };
+    let mut surfaces = vec![];
+    for (window, instance) in members {
+        let Some(surface) = reference(window) else {
+            return false;
+        };
+        let ready = unsafe {
+            (*surface).instance == instance
+                && if feedback {
+                    (*surface).bootstrap.is_none()
+                        && (*surface).feedback_queued
+                        && !(*surface).feedback_notified
+                } else {
+                    (*surface).visible_paint
+                        && (*surface).rendered
+                        && (*surface).bootstrap.is_some()
+                }
+        };
+        if !ready {
+            return false;
+        }
+        surfaces.push((window, surface));
+    }
+    let started = std::time::Instant::now();
+    if unsafe { DwmFlush() }.is_err() {
+        return false;
+    }
+    tracing::debug!(
+        feedback,
+        windows = surfaces.len(),
+        elapsed_us = started.elapsed().as_micros(),
+        "Screenshot desktop group synchronized"
+    );
+    for &(window, surface) in &surfaces {
+        unsafe {
+            if feedback {
+                (*surface).feedback_notified = true;
+            } else {
+                (*surface).bootstrap.take();
+                let _ = InvalidateRect(Some(window), None, false);
+            }
+        }
+    }
+    for (window, _) in surfaces {
+        if feedback {
+            super::popup::notify_feedback_frame_presented(window);
+        } else {
+            super::popup::notify_frame_presented(window);
+        }
+    }
+    true
 }
 fn reference(hwnd: HWND) -> Option<*mut Surface> {
     let p = unsafe { GetPropW(hwnd, w!("Lexift.RegionSelectionSurface")) };
@@ -99,36 +243,37 @@ fn prepare_surface_native(
         .checked_sub(bounds.top)
         .filter(|n| *n > 0)
         .ok_or_else(|| Error::new("Invalid region surface"))?;
+    let mut group = None;
     let bootstrap = if let Some(frame) = frame {
-        if frame.bounds != bounds
-            || (width as usize)
-                .checked_mul(height as usize)
-                .and_then(|n| n.checked_mul(4))
-                != Some(frame.pixels.len())
-        {
-            return Err(Error::new("Invalid region surface pixels"));
+        if frame.bounds != bounds {
+            return Err(Error::new("Invalid region surface bounds"));
         }
-        let mut pixels = Vec::with_capacity(frame.pixels.len());
-        // Same frozen pixels and #0008 dimming as the Slint selection overlay.
-        for p in frame.pixels.as_chunks::<4>().0 {
-            pixels.extend_from_slice(&[
-                (u16::from(p[2]) * 119 / 255) as u8,
-                (u16::from(p[1]) * 119 / 255) as u8,
-                (u16::from(p[0]) * 119 / 255) as u8,
-                255,
-            ]);
-        }
-        Some(pixels)
+        let cached = {
+            let mut cache = PIXELS.lock().unwrap_or_else(|p| p.into_inner());
+            cache
+                .iter()
+                .position(|p| p.bounds == bounds && p.key == frame.pixels.as_ptr() as usize)
+                .map(|i| cache.swap_remove(i))
+        };
+        Some(if let Some(prepared) = cached {
+            group = Some((prepared.session, prepared.count));
+            prepared.pixels
+        } else {
+            bootstrap_pixels(frame)?
+        })
     } else {
         None
     };
     let data = Box::into_raw(Box::new(Surface {
         instance: NEXT_SURFACE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        group,
         width,
         height,
         bootstrap,
         visible_paint: false,
         rendered: false,
+        feedback_queued: false,
+        feedback_notified: false,
     }));
     if let Err(e) = unsafe {
         SetPropW(
@@ -170,6 +315,14 @@ fn prepare_surface_native(
         .map_err(|e| Error::new(format!("Region geometry: {e}")))?;
     }
     tracing::debug!(width, height, "Region surface prepared while hidden");
+    if let Some((group, _)) = group {
+        GROUPS.with(|g| {
+            g.borrow_mut()
+                .entry(group)
+                .or_default()
+                .push((hwnd, unsafe { (*data).instance }))
+        });
+    }
     Ok(())
 }
 /// Called in an event-loop turn after the renderer returns, not inside its notifier.
@@ -284,7 +437,36 @@ unsafe extern "system" fn subclass(
                     }
                 }
             }
+            let started = std::time::Instant::now();
             let result = unsafe { DefSubclassProc(hwnd, message, wp, lp) };
+            if first_visible_paint {
+                tracing::debug!(
+                    elapsed_us = started.elapsed().as_micros(),
+                    "Screenshot first client paint returned"
+                );
+            }
+            if visible && unsafe { (*(data as *const Surface)).feedback_notified } {
+                super::popup::notify_feedback_frame_presented(hwnd);
+            }
+            // Software Slint has no rendering notifier. Its first client paint
+            // after bootstrap removal must finish before editor prewarming.
+            if visible
+                && unsafe {
+                    (*(data as *const Surface)).rendered
+                        && (*(data as *const Surface)).bootstrap.is_none()
+                        && !(*(data as *const Surface)).feedback_queued
+                }
+            {
+                unsafe {
+                    (*(data as *mut Surface)).feedback_queued = true;
+                    let _ = PostMessageW(
+                        Some(hwnd),
+                        FEEDBACK,
+                        WPARAM((*(data as *const Surface)).instance),
+                        LPARAM(0),
+                    );
+                }
+            }
             if visible
                 && unsafe {
                     (*(data as *const Surface)).rendered
@@ -303,26 +485,29 @@ unsafe extern "system" fn subclass(
             return result;
         }
         HANDOFF => {
-            if wp.0 != unsafe { (*(data as *const Surface)).instance } {
-                return LRESULT(0);
+            if wp.0 == unsafe { (*(data as *const Surface)).instance } {
+                complete_group(hwnd, data as *mut Surface, false);
             }
-            if unsafe {
-                (*(data as *const Surface)).visible_paint
-                    && (*(data as *const Surface)).rendered
-                    && (*(data as *const Surface)).bootstrap.is_some()
-            } && unsafe { DwmFlush() }.is_ok()
-            {
-                unsafe {
-                    (*(data as *mut Surface)).bootstrap.take();
-                    // Expose the renderer's prepared frame after the one-shot GDI bootstrap.
-                    let _ = InvalidateRect(Some(hwnd), None, false);
-                }
-                tracing::debug!("Region initial frame handed off after visible paint");
-                super::popup::notify_frame_presented(hwnd);
+            return LRESULT(0);
+        }
+        FEEDBACK => {
+            if wp.0 == unsafe { (*(data as *const Surface)).instance } {
+                complete_group(hwnd, data as *mut Surface, true);
             }
             return LRESULT(0);
         }
         WM_NCDESTROY => unsafe {
+            if let Some((group, _)) = (*(data as *const Surface)).group {
+                GROUPS.with(|g| {
+                    let mut g = g.borrow_mut();
+                    if let Some(m) = g.get_mut(&group) {
+                        m.retain(|(h, _)| *h != hwnd);
+                        if m.is_empty() {
+                            g.remove(&group);
+                        }
+                    }
+                });
+            }
             let _ = RemovePropW(hwnd, w!("Lexift.RegionSelectionSurface"));
             let _ = RemoveWindowSubclass(hwnd, Some(subclass), id);
             drop(Box::from_raw(data as *mut Surface));
@@ -371,6 +556,92 @@ mod tests {
             let _ = unsafe { DestroyWindow(self.0) };
         }
     }
+    #[test]
+    fn screenshot_group_waits_for_both_monitors_and_releases_prepared_buffers() {
+        use lexift_core::domain::geometry::Rect;
+        use std::sync::atomic::AtomicBool;
+        let frames = vec![
+            CapturedRegion {
+                bounds: Rect {
+                    left: 0,
+                    top: 0,
+                    right: 32,
+                    bottom: 24,
+                },
+                pixels: vec![255; 32 * 24 * 4],
+            },
+            CapturedRegion {
+                bounds: Rect {
+                    left: 32,
+                    top: 0,
+                    right: 64,
+                    bottom: 24,
+                },
+                pixels: vec![128; 32 * 24 * 4],
+            },
+        ];
+        prepare_pixels(700, &frames, &AtomicBool::new(false)).unwrap();
+        let make = || {
+            OwnedWindow(
+                unsafe {
+                    CreateWindowExW(
+                        WS_EX_APPWINDOW,
+                        w!("STATIC"),
+                        w!("Grouped screenshot test"),
+                        WS_OVERLAPPEDWINDOW,
+                        0,
+                        0,
+                        32,
+                        24,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                }
+                .unwrap(),
+            )
+        };
+        let a = make();
+        let b = make();
+        prepare_native(&a, &frames[0]).unwrap();
+        prepare_native(&b, &frames[1]).unwrap();
+        assert!(!PIXELS.lock().unwrap().iter().any(|p| p.session == 700));
+        let pa = reference(a.0).unwrap();
+        let pb = reference(b.0).unwrap();
+        unsafe {
+            (*pa).visible_paint = true;
+            (*pa).rendered = true;
+            (*pb).visible_paint = true;
+        }
+        assert!(!complete_group(a.0, pa, false));
+        assert!(unsafe { (*pa).bootstrap.is_some() });
+        unsafe {
+            (*pb).rendered = true;
+        }
+        assert!(complete_group(b.0, pb, false));
+        assert!(unsafe { (*pa).bootstrap.is_none() && (*pb).bootstrap.is_none() });
+        unsafe {
+            (*pa).feedback_queued = true;
+        }
+        assert!(!complete_group(a.0, pa, true));
+        assert!(!unsafe { (*pa).feedback_notified });
+        unsafe {
+            (*pb).feedback_queued = true;
+        }
+        assert!(complete_group(b.0, pb, true));
+        assert!(unsafe { (*pa).feedback_notified && (*pb).feedback_notified });
+        assert!(!complete_group(a.0, pa, true));
+        drop(a);
+        drop(b);
+        assert!(!GROUPS.with(|g| g.borrow().contains_key(&700)));
+        prepare_pixels(701, &frames, &AtomicBool::new(false)).unwrap();
+        clear_pixels(701);
+        assert!(!PIXELS.lock().unwrap().iter().any(|p| p.session == 701));
+        prepare_pixels(702, &frames, &AtomicBool::new(true)).unwrap();
+        assert!(!PIXELS.lock().unwrap().iter().any(|p| p.session == 702));
+    }
+
     #[test]
     fn hidden_native_surface_has_exact_client_bounds_and_guards_backend_rewrites() {
         unsafe extern "system" fn observe_activation(
@@ -478,11 +749,15 @@ mod tests {
         assert!(unsafe { &*data }.bootstrap.is_some());
         let frames = std::rc::Rc::new(std::cell::Cell::new(0));
         let count = frames.clone();
+        let feedbacks = std::rc::Rc::new(std::cell::Cell::new(0));
+        let feedback_count = feedbacks.clone();
         super::super::popup::enable_passive_interaction(
             &window,
             Box::new(move |event| {
                 if event == crate::PopupPointerEvent::FramePresented {
                     count.set(count.get() + 1);
+                } else if event == crate::PopupPointerEvent::FeedbackFramePresented {
+                    feedback_count.set(feedback_count.get() + 1);
                 }
             }),
         )
@@ -496,6 +771,26 @@ mod tests {
             SendMessageW(window.0, HANDOFF, Some(WPARAM(instance)), Some(LPARAM(0)));
         }
         assert_eq!(frames.get(), 1);
+        unsafe {
+            let instance = (*data).instance;
+            SendMessageW(window.0, FEEDBACK, Some(WPARAM(instance)), Some(LPARAM(0)));
+            assert_eq!(
+                feedbacks.get(),
+                0,
+                "bootstrap handoff is not a client paint"
+            );
+            (*data).feedback_queued = true;
+            SendMessageW(
+                window.0,
+                FEEDBACK,
+                Some(WPARAM(instance + 1)),
+                Some(LPARAM(0)),
+            );
+            assert_eq!(feedbacks.get(), 0, "retired surface identities are ignored");
+            SendMessageW(window.0, FEEDBACK, Some(WPARAM(instance)), Some(LPARAM(0)));
+            SendMessageW(window.0, FEEDBACK, Some(WPARAM(instance)), Some(LPARAM(0)));
+        }
+        assert_eq!(feedbacks.get(), 1);
         let hwnd = window.0;
         drop(window);
         assert!(reference(hwnd).is_none());

@@ -173,9 +173,14 @@ pub(super) fn screenshot_windows(
             {
                 return None;
             }
+            let mut process_id = 0;
+            unsafe {
+                GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+            }
             let b = frame.bounds;
             (b.right > b.left && b.bottom > b.top).then_some(
                 lexift_core::domain::window_candidate::WindowCandidate {
+                    process_id,
                     window: lexift_core::ports::magnifier::WindowToken(frame.token),
                     bounds: b,
                     order: 0,

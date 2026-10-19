@@ -16,7 +16,6 @@ struct Assets {
     shells: Vec<Pixmap>,
     glyphs: Vec<Pixmap>,
     advances: Vec<f32>,
-    scale: f32,
 }
 #[derive(Default)]
 struct State {
@@ -219,7 +218,6 @@ pub(crate) fn prepare(
                 shells,
                 glyphs,
                 advances,
-                scale,
             }),
         )
     });
@@ -232,7 +230,8 @@ pub(crate) struct Feedback {
     pub bounds: Rect,
     pub sample: PixelSample,
     pub status: i32,
-    assets: Arc<Assets>,
+    assets: Option<Arc<Assets>>,
+    scale: f32,
     pub grid: Arc<Pixmap>,
 }
 impl Feedback {
@@ -252,16 +251,19 @@ impl Feedback {
         format!("RGB({}, {}, {})", c.0, c.1, c.2)
     }
     pub fn scale(&self) -> f32 {
-        self.assets.scale
+        self.scale
     }
     pub fn paint(&self, target: &mut Pixmap, monitor: Rect) {
         if monitor != self.host {
             return;
         }
+        let Some(assets) = self.assets.as_ref() else {
+            return;
+        };
         let x = self.bounds.left - monitor.left;
         let y = self.bounds.top - monitor.top;
         let scale = self.scale();
-        let shell = &self.assets.shells[self.status as usize];
+        let shell = &assets.shells[self.status as usize];
         target.draw_pixmap(
             x,
             y,
@@ -288,18 +290,32 @@ impl Feedback {
                     target.draw_pixmap(
                         at.round() as i32,
                         y + ((104. + i as f32 * 18.) * scale).round() as i32,
-                        self.assets.glyphs[j].as_ref(),
+                        assets.glyphs[j].as_ref(),
                         &PixmapPaint::default(),
                         Transform::identity(),
                         None,
                     );
-                    at += self.assets.advances[j];
+                    at += assets.advances[j];
                 }
             }
         }
     }
 }
 pub(crate) fn feedback(screens: &[(Rect, f32)], area: Option<Rect>) -> Option<Feedback> {
+    feedback_with_size(screens, area, None)
+}
+pub(crate) fn live_feedback(
+    screens: &[(Rect, f32)],
+    area: Option<Rect>,
+    size: (u32, u32),
+) -> Option<Feedback> {
+    feedback_with_size(screens, area, Some(size))
+}
+fn feedback_with_size(
+    screens: &[(Rect, f32)],
+    area: Option<Rect>,
+    size: Option<(u32, u32)>,
+) -> Option<Feedback> {
     STATE.with(|s| {
         let s = s.borrow();
         let point = s.point?;
@@ -307,7 +323,14 @@ pub(crate) fn feedback(screens: &[(Rect, f32)], area: Option<Rect>) -> Option<Fe
             point.x >= b.left && point.x < b.right && point.y >= b.top && point.y < b.bottom
         })?;
         let sample = sample_pixels(s.frames.as_deref()?, point)?;
-        let assets = ASSETS.with(|s| s.borrow().get(&key(scale)).cloned())?;
+        let assets = ASSETS.with(|s| s.borrow().get(&key(scale)).cloned());
+        let (w, h) = match size {
+            Some(size) => size,
+            None => {
+                let a = assets.as_ref()?;
+                (a.shells[0].width(), a.shells[0].height())
+            }
+        };
         let mut status = 0;
         if let Some(result) = s.core.color_result
             && s.result_at.is_some_and(|(id, t)| {
@@ -318,8 +341,7 @@ pub(crate) fn feedback(screens: &[(Rect, f32)], area: Option<Rect>) -> Option<Fe
         {
             status = if result.success { 1 } else { 2 };
         }
-        let w = assets.shells[0].width() as i32;
-        let h = assets.shells[0].height() as i32;
+        let (w, h) = (w as i32, h as i32);
         let area = area.unwrap_or(host);
         let gap = (16. * scale).round() as i32;
         let mut position = None;
@@ -356,6 +378,7 @@ pub(crate) fn feedback(screens: &[(Rect, f32)], area: Option<Rect>) -> Option<Fe
             sample,
             status,
             assets,
+            scale,
             grid,
         })
     })
@@ -586,9 +609,11 @@ mod tests {
                     let f = feedback(&[(b, scale)], Some(b)).unwrap();
                     assert_eq!(f.grid.width(), (150. * scale).round() as u32);
                     assert_eq!(f.grid.height(), (90. * scale).round() as u32);
-                    let mut image =
-                        Pixmap::new(f.assets.shells[0].width(), f.assets.shells[0].height())
-                            .unwrap();
+                    let mut image = Pixmap::new(
+                        f.assets.as_ref().unwrap().shells[0].width(),
+                        f.assets.as_ref().unwrap().shells[0].height(),
+                    )
+                    .unwrap();
                     let monitor = Rect {
                         left: f.bounds.left,
                         top: f.bounds.top,

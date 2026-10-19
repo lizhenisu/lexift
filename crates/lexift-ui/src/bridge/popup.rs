@@ -1099,7 +1099,7 @@ pub(super) fn popup_pointer_sink(popup: slint::Weak<TranslationPopup>) -> PopupP
         let position = |x: f32, y: f32| slint::LogicalPosition::new(x / scale, y / scale);
         use slint::platform::{PointerEventButton, WindowEvent};
         let event = match input {
-            PopupPointerInput::FramePresented => return,
+            PopupPointerInput::FramePresented | PopupPointerInput::FeedbackFramePresented => return,
             PopupPointerInput::RightPressed { .. } | PopupPointerInput::RightReleased { .. } => {
                 return;
             }

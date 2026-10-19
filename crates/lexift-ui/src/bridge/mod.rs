@@ -472,9 +472,25 @@ impl UiHandle {
     pub fn request_ocr(&self) {
         let _ = slint::invoke_from_event_loop(crate::ocr::request);
     }
-    pub fn suspend_for_screenshot(&self, session: u64) {
-        let _ =
-            slint::invoke_from_event_loop(move || crate::annotation::screenshot::suspend(session));
+    pub fn suspend_for_screenshot(
+        &self,
+        session: u64,
+        ready: Box<
+            dyn FnOnce(lexift_core::Result<Option<lexift_core::domain::geometry::Point>>) + Send,
+        >,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::annotation::screenshot::suspend(session);
+            ready(crate::annotation::screenshot::suspended_pointer(session));
+        });
+    }
+    pub fn update_screenshot_elements(
+        &self,
+        result: lexift_core::domain::element_candidate::ElementQueryResult,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::screen_interaction::selection::set_elements(result)
+        });
     }
     pub fn restore_screenshot(&self, session: u64) {
         let _ =

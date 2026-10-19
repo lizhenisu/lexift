@@ -1,8 +1,8 @@
 # PixPin 截图功能研究与 Lexift 实现拆解
 
-研究日期：2026-10-16。Lexift 实现状态更新：2026-10-18。状态：已完成功能研究、局部静态调用链、Lexift 逐项实现拆解及原生自动化主流程取证；竞品硬件组合与高级功能的未实测范围见第 5 节，Lexift 新增能力的验证边界见下表。
+研究日期：2026-10-16。Lexift 实现状态更新：2026-10-19。状态：已完成功能研究、局部静态调用链、Lexift 逐项实现拆解及原生自动化主流程取证；竞品硬件组合与高级功能的未实测范围见第 5 节，Lexift 新增能力的验证边界见下表。
 
-主要结论：Lexift 已具备静态截图和可编辑贴图的基础，不应重新实现一套编辑器。选区键盘微调、手动宽高输入及左下角操作提示已完成；比例锁定已接入本次截图的鼠标、键盘和尺寸草稿；冻结帧取色、像素放大镜及顶层窗口候选已接入；截图选区 OCR 复制已接入；内部元素识别仍需独立评估。长截图和录制需要独立的连续采集与处理生命周期。本机 PixPin 的截图→标注→贴图→拖动→PNG／复制已自动跑通，复制与 PNG 像素一致。
+主要结论：Lexift 已具备静态截图和可编辑贴图的基础，不应重新实现一套编辑器。选区键盘微调、手动宽高输入及左下角操作提示已完成；比例锁定已接入本次截图的鼠标、键盘和尺寸草稿；冻结帧取色、像素放大镜及顶层窗口候选已接入；截图选区 OCR 复制已接入；内部元素按点异步识别与滚轮层级切换已接入，支持范围受 UIA 提供者和有界预算限制。长截图和录制需要独立的连续采集与处理生命周期。本机 PixPin 的截图→标注→贴图→拖动→PNG／复制已自动跑通，复制与 PNG 像素一致。
 
 ### Lexift 后续实施进度
 
@@ -15,9 +15,11 @@
 | 手动宽高输入 | 已实现 | 点击尺寸标签编辑宽高草稿，确认后固定左上角应用，超出桌面自动截断；与键盘共用边界，不影响标注历史；紧凑面板支持标题栏拖动，见 [面板验证](../releases/screenshot-size-panel.md)。见 [宽高输入验证](../releases/screenshot-size-input.md) |
 | 比例锁定 | 已实现 | 尺寸草稿捕获比例，应用后统一约束八方向鼠标缩放、键盘及数值调整；固定已确认锚点，不跨截图记忆。见 [比例锁定验证](../releases/screenshot-aspect-lock.md) |
 | 冻结帧取色／像素放大 | 已实现，验证范围见记录 | 首次框选及截图鼠标模式显示 15×9 物理像素网格，C 复制大写 HEX；采样冻结底图，不含截图新增标注和装饰，见 [像素放大镜验证](../releases/screenshot-pixel-picker.md) |
-| 顶层窗口候选 | 已实现，验证范围见记录 | 悬停预览、单击进入编辑，超过 4px 逻辑距离转自由框选；同次截图冻结候选，不查询内部控件，见 [窗口自动框选验证](../releases/screenshot-window-candidates.md) |
+| 顶层窗口候选 | 已实现，验证范围见记录 | 悬停预览、单击进入编辑，超过 4px 逻辑距离转自由框选；同次截图冻结候选，内部控件见下一项，见 [窗口自动框选验证](../releases/screenshot-window-candidates.md) |
 | 截图 OCR 复制 | 已实现，验证范围见记录 | 识别冻结底图选区，复制文字；成功、空结果或失败均退出截图并显示 toast，不自动翻译，见 [截图 OCR 验证](../releases/screenshot-ocr.md) |
-| 内部元素候选、截图历史、长截图与录制 | 待实现 | 后文保留方案与能力边界；竞品菜单或静态字符串不代表 Lexift 已具备这些能力 |
+| 内部元素候选与滚轮层级 | 已实现，验证范围见记录 | 已改为所属窗口内的有界后台按点 UIA 查询，首帧不等元素；点击采用已呈现范围，结果过期隔离。新验证见[按点优化记录](../releases/screenshot-point-query-performance.md)，[冻结快照验证](../releases/screenshot-element-candidates.md)作为历史记录 |
+| 首次截图准备 | 已改为按点采集，重复性能目标未全部达到 | 后台 bootstrap 预处理、多屏分阶段组同步；三屏整帧观测首次／重复 P95 为 329.29／321.92ms，重复 ≤250ms 尚未达到，见[按点优化记录](../releases/screenshot-point-query-performance.md)，[前轮准备性能](../releases/screenshot-startup-performance.md)保留历史口径 |
+| 截图历史、长截图与录制 | 待实现 | 后文保留方案与能力边界；竞品菜单或静态字符串不代表 Lexift 已具备这些能力 |
 
 ## 1. 阅读边界与证据
 
@@ -78,6 +80,17 @@ S1 中的 `ScreenShotView`、`prepareScreenShotBgLayer`、`refreshScreenShot`、
 
 因此 Lexift 可以借鉴“显示器/坐标管理 → 可取消采集 → 不可变像素结果 → 共用编辑/输出”的职责划分；具体实现继续使用自己的 ScreenCapturePort，不复制私有 DLL 接口。尝试用 REA 按导入名寻找引用时，IDA adapter 返回 `list_names` 不支持，未假装已经取得该调用链。
 
+### 本轮补充：首次准备与区域识别
+
+2026-10-18 重连 IDA，核对同一 PixPin.exe 摘要后取得以下静态调用证据，完整记录在忽略的 `target/pixpin-analysis/screenshot-startup-evidence-20261018.json`：
+
+- `0x1402DA760` 调用 `AsyncGetWinRectByPoint`；`0x1402DE350` 的滚轮分支分别调用异步父／子区域查询。
+- `0x1402D69B0` 创建检测器，读取 `getFirstRect`，随后连接 `sigNewRectDetected`；未取得首结果时有 `msleep(1)` 与 `processEvents` 循环。不能将其描述成完全不等待，也不照搬事件泵重入。
+- `0x1402C2940` 创建背景图形项并调用 `0x1402C7DC0` 更新多屏背景。该函数伪代码失败，结论来自汇编；不将失败输出视为完整反编译。
+- 调用端可确认按位置请求及首结果交接；DLL 内部是否完整预扫描、底层抓图 API、线程等待的实际成本仍未确认。实测与实现优化见[首次准备验证](../releases/screenshot-startup-performance.md)。
+
+2026-10-18 的 Lexift 版本采用“整窗及底图先显示、元素校验后补充”，首轮 80ms、后置 250ms；这套冻结元素策略已被本轮后台按点查询替代，当前规则见下文及[验证记录](../releases/screenshot-point-query-performance.md)。快采集与纹理准备优化来自 Lexift 源码和测试，不冒充 PixPin 已恢复的实现。
+
 ### 已追踪的多屏背景准备代码
 
 按 PE 导入表计算 IAT 地址后，可以绕过该 adapter 的名称枚举限制，直接查询地址引用；下面是静态调用证据，不是运行时跟踪。
@@ -106,6 +119,8 @@ flowchart LR
 图仅表达上述已检查函数的局部关系，不表示已恢复整个应用架构。
 
 ### Lexift 已有对应链
+
+2026-10-19 补充：[截图启动 DLL 深入分析](pixpin-startup-ida-analysis.md) 已追通顶层快照后按点 MSAA／HWND 查询、同类请求合并、局部区域缓存，以及 WGC + D3D11 静态采集分支、CPU 回读和 3 秒空闲释放；它细化此前底层未知部分，不证明本机每次基准走过该分支，也不改变现有性能统计。
 
 - [Core 截图状态机](../../crates/lexift-core/src/domain/screenshot.rs)：`ScreenshotPhase`、`ScreenshotEvent`、`ScreenshotCommand`，准备、框选、编辑、输出和恢复；会话及操作身份防止旧结果生效。
 - [App 截图调度](../../crates/lexift-app/src/screenshot.rs)：`execute`、`prepare`、`output_image`，采集、合成与输出接线。
@@ -202,7 +217,7 @@ flowchart LR
 | OCR | [ocr.rs](../../crates/lexift-core/src/ports/ocr.rs) 的 `recognize`；[Core OCR](../../crates/lexift-core/src/domain/ocr.rs) 的 Recognized；[App OCR](../../crates/lexift-app/src/ocr.rs) | 返回 String；现有框选→识别→翻译弹窗，没有词框结果供贴图划词命中。贴图菜单没有 OCR 接线 |
 | 平台采集 | [ScreenCapturePort](../../crates/lexift-core/src/ports/screen_capture.rs)、[Windows 实现](../../crates/lexift-platform/src/windows/screen_capture.rs) | 有冻结桌面和效果取样；WGC/D3D 路径存在不等于已实现录制帧时钟/编码 |
 
-检索边界为当前工作树的 Rust/Slint 源码；已加入冻结帧像素采样及取色；未发现长截图配准、视频时间轴/编码、实时屏幕取色、截图历史及内部元素选区；普通顶层窗口自动选区现已接入。剪贴板业务中的 recording 是文本历史记录开关，不是录屏。
+检索边界为当前工作树的 Rust/Slint 源码；已加入冻结帧像素采样及取色；未发现长截图配准、视频时间轴/编码、实时屏幕取色及截图历史；普通顶层窗口与内部元素冻结选区、滚轮层级切换现已接入。剪贴板业务中的 recording 是文本历史记录开关，不是录屏。
 
 ### 3.7 与本机版本对应的区域模式及输出策略
 
@@ -225,8 +240,8 @@ Lexift 的取舍应基于自身用户需求：保留已经确认的鼠标穿透�
 ## 4. 建议落地顺序
 
 1. 持续回归已有静态截图、同帧反馈、工具、输出及可编辑贴图；复用现有夹具和像素对照，不把已完成的键盘微调与操作提示重新列为开发项。
-2. 手动宽高输入已完成，见 [验证记录](../releases/screenshot-size-input.md)。比例锁定已完成，见 [验证记录](../releases/screenshot-aspect-lock.md)；冻结帧取色／像素放大已实现，见 [验证记录](../releases/screenshot-pixel-picker.md)。复用既有冻结帧、预览和剪贴板输出链路；顶层窗口候选已接入，见 [验证记录](../releases/screenshot-window-candidates.md)；内部元素识别不包含在首版中。
-3. 顶层窗口候选已实现；截图 OCR 复制已接入，见 [验证记录](../releases/screenshot-ocr.md)；后续分别评估内部元素识别和输出格式，每项保留请求身份与失败回退。
+2. 手动宽高输入已完成，见 [验证记录](../releases/screenshot-size-input.md)。比例锁定已完成，见 [验证记录](../releases/screenshot-aspect-lock.md)；冻结帧取色／像素放大已实现，见 [验证记录](../releases/screenshot-pixel-picker.md)。复用既有冻结帧、预览和剪贴板输出链路；顶层窗口候选已接入，见 [验证记录](../releases/screenshot-window-candidates.md)；内部元素冻结识别与滚轮切换已在后续实现，见[验证记录](../releases/screenshot-element-candidates.md)。
+3. 顶层窗口候选已实现；截图 OCR 复制已接入，见 [验证记录](../releases/screenshot-ocr.md)；内部元素与滚轮层级已接入；后续评估输出格式，每项保留请求身份与失败回退。
 4. 最后做长截图、历史及录屏。三者分别涉及连续采集、敏感持久化、媒体时间轴，不能仅靠增加工具条按钮交付。
 
 无需为了与竞品外观相近新增 crate，也不能把 PixPin 字符串中推测的类名照搬为 Lexift 架构。新增 Port 仅用于真正缺少的业务能力；窗口准备、层级和输入仍沿用 App 注入策略。

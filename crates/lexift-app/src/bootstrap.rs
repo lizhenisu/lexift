@@ -584,6 +584,9 @@ fn map_pointer_event(event: lexift_platform::PopupPointerEvent) -> lexift_ui::Po
         lexift_platform::PopupPointerEvent::FramePresented => {
             lexift_ui::PopupPointerInput::FramePresented
         }
+        lexift_platform::PopupPointerEvent::FeedbackFramePresented => {
+            lexift_ui::PopupPointerInput::FeedbackFramePresented
+        }
         lexift_platform::PopupPointerEvent::LeftCancelled { x, y } => {
             lexift_ui::PopupPointerInput::LeftCancelled { x, y }
         }

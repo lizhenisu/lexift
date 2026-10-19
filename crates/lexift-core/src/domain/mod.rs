@@ -17,6 +17,7 @@ pub mod clipboard_history;
 
 pub mod copy_feedback;
 
+pub mod element_candidate;
 pub mod region_selection;
 pub mod window_candidate;
 

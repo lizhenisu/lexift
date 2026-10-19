@@ -1809,3 +1809,12 @@ msgstr "텍스트 인식 실패"
 
 msgid "Could not copy recognized text"
 msgstr "인식한 텍스트를 복사하지 못했습니다"
+
+msgid "Click a region, or drag to select freely"
+msgstr "영역을 클릭하거나 드래그하여 자유롭게 선택"
+
+msgid "Wheel"
+msgstr "휠"
+
+msgid "Scroll to switch regions"
+msgstr "스크롤하여 영역 전환"

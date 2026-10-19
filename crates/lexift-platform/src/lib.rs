@@ -150,6 +150,8 @@ pub enum PopupDismissCause {
 pub enum PopupPointerEvent {
     /// The region host released its first-frame bootstrap after a visible native paint.
     FramePresented,
+    /// The first client paint after removing the region bootstrap has completed.
+    FeedbackFramePresented,
     RightPressed {
         x: f32,
         y: f32,
@@ -792,4 +794,33 @@ pub fn configure_pinned_image(
         let _ = (window, topmost, interactive, inset);
         Ok(())
     }
+}
+
+/// Stop the single accessibility snapshot worker; in-flight native calls unwind on its MTA.
+pub fn shutdown_screenshot_element_queries() {
+    #[cfg(target_os = "windows")]
+    windows::screen_capture::elements::shutdown();
+}
+
+/// Prepare screenshot-only bootstrap buffers on the capture worker, before any host is shown.
+pub fn prepare_screenshot_surface_pixels(
+    session: u64,
+    frames: &[lexift_core::ports::screen_capture::CapturedRegion],
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::screen_interaction_window::prepare_pixels(session, frames, cancelled)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (session, frames, cancelled);
+        Ok(())
+    }
+}
+pub fn clear_screenshot_surface_pixels(session: u64) {
+    #[cfg(target_os = "windows")]
+    windows::screen_interaction_window::clear_pixels(session);
+    #[cfg(not(target_os = "windows"))]
+    let _ = session;
 }

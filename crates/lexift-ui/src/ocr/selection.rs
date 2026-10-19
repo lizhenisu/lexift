@@ -75,6 +75,8 @@ pub(crate) fn show(generation: u64, frames: Arc<Vec<CapturedRegion>>) {
     host::set_screenshot(false);
     host::set_handler(Rc::new(|event| {
         emit(match event {
+            host::SelectionEvent::QueryElements(_)
+            | host::SelectionEvent::CancelElements { .. } => return,
             host::SelectionEvent::Cancelled => OcrEvent::Cancelled,
             host::SelectionEvent::Failed { generation, error } => {
                 OcrEvent::Failed { generation, error }

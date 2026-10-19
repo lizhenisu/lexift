@@ -71,6 +71,17 @@ pub(crate) fn compose(
     capture: Arc<ScreenCaptureFrame>,
     cancelled: &AtomicBool,
 ) -> Result<CapturedRegion> {
+    // An empty document has no overlay to rasterize or blend. Keep the source
+    // pixels exact and avoid allocating two full-monitor transparent surfaces.
+    if snapshot.session.objects.is_empty() && snapshot.session.watermark.is_none() {
+        if cancelled.load(Ordering::Acquire) {
+            return Err(Error::new("Annotation export cancelled"));
+        }
+        return lexift_core::domain::screen_snapshot::crop_frames(
+            &capture.regions,
+            snapshot.monitor,
+        );
+    }
     if super::font_service::document_needs_fonts(&snapshot.session) && !super::font_service::ready()
     {
         return Err(Error::new("annotation fonts are not ready"));

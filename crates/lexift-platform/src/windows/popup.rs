@@ -909,6 +909,12 @@ fn scale_dip_to_physical(dip: f32, dpi: u32) -> i32 {
 
 /// Retain the callback independently: delivering a view event may retire its HWND bridge.
 pub(super) fn notify_frame_presented(hwnd: windows::Win32::Foundation::HWND) {
+    notify_region_frame(hwnd, PopupPointerEvent::FramePresented);
+}
+pub(super) fn notify_feedback_frame_presented(hwnd: windows::Win32::Foundation::HWND) {
+    notify_region_frame(hwnd, PopupPointerEvent::FeedbackFramePresented);
+}
+fn notify_region_frame(hwnd: windows::Win32::Foundation::HWND, event: PopupPointerEvent) {
     use windows::{Win32::UI::WindowsAndMessaging::GetPropW, core::w};
     let handler = unsafe {
         let data = GetPropW(hwnd, w!("Lexift.PopupInputBridge")).0;
@@ -919,7 +925,7 @@ pub(super) fn notify_frame_presented(hwnd: windows::Win32::Foundation::HWND) {
         }
     };
     if let Some(handler) = handler {
-        handler(PopupPointerEvent::FramePresented);
+        handler(event);
     }
 }
 
