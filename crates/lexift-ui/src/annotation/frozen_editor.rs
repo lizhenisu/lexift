@@ -17,7 +17,7 @@ pub(super) struct Editing {
     pub(super) feedback_placement: Option<(Point, slint::PhysicalSize)>,
     pub(super) toolbar_adjustment: u64,
     pub(super) keyboard: screenshot::keyboard::State,
-    pub(super) initial_focus: Option<focus::Origin>,
+    pub(super) initial_focus: Option<crate::screen_interaction::selection::SubmissionFocus>,
     pub(super) size_input: screenshot::size_input::State,
     pub(super) help: crate::screen_interaction::screenshot_help::State,
 }

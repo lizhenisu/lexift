@@ -16,6 +16,8 @@ use std::sync::atomic::AtomicBool;
 
 pub(super) use super::frozen_editor::{Editing, frame, render};
 
+#[path = "screenshot_focus.rs"]
+pub(super) mod handoff;
 #[path = "screenshot_keyboard.rs"]
 pub(super) mod keyboard;
 #[path = "screenshot_size_input.rs"]
@@ -92,6 +94,15 @@ pub(crate) fn sync(state: &ScreenshotState) {
             }
             if r.screenshot.is_some() {
                 if state.phase != ScreenshotPhase::Editing {
+                    // Older preparation snapshots can still be delivered during the UI handoff.
+                    // Only an actual output for this editor revokes its pending focus request.
+                    if matches!(
+                        state.phase,
+                        ScreenshotPhase::Output | ScreenshotPhase::Recognizing
+                    ) && r.screenshot.as_ref().is_some_and(|e| e.id == state.session)
+                    {
+                        handoff::cancel(r);
+                    }
                     size_input::close(r);
                 }
                 r.queue_render();
@@ -250,8 +261,7 @@ pub(crate) fn show(
         selection_host::SelectionEvent::Failed { error, .. } => {
             emit(ScreenshotEvent::Failed { session: id, error })
         }
-        selection_host::SelectionEvent::SelectionSubmitted { selection } => {
-            let activation = current_focus_origin();
+        selection_host::SelectionEvent::SelectionSubmitted { selection, focus } => {
             // A quick pointer selection can submit before every monitor reports
             // feedback. Its own input window is now active, so pin retirement is safe.
             crate::pinned_screenshot::set_frozen(true);
@@ -277,7 +287,7 @@ pub(crate) fn show(
                         feedback_placement: None,
                         toolbar_adjustment: 0,
                         keyboard: Default::default(),
-                        initial_focus: Some(activation),
+                        initial_focus: focus,
                         help: Default::default(),
                         size_input: Default::default(),
                     });
@@ -1016,7 +1026,6 @@ pub(super) fn toolbar_ready(generation: u64, revision: u64) {
     if !live {
         return;
     }
-    keyboard::activate_initial();
     let state = FLOW.with(|s| {
         let s = s.borrow();
         if s.state.error.is_some() && s.toast.get().is_none() {

@@ -287,43 +287,6 @@ fn lost_focus(generation: u64, owner: Owner, epoch: u64) {
         }
     })
 }
-/// First selection is a user gesture; activate once after all editor windows are prepared.
-pub(in crate::annotation) fn activate_initial() {
-    let context = REGISTRY.with(|s| {
-        let mut slot = s.borrow_mut();
-        let r = slot.as_mut()?;
-        if !r.canvas_state.annotation_ready {
-            return None;
-        };
-        let e = r.screenshot.as_mut().filter(|e| e.pin.is_none())?;
-        if !FLOW.with(|s| {
-            let s = s.borrow();
-            s.state.session == e.id && s.state.phase == ScreenshotPhase::Editing
-        }) {
-            return None;
-        }
-        let origin = e.initial_focus.take()?;
-        let b = e.region.bounds()?;
-        tracing::debug!(?origin, current=?r.lifecycle.annotation_foreground.as_ref().and_then(|q|q()), "Screenshot editor input activation considered");
-        if !permits_focus_activation(r, origin) {
-            return None;
-        };
-        let c = r.canvas_state.canvases.iter().find(|c| {
-            b.left >= c.bounds.left
-                && b.left < c.bounds.right
-                && b.top >= c.bounds.top
-                && b.top < c.bounds.bottom
-        })?;
-        Some((
-            c.window.clone_strong(),
-            r.lifecycle.activate_user_requested_window,
-        ))
-    });
-    if let Some((window, activate)) = context {
-        activate(window.window());
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::tests::{TestPlatform, lifecycle};
@@ -783,38 +746,6 @@ mod tests {
             }
         );
         assert!(!f.key(Key::DownArrow, false, false, false, false));
-    }
-
-    #[test]
-    fn keyboard_initial_activation_is_prepared_scoped_and_attempted_once() {
-        thread_local! {static ACTIVATIONS:Cell<usize>=const { Cell::new(0) };}
-        fn activate(_: &slint::Window) -> bool {
-            ACTIVATIONS.with(|c| c.set(c.get() + 1));
-            false // native failure must not cause repeated activation attempts
-        }
-        let _f = Fixture::new();
-        let revision = REGISTRY.with(|s| {
-            let mut s = s.borrow_mut();
-            let r = s.as_mut().unwrap();
-            r.lifecycle.activate_user_requested_window = activate;
-            r.screenshot.as_mut().unwrap().initial_focus = Some(focus::Origin::Unobserved);
-            r.toolbar_state.main.revision()
-        });
-        super::super::toolbar_ready(42, revision);
-        ACTIVATIONS.with(|c| assert_eq!(c.get(), 0));
-        REGISTRY.with(|s| {
-            s.borrow_mut()
-                .as_mut()
-                .unwrap()
-                .canvas_state
-                .annotation_ready = true
-        });
-        super::super::toolbar_ready(41, revision);
-        super::super::toolbar_ready(42, revision.wrapping_add(1));
-        ACTIVATIONS.with(|c| assert_eq!(c.get(), 0));
-        super::super::toolbar_ready(42, revision);
-        super::super::toolbar_ready(42, revision);
-        ACTIVATIONS.with(|c| assert_eq!(c.get(), 1));
     }
 
     #[test]

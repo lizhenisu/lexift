@@ -26,6 +26,17 @@ pub(crate) enum HostPhase {
     Idle,
     Capturing,
 }
+/// Captured before input retirement; authorizes only this live selection-to-editor handoff.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SubmissionFocus {
+    pub session: u64,
+    pub host: u64,
+    pub input_host: u64,
+    pub screen: Rect,
+    pub source: Option<lexift_core::ports::magnifier::WindowToken>,
+    pub observed: bool,
+    pub started: std::time::Instant,
+}
 pub(crate) enum SelectionEvent {
     /// Every host has presented complete feedback; initial activation was already attempted.
     Ready {
@@ -48,7 +59,25 @@ pub(crate) enum SelectionEvent {
     },
     SelectionSubmitted {
         selection: lexift_core::domain::region_selection::RegionSelectionResult,
+        focus: Option<SubmissionFocus>,
     },
+}
+
+pub(crate) fn submission_live(focus: SubmissionFocus) -> bool {
+    STATE.with(|s| {
+        s.borrow().as_ref().is_some_and(|r| {
+            r.generation == focus.session
+                && r.screenshot
+                && r.submitted
+                && r.windows.iter().any(|h| {
+                    h.revision() == focus.host
+                        && (r.lifecycle.annotation_window_token)(h.window.window()) == focus.source
+                })
+                && r.windows
+                    .iter()
+                    .any(|h| h.revision() == focus.input_host && h.bounds == focus.screen)
+        })
+    })
 }
 thread_local! { static STATE: RefCell<Option<Registry>> = const { RefCell::new(None) }; }
 struct Registry {
@@ -351,6 +380,19 @@ fn emit(event: SelectionEvent) {
     }
 }
 pub(crate) fn close() {
+    STATE.with(|s| {
+        if let Some(r) = s
+            .borrow()
+            .as_ref()
+            .filter(|r| r.screenshot && !r.windows.is_empty())
+        {
+            tracing::debug!(
+                session = r.generation,
+                submitted = r.submitted,
+                "Screenshot selection hosts closing"
+            );
+        }
+    });
     STATE.with(|s| {
         if let Some(r) = s.borrow_mut().as_mut() {
             r.timer.stop();
@@ -952,6 +994,7 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
         }
     }
     let mut outcome = None;
+    let mut input_screen = bounds;
     let mut query_event = None;
     STATE.with(|s| {
         let mut slot = s.borrow_mut();
@@ -995,6 +1038,7 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
                             && p.y < h.bounds.bottom
                     })
                     .map_or(bounds, |h| h.bounds);
+                input_screen = host;
                 r.help.pointer(host, Some(p));
                 if r.screenshot {
                     let (px, py) = crate::screen_interaction::screen_point(bounds, (x, y), 1.);
@@ -1066,7 +1110,10 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
                     .gesture
                     .finish(point(x, y), SelectionContext::standalone(generation))
                 {
-                    outcome = Some(SelectionEvent::SelectionSubmitted { selection });
+                    outcome = Some(SelectionEvent::SelectionSubmitted {
+                        selection,
+                        focus: None,
+                    });
                 } else {
                     for Host { window, .. } in &r.windows {
                         window.set_selecting(false);
@@ -1094,7 +1141,7 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
         emit(event);
     }
     if let Some(event) = outcome {
-        finish_submission(event);
+        finish_submission_from(event, Some(input_screen));
     }
 }
 
@@ -1240,11 +1287,18 @@ pub(crate) fn apply_reused_region(generation: u64, host: u64, request: u64, boun
         "Screenshot region reuse result"
     );
     if let Some(selection) = selection {
-        finish_submission(SelectionEvent::SelectionSubmitted { selection });
+        finish_submission(SelectionEvent::SelectionSubmitted {
+            selection,
+            focus: None,
+        });
     }
 }
 
 fn finish_submission(event: SelectionEvent) {
+    finish_submission_from(event, None);
+}
+
+fn finish_submission_from(mut event: SelectionEvent, input_screen: Option<Rect>) {
     if matches!(event, SelectionEvent::SelectionSubmitted { .. }) {
         let cancelled = STATE.with(|s| s.borrow_mut().as_mut().and_then(cancel_query));
         if let Some(cancelled) = cancelled {
@@ -1258,6 +1312,37 @@ fn finish_submission(event: SelectionEvent) {
                 return false;
             };
             r.submitted = true;
+            if let SelectionEvent::SelectionSubmitted { focus, .. } = &mut event {
+                let source = r.lifecycle.annotation_foreground.as_ref().and_then(|q| q());
+                let host = r
+                    .windows
+                    .iter()
+                    .find(|h| {
+                        source.is_some()
+                            && (r.lifecycle.annotation_window_token)(h.window.window()) == source
+                    })
+                    .or_else(|| r.windows.iter().find(|h| h.revision() == r.query_host))
+                    .or_else(|| r.windows.first());
+                *focus = host.map(|h| SubmissionFocus {
+                    session: r.generation,
+                    host: h.revision(),
+                    input_host: r
+                        .windows
+                        .iter()
+                        .find(|input| Some(input.bounds) == input_screen)
+                        .map_or(h.revision(), |input| input.revision()),
+                    screen: input_screen.unwrap_or(h.bounds),
+                    source: (r.lifecycle.annotation_window_token)(h.window.window()),
+                    observed: r.lifecycle.annotation_foreground.is_some(),
+                    started: std::time::Instant::now(),
+                });
+                tracing::debug!(
+                    session = r.generation,
+                    ?source,
+                    ?focus,
+                    "Screenshot selection focus captured before retirement"
+                );
+            }
             r.reuse_pending = None;
             r.timer.stop();
             r.candidates.clear();
@@ -1370,7 +1455,7 @@ fn activate(generation: u64, bounds: Rect, explicit: bool) {
         let mut slot = s.borrow_mut();
         let r = slot.as_mut()?;
         tracing::debug!(generation,explicit,done=r.activation_done,screenshot=r.screenshot,?bounds,"Screenshot input activation considered");
-        if r.generation != generation || !r.screenshot || (!explicit && r.activation_done) {
+        if r.generation != generation || !r.screenshot || r.submitted || (!explicit && r.activation_done) {
             return None;
         }
         let target =
@@ -1549,6 +1634,70 @@ mod tests {
         lifecycle.complete_region_frame = Rc::new(|_| true);
         lifecycle
     }
+    #[test]
+    fn fast_cross_screen_submission_preserves_input_screen_and_cancels_queued_activation() {
+        use lexift_core::ports::magnifier::WindowToken;
+        thread_local! { static CALLS: Cell<usize> = const { Cell::new(0) }; }
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        let mut l = lifecycle();
+        l.annotation_window_token = Rc::new(|_| Some(WindowToken(101)));
+        l.annotation_foreground = Some(Rc::new(|| Some(WindowToken(101))));
+        l.activate_user_requested_window = |_| {
+            CALLS.set(CALLS.get() + 1);
+            true
+        };
+        init(|_| PassiveWindowPreparation::Ready, l);
+        sync(501, HostPhase::Capturing);
+        set_screenshot(true);
+        let output = Rc::new(RefCell::new(None));
+        let recorded = output.clone();
+        set_handler(Rc::new(move |event| {
+            if let SelectionEvent::SelectionSubmitted { focus, .. } = event {
+                *recorded.borrow_mut() = focus;
+            }
+        }));
+        show(501, frames());
+        let screen = frames()[1].bounds;
+        for input in [
+            PopupPointerInput::LeftPressed { x: 20., y: 20. },
+            PopupPointerInput::Moved { x: 60., y: 60. },
+            PopupPointerInput::LeftReleased { x: 60., y: 60. },
+        ] {
+            pointer(501, screen, 1., input);
+        }
+        let focus = output.borrow().unwrap();
+        assert_eq!(focus.screen, screen);
+        assert_ne!(
+            focus.host, focus.input_host,
+            "source still owns the first screen before queued native activation"
+        );
+        assert!(submission_live(focus));
+        CALLS.set(0);
+        activate(501, screen, true);
+        assert_eq!(
+            CALLS.get(),
+            0,
+            "retired source cannot perform its queued pointer activation"
+        );
+        close();
+        assert!(!submission_live(focus));
+        // Mouse capture still delivers the release to the first host after crossing displays.
+        sync(502, HostPhase::Capturing);
+        show(502, frames());
+        let capture_screen = frames()[0].bounds;
+        for input in [
+            PopupPointerInput::LeftPressed { x: 20., y: 20. },
+            PopupPointerInput::Moved { x: 160., y: 60. },
+            PopupPointerInput::LeftReleased { x: 160., y: 60. },
+        ] {
+            pointer(502, capture_screen, 1., input);
+        }
+        let crossed = output.borrow().unwrap();
+        assert_eq!(crossed.screen, screen);
+        assert_ne!(crossed.host, crossed.input_host);
+        assert!(submission_live(crossed));
+        close();
+    }
     fn frames() -> Arc<Vec<CapturedRegion>> {
         Arc::new(vec![
             CapturedRegion {
@@ -1638,7 +1787,7 @@ mod tests {
         let out = submissions.clone();
         let requests = events.clone();
         set_handler(Rc::new(move |event| match event {
-            SelectionEvent::SelectionSubmitted { selection } => {
+            SelectionEvent::SelectionSubmitted { selection, .. } => {
                 out.borrow_mut().push(selection.bounds)
             }
             SelectionEvent::ReuseRegion {
@@ -1893,7 +2042,7 @@ mod tests {
         let selected = Rc::new(RefCell::new(Vec::new()));
         let results = selected.clone();
         set_handler(Rc::new(move |event| {
-            if let SelectionEvent::SelectionSubmitted { selection } = event {
+            if let SelectionEvent::SelectionSubmitted { selection, .. } = event {
                 results.borrow_mut().push(selection.bounds);
             }
         }));
@@ -2069,7 +2218,7 @@ mod tests {
         let selected = Rc::new(RefCell::new(None));
         let result = selected.clone();
         set_handler(Rc::new(move |event| {
-            if let SelectionEvent::SelectionSubmitted { selection } = event {
+            if let SelectionEvent::SelectionSubmitted { selection, .. } = event {
                 *result.borrow_mut() = Some(selection.bounds);
             }
         }));
@@ -2521,6 +2670,7 @@ mod tests {
         assert!(matches!(
             &events.borrow()[0],
             SelectionEvent::SelectionSubmitted {
+                focus: None,
                 selection: lexift_core::domain::region_selection::RegionSelectionResult {
                     context: SelectionContext {
                         source_session: 7,

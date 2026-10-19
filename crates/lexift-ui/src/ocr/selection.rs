@@ -83,7 +83,7 @@ pub(crate) fn show(generation: u64, frames: Arc<Vec<CapturedRegion>>) {
             host::SelectionEvent::Failed { generation, error } => {
                 OcrEvent::Failed { generation, error }
             }
-            host::SelectionEvent::SelectionSubmitted { selection } => {
+            host::SelectionEvent::SelectionSubmitted { selection, .. } => {
                 OcrEvent::SelectionSubmitted { selection }
             }
         })

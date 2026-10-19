@@ -394,7 +394,17 @@ pub(super) fn render_initial_canvas(r: &mut Registry, index: usize) {
         .all(|layer| matches!(layer.bootstrap, CanvasBootstrap::Ready))
         && let Some(editing) = r.screenshot.as_ref().filter(|e| e.pin.is_none())
     {
-        crate::screen_interaction::selection::finish_selection(editing.id);
+        let generation = r.generation;
+        let session = editing.id;
+        let canvases: Vec<_> = r
+            .canvas_state
+            .canvases
+            .iter()
+            .map(|c| c.revision())
+            .collect();
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            screenshot::handoff::complete(generation, session, &canvases);
+        });
     }
 }
 

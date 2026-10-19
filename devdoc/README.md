@@ -84,6 +84,7 @@
 
 ## 发布
 
+- [截图编辑焦点交接验证](releases/screenshot-editor-focus.md)
 - [截图操作提示验证](releases/screenshot-help.md)
 - [截图比例锁定验证](releases/screenshot-aspect-lock.md)
 - [截图像素放大镜与取色验证](releases/screenshot-pixel-picker.md)
