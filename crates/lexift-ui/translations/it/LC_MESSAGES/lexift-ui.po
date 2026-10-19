@@ -1818,3 +1818,7 @@ msgstr "Rotella"
 
 msgid "Scroll to switch regions"
 msgstr "Scorri per cambiare zona"
+
+#: ui/screenshot-help.slint
+msgid "Reuse last region"
+msgstr "Riutilizza l’ultima area"

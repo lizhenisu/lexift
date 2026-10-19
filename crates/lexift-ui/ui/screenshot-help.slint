@@ -4,10 +4,16 @@ import { Metrics } from "design/metrics.slint";
 struct HelpRow { key: string, description: string }
 // Read-only feedback shared by the live selection host and cached editor textures.
 export component ScreenshotHelp inherits Rectangle {
+    in property <bool> reuse-available;
     in property <int> stage;
     in property <float> render-scale: 1;
     private property <length> key-width: (root.stage == 1 ? Metrics.screen-help-key-width : Metrics.screen-help-small-key-width) * root.render-scale;
-    private property <[HelpRow]> rows: root.stage == 0 ? [
+    private property <[HelpRow]> rows: root.stage == 0 && root.reuse-available ? [
+        { key: @tr("Mouse"), description: @tr("Click a region, or drag to select freely") },
+        { key: @tr("Wheel"), description: @tr("Scroll to switch regions") },
+        { key: "R", description: @tr("Reuse last region") },
+        { key: "Esc", description: @tr("Cancel, or right-click") },
+    ] : root.stage == 0 ? [
         { key: @tr("Mouse"), description: @tr("Click a region, or drag to select freely") },
         { key: @tr("Wheel"), description: @tr("Scroll to switch regions") },
         { key: "Esc", description: @tr("Cancel, or right-click") },
@@ -63,10 +69,11 @@ export component ScreenshotHelp inherits Rectangle {
 }
 // Used only for hidden, bounded preparation; never shown or retained as a visible HWND.
 export component ScreenshotHelpTextureWindow inherits Window {
+    in property <bool> reuse-available;
     no-frame: true; background: transparent;
     in property <int> stage;
     in property <float> render-scale: 1;
     out property <float> content-height: panel.preferred-height / 1px;
     out property <float> content-width: panel.natural-width / 1px;
-    panel := ScreenshotHelp { width: parent.width; height: parent.height; stage: root.stage; render-scale: root.render-scale; }
+    panel := ScreenshotHelp { width: parent.width; height: parent.height; stage: root.stage; render-scale: root.render-scale; reuse-available: root.reuse-available; }
 }

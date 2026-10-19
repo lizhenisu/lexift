@@ -255,7 +255,12 @@ fn screenshot_toolbars_are_exclusive_and_restore_document_undo_after_failed_outp
     }));
     emit(ScreenshotEvent::Prepared {
         session: id,
-        result: Ok(()),
+        result: Ok(vec![Rect {
+            left: 0,
+            top: 0,
+            right: 300,
+            bottom: 200,
+        }]),
     });
     let frames = Arc::new(vec![CapturedRegion {
         bounds: Rect {
@@ -768,7 +773,12 @@ fn screenshot_toolbars_are_exclusive_and_restore_document_undo_after_failed_outp
     suspend(cancelled);
     emit(ScreenshotEvent::Prepared {
         session: cancelled,
-        result: Ok(()),
+        result: Ok(vec![Rect {
+            left: 0,
+            top: 0,
+            right: 300,
+            bottom: 200,
+        }]),
     });
     let cancelled_frames = Arc::new(vec![CapturedRegion {
         bounds: Rect {
@@ -786,8 +796,58 @@ fn screenshot_toolbars_are_exclusive_and_restore_document_undo_after_failed_outp
         Arc::new(crate::FrozenCapture::new(cancelled_frames.clone())),
         Vec::new(),
     );
+    let last = core.borrow().screenshot.last_region.clone().unwrap();
+    assert_eq!(
+        crate::pinned_screenshot::diagnostic_visible_count(),
+        1,
+        "the retained pin must survive until the selection hosts finish activation"
+    );
+    selection_host::diagnostic_feedback(cancelled - 1);
+    assert_eq!(crate::pinned_screenshot::diagnostic_visible_count(), 1);
+    selection_host::diagnostic_feedback(cancelled);
+    assert_eq!(crate::pinned_screenshot::diagnostic_visible_count(), 0);
+    assert!(selection_host::diagnostic_reuse(cancelled));
+    let reuse = commands
+        .borrow()
+        .iter()
+        .rev()
+        .find_map(|c| match c {
+            lexift_core::AppCommand::Screenshot(
+                lexift_core::domain::screenshot::ScreenshotCommand::ReuseRegion {
+                    session,
+                    host,
+                    request,
+                    bounds,
+                },
+            ) => Some((*session, *host, *request, *bounds)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(reuse.3, Some(last.bounds));
+    selection_host::apply_reused_region(reuse.0, reuse.1, reuse.2, reuse.3);
+    pump("retained pin then region reuse", || {
+        REGISTRY.with(|s| s.borrow().as_ref().unwrap().canvas_state.annotation_ready)
+    });
+    assert_eq!(core.borrow().screenshot.phase, ScreenshotPhase::Editing);
+    REGISTRY.with(|s| {
+        let slot = s.borrow();
+        let r = slot.as_ref().unwrap();
+        assert_eq!(
+            r.screenshot.as_ref().unwrap().region.bounds(),
+            Some(last.bounds)
+        );
+        assert!(r.document.session.objects.is_empty());
+    });
+    emit(ScreenshotEvent::Completed {
+        session: id,
+        operation,
+        result: Ok(lexift_core::ports::annotation_save::SaveOutcome::Saved),
+    });
+    assert_eq!(core.borrow().screenshot.last_region.as_ref(), Some(&last));
+    assert_eq!(core.borrow().screenshot.session, cancelled);
     cancel();
     restore(cancelled);
+    assert_eq!(crate::pinned_screenshot::diagnostic_visible_count(), 1);
     drop(cancelled_frames);
     assert!(cancelled_weak.upgrade().is_none());
     selection_host::pointer(

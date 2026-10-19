@@ -492,6 +492,19 @@ impl UiHandle {
             crate::screen_interaction::selection::set_elements(result)
         });
     }
+    pub fn reuse_screenshot_region(
+        &self,
+        session: u64,
+        host: u64,
+        request: u64,
+        bounds: Option<lexift_core::domain::geometry::Rect>,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::screen_interaction::selection::apply_reused_region(
+                session, host, request, bounds,
+            );
+        });
+    }
     pub fn restore_screenshot(&self, session: u64) {
         let _ =
             slint::invoke_from_event_loop(move || crate::annotation::screenshot::restore(session));

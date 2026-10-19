@@ -241,6 +241,62 @@ mod tests {
         )
     }
     #[test]
+    fn reuse_hint_renders_all_languages_themes_and_dpi() {
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        for language in UiLanguage::ALL {
+            crate::i18n::select(language);
+            for theme in [ThemePreference::Light, ThemePreference::Dark] {
+                crate::theme::set_current(theme);
+                for scale in [1., 1.25] {
+                    let window = crate::ScreenshotHelpTextureWindow::new().unwrap();
+                    crate::theme::apply(&window);
+                    window.set_stage(0);
+                    window.set_render_scale(scale);
+                    window
+                        .window()
+                        .set_size(slint::LogicalSize::new(500. * scale, 300. * scale));
+                    window.window().take_snapshot().unwrap();
+                    let initial = window.get_content_height();
+                    window.set_reuse_available(true);
+                    let width = window.get_content_width().ceil().min(500. * scale);
+                    window
+                        .window()
+                        .set_size(slint::LogicalSize::new(width, 300. * scale));
+                    window.window().take_snapshot().unwrap();
+                    let height = window.get_content_height().ceil();
+                    assert!(
+                        height > initial,
+                        "{} scale {scale}: initial {initial}, reused {height}",
+                        language.code()
+                    );
+                    window
+                        .window()
+                        .set_size(slint::LogicalSize::new(width, height));
+                    let pixels = window.window().take_snapshot().unwrap();
+                    crate::i18n::write_test_bitmap(
+                        concat!(
+                            env!("CARGO_MANIFEST_DIR"),
+                            "/../../target/screenshot-region-history/render"
+                        ),
+                        &format!(
+                            "{}-{}-{}",
+                            language.code(),
+                            crate::theme::current_index(),
+                            scale
+                        ),
+                        pixels.width(),
+                        pixels.height(),
+                        pixels.as_slice().iter().map(|p| [p.r, p.g, p.b, p.a]),
+                    );
+                    window.set_reuse_available(false);
+                    window.window().take_snapshot().unwrap();
+                    assert_eq!(window.get_content_height(), initial);
+                }
+            }
+        }
+        crate::i18n::select(UiLanguage::EnglishUs);
+    }
+    #[test]
     fn proximity_hysteresis_uses_current_operation_and_scaled_physical_bounds() {
         let panel = Rect {
             left: -400,

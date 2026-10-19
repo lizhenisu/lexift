@@ -1818,3 +1818,7 @@ msgstr "휠"
 
 msgid "Scroll to switch regions"
 msgstr "스크롤하여 영역 전환"
+
+#: ui/screenshot-help.slint
+msgid "Reuse last region"
+msgstr "이전 영역 재사용"

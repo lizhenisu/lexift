@@ -471,6 +471,17 @@ pub(crate) fn set_frozen(frozen: bool) {
         }
     }
 }
+#[cfg(test)]
+pub(crate) fn diagnostic_visible_count() -> usize {
+    STATE.with(|s| {
+        s.borrow().as_ref().map_or(0, |r| {
+            r.windows
+                .values()
+                .filter(|p| p.window.get().is_some_and(|w| w.window().is_visible()))
+                .count()
+        })
+    })
+}
 pub(crate) fn active() -> bool {
     STATE.with(|s| s.borrow().as_ref().is_some_and(|s| !s.windows.is_empty()))
 }

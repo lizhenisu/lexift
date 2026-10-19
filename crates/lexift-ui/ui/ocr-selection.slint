@@ -15,6 +15,8 @@ export component OcrSelectionWindow inherits Window {
     in property <string> picker-hex;
     in property <string> picker-rgb;
     in property <int> picker-status;
+    in property <bool> reuse-available;
+    callback reuse-region() -> bool;
     callback color-copy() -> bool;
     forward-focus: keys;
     keys := FocusScope {
@@ -25,6 +27,9 @@ export component OcrSelectionWindow inherits Window {
             }
             if root.screenshot-mode && (event.text == "c" || event.text == "C") && !event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt && !event.modifiers.meta {
                 if root.color-copy() { return accept; }
+            }
+            if root.screenshot-mode && root.reuse-available && (event.text == "r" || event.text == "R") && !event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt && !event.modifiers.meta {
+                if root.reuse-region() { return accept; }
             }
             return reject;
         }
@@ -57,7 +62,7 @@ export component OcrSelectionWindow inherits Window {
         selection-width: root.selection-width; selection-height: root.selection-height;
     }
     if root.screenshot-mode && root.help-visible: ScreenshotHelp {
-        x: root.help-left; y: root.help-top; width: root.help-width; height: root.help-height; stage: 0;
+        x: root.help-left; y: root.help-top; width: root.help-width; height: root.help-height; stage: 0; reuse-available: root.reuse-available;
     }
     if root.screenshot-mode && root.picker-visible: ScreenshotPixelPicker {
         x:root.picker-left;y:root.picker-top;width:root.picker-width;height:root.picker-height;
@@ -73,7 +78,7 @@ export component OcrSelectionWindow inherits Window {
     }
     // Measure in the existing host; first selection needs no texture-preparation HWND.
     measure-size := Text { visible:false; text:root.size-text; font-size:SizeLabelStyle.font-size; }
-    measure-help := ScreenshotHelp { visible:false; stage:0; width:min(400px,max(1px,parent.width - 16px)); }
+    measure-help := ScreenshotHelp { visible:false; stage:0; reuse-available:root.reuse-available; width:min(400px,max(1px,parent.width - 16px)); }
     measure-picker := ScreenshotPixelPicker { visible:false; }
     out property <float> measured-size-width: (measure-size.preferred-width + 2 * SizeLabelStyle.inset) / 1px;
     out property <float> measured-size-height: SizeLabelStyle.label-height / 1px;

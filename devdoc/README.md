@@ -41,6 +41,7 @@
 - [屏幕区域选择基础](features/region-selection.md)
 - [共用屏幕交互宿主](features/screen-interaction.md)
 - [截图模式与临时贴图](features/screenshot-mode.md)
+- [选区历史与区域复用验证](releases/screenshot-region-history.md)
 - [截图模式验证](releases/screenshot-mode-2026-10-13.md)
 - [多贴图输入与生命周期验证](releases/multi-pin-interaction-2026-10-13.md)
 - [剪贴板历史](features/clipboard-history.md)

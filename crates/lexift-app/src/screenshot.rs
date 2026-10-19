@@ -486,6 +486,16 @@ impl ScreenshotRuntime {
                     port.cancel_screenshot_elements(session);
                 }
             }
+            ScreenshotCommand::ReuseRegion {
+                session,
+                host,
+                request,
+                bounds,
+            } => {
+                controller
+                    .ui
+                    .reuse_screenshot_region(session, host, request, bounds);
+            }
             ScreenshotCommand::UpdateElements(result) => {
                 controller.ui.update_screenshot_elements(result);
             }
@@ -552,6 +562,8 @@ impl ScreenshotRuntime {
                                 let result = this.prepare(&request, &cancelled, pointer, session);
                                 match result {
                                     Ok(prepared) => {
+                                        let layout =
+                                            prepared.frames.iter().map(|f| f.bounds).collect();
                                         {
                                             let mut slot = this
                                                 .session
@@ -574,7 +586,7 @@ impl ScreenshotRuntime {
                                         worker_controller.dispatch(AppEvent::Screenshot(
                                             ScreenshotEvent::Prepared {
                                                 session,
-                                                result: Ok(()),
+                                                result: Ok(layout),
                                             },
                                         ));
                                     }

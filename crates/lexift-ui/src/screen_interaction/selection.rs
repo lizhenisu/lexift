@@ -27,6 +27,15 @@ pub(crate) enum HostPhase {
     Capturing,
 }
 pub(crate) enum SelectionEvent {
+    /// Every host has presented complete feedback; initial activation was already attempted.
+    Ready {
+        generation: u64,
+    },
+    ReuseRegion {
+        session: u64,
+        host: u64,
+        request: u64,
+    },
     Cancelled,
     QueryElements(lexift_core::domain::element_candidate::ElementQuery),
     CancelElements {
@@ -51,6 +60,9 @@ struct Registry {
     generation: u64,
     screenshot: bool,
     submitted: bool,
+    reusable: bool,
+    reuse_sequence: u64,
+    reuse_pending: Option<u64>,
     candidates: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
     hover: Option<Rect>,
     presented_hover: Option<Rect>,
@@ -90,6 +102,9 @@ pub(crate) fn init(
             generation: 0,
             screenshot: false,
             submitted: false,
+            reusable: false,
+            reuse_sequence: 0,
+            reuse_pending: None,
             candidates: Vec::new(),
             hover: None,
             presented_hover: None,
@@ -172,6 +187,7 @@ pub(crate) fn set_elements(result: lexift_core::domain::element_candidate::Eleme
             r.screenshot
                 && !r.submitted
                 && !r.gesture.active()
+                && r.reuse_pending.is_none()
                 && r.generation == result.query.session
                 && r.query_host == result.query.host
                 && r.query_pending.as_ref() == Some(&result.query)
@@ -347,6 +363,8 @@ pub(crate) fn close() {
             r.hover_revision = r.hover_revision.wrapping_add(1);
             r.hover_paints.clear();
             r.submitted = false;
+            r.reusable = false;
+            r.reuse_pending = None;
             r.gesture.cancel();
             r.candidates.clear();
             r.elements = Default::default();
@@ -393,14 +411,18 @@ pub(crate) fn show_screenshot_with_candidates(
     frames: Arc<Vec<CapturedRegion>>,
     origin: Option<Option<lexift_core::ports::magnifier::WindowToken>>,
     windows: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
+    reusable: bool,
 ) {
-    show_prepared(generation, frames, origin, Some(windows));
+    show_prepared(generation, frames, origin, Some((windows, reusable)));
 }
 fn show_prepared(
     generation: u64,
     frames: Arc<Vec<CapturedRegion>>,
     origin: Option<Option<lexift_core::ports::magnifier::WindowToken>>,
-    candidates: Option<Vec<lexift_core::domain::window_candidate::WindowCandidate>>,
+    candidates: Option<(
+        Vec<lexift_core::domain::window_candidate::WindowCandidate>,
+        bool,
+    )>,
 ) {
     let started = std::time::Instant::now();
     if !STATE.with(|s| {
@@ -411,12 +433,13 @@ fn show_prepared(
         return;
     }
     close();
-    if let Some(candidates) = candidates {
+    if let Some((candidates, reusable)) = candidates {
         let event = STATE.with(|s| {
             let mut slot = s.borrow_mut();
             let r = slot.as_mut()?;
             r.generation = generation;
             r.candidates = candidates;
+            r.reusable = reusable;
             let p = (r.lifecycle.toolbar_cursor_position)()?;
             point_query(r, p)
         });
@@ -438,6 +461,7 @@ fn show_prepared(
             let window = crate::screen_interaction::create(&r.lifecycle, OcrSelectionWindow::new)
                 .map_err(|_| ())?;
             window.set_screenshot_mode(r.screenshot);
+            window.set_reuse_available(r.reusable);
             let b = frame.bounds;
             let key_weak = window.as_weak();
             let repeat = Rc::new(std::cell::Cell::new(false));
@@ -456,6 +480,11 @@ fn show_prepared(
                     _ => {}
                 }
                 EventResult::Propagate
+            });
+            let reuse_weak = window.as_weak();
+            let reuse_repeat = repeat.clone();
+            window.on_reuse_region(move || {
+                request_reuse(generation, &reuse_weak, reuse_repeat.get())
             });
             window.on_color_copy(move || {
                 let current = STATE.with(|s| {
@@ -828,6 +857,11 @@ fn feedback_presented(
             (true, vec![])
         }
     });
+    if !warm.is_empty() {
+        // Hiding a foreground pin before activation invalidates the original
+        // foreground identity. Retire pins only after this complete host handoff.
+        emit(SelectionEvent::Ready { generation });
+    }
     for weak in warm {
         warm_assets(generation, weak, 0);
     }
@@ -922,7 +956,17 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
     STATE.with(|s| {
         let mut slot = s.borrow_mut();
         let Some(r) = slot.as_mut() else { return };
-        if r.generation != generation || r.submitted || r.windows.is_empty() {
+        if r.generation != generation
+            || r.submitted
+            || r.windows.is_empty()
+            || (r.reuse_pending.is_some()
+                && !matches!(
+                    event,
+                    PopupPointerInput::RightPressed { .. }
+                        | PopupPointerInput::LeftCancelled { .. }
+                        | PopupPointerInput::DismissRequested { .. }
+                ))
+        {
             return;
         }
         let point = |x: f32, y: f32| {
@@ -1050,29 +1094,186 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
         emit(event);
     }
     if let Some(event) = outcome {
-        let retained = matches!(event, SelectionEvent::SelectionSubmitted { .. })
-            && STATE.with(|s| {
-                let mut slot = s.borrow_mut();
-                let Some(r) = slot.as_mut().filter(|r| r.screenshot) else {
-                    return false;
-                };
-                r.submitted = true;
-                r.timer.stop();
-                r.candidates.clear();
-                r.elements = Default::default();
-                r.navigation = Default::default();
-                r.hover = None;
-                r.modified = Rc::new(Cell::new(false));
-                for h in &r.windows {
-                    h.retire_input();
-                }
-                true
-            });
-        if !retained {
-            close();
+        finish_submission(event);
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn diagnostic_feedback(generation: u64) {
+    let hosts = STATE.with(|s| {
+        s.borrow().as_ref().map_or_else(Vec::new, |r| {
+            r.windows
+                .iter()
+                .map(|h| (h.bounds, h.window.as_weak()))
+                .collect()
+        })
+    });
+    for (bounds, weak) in hosts {
+        pointer(generation, bounds, 1., PopupPointerInput::FramePresented);
+        feedback_presented(generation, bounds, weak);
+    }
+}
+#[cfg(test)]
+pub(crate) fn diagnostic_reuse(generation: u64) -> bool {
+    let weak = STATE.with(|s| {
+        s.borrow()
+            .as_ref()
+            .and_then(|r| r.windows.first())
+            .map(|h| h.window.as_weak())
+    });
+    weak.is_some_and(|weak| request_reuse(generation, &weak, false))
+}
+
+#[cfg(test)]
+fn set_reusable(generation: u64, available: bool) {
+    STATE.with(|s| {
+        let mut slot = s.borrow_mut();
+        if let Some(r) = slot
+            .as_mut()
+            .filter(|r| r.generation == generation && r.screenshot)
+        {
+            r.reusable = available;
+            for h in &r.windows {
+                h.window.set_reuse_available(available);
+            }
+            sync_help(r);
         }
+    });
+}
+fn request_reuse(generation: u64, weak: &slint::Weak<OcrSelectionWindow>, repeat: bool) -> bool {
+    let event = STATE.with(|s| {
+        let mut slot = s.borrow_mut();
+        let r = slot.as_mut()?;
+        let window = weak.upgrade()?;
+        if !repeat {
+            tracing::debug!(
+                generation,
+                host = r.query_host,
+                available = r.reusable,
+                submitted = r.submitted,
+                pending = r.reuse_pending.is_some(),
+                ready = r.feedback_hosts.len() == r.windows.len(),
+                dragging = r.gesture.active(),
+                modified = r.modified.get(),
+                "Screenshot region reuse input"
+            );
+        }
+        if r.generation != generation
+            || !r.screenshot
+            || !r.reusable
+            || r.submitted
+            || repeat
+            || r.modified.get()
+            || r.gesture.active()
+            || r.reuse_pending.is_some()
+            || r.windows.is_empty()
+            || r.feedback_hosts.len() != r.windows.len()
+            || !r
+                .windows
+                .iter()
+                .any(|h| std::ptr::eq(h.window.window(), window.window()))
+            || r.lifecycle.annotation_foreground.as_ref().is_some_and(|q| {
+                q().is_none_or(|token| {
+                    !r.windows.iter().any(|h| {
+                        (r.lifecycle.annotation_window_token)(h.window.window()) == Some(token)
+                    })
+                })
+            })
+        {
+            return None;
+        }
+        r.reuse_sequence = r
+            .reuse_sequence
+            .checked_add(1)
+            .expect("selection reuse exhausted");
+        r.reuse_pending = Some(r.reuse_sequence);
+        tracing::debug!(
+            generation,
+            host = r.query_host,
+            request = r.reuse_sequence,
+            "Screenshot region reuse requested"
+        );
+        Some(SelectionEvent::ReuseRegion {
+            session: generation,
+            host: r.query_host,
+            request: r.reuse_sequence,
+        })
+    });
+    let accepted = event.is_some();
+    if let Some(event) = event {
         emit(event);
     }
+    accepted
+}
+/// Apply only to the idle host that issued this request, retaining the complete
+/// selection picture until the editor's first frame retires it.
+pub(crate) fn apply_reused_region(generation: u64, host: u64, request: u64, bounds: Option<Rect>) {
+    let selection = STATE.with(|s| {
+        let mut slot = s.borrow_mut();
+        let r = slot.as_mut().filter(|r| {
+            r.generation == generation
+                && r.query_host == host
+                && r.reuse_pending == Some(request)
+                && r.screenshot
+                && !r.submitted
+        })?;
+        r.reuse_pending = None;
+        if r.gesture.active() {
+            return None;
+        }
+        let bounds = bounds?;
+        r.hover = Some(bounds);
+        sync_region(r);
+        Some(
+            lexift_core::domain::region_selection::RegionSelectionResult {
+                context: SelectionContext::standalone(generation),
+                bounds,
+            },
+        )
+    });
+    tracing::debug!(
+        generation,
+        host,
+        request,
+        applied = selection.is_some(),
+        available = bounds.is_some(),
+        "Screenshot region reuse result"
+    );
+    if let Some(selection) = selection {
+        finish_submission(SelectionEvent::SelectionSubmitted { selection });
+    }
+}
+
+fn finish_submission(event: SelectionEvent) {
+    if matches!(event, SelectionEvent::SelectionSubmitted { .. }) {
+        let cancelled = STATE.with(|s| s.borrow_mut().as_mut().and_then(cancel_query));
+        if let Some(cancelled) = cancelled {
+            emit(cancelled);
+        }
+    }
+    let retained = matches!(event, SelectionEvent::SelectionSubmitted { .. })
+        && STATE.with(|s| {
+            let mut slot = s.borrow_mut();
+            let Some(r) = slot.as_mut().filter(|r| r.screenshot) else {
+                return false;
+            };
+            r.submitted = true;
+            r.reuse_pending = None;
+            r.timer.stop();
+            r.candidates.clear();
+            r.elements = Default::default();
+            r.navigation = Default::default();
+            r.hover = None;
+            r.modified = Rc::new(Cell::new(false));
+            for h in &r.windows {
+                h.retire_input();
+            }
+            true
+        });
+    if !retained {
+        close();
+    }
+    emit(event);
 }
 
 fn sync_region(r: &mut Registry) {
@@ -1369,6 +1570,149 @@ mod tests {
                 pixels: vec![255; 100 * 100 * 4],
             },
         ])
+    }
+    #[test]
+    fn pin_retirement_follows_activation_and_does_not_authorize_external_foregrounds() {
+        use lexift_core::ports::magnifier::WindowToken;
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        thread_local! {
+            static FRONT: Cell<isize> = const { Cell::new(17) };
+            static ACTIVATIONS: Cell<u32> = const { Cell::new(0) };
+        }
+        let prepare_case = |session, current| {
+            FRONT.set(current);
+            ACTIVATIONS.set(0);
+            let mut l = lifecycle();
+            l.toolbar_cursor_position = Rc::new(|| Some(Point { x: 20, y: 20 }));
+            l.annotation_foreground = Some(Rc::new(|| Some(WindowToken(FRONT.get()))));
+            l.annotation_window_token = Rc::new(|_| Some(WindowToken(101)));
+            l.activate_user_requested_window = |_| {
+                FRONT.set(101);
+                ACTIVATIONS.set(ACTIVATIONS.get() + 1);
+                true
+            };
+            init(|_| PassiveWindowPreparation::Ready, l);
+            sync(session, HostPhase::Capturing);
+            set_screenshot(true);
+            show_with_origin(session, frames(), Some(Some(WindowToken(17))));
+        };
+        let retired = Rc::new(Cell::new(0));
+        for (session, current, expected) in [(501, 17, 1), (502, 900, 0)] {
+            prepare_case(session, current);
+            let count = retired.clone();
+            set_handler(Rc::new(move |event| {
+                if let SelectionEvent::Ready { generation } = event {
+                    assert_eq!(generation, session);
+                    // Simulate native hide falling back to the application's main
+                    // window only if the retired pin still owns the foreground.
+                    if FRONT.get() == 17 {
+                        FRONT.set(18);
+                    }
+                    count.set(count.get() + 1);
+                }
+            }));
+            let before = retired.get();
+            diagnostic_feedback(session - 1);
+            assert_eq!(retired.get(), before);
+            diagnostic_feedback(session);
+            assert_eq!(ACTIVATIONS.get(), expected);
+            assert_eq!(FRONT.get(), if expected == 1 { 101 } else { 900 });
+            assert_eq!(retired.get(), before + 1);
+            diagnostic_feedback(session);
+            assert_eq!(retired.get(), before + 1);
+            close();
+            diagnostic_feedback(session);
+            assert_eq!(retired.get(), before + 1);
+        }
+    }
+    #[test]
+    fn reuse_routes_only_idle_ready_owned_hosts_and_retires_through_shared_submit() {
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        init(|_| PassiveWindowPreparation::Ready, lifecycle());
+        sync(301, HostPhase::Capturing);
+        set_screenshot(true);
+        show(301, frames());
+        let weak = STATE.with(|s| s.borrow().as_ref().unwrap().windows[0].window.as_weak());
+        let submissions = Rc::new(RefCell::new(Vec::new()));
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let out = submissions.clone();
+        let requests = events.clone();
+        set_handler(Rc::new(move |event| match event {
+            SelectionEvent::SelectionSubmitted { selection } => {
+                out.borrow_mut().push(selection.bounds)
+            }
+            SelectionEvent::ReuseRegion {
+                session,
+                host,
+                request,
+            } => requests.borrow_mut().push((session, host, request)),
+            _ => {}
+        }));
+        set_reusable(301, true);
+        assert!(weak.upgrade().unwrap().get_reuse_available());
+        assert!(!request_reuse(301, &weak, false)); // No complete feedback yet.
+        STATE.with(|s| {
+            s.borrow_mut().as_mut().unwrap().feedback_hosts =
+                frames().iter().map(|f| f.bounds).collect()
+        });
+        assert!(!request_reuse(301, &weak, true));
+        STATE.with(|s| s.borrow().as_ref().unwrap().modified.set(true));
+        assert!(!request_reuse(301, &weak, false));
+        STATE.with(|s| s.borrow().as_ref().unwrap().modified.set(false));
+        pointer(
+            301,
+            frames()[0].bounds,
+            1.,
+            PopupPointerInput::LeftPressed { x: 10., y: 10. },
+        );
+        assert!(!request_reuse(301, &weak, false));
+        STATE.with(|s| s.borrow_mut().as_mut().unwrap().gesture.cancel());
+        set_reusable(301, false);
+        assert!(!request_reuse(301, &weak, false));
+        set_reusable(301, true);
+        assert!(request_reuse(301, &weak, false));
+        assert!(!request_reuse(301, &weak, false));
+        let (session, host, request) = events.borrow()[0];
+        apply_reused_region(session, host, request, None); // Rejection unlocks input.
+        assert!(request_reuse(301, &weak, false));
+        let (session, host, request) = events.borrow()[1];
+        let expected = Rect {
+            left: -70,
+            top: 10,
+            right: 60,
+            bottom: 80,
+        };
+        apply_reused_region(session - 1, host, request, Some(expected));
+        apply_reused_region(session, host + 1, request, Some(expected));
+        apply_reused_region(session, host, request - 1, Some(expected));
+        assert!(submissions.borrow().is_empty());
+        pointer(
+            301,
+            frames()[0].bounds,
+            1.,
+            PopupPointerInput::LeftPressed { x: 10., y: 10. },
+        );
+        STATE.with(|s| assert!(!s.borrow().as_ref().unwrap().gesture.active()));
+        apply_reused_region(session, host, request, Some(expected));
+        apply_reused_region(session, host, request, Some(expected));
+        assert_eq!(*submissions.borrow(), vec![expected]);
+        assert!(!active());
+        assert!(!request_reuse(301, &weak, false));
+        STATE.with(|s| {
+            let slot = s.borrow();
+            let r = slot.as_ref().unwrap();
+            assert!(r.submitted && r.query_pending.is_none());
+            assert_eq!(r.scheduled_hover, Some(expected));
+            assert!(r.windows.iter().all(|h| h.window.get_selecting()));
+        });
+        finish_selection(301);
+        sync(302, HostPhase::Capturing);
+        set_screenshot(true);
+        show(302, frames());
+        apply_reused_region(session, host, request, Some(expected));
+        assert!(!request_reuse(301, &weak, false));
+        assert_eq!(submissions.borrow().len(), 1);
+        close();
     }
     #[test]
     fn presented_frame_activates_only_the_requested_host_once_and_rejects_stale_sessions() {

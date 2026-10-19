@@ -1818,3 +1818,7 @@ msgstr "Rueda"
 
 msgid "Scroll to switch regions"
 msgstr "Desplaza para cambiar de región"
+
+#: ui/screenshot-help.slint
+msgid "Reuse last region"
+msgstr "Reutilizar la última región"

@@ -68,6 +68,12 @@ pub(crate) fn sync(state: &ScreenshotState) {
         let changed = slot.state.error != state.error
             || slot.state.session != state.session
             || slot.state.operation != state.operation;
+        if slot.state.session != state.session || slot.state.phase != state.phase {
+            tracing::debug!(session=state.session, operation=state.operation,
+                previous=?slot.state.phase, phase=?state.phase,
+                history=state.last_region.is_some(), reusable=state.reusable_region().is_some(),
+                "Screenshot view phase changed");
+        }
         slot.state = state.clone();
         changed && state.error.is_some()
     });
@@ -194,7 +200,6 @@ pub(crate) fn show(
     }
     crate::screen_interaction::size_label::clear();
     crate::screen_interaction::screenshot_help::clear();
-    crate::pinned_screenshot::set_frozen(true);
     FLOW.with(|s| s.borrow_mut().frames = Some(frames.clone()));
     crate::screen_interaction::pixel_picker::begin(
         id,
@@ -212,6 +217,29 @@ pub(crate) fn show(
     );
     selection_host::set_screenshot(true);
     selection_host::set_handler(Rc::new(move |event| match event {
+        selection_host::SelectionEvent::Ready { generation } => {
+            if generation == id
+                && FLOW.with(|s| {
+                    let s = s.borrow();
+                    s.state.session == id
+                        && s.state.phase == ScreenshotPhase::Selecting
+                        && s.recovery.is_some()
+                })
+            {
+                crate::pinned_screenshot::set_frozen(true);
+            }
+        }
+        selection_host::SelectionEvent::ReuseRegion {
+            session,
+            host,
+            request,
+        } => {
+            emit(ScreenshotEvent::ReuseRegion {
+                session,
+                host,
+                request,
+            });
+        }
         selection_host::SelectionEvent::QueryElements(query) => {
             emit(ScreenshotEvent::QueryElements(query))
         }
@@ -224,6 +252,9 @@ pub(crate) fn show(
         }
         selection_host::SelectionEvent::SelectionSubmitted { selection } => {
             let activation = current_focus_origin();
+            // A quick pointer selection can submit before every monitor reports
+            // feedback. Its own input window is now active, so pin retirement is safe.
+            crate::pinned_screenshot::set_frozen(true);
             emit(ScreenshotEvent::Selected {
                 session: id,
                 bounds: selection.bounds,
@@ -262,7 +293,8 @@ pub(crate) fn show(
     selection_host::sync(id, selection_host::HostPhase::Capturing);
     let frames = FLOW.with(|s| s.borrow().frames.clone().unwrap());
     let origin = FLOW.with(|s| s.borrow().activation);
-    selection_host::show_screenshot_with_candidates(id, frames, origin, windows);
+    let reusable = FLOW.with(|s| s.borrow().state.reusable_region().is_some());
+    selection_host::show_screenshot_with_candidates(id, frames, origin, windows, reusable);
 }
 pub(crate) fn cancel() {
     let id = FLOW.with(|s| s.borrow().state.session);

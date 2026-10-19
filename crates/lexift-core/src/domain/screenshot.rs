@@ -52,6 +52,12 @@ pub enum ScreenshotOutput {
     Save,
     Pin,
 }
+/// Geometry only: no pixels, document, or persisted screenshot history.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LastRegion {
+    pub bounds: Rect,
+    pub layout: Vec<Rect>,
+}
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ScreenshotState {
     pub session: u64,
@@ -59,6 +65,9 @@ pub struct ScreenshotState {
     pub phase: ScreenshotPhase,
     pub operation: u64,
     pub bounds: Option<Rect>,
+    pub layout: Vec<Rect>,
+    pub last_region: Option<LastRegion>,
+    pub reuse_sequence: u64,
     pub error: Option<String>,
     pub ocr_result: Option<OcrOutcome>,
     pub element_sequence: u64,
@@ -68,12 +77,31 @@ pub struct ScreenshotState {
     pub color_result: Option<ColorResult>,
 }
 impl ScreenshotState {
+    /// Physical layout equality ignores enumeration order and logical DPI.
+    pub fn reusable_region(&self) -> Option<Rect> {
+        let last = self.last_region.as_ref()?;
+        if self.phase != ScreenshotPhase::Selecting || self.layout.is_empty() {
+            return None;
+        }
+        let normalize = |layout: &[Rect]| {
+            let mut layout = layout.to_vec();
+            layout.sort_by_key(|r| (r.left, r.top, r.right, r.bottom));
+            layout.dedup();
+            layout
+        };
+        (normalize(&last.layout) == normalize(&self.layout)).then_some(last.bounds)
+    }
     pub fn active(&self) -> bool {
         self.phase != ScreenshotPhase::Idle
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotEvent {
+    ReuseRegion {
+        session: u64,
+        host: u64,
+        request: u64,
+    },
     Recognize {
         session: u64,
         bounds: Rect,
@@ -102,7 +130,7 @@ pub enum ScreenshotEvent {
     Requested(ExportRequest),
     Prepared {
         session: u64,
-        result: Result<()>,
+        result: Result<Vec<Rect>>,
     },
     Selected {
         session: u64,
@@ -129,6 +157,12 @@ pub enum ScreenshotEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotCommand {
+    ReuseRegion {
+        session: u64,
+        host: u64,
+        request: u64,
+        bounds: Option<Rect>,
+    },
     QueryElements(super::element_candidate::ElementQuery),
     UpdateElements(super::element_candidate::ElementQueryResult),
     CancelElements {
@@ -165,6 +199,22 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
     let command = |command| vec![AppCommand::Screenshot(command)];
     let s = &mut state.screenshot;
     match event {
+        ScreenshotEvent::ReuseRegion {
+            session,
+            host,
+            request,
+        } if s.session == session
+            && s.phase == ScreenshotPhase::Selecting
+            && request > s.reuse_sequence =>
+        {
+            s.reuse_sequence = request;
+            command(ScreenshotCommand::ReuseRegion {
+                session,
+                host,
+                request,
+                bounds: s.reusable_region(),
+            })
+        }
         ScreenshotEvent::Recognize { session, bounds }
             if s.session == session
                 && s.phase == ScreenshotPhase::Editing
@@ -262,6 +312,8 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.element_sequence = 0;
             s.element_pending = None;
             s.operation = 0;
+            s.layout.clear();
+            s.reuse_sequence = 0;
             s.ocr_result = None;
             s.bounds = None;
             s.error = None;
@@ -300,7 +352,8 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             if s.session == session && s.phase == ScreenshotPhase::Preparing =>
         {
             match result {
-                Ok(()) => {
+                Ok(layout) => {
+                    s.layout = layout;
                     s.phase = ScreenshotPhase::Selecting;
                     command(ScreenshotCommand::Show { session })
                 }
@@ -359,6 +412,12 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         {
             match result {
                 Ok(SaveOutcome::Saved) => {
+                    if let Some(bounds) = s.bounds.filter(|_| !s.layout.is_empty()) {
+                        s.last_region = Some(LastRegion {
+                            bounds,
+                            layout: s.layout.clone(),
+                        });
+                    }
                     s.phase = ScreenshotPhase::Idle;
                     command(ScreenshotCommand::Restore { session })
                 }
@@ -442,6 +501,170 @@ mod tests {
         s
     }
     #[test]
+    fn last_region_records_only_successful_image_outputs_and_uses_final_bounds() {
+        for kind in [
+            ScreenshotOutput::Copy,
+            ScreenshotOutput::Save,
+            ScreenshotOutput::Pin,
+        ] {
+            let mut s = begin();
+            let previous = LastRegion {
+                bounds: bounds(),
+                layout: vec![bounds()],
+            };
+            s.screenshot.last_region = Some(previous.clone());
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
+                session: 1,
+                result: Ok(vec![bounds()]),
+            }));
+            let adjusted = Rect {
+                left: -50,
+                top: -20,
+                right: 90,
+                bottom: 80,
+            };
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::Selected {
+                session: 1,
+                bounds: adjusted,
+            }));
+            for (operation, result) in [
+                (1, Err(crate::Error::new("fixture"))),
+                (2, Ok(SaveOutcome::Cancelled)),
+                (3, Ok(SaveOutcome::Saved)),
+            ] {
+                s.reduce(AppEvent::Screenshot(ScreenshotEvent::Output {
+                    session: 1,
+                    operation,
+                    kind,
+                    request: request(1, operation, adjusted),
+                }));
+                s.reduce(AppEvent::Screenshot(ScreenshotEvent::Completed {
+                    session: 99,
+                    operation,
+                    result: Ok(SaveOutcome::Saved),
+                }));
+                assert_eq!(s.screenshot.last_region, Some(previous.clone()));
+                // Geometry cannot change after the output snapshot was frozen.
+                s.reduce(AppEvent::Screenshot(ScreenshotEvent::Selected {
+                    session: 1,
+                    bounds: bounds(),
+                }));
+                s.reduce(AppEvent::Screenshot(ScreenshotEvent::Completed {
+                    session: 1,
+                    operation,
+                    result,
+                }));
+                assert_eq!(
+                    s.screenshot.last_region.as_ref().unwrap().bounds,
+                    if operation == 3 { adjusted } else { bounds() }
+                );
+            }
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::Requested(request(
+                42,
+                1,
+                bounds(),
+            ))));
+            assert_eq!(s.screenshot.session, 2);
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
+                session: 2,
+                result: Ok(vec![bounds()]),
+            }));
+            assert_eq!(s.screenshot.reusable_region(), Some(adjusted));
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::Cancelled {
+                session: 2,
+            }));
+            assert_eq!(s.screenshot.last_region.unwrap().bounds, adjusted);
+        }
+    }
+    #[test]
+    fn reuse_layout_is_physical_order_independent_and_requests_are_scoped() {
+        let mut s = begin();
+        let left = Rect {
+            left: -300,
+            top: -50,
+            right: -100,
+            bottom: 100,
+        };
+        let saved = LastRegion {
+            bounds: bounds(),
+            layout: vec![left, bounds()],
+        };
+        s.screenshot.last_region = Some(saved.clone());
+        assert_eq!(s.screenshot.reusable_region(), None);
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
+            session: 1,
+            result: Ok(vec![bounds(), left]),
+        }));
+        assert_eq!(s.screenshot.reusable_region(), Some(bounds()));
+        let event = ScreenshotEvent::ReuseRegion {
+            session: 1,
+            host: 12,
+            request: 1,
+        };
+        assert!(
+            matches!(s.reduce(AppEvent::Screenshot(event.clone())).as_slice(),
+            [AppCommand::Screenshot(ScreenshotCommand::ReuseRegion { session: 1, host: 12, request: 1, bounds: Some(b) })] if *b == bounds())
+        );
+        assert!(s.reduce(AppEvent::Screenshot(event)).is_empty());
+        assert!(
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::ReuseRegion {
+                session: 0,
+                host: 12,
+                request: 2
+            }))
+            .is_empty()
+        );
+        s.screenshot.layout = vec![bounds()];
+        assert_eq!(s.screenshot.reusable_region(), None);
+        assert!(matches!(
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::ReuseRegion {
+                session: 1,
+                host: 12,
+                request: 2
+            }))
+            .as_slice(),
+            [AppCommand::Screenshot(ScreenshotCommand::ReuseRegion {
+                bounds: None,
+                ..
+            })]
+        ));
+        s.screenshot.layout = vec![left, bounds()];
+        assert_eq!(s.screenshot.reusable_region(), Some(bounds()));
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::Selected {
+            session: 1,
+            bounds: bounds(),
+        }));
+        assert!(
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::ReuseRegion {
+                session: 1,
+                host: 12,
+                request: 3
+            }))
+            .is_empty()
+        );
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::CopyColor {
+            session: 1,
+            point: Point { x: 0, y: 0 },
+            color: Rgb(1, 2, 3),
+        }));
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::ColorCopied {
+            session: 1,
+            request: 1,
+            result: Ok(()),
+        }));
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::Recognize {
+            session: 1,
+            bounds: bounds(),
+        }));
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::Recognized {
+            session: 1,
+            operation: s.screenshot.operation,
+            outcome: OcrOutcome::Copied,
+        }));
+        assert_eq!(s.screenshot.last_region, Some(saved));
+        assert_eq!(ScreenshotState::default().last_region, None);
+    }
+    #[test]
     fn point_queries_replace_pending_and_ignore_cancelled_or_late_results() {
         use super::super::{
             element_candidate::{ElementQuery, ElementQueryResult},
@@ -477,7 +700,7 @@ mod tests {
         );
         state.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
             session: 1,
-            result: Ok(()),
+            result: Ok(vec![bounds()]),
         }));
         assert!(
             !state
@@ -525,7 +748,7 @@ mod tests {
             let mut s = begin();
             s.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
                 session: 1,
-                result: Ok(()),
+                result: Ok(vec![bounds()]),
             }));
             s.reduce(AppEvent::Screenshot(ScreenshotEvent::Selected {
                 session: 1,
@@ -595,7 +818,7 @@ mod tests {
         let mut s = begin();
         s.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
             session: 1,
-            result: Ok(()),
+            result: Ok(vec![bounds()]),
         }));
         s.reduce(AppEvent::Screenshot(ScreenshotEvent::Selected {
             session: 1,
@@ -634,7 +857,7 @@ mod tests {
         let mut s = begin();
         s.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
             session: 1,
-            result: Ok(()),
+            result: Ok(vec![bounds()]),
         }));
         let event = ScreenshotEvent::CopyColor {
             session: 1,
@@ -709,7 +932,7 @@ mod tests {
         assert!(
             s.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
                 session: 1,
-                result: Ok(())
+                result: Ok(vec![bounds()])
             }))
             .is_empty()
         );
@@ -744,7 +967,7 @@ mod tests {
         let mut s = begin();
         s.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
             session: 1,
-            result: Ok(()),
+            result: Ok(vec![bounds()]),
         }));
         s.reduce(AppEvent::Screenshot(ScreenshotEvent::Selected {
             session: 1,
@@ -823,7 +1046,7 @@ mod tests {
         let mut s = begin();
         s.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
             session: 1,
-            result: Ok(()),
+            result: Ok(vec![bounds()]),
         }));
         s.reduce(AppEvent::Screenshot(ScreenshotEvent::Selected {
             session: 1,

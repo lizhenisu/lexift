@@ -1818,3 +1818,7 @@ msgstr "Mausrad"
 
 msgid "Scroll to switch regions"
 msgstr "Scrollen, um Bereiche zu wechseln"
+
+#: ui/screenshot-help.slint
+msgid "Reuse last region"
+msgstr "Letzten Bereich wiederverwenden"

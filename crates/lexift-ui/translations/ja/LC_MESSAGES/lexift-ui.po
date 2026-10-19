@@ -1818,3 +1818,7 @@ msgstr "ホイール"
 
 msgid "Scroll to switch regions"
 msgstr "スクロールして領域を切り替え"
+
+#: ui/screenshot-help.slint
+msgid "Reuse last region"
+msgstr "前回の範囲を再利用"

@@ -47,6 +47,14 @@ pub(crate) trait ViewPort: Send + Sync {
     ) {
         ready(Ok(None));
     }
+    fn reuse_screenshot_region(
+        &self,
+        _session: u64,
+        _host: u64,
+        _request: u64,
+        _bounds: Option<Rect>,
+    ) {
+    }
     fn update_screenshot_elements(
         &self,
         _result: lexift_core::domain::element_candidate::ElementQueryResult,
@@ -144,6 +152,9 @@ impl ViewPort for lexift_ui::UiHandle {
         ready: Box<dyn FnOnce(lexift_core::Result<Option<Point>>) + Send>,
     ) {
         self.suspend_for_screenshot(session, ready);
+    }
+    fn reuse_screenshot_region(&self, session: u64, host: u64, request: u64, bounds: Option<Rect>) {
+        self.reuse_screenshot_region(session, host, request, bounds);
     }
     fn update_screenshot_elements(
         &self,
