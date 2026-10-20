@@ -509,6 +509,11 @@ impl UiHandle {
         let _ =
             slint::invoke_from_event_loop(move || crate::annotation::screenshot::restore(session));
     }
+    pub fn long_screenshot(&self, command: lexift_core::domain::long_capture::workflow::Command) {
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::annotation::screenshot::long::execute(command)
+        });
+    }
     pub fn show_screenshot_capture(
         &self,
         session: u64,

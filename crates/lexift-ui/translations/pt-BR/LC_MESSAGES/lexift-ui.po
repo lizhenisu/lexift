@@ -1822,3 +1822,60 @@ msgstr "Role para alternar regiões"
 #: ui/screenshot-help.slint
 msgid "Reuse last region"
 msgstr "Reutilizar a última área"
+
+msgid "Long screenshot"
+msgstr "Captura com rolagem"
+
+msgid "Clear screenshot annotations and start long capture?"
+msgstr "Limpar as anotações e iniciar a captura com rolagem?"
+
+msgid "Scroll down inside the selected area. Exclude fixed headers."
+msgstr "Role para baixo na seleção. Exclua os cabeçalhos fixos."
+
+msgid "Continue"
+msgstr "Continuar"
+
+msgid "Pause"
+msgstr "Pausar"
+
+msgid "Finish"
+msgstr "Concluir"
+
+msgid "Preparing long image"
+msgstr "Preparando imagem longa"
+
+msgid "Capture paused"
+msgstr "Captura pausada"
+
+msgid "Cannot match this frame. Scroll back to the last captured area."
+msgstr "Não foi possível alinhar esta imagem. Volte à última área capturada."
+
+msgid "Image limit reached. Finish the current capture."
+msgstr "Limite da imagem atingido. Conclua a captura atual."
+
+msgid "Scroll down to extend the image"
+msgstr "Role para baixo para ampliar a imagem"
+
+msgid "Long capture unavailable. Select a smaller scrolling area."
+msgstr "Captura com rolagem indisponível. Selecione uma área menor."
+
+msgid "Fit image"
+msgstr "Ajustar imagem"
+
+msgid "Zoom out"
+msgstr "Reduzir"
+
+msgid "Zoom in"
+msgstr "Ampliar"
+
+msgid "Edit"
+msgstr "Editar"
+
+msgid "Fit width"
+msgstr "Ajustar à largura"
+
+msgid "Long image ready"
+msgstr "Imagem longa pronta"
+
+msgid "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
+msgstr "Roda: zoom · Arrastar: mover · Espaço: editar/mover · Ctrl+0: ajustar imagem"

@@ -8,6 +8,8 @@ mod crops;
 #[cfg(test)]
 pub(crate) mod diagnostics;
 pub(crate) mod elements;
+#[cfg(test)]
+mod long_capture_native;
 pub(crate) mod regions;
 mod runtime;
 

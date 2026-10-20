@@ -1822,3 +1822,60 @@ msgstr "スクロールして領域を切り替え"
 #: ui/screenshot-help.slint
 msgid "Reuse last region"
 msgstr "前回の範囲を再利用"
+
+msgid "Long screenshot"
+msgstr "スクロール撮影"
+
+msgid "Clear screenshot annotations and start long capture?"
+msgstr "注釈を消去してスクロール撮影を開始しますか？"
+
+msgid "Scroll down inside the selected area. Exclude fixed headers."
+msgstr "選択範囲内で下にスクロールしてください。固定ヘッダーは除外してください。"
+
+msgid "Continue"
+msgstr "続行"
+
+msgid "Pause"
+msgstr "一時停止"
+
+msgid "Finish"
+msgstr "完了"
+
+msgid "Preparing long image"
+msgstr "長い画像を準備中"
+
+msgid "Capture paused"
+msgstr "撮影を一時停止中"
+
+msgid "Cannot match this frame. Scroll back to the last captured area."
+msgstr "画面を照合できません。最後に撮影した範囲まで戻してください。"
+
+msgid "Image limit reached. Finish the current capture."
+msgstr "画像の上限に達しました。撮影を完了してください。"
+
+msgid "Scroll down to extend the image"
+msgstr "下にスクロールして画像を延長"
+
+msgid "Long capture unavailable. Select a smaller scrolling area."
+msgstr "スクロール撮影を開始できません。小さい範囲を選択してください。"
+
+msgid "Fit image"
+msgstr "全体表示"
+
+msgid "Zoom out"
+msgstr "縮小"
+
+msgid "Zoom in"
+msgstr "拡大"
+
+msgid "Edit"
+msgstr "編集"
+
+msgid "Fit width"
+msgstr "幅に合わせる"
+
+msgid "Long image ready"
+msgstr "長い画像の準備完了"
+
+msgid "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
+msgstr "ホイール：拡大縮小 · ドラッグ：移動 · スペース：編集／移動 · Ctrl+0：画像全体を表示"

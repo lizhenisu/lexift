@@ -323,6 +323,10 @@ impl<C: ComponentHandle> Slot<C> {
     pub fn cancel_position(&self) {
         self.placement.stop();
     }
+    pub fn cancel_scheduled(&self) {
+        self.preparation.stop();
+        self.placement.stop();
+    }
 }
 
 impl<C: ComponentHandle> Drop for Slot<C> {

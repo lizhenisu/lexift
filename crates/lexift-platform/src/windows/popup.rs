@@ -1701,6 +1701,27 @@ pub(crate) fn configure_hint_input(
     }
     Ok(())
 }
+/// Live capture feedback uses the existing native RGBA presenter, so layered cross-process
+/// hit-test transparency must survive Winit's show and geometry style rewrites.
+pub(crate) fn configure_capture_feedback(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    configure_capture_feedback_hwnd(required_hwnd(window)?)
+}
+pub(super) fn configure_capture_feedback_hwnd(
+    hwnd: windows::Win32::Foundation::HWND,
+) -> lexift_core::Result<()> {
+    use windows::Win32::UI::{Shell::SetWindowSubclass, WindowsAndMessaging::*};
+    if !unsafe { SetWindowSubclass(hwnd, Some(hint_input_proc), HINT_INPUT_SUBCLASS, 1) }.as_bool()
+    {
+        return Err(lexift_core::Error::new(
+            "Could not protect capture feedback input",
+        ));
+    }
+    configure_hwnd_extended_style(hwnd, |style| {
+        style | (WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW).0 as isize
+    })
+}
 const HINT_INPUT_SUBCLASS: usize = 0x4c584849;
 unsafe extern "system" fn hint_input_proc(
     hwnd: windows::Win32::Foundation::HWND,
@@ -1719,6 +1740,13 @@ unsafe extern "system" fn hint_input_proc(
     };
     unsafe {
         match message {
+            WM_STYLECHANGING if _data == 1 && wparam.0 as i32 == GWL_EXSTYLE.0 => {
+                let styles = lparam.0 as *mut STYLESTRUCT;
+                if !styles.is_null() {
+                    (*styles).styleNew |=
+                        (WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW).0;
+                }
+            }
             WM_STYLECHANGING if wparam.0 as i32 == GWL_STYLE.0 => {
                 let styles = lparam.0 as *mut STYLESTRUCT;
                 if !styles.is_null() {

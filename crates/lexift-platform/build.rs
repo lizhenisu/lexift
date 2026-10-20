@@ -6,8 +6,13 @@ const CURSOR_SIZES: [u32; 3] = [32, 48, 64];
 const SUPERSAMPLE: u32 = 4;
 
 fn main() {
+    for name in ["annotation-corner-radius", "image-grab", "image-grabbing"] {
+        build_cursor(name);
+    }
+}
+fn build_cursor(name: &str) {
     let source = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap())
-        .join("assets/annotation-corner-radius.svg");
+        .join(format!("assets/{name}.svg"));
     println!("cargo:rerun-if-changed={}", source.display());
 
     let svg = fs::read_to_string(&source).expect("read annotation cursor SVG");
@@ -21,11 +26,8 @@ fn main() {
     let output = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     for size in CURSOR_SIZES {
         let rgba = render_cursor(&tree, size);
-        fs::write(
-            output.join(format!("annotation-corner-radius-{size}.rgba")),
-            rgba,
-        )
-        .expect("write annotation cursor raster");
+        fs::write(output.join(format!("{name}-{size}.rgba")), rgba)
+            .expect("write annotation cursor raster");
     }
 }
 

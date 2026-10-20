@@ -25,5 +25,6 @@ pub mod screen_snapshot;
 
 pub mod service_provider;
 
+pub mod long_capture;
 pub mod pinned_image;
 pub mod screenshot;

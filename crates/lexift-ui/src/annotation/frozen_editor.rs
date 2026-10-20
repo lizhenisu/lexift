@@ -25,6 +25,10 @@ fn input(r: &Registry, index: usize) -> Option<screenshot_preview::Input> {
     let editing = r.screenshot.as_ref()?;
     let layer = r.canvas_state.canvases.get(index)?;
     let mut snapshot = export::snapshot_at(r, layer.bounds, layer.scale())?;
+    if screenshot::long::image_editing() {
+        snapshot.scale = 1.;
+        snapshot.monitors = vec![(layer.bounds, 1.)];
+    }
     if let Some((id, _)) = editing.pin {
         pin_editor::source_metadata(id, &mut snapshot);
     }
@@ -52,8 +56,10 @@ fn input(r: &Registry, index: usize) -> Option<screenshot_preview::Input> {
             })
             .and_then(|_| screenshot::picker_feedback(r)),
         hovered: r.hovered,
-        crop_handles: r.document.mode.is_mouse() && editing.pin.is_none(),
-        crop_border: editing.pin.is_none(),
+        crop_handles: r.document.mode.is_mouse()
+            && editing.pin.is_none()
+            && !screenshot::long::image_editing(),
+        crop_border: editing.pin.is_none() && !screenshot::long::image_editing(),
         erase: r
             .document
             .session
@@ -65,6 +71,11 @@ pub(super) fn frame(r: &Registry, index: usize) -> Option<tiny_skia::Pixmap> {
     screenshot_preview::paint(&input(r, index)?, &AtomicBool::new(false))
 }
 pub(super) fn render(r: &mut Registry) {
+    if screenshot::long::busy()
+        || screenshot::long::image_editing() && screenshot::long::editor().is_none()
+    {
+        return;
+    }
     pin_editor::sync_watermark_anchor(r);
     screenshot::sync_region_feedback(r);
     let inputs = (0..r.canvas_state.canvases.len())
@@ -124,6 +135,19 @@ pub(super) fn present(
         else {
             return;
         };
+        // Capture suspension and image-view replacement retire the previous frame owners.
+        // Validate those identities even for failed jobs, before reporting a session failure.
+        if screenshot::long::busy()
+            || labels.len() != r.canvas_state.canvases.len()
+            || r.canvas_state
+                .canvases
+                .iter()
+                .zip(&labels)
+                .any(|(c, (revision, _))| c.revision() != *revision)
+            || (frames.is_none() && revision < editing.revision)
+        {
+            return;
+        }
         let Some(frames) = frames else {
             failed = true;
             return;
@@ -136,6 +160,32 @@ pub(super) fn present(
             };
             editing.presented = revision;
             crate::pinned_screenshot::present_edit(pin, image, controls);
+            return;
+        }
+        if screenshot::long::image_editing() {
+            if let Some(window) = screenshot::long::editor() {
+                let mut frames = frames.into_iter();
+                if let (Some(base), Some(controls)) = (frames.next(), frames.next()) {
+                    editing.presented = revision;
+                    let as_image = |p: tiny_skia::Pixmap| {
+                        slint::Image::from_rgba8_premultiplied(slint::SharedPixelBuffer::<
+                            slint::Rgba8Pixel,
+                        >::clone_from_slice(
+                            p.data(), p.width(), p.height()
+                        ))
+                    };
+                    window.set_frame(as_image(base));
+                    window.set_controls(as_image(controls));
+                    if let Some(canvas) = r.canvas_state.canvases.first() {
+                        let canvas_revision = canvas.revision();
+                        slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                            if canvas_current(generation, 0, canvas_revision) {
+                                screenshot::long::editor_presented(id);
+                            }
+                        });
+                    }
+                }
+            }
             return;
         }
         if frames.len() != r.canvas_state.canvases.len() {
@@ -174,6 +224,7 @@ pub(super) fn present(
     }
 }
 fn report_failure(id: u64) {
+    tracing::debug!(session = id, "Frozen editor presentation failed");
     if let Some((pin, edit)) = pin_editor::current().filter(|p| p.1 == id) {
         emit_pin(lexift_core::domain::pinned_image::Event::EditFailed {
             id: pin,

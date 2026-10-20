@@ -29,6 +29,9 @@ fn current(r: &Registry, generation: u64, owner: Owner) -> bool {
         }
 }
 fn allowed(r: &Registry) -> bool {
+    if super::long::busy() || super::long::image_editing() {
+        return false;
+    }
     r.screenshot.as_ref().is_some_and(|e| {
         e.pin.is_none()
             && !e.region.dragging()
@@ -131,6 +134,27 @@ fn handle(
     repeat: bool,
 ) -> bool {
     let (owner, epoch) = source;
+    if super::long::image_editing() && (text == " " || (text == "0" && control)) {
+        let eligible = REGISTRY.with(|s| {
+            s.borrow().as_ref().is_some_and(|r| {
+                current(r, generation, owner)
+                    && r.lifecycle
+                        .annotation_foreground
+                        .as_ref()
+                        .is_none_or(|query| {
+                            query().is_some_and(|token| {
+                                r.canvas_state.canvases.iter().any(|c| {
+                                    (r.lifecycle.annotation_window_token)(c.window.window())
+                                        == Some(token)
+                                }) || r.toolbar_state.main.get().is_some_and(|w| {
+                                    (r.lifecycle.annotation_window_token)(w.window()) == Some(token)
+                                })
+                            })
+                        })
+            })
+        });
+        return eligible && image_navigation::key(text, down, control, shift, repeat);
+    }
     if text.eq_ignore_ascii_case("c") && !control && !shift {
         let eligible = REGISTRY.with(|s| {
             let slot = s.borrow();
@@ -256,7 +280,40 @@ pub(in crate::annotation) fn bind(
                 native_epoch.set(previous.wrapping_add(1));
                 native_repeat.set(false);
                 slint::Timer::single_shot(Duration::ZERO, move || {
+                    if REGISTRY.with(|s| {
+                        s.borrow()
+                            .as_ref()
+                            .is_some_and(|r| current(r, generation, owner))
+                    }) {
+                        image_navigation::lost_focus();
+                    }
                     lost_focus(generation, owner, previous)
+                });
+            }
+            winit::event::WindowEvent::ModifiersChanged(value) => {
+                let m = value.state();
+                if REGISTRY.with(|s| {
+                    s.try_borrow()
+                        .is_ok_and(|s| s.as_ref().is_some_and(|r| current(r, generation, owner)))
+                }) {
+                    image_navigation::modifiers(
+                        m.control_key() || m.shift_key() || m.alt_key() || m.super_key(),
+                    );
+                }
+            }
+            winit::event::WindowEvent::ScaleFactorChanged { .. }
+                if matches!(owner, Owner::Canvas(..)) =>
+            {
+                // The native paint bridge can run before Slint updates its scale factor.
+                // Preserve physical zoom only after this event propagates through the backend.
+                slint::Timer::single_shot(Duration::ZERO, move || {
+                    if REGISTRY.with(|s| {
+                        s.try_borrow().is_ok_and(|s| {
+                            s.as_ref().is_some_and(|r| current(r, generation, owner))
+                        })
+                    }) {
+                        image_navigation::refresh_geometry();
+                    }
                 });
             }
             _ => {}

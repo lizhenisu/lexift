@@ -1,0 +1,33 @@
+import { Colors } from "design/colors.slint";
+import { Spacing } from "design/spacing.slint";
+import { Metrics } from "design/metrics.slint";
+import { SettingsButton } from "settings-controls.slint";
+
+// Confirmation owns no capture controls or preview state.
+export component LongCaptureConfirmation inherits Window {
+    title: @tr("Long screenshot"); no-frame: true; always-on-top: true;
+    background: Colors.surface;
+    out property <length> content-width: max(Metrics.compact-panel-width, title-metrics.preferred-width + 24px,
+        cancel-metrics.preferred-width + start-metrics.preferred-width + 4 * Spacing.medium + Spacing.small);
+    out property <length> content-height: Metrics.long-capture-confirmation-height;
+    preferred-width: root.content-width; preferred-height: root.content-height;
+    in property <bool> confirmation: true;
+    callback confirm(); callback cancel();
+    title-metrics := Text { visible: false; text: @tr("Long screenshot"); }
+    cancel-metrics := Text { visible: false; text: @tr("Cancel"); }
+    start-metrics := Text { visible: false; text: @tr("Start"); }
+    forward-focus: keys;
+    keys := FocusScope {
+        key-pressed(event) => { if event.text == Key.Escape { root.cancel(); return accept; } return reject; }
+        VerticalLayout {
+            padding: Spacing.medium; spacing: Spacing.small;
+            Text { text: @tr("Long screenshot"); color: Colors.foreground; font-weight: 600; }
+            Text { text: @tr("Clear screenshot annotations and start long capture?"); wrap: word-wrap; color: Colors.foreground; vertical-stretch: 1; }
+            HorizontalLayout {
+                spacing: Spacing.small;
+                SettingsButton { compact: true; label: @tr("Cancel"); clicked => { root.cancel(); } }
+                SettingsButton { compact: true; label: @tr("Start"); primary: true; clicked => { root.confirm(); } }
+            }
+        }
+    }
+}

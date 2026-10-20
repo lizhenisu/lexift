@@ -39,6 +39,9 @@ pub(super) fn escape() {
 }
 
 pub(super) fn escape_from(origin: focus::Origin) {
+    if image_navigation::escape() {
+        return;
+    }
     if screenshot::recognizing() {
         screenshot::cancel();
         return;
@@ -292,6 +295,10 @@ pub(crate) fn toggle(requested_at: Instant) {
             later_main(&input, generation, revision, screenshot::recognize_text)
         });
         let input = r.toolbar_state.main.input();
+        main.on_long_capture_requested(move || {
+            later_main(&input, generation, revision, screenshot::long::request)
+        });
+        let input = r.toolbar_state.main.input();
         main.on_pin_screenshot_requested(move || {
             later_main(&input, generation, revision, || {
                 screenshot::output(lexift_core::domain::screenshot::ScreenshotOutput::Pin)
@@ -401,6 +408,10 @@ impl Registry {
         let _pointer_guards = self.pause_native_pointer_inputs();
         crate::pinned_screenshot::set_annotation_interaction(true);
         if let Some(editing) = self.screenshot.take() {
+            tracing::debug!(
+                session = editing.id,
+                "Closing annotation registry with an active frozen editor"
+            );
             if let Some((id, edit)) = editing.pin {
                 pin_editor::retain_closing(self, id, edit);
             } else {

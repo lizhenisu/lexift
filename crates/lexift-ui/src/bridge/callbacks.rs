@@ -109,6 +109,7 @@ pub(super) type AnnotationDisplays = Rc<dyn Fn() -> Vec<Rect>>;
 pub(super) type AnnotationClickThrough = Rc<dyn Fn(&slint::Window, bool) -> bool>;
 pub(super) type AnnotationCornerCursor = Rc<dyn Fn(&slint::Window, bool) -> bool>;
 pub(super) type AnnotationBrushCursor = Rc<dyn Fn(&slint::Window, f32) -> bool>;
+pub(crate) type ImagePanCursor = Rc<dyn Fn(&slint::Window, Option<bool>) -> bool>;
 pub(super) type AnnotationFramePresenter = Rc<dyn Fn(&slint::Window, &[u8], u32, u32) -> bool>;
 pub(super) type AnnotationForeground =
     Rc<dyn Fn() -> Option<lexift_core::ports::magnifier::WindowToken>>;
@@ -147,17 +148,19 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) activate_user_requested_window: fn(&slint::Window) -> bool,
     pub(crate) begin_window_drag: fn(&slint::Window) -> bool,
     pub(crate) cancel_window_interaction: Rc<dyn Fn(&slint::Window) -> bool>,
-    pub(super) begin_window_resize: BeginWindowResize,
+    pub(crate) begin_window_resize: BeginWindowResize,
     pub(crate) popup_work_area: PopupWorkArea,
     pub(crate) toolbar_cursor_position: ToolbarCursorPosition,
     pub(crate) cancel_toolbar_drag_on_escape: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) set_popup_dismissal: SetPopupDismissal,
     pub(crate) attach_tool_window: AttachToolWindow,
     pub(crate) annotation_displays: AnnotationDisplays,
+    pub(crate) configure_capture_feedback: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) configure_hint_window: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) annotation_click_through: AnnotationClickThrough,
     pub(crate) annotation_corner_cursor: AnnotationCornerCursor,
     pub(crate) annotation_brush_cursor: AnnotationBrushCursor,
+    pub(crate) image_pan_cursor: ImagePanCursor,
     pub(crate) annotation_frame_presenter: AnnotationFramePresenter,
     pub(crate) annotation_magnifier_sync: AnnotationMagnifierSync,
     pub(crate) annotation_magnifier_refresh: AnnotationMagnifierRefresh,
@@ -171,8 +174,8 @@ pub struct WindowLifecycleCallbacks {
     pub(super) trim_process_working_set: fn() -> bool,
     pub(crate) configure_menu_window: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) tray_menu_cancelled: Rc<dyn Fn()>,
-    pub(super) configure_resize_background: ConfigureResizeBackground,
-    pub(super) configure_window_paint_repair: ConfigureWindowPaintRepair,
+    pub(crate) configure_resize_background: ConfigureResizeBackground,
+    pub(crate) configure_window_paint_repair: ConfigureWindowPaintRepair,
     pub(super) configure_app_window_icon: fn(&slint::Window) -> bool,
     pub(super) prepare_app_window: PrepareAppWindow,
     pub(crate) configure_pinned_image: ConfigurePinnedImage,
@@ -225,10 +228,12 @@ impl WindowLifecycleCallbacks {
             set_popup_dismissal: Rc::new(set_popup_dismissal),
             attach_tool_window: Rc::new(attach_tool_window),
             annotation_displays: Rc::new(Vec::new),
+            configure_capture_feedback: Rc::new(|_| false),
             configure_hint_window: Rc::new(|_| false),
             annotation_click_through: Rc::new(|_, _| false),
             annotation_corner_cursor: Rc::new(|_, _| false),
             annotation_brush_cursor: Rc::new(|_, _| false),
+            image_pan_cursor: Rc::new(|_, _| false),
             annotation_frame_presenter: Rc::new(|_, _, _, _| false),
             annotation_magnifier_sync: Rc::new(|_, _| false),
             annotation_magnifier_refresh: Rc::new(|| false),
@@ -375,11 +380,27 @@ impl WindowLifecycleCallbacks {
         self
     }
 
+    /// Protect input transparency for native RGBA capture feedback only.
+    pub fn with_capture_feedback(
+        mut self,
+        configure: impl Fn(&slint::Window) -> bool + 'static,
+    ) -> Self {
+        self.configure_capture_feedback = Rc::new(configure);
+        self
+    }
     pub fn with_annotation_brush_cursor(
         mut self,
         cursor: impl Fn(&slint::Window, f32) -> bool + 'static,
     ) -> Self {
         self.annotation_brush_cursor = Rc::new(cursor);
+        self
+    }
+    /// Selects a window-owned open/closed hand; None releases the native cursor.
+    pub fn with_image_pan_cursor(
+        mut self,
+        cursor: impl Fn(&slint::Window, Option<bool>) -> bool + 'static,
+    ) -> Self {
+        self.image_pan_cursor = Rc::new(cursor);
         self
     }
 

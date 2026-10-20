@@ -1822,3 +1822,60 @@ msgstr "滚动切换区域"
 #: ui/screenshot-help.slint
 msgid "Reuse last region"
 msgstr "复用上次区域"
+
+msgid "Long screenshot"
+msgstr "长截图"
+
+msgid "Clear screenshot annotations and start long capture?"
+msgstr "清空截图标注并开始长截图？"
+
+msgid "Scroll down inside the selected area. Exclude fixed headers."
+msgstr "在选区内向下滚动，请避开固定标题栏。"
+
+msgid "Continue"
+msgstr "继续"
+
+msgid "Pause"
+msgstr "暂停"
+
+msgid "Finish"
+msgstr "完成"
+
+msgid "Preparing long image"
+msgstr "正在准备长图"
+
+msgid "Capture paused"
+msgstr "采集已暂停"
+
+msgid "Cannot match this frame. Scroll back to the last captured area."
+msgstr "无法匹配此画面，请滚回上次采集的区域。"
+
+msgid "Image limit reached. Finish the current capture."
+msgstr "已达到图片上限，请完成当前截图。"
+
+msgid "Scroll down to extend the image"
+msgstr "向下滚动以扩展图片"
+
+msgid "Long capture unavailable. Select a smaller scrolling area."
+msgstr "无法开始长截图，请选择较小的滚动区域。"
+
+msgid "Fit image"
+msgstr "适应窗口"
+
+msgid "Zoom out"
+msgstr "缩小"
+
+msgid "Zoom in"
+msgstr "放大"
+
+msgid "Edit"
+msgstr "编辑"
+
+msgid "Fit width"
+msgstr "适应宽度"
+
+msgid "Long image ready"
+msgstr "长图已就绪"
+
+msgid "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
+msgstr "滚轮缩放 · 拖动平移 · 空格切换编辑／平移 · Ctrl+0 适应整图"

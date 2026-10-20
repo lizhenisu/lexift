@@ -1,13 +1,38 @@
+import { AnnotationHintTarget } from "annotation-hint.slint";
+import { Colors } from "design/colors.slint";
+import { Metrics } from "design/metrics.slint";
 export enum AnnotationCursor { idle, drawing, text, moving, horizontal, vertical, diagonal-down, diagonal-up, corner-radius, brush }
 
 // A transparent, live-desktop overlay. Pixel content is produced from Core objects in Rust.
 export component AnnotationCanvas inherits Window {
-    title: "Lexift Annotation Canvas";
+    title: root.image-view ? @tr("Long screenshot") : "Lexift Annotation Canvas";
     no-frame: true;
     always-on-top: true;
+    min-width: root.image-view ? 640px : 0px;
+    min-height: root.image-view ? 320px : 0px;
     // A one-step alpha keeps the layered HWND hittable while remaining visually transparent.
     background: #00000001;
     in property <image> frame;
+    in property <image> controls;
+    in property <bool> image-view: false;
+    out property <length> image-header-height: Metrics.image-view-header-height;
+    in-out property <float> image-zoom: 1;
+    in property <float> image-pixel-scale: 1;
+    out property <length> image-footer-height: 24px;
+    in property <length> image-pan-x;
+    in property <length> image-pan-y;
+    in property <bool> image-browsing: true;
+    in property <bool> image-panning: false;
+    callback header-drag-requested();
+    callback image-resize-requested();
+    callback image-close-requested();
+    callback fit-image();
+    callback image-pointer(int, float, float);
+    callback viewport-pointer(int, float, float);
+    callback viewport-scroll(float, float, float, float, bool);
+    callback viewport-resized();
+    changed width => { if root.image-view { root.viewport-resized(); } }
+    changed height => { if root.image-view { root.viewport-resized(); } }
     in property <AnnotationCursor> cursor: AnnotationCursor.drawing;
     callback pointer(int, float, float);
     callback brush-size-scrolled(float);
@@ -19,8 +44,68 @@ export component AnnotationCanvas inherits Window {
     callback region-key(string, bool, bool, bool) -> bool;
     forward-focus: keys;
     public function focus-input() { keys.focus(); }
-    Image { source: root.frame; width: 100%; height: 100%; image-fit: fill; }
+    if !root.image-view: Image { source: root.frame; width: 100%; height: 100%; image-fit: fill; }
+    if root.image-view: Rectangle { width: 100%; height: 100%; background: Colors.background; }
+    if root.image-view: Rectangle {
+        x: 0px; y: 0px; width: 100%; height: 32px; background: Colors.surface;
+        accessible-role: window-title-bar; accessible-label: @tr("Long screenshot");
+        Text { x: 12px; width: parent.width - 52px; height: 100%; text: @tr("Long screenshot"); color: Colors.foreground; vertical-alignment: center; }
+        TouchArea { width: parent.width - 36px; height: 100%; mouse-cursor: move;
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.header-drag-requested(); } }
+        }
+        Rectangle { x: parent.width - 32px; width: 32px; height: 32px;
+            accessible-role: button; accessible-label: @tr("Close");
+            background: close-area.has-hover ? Colors.icon-button-hover : transparent;
+            Image { x: 8px; y: 8px; width: 16px; height: 16px; source: @image-url("assets/icons/screenshot-close.svg"); colorize: Colors.foreground; }
+            close-area := TouchArea { clicked => { root.image-close-requested(); } }
+        }
+    }
+    if root.image-view: Rectangle {
+        y: root.height - root.image-footer-height; width: 100%; height: root.image-footer-height; background: Colors.surface;
+        Text { x: 12px; height: 100%; text: "\{round(root.image-zoom * root.image-pixel-scale * 100)}%    \{root.frame.width} × \{root.frame.height} px"; color: Colors.foreground; font-size: 11px; vertical-alignment: center; }
+        AnnotationHintTarget { width: parent.width - 20px; height: 100%;
+            text: @tr("Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image");
+            hovered: status-area.has-hover; pressed: status-area.pressed;
+            status-area := TouchArea { }
+        }
+        TouchArea { x: parent.width - 16px; width: 16px; height: 100%; mouse-cursor: nwse-resize;
+            pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.image-resize-requested(); } }
+        }
+    }
+    if root.image-view: Rectangle {
+        x: 0px; y: root.image-header-height; width: root.width;
+        height: max(0px, root.height - root.image-header-height - root.image-footer-height);
+        clip: true; background: Colors.image-workspace;
+        for row in ceil(self.height / Metrics.image-grid-spacing): Rectangle {
+            y: row * Metrics.image-grid-spacing; width: parent.width; height: 1px;
+            for col in ceil(parent.width / Metrics.image-grid-spacing): Rectangle {
+                x: col * Metrics.image-grid-spacing; y: 0px;
+                width: 1px; height: 1px; background: Colors.image-workspace-dot;
+            }
+        }
+        Image { x: root.image-pan-x; y: root.image-pan-y; width: root.frame.width * 1px * root.image-zoom; height: root.frame.height * 1px * root.image-zoom; source: root.frame; image-fit: fill; }
+        Image { x: root.image-pan-x; y: root.image-pan-y; width: root.frame.width * 1px * root.image-zoom; height: root.frame.height * 1px * root.image-zoom; source: root.controls; image-fit: fill; }
+        image-input := TouchArea {
+            mouse-cursor: root.image-browsing ? (root.image-panning ? grabbing : grab)
+                : root.cursor == AnnotationCursor.text ? text : root.cursor == AnnotationCursor.idle ? default : crosshair;
+            pointer-event(event) => {
+                if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                    keys.focus(); root.viewport-pointer(0, self.mouse-x / 1px, self.mouse-y / 1px);
+                }
+                if event.kind == PointerEventKind.move { root.viewport-pointer(1, self.mouse-x / 1px, self.mouse-y / 1px); }
+                if event.button == PointerEventButton.left && event.kind == PointerEventKind.up { root.viewport-pointer(2, self.mouse-x / 1px, self.mouse-y / 1px); }
+                if event.kind == PointerEventKind.cancel { root.viewport-pointer(3, self.mouse-x / 1px, self.mouse-y / 1px); }
+            }
+            changed has-hover => { if !self.has-hover { root.viewport-pointer(4, self.mouse-x / 1px, self.mouse-y / 1px); } }
+            scroll-event(event) => {
+                root.viewport-scroll(self.mouse-x / 1px, self.mouse-y / 1px, event.delta-x / 1px, event.delta-y / 1px,
+                    event.modifiers.control || event.modifiers.shift || event.modifiers.alt || event.modifiers.meta);
+                return accept;
+            }
+        }
+    }
     TouchArea {
+        visible: !root.image-view;
         width: 100%;
         height: 100%;
         mouse-cursor: root.cursor == AnnotationCursor.moving ? move

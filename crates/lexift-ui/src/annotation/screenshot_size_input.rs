@@ -90,6 +90,9 @@ pub(in crate::annotation) fn close(r: &mut Registry) -> bool {
     closed
 }
 fn allowed(r: &Registry) -> bool {
+    if super::long::busy() || super::long::image_editing() {
+        return false;
+    }
     r.document.mode.is_mouse()
         && r.screenshot.as_ref().is_some_and(|e| {
             e.pin.is_none()

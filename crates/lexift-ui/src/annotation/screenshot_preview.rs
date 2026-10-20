@@ -219,13 +219,20 @@ fn compose_base(
 ) -> Option<tiny_skia::Pixmap> {
     let snapshot = &input.snapshot;
     let monitor = snapshot.monitor;
-    let base = input.capture.regions.iter().find(|f| f.bounds == monitor)?;
+    let base = input.capture.regions.iter().find(|f| f.bounds == monitor).or_else(|| {
+        tracing::debug!(?monitor, capture_bounds=?input.capture.regions.iter().map(|r|r.bounds).collect::<Vec<_>>(), "Frozen preview source geometry mismatch");
+        None
+    })?;
     let pixmap = if !input.crop_border {
         let image = crate::annotation_export_render::compose_frozen(
             snapshot,
             input.capture.clone(),
             cancelled,
         )
+        .map_err(|error| {
+            tracing::debug!(%error, "Frozen preview composition failed");
+            error
+        })
         .ok()?;
         tiny_skia::Pixmap::from_vec(
             image.pixels,

@@ -1822,3 +1822,60 @@ msgstr "Défilez pour changer de zone"
 #: ui/screenshot-help.slint
 msgid "Reuse last region"
 msgstr "Réutiliser la dernière zone"
+
+msgid "Long screenshot"
+msgstr "Capture défilante"
+
+msgid "Clear screenshot annotations and start long capture?"
+msgstr "Effacer les annotations et démarrer la capture défilante ?"
+
+msgid "Scroll down inside the selected area. Exclude fixed headers."
+msgstr "Faites défiler vers le bas dans la sélection. Excluez les en-têtes fixes."
+
+msgid "Continue"
+msgstr "Continuer"
+
+msgid "Pause"
+msgstr "Pause"
+
+msgid "Finish"
+msgstr "Terminer"
+
+msgid "Preparing long image"
+msgstr "Préparation de l’image longue"
+
+msgid "Capture paused"
+msgstr "Capture en pause"
+
+msgid "Cannot match this frame. Scroll back to the last captured area."
+msgstr "Impossible de raccorder cette image. Revenez à la dernière zone capturée."
+
+msgid "Image limit reached. Finish the current capture."
+msgstr "Limite d’image atteinte. Terminez la capture actuelle."
+
+msgid "Scroll down to extend the image"
+msgstr "Faites défiler vers le bas pour agrandir l’image"
+
+msgid "Long capture unavailable. Select a smaller scrolling area."
+msgstr "Capture défilante indisponible. Sélectionnez une zone plus petite."
+
+msgid "Fit image"
+msgstr "Ajuster l’image"
+
+msgid "Zoom out"
+msgstr "Réduire"
+
+msgid "Zoom in"
+msgstr "Agrandir"
+
+msgid "Edit"
+msgstr "Modifier"
+
+msgid "Fit width"
+msgstr "Adapter à la largeur"
+
+msgid "Long image ready"
+msgstr "Image longue prête"
+
+msgid "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
+msgstr "Molette : zoom · Glisser : déplacer · Espace : modifier/déplacer · Ctrl+0 : ajuster l’image"

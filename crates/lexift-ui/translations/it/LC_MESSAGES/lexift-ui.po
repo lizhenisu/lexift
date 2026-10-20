@@ -1822,3 +1822,60 @@ msgstr "Scorri per cambiare zona"
 #: ui/screenshot-help.slint
 msgid "Reuse last region"
 msgstr "Riutilizza l’ultima area"
+
+msgid "Long screenshot"
+msgstr "Cattura a scorrimento"
+
+msgid "Clear screenshot annotations and start long capture?"
+msgstr "Cancellare le annotazioni e avviare la cattura a scorrimento?"
+
+msgid "Scroll down inside the selected area. Exclude fixed headers."
+msgstr "Scorrere verso il basso nella selezione. Escludere le intestazioni fisse."
+
+msgid "Continue"
+msgstr "Continua"
+
+msgid "Pause"
+msgstr "Pausa"
+
+msgid "Finish"
+msgstr "Termina"
+
+msgid "Preparing long image"
+msgstr "Preparazione immagine lunga"
+
+msgid "Capture paused"
+msgstr "Cattura in pausa"
+
+msgid "Cannot match this frame. Scroll back to the last captured area."
+msgstr "Impossibile allineare questa immagine. Tornare all’ultima area acquisita."
+
+msgid "Image limit reached. Finish the current capture."
+msgstr "Limite immagine raggiunto. Terminare la cattura corrente."
+
+msgid "Scroll down to extend the image"
+msgstr "Scorrere verso il basso per estendere l’immagine"
+
+msgid "Long capture unavailable. Select a smaller scrolling area."
+msgstr "Cattura a scorrimento non disponibile. Selezionare un’area più piccola."
+
+msgid "Fit image"
+msgstr "Adatta immagine"
+
+msgid "Zoom out"
+msgstr "Riduci"
+
+msgid "Zoom in"
+msgstr "Ingrandisci"
+
+msgid "Edit"
+msgstr "Modifica"
+
+msgid "Fit width"
+msgstr "Adatta alla larghezza"
+
+msgid "Long image ready"
+msgstr "Immagine lunga pronta"
+
+msgid "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
+msgstr "Rotella: zoom · Trascina: sposta · Spazio: modifica/sposta · Ctrl+0: adatta immagine"

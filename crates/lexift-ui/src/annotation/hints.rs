@@ -8,6 +8,12 @@ pub(super) enum Owner {
     Toolbar(u64),
     Panel(u64),
     SizeInput(u64),
+    ImageEditor(u64),
+    LongControl {
+        session: u64,
+        operation: u64,
+        revision: u64,
+    },
 }
 #[derive(Clone)]
 struct Request {
@@ -31,15 +37,77 @@ impl State {
         self.window.clear();
     }
 }
-fn owner_window(r: &Registry, owner: Owner) -> Option<&slint::Window> {
+pub(super) fn clear_long(r: &mut Registry) {
+    if r.hints
+        .pending
+        .as_ref()
+        .is_some_and(|p| matches!(p.owner, Owner::LongControl { .. }))
+    {
+        r.hints.clear();
+    }
+}
+pub(super) fn clear_image_editor(r: &mut Registry) {
+    if r.hints
+        .pending
+        .as_ref()
+        .is_some_and(|p| matches!(p.owner, Owner::ImageEditor(_)))
+    {
+        r.hints.clear();
+    }
+}
+/// Live capture notifications use the existing layered feedback bridge for cross-process input transparency.
+/// Snapshot only on show; no desktop sampling, font setup or per-frame text rendering occurs.
+pub(super) fn show_capture_feedback(
+    lifecycle: &WindowLifecycleCallbacks,
+    window: &slint::Window,
+) -> bool {
+    let Ok(snapshot) = window.take_snapshot() else {
+        return false;
+    };
+    let mut rgba = snapshot.as_bytes().to_vec();
+    for pixel in rgba.as_chunks_mut::<4>().0 {
+        let a = u32::from(pixel[3]);
+        for channel in &mut pixel[..3] {
+            *channel = ((u32::from(*channel) * a + 127) / 255) as u8;
+        }
+    }
+    (lifecycle.configure_capture_feedback)(window)
+        && window.show().is_ok()
+        && (lifecycle.annotation_frame_presenter)(
+            window,
+            &rgba,
+            snapshot.width(),
+            snapshot.height(),
+        )
+}
+fn with_owner_window<T>(
+    r: &Registry,
+    owner: Owner,
+    f: impl FnOnce(&slint::Window) -> T,
+) -> Option<T> {
     match owner {
         Owner::Toolbar(id) if id == r.toolbar_state.main.revision() => {
-            r.toolbar_state.main.get().map(ComponentHandle::window)
+            r.toolbar_state.main.get().map(|v| f(v.window()))
         }
         Owner::Panel(id) if id == r.toolbar_state.panel.revision() => {
-            r.toolbar_state.panel.get().map(ComponentHandle::window)
+            r.toolbar_state.panel.get().map(|v| f(v.window()))
         }
-        Owner::SizeInput(id) => screenshot::size_input::hint_window(r, id),
+        Owner::SizeInput(id) => screenshot::size_input::hint_window(r, id).map(f),
+        Owner::ImageEditor(id) => r
+            .canvas_state
+            .canvases
+            .first()
+            .filter(|c| {
+                c.image_view
+                    && c.revision() == id
+                    && matches!(&c.window, canvas::Surface::Canvas(w) if !w.get_image_panning())
+            })
+            .map(|c| f(c.window.window())),
+        Owner::LongControl {
+            session,
+            operation,
+            revision,
+        } => screenshot::long::with_hint_window(session, operation, revision, f),
         _ => None,
     }
 }
@@ -64,19 +132,22 @@ macro_rules! bind {
 bind!(bind_toolbar, AnnotationToolbar);
 bind!(bind_panel, AnnotationPanel);
 bind!(bind_size_input, crate::ScreenshotSizeInput);
+bind!(bind_long_control, crate::LongCaptureControl);
+bind!(bind_image_editor, crate::AnnotationCanvas);
 fn request(generation: u64, owner: Owner, text: slint::SharedString, anchor: [f32; 4]) {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let Some(r) = slot.as_mut().filter(|r| r.generation == generation) else {
             return;
         };
-        let Some(window) = owner_window(r, owner) else {
+        let Some((visible, origin)) =
+            with_owner_window(r, owner, |w| (w.is_visible(), w.position()))
+        else {
             return;
         };
-        if !window.is_visible() || text.is_empty() {
+        if !visible || text.is_empty() {
             return;
         }
-        let origin = window.position();
         r.hints.clear();
         r.hints.pending = Some(Request {
             owner,
@@ -133,19 +204,20 @@ fn show(generation: u64, revision: u64, attempt: u8) {
         let Some(request) = r.hints.pending.clone() else {
             return;
         };
-        let Some(owner) = owner_window(r, request.owner) else {
+        let Some((visible, position, scale)) = with_owner_window(r, request.owner, |w| {
+            (w.is_visible(), w.position(), w.scale_factor())
+        }) else {
             r.hints.clear();
             return;
         };
-        if !owner.is_visible()
-            || owner.position() != request.origin
+        if !visible
+            || position != request.origin
             || r.toolbar_state.toolbar_drag.is_some()
             || screenshot::size_input::dragging(r)
         {
             r.hints.clear();
             return;
         }
-        let scale = owner.scale_factor();
         let anchor = Rect {
             left: request.origin.x + (request.anchor[0] * scale).round() as i32,
             top: request.origin.y + (request.anchor[1] * scale).round() as i32,
@@ -178,7 +250,6 @@ fn show(generation: u64, revision: u64, attempt: u8) {
         let hint = r.hints.window.get().unwrap();
         match (r.prepare)(hint.window()) {
             PassiveWindowPreparation::Ready => {
-                let owner = owner_window(r, request.owner).unwrap();
                 let scale = hint.window().scale_factor();
                 // Native font metrics and wrapped height settle after evaluating the final width.
                 // Keep both measurements hidden so the first visible frame is already compact.
@@ -209,10 +280,17 @@ fn show(generation: u64, revision: u64, attempt: u8) {
                 );
                 hint.window()
                     .set_position(slint::PhysicalPosition::new(point.x, point.y));
-                if !(r.lifecycle.attach_tool_window)(hint.window(), owner)
+                if !with_owner_window(r, request.owner, |owner| {
+                    (r.lifecycle.attach_tool_window)(hint.window(), owner)
+                })
+                .unwrap_or(false)
                     || !(r.lifecycle.complete_toolbar_show)(hint.window(), Rc::new(|_| {}))
                     || !(r.lifecycle.configure_hint_window)(hint.window())
-                    || hint.show().is_err()
+                    || if matches!(request.owner, Owner::LongControl { .. }) {
+                        !show_capture_feedback(&r.lifecycle, hint.window())
+                    } else {
+                        hint.show().is_err()
+                    }
                 {
                     r.hints.clear();
                 }

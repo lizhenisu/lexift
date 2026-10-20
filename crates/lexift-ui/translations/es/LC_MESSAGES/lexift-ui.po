@@ -1822,3 +1822,60 @@ msgstr "Desplaza para cambiar de región"
 #: ui/screenshot-help.slint
 msgid "Reuse last region"
 msgstr "Reutilizar la última región"
+
+msgid "Long screenshot"
+msgstr "Captura con desplazamiento"
+
+msgid "Clear screenshot annotations and start long capture?"
+msgstr "¿Borrar las anotaciones e iniciar la captura con desplazamiento?"
+
+msgid "Scroll down inside the selected area. Exclude fixed headers."
+msgstr "Desplácese hacia abajo dentro de la selección. Excluya las cabeceras fijas."
+
+msgid "Continue"
+msgstr "Continuar"
+
+msgid "Pause"
+msgstr "Pausar"
+
+msgid "Finish"
+msgstr "Finalizar"
+
+msgid "Preparing long image"
+msgstr "Preparando imagen larga"
+
+msgid "Capture paused"
+msgstr "Captura pausada"
+
+msgid "Cannot match this frame. Scroll back to the last captured area."
+msgstr "No se puede unir esta imagen. Vuelva a la última zona capturada."
+
+msgid "Image limit reached. Finish the current capture."
+msgstr "Se alcanzó el límite de imagen. Finalice la captura actual."
+
+msgid "Scroll down to extend the image"
+msgstr "Desplácese hacia abajo para ampliar la imagen"
+
+msgid "Long capture unavailable. Select a smaller scrolling area."
+msgstr "Captura con desplazamiento no disponible. Seleccione una zona menor."
+
+msgid "Fit image"
+msgstr "Ajustar imagen"
+
+msgid "Zoom out"
+msgstr "Alejar"
+
+msgid "Zoom in"
+msgstr "Acercar"
+
+msgid "Edit"
+msgstr "Editar"
+
+msgid "Fit width"
+msgstr "Ajustar al ancho"
+
+msgid "Long image ready"
+msgstr "Imagen larga lista"
+
+msgid "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
+msgstr "Rueda: zoom · Arrastrar: desplazar · Espacio: editar/desplazar · Ctrl+0: ajustar imagen"

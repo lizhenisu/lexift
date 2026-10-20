@@ -207,6 +207,9 @@ pub(crate) fn finish_now() {
     }
 }
 pub(super) fn view_point(point: (f32, f32), reverse: bool) -> (f32, f32) {
+    if let Some(point) = screenshot::long_editor::view_point(point, reverse) {
+        return point;
+    }
     ACTIVE.with(|s| {
         let s = s.borrow();
         let Some(a) = s.as_ref() else {
@@ -225,6 +228,9 @@ pub(super) fn view_point(point: (f32, f32), reverse: bool) -> (f32, f32) {
     })
 }
 pub(super) fn view_zoom() -> f32 {
+    if let Some(zoom) = screenshot::long_editor::view_zoom() {
+        return zoom;
+    }
     ACTIVE.with(|s| {
         s.borrow().as_ref().map_or(1., |a| {
             (a.display.right - a.display.left) as f32 / (a.source.right - a.source.left) as f32

@@ -536,7 +536,7 @@ pub(super) fn place(
             bottom: z.1,
         }
     };
-    let viewport = map_bounds(viewport);
+    let viewport = super::screenshot::long_editor::clip_text(map_bounds(viewport));
     let bounds = map_bounds(bounds);
     let scale = scale * super::pin_editor::view_zoom();
     editor.window().set_position(slint::PhysicalPosition::new(

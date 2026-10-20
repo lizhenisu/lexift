@@ -29,6 +29,7 @@ struct CursorState {
     size: i32,
     active: bool,
     brush: bool,
+    pan: Option<bool>,
 }
 
 fn hwnd(window: &impl HasWindowHandle) -> lexift_core::Result<HWND> {
@@ -73,6 +74,17 @@ fn pixels(size: i32) -> &'static [u8] {
 
 fn make_cursor(size: i32) -> lexift_core::Result<HCURSOR> {
     make_bitmap_cursor(size, pixels(size), size as u32 * POINTER_TIP_UNITS / 32)
+}
+fn make_pan_cursor(size: i32, closed: bool) -> lexift_core::Result<HCURSOR> {
+    let bytes: &[u8] = match (size, closed) {
+        (64, false) => include_bytes!(concat!(env!("OUT_DIR"), "/image-grab-64.rgba")),
+        (48, false) => include_bytes!(concat!(env!("OUT_DIR"), "/image-grab-48.rgba")),
+        (_, false) => include_bytes!(concat!(env!("OUT_DIR"), "/image-grab-32.rgba")),
+        (64, true) => include_bytes!(concat!(env!("OUT_DIR"), "/image-grabbing-64.rgba")),
+        (48, true) => include_bytes!(concat!(env!("OUT_DIR"), "/image-grabbing-48.rgba")),
+        (_, true) => include_bytes!(concat!(env!("OUT_DIR"), "/image-grabbing-32.rgba")),
+    };
+    make_bitmap_cursor(size, bytes, size as u32 / 2)
 }
 
 fn make_brush_cursor(size: i32) -> lexift_core::Result<HCURSOR> {
@@ -175,24 +187,32 @@ fn apply_on_hover(hwnd: HWND, cursor: HCURSOR) {
 
 /// Enables the custom cursor; failure leaves Slint free to show its ordinary move cursor.
 pub(crate) fn set(window: &impl HasWindowHandle, active: bool) -> lexift_core::Result<()> {
-    set_shape(window, active, None)
+    set_shape(window, active, None, None)
 }
 
 pub(crate) fn set_brush(window: &impl HasWindowHandle, diameter: f32) -> lexift_core::Result<()> {
     if !diameter.is_finite() || diameter <= 0. {
-        return set_shape(window, false, None);
+        return set_shape(window, false, None, None);
     }
     set_shape(
         window,
         true,
         Some(diameter.round().clamp(1., 2048.) as i32 + 4),
+        None,
     )
+}
+pub(crate) fn set_pan(
+    window: &impl HasWindowHandle,
+    closed: Option<bool>,
+) -> lexift_core::Result<()> {
+    set_shape(window, closed.is_some(), None, closed)
 }
 
 fn set_shape(
     window: &impl HasWindowHandle,
     active: bool,
     brush_size: Option<i32>,
+    pan: Option<bool>,
 ) -> lexift_core::Result<()> {
     let hwnd = hwnd(window)?;
     let pointer = unsafe { GetPropW(hwnd, w!("Lexift.AnnotationCornerCursor")) }.0 as usize;
@@ -211,8 +231,10 @@ fn set_shape(
             return Ok(());
         }
         let size = brush_size.unwrap_or_else(|| cursor_size(hwnd));
-        if state.size != size || state.brush != brush_size.is_some() {
-            let cursor = if brush_size.is_some() {
+        if state.size != size || state.brush != brush_size.is_some() || state.pan != pan {
+            let cursor = if let Some(closed) = pan {
+                make_pan_cursor(size, closed)?
+            } else if brush_size.is_some() {
                 make_brush_cursor(size)?
             } else {
                 make_cursor(size)?
@@ -221,6 +243,7 @@ fn set_shape(
             state.cursor = cursor;
             state.size = size;
             state.brush = brush_size.is_some();
+            state.pan = pan;
         }
         state.active = true;
         apply_on_hover(hwnd, state.cursor);
@@ -230,7 +253,9 @@ fn set_shape(
         return Ok(());
     }
     let size = brush_size.unwrap_or_else(|| cursor_size(hwnd));
-    let cursor = if brush_size.is_some() {
+    let cursor = if let Some(closed) = pan {
+        make_pan_cursor(size, closed)?
+    } else if brush_size.is_some() {
         make_brush_cursor(size)?
     } else {
         make_cursor(size)?
@@ -240,6 +265,7 @@ fn set_shape(
         size,
         active,
         brush: brush_size.is_some(),
+        pan,
     }));
     if unsafe {
         SetPropW(
@@ -305,6 +331,21 @@ unsafe extern "system" fn subclass(
 mod tests {
     use super::*;
     use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, HICON};
+    #[test]
+    fn image_hands_have_centered_hotspots_and_release_at_all_dpi_sizes() {
+        for size in [32, 48, 64] {
+            for closed in [false, true] {
+                let cursor = make_pan_cursor(size, closed).unwrap();
+                let mut info = ICONINFO::default();
+                unsafe { GetIconInfo(HICON(cursor.0), &mut info) }.unwrap();
+                assert_eq!(info.xHotspot, size as u32 / 2);
+                assert_eq!(info.yHotspot, size as u32 / 2);
+                let _ = unsafe { DeleteObject(HGDIOBJ(info.hbmMask.0)) };
+                let _ = unsafe { DeleteObject(HGDIOBJ(info.hbmColor.0)) };
+                unsafe { DestroyCursor(cursor) }.unwrap();
+            }
+        }
+    }
 
     #[test]
     fn brush_cursor_hotspot_and_bitmap_follow_the_physical_diameter() {

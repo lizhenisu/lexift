@@ -29,6 +29,8 @@
 - [架构决策](architecture/architecture.md)
 - [Cargo Workspace 设计](architecture/workspace.md)
 - [功能能力与路线图](planning/capabilities-roadmap.md)
+- [PixPin 长截图链路与交互研究](planning/pixpin-long-screenshot-research.md)
+- [PixPin 长图结果编辑器研究](planning/pixpin-image-editor-research.md)
 - [阶段实施计划与阶段验收记录](planning/implementation-plan.md)：M2／M3／M4 的阶段背景，不能单独作为当前功能清单。
 
 ## 功能
@@ -85,6 +87,10 @@
 ## 发布
 
 - [截图编辑焦点交接验证](releases/screenshot-editor-focus.md)
+- [手动纵向长截图验证](releases/screenshot-long-capture.md)
+- [长截图采集、预览与编辑体验重做验证](releases/screenshot-long-redesign.md)
+- [长截图单行工具条与延迟提示验证](releases/screenshot-long-toolbar.md)
+- [长图编辑器统一图片视口验证](releases/screenshot-image-viewport.md)
 - [截图操作提示验证](releases/screenshot-help.md)
 - [截图比例锁定验证](releases/screenshot-aspect-lock.md)
 - [截图像素放大镜与取色验证](releases/screenshot-pixel-picker.md)

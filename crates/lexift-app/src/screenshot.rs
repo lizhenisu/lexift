@@ -22,6 +22,8 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
+#[path = "screenshot_long.rs"]
+mod long;
 type CaptureFactory = fn() -> Option<Arc<dyn ScreenCapturePort>>;
 struct PreparedScreenshot {
     frames: Vec<CapturedRegion>,
@@ -31,6 +33,7 @@ struct Session {
     id: u64,
     cancelled: Arc<AtomicBool>,
     frames: Option<Arc<Vec<CapturedRegion>>>,
+    long_source_frames: Option<Arc<Vec<CapturedRegion>>>,
     element_port: Option<Arc<dyn ScreenCapturePort>>,
     windows: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
 }
@@ -45,6 +48,7 @@ impl Session {
     }
 }
 pub(crate) struct ScreenshotRuntime {
+    long: Mutex<Option<long::Job>>,
     capture: CaptureFactory,
     save: Arc<dyn AnnotationSavePort>,
     render: Arc<dyn AnnotationExportRenderPort>,
@@ -67,6 +71,7 @@ impl ScreenshotRuntime {
         clipboard: Arc<dyn ClipboardPort>,
     ) -> Self {
         Self {
+            long: Default::default(),
             capture,
             save,
             render,
@@ -122,6 +127,7 @@ impl ScreenshotRuntime {
         (!cancel.load(Ordering::Acquire)).then_some(outcome)
     }
     pub fn sync(&self, state: &lexift_core::domain::screenshot::ScreenshotState, quitting: bool) {
+        long::sync(self, state, quitting);
         let mut color = self.color_job.lock().unwrap_or_else(|p| p.into_inner());
         if color.as_ref().is_some_and(|(s, id, _)| {
             quitting
@@ -394,6 +400,7 @@ impl ScreenshotRuntime {
     }
     pub fn execute(self: &Arc<Self>, controller: &Arc<AppController>, command: ScreenshotCommand) {
         match command {
+            ScreenshotCommand::Long(command) => long::execute(self, controller, command),
             ScreenshotCommand::Recognize {
                 session,
                 operation,
@@ -528,6 +535,7 @@ impl ScreenshotRuntime {
                         id: session,
                         cancelled: cancelled.clone(),
                         frames: None,
+                        long_source_frames: None,
                         element_port,
                         windows: Vec::new(),
                     });

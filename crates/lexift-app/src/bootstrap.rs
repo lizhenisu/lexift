@@ -322,6 +322,9 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         .with_annotation_brush_cursor(|window, diameter| {
             lexift_platform::set_annotation_brush_cursor(&window.window_handle(), diameter).is_ok()
         })
+        .with_image_pan_cursor(|window, closed| {
+            lexift_platform::set_image_pan_cursor(&window.window_handle(),closed).is_ok()
+        })
         .with_annotation_corner_cursor(|window, active| {
             match lexift_platform::set_annotation_corner_cursor(&window.window_handle(), active) {
                 Ok(()) => true,
@@ -366,6 +369,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 }
             }
         })
+        .with_capture_feedback(|window| lexift_platform::configure_capture_feedback(&window.window_handle()).is_ok())
         .with_window_paint_repair(move |window, repair| {
             if !software_renderer {
                 return true;

@@ -20,6 +20,10 @@ pub(super) use super::frozen_editor::{Editing, frame, render};
 pub(super) mod handoff;
 #[path = "screenshot_keyboard.rs"]
 pub(super) mod keyboard;
+#[path = "screenshot_long.rs"]
+pub(crate) mod long;
+#[path = "screenshot_long_editor.rs"]
+pub(in crate::annotation) mod long_editor;
 #[path = "screenshot_size_input.rs"]
 pub(super) mod size_input;
 
@@ -43,6 +47,7 @@ struct Flow {
     toast: window::Slot<crate::ScreenshotToastWindow>,
     toast_timer: slint::Timer,
     toast_measurement: Option<(u64, slint::PhysicalSize)>,
+    toast_operation: Option<u64>,
     ocr_context: Option<OcrFeedbackContext>,
 }
 thread_local! { static FLOW:RefCell<Flow>=RefCell::new(Flow::default()); }
@@ -79,7 +84,7 @@ pub(crate) fn sync(state: &ScreenshotState) {
         slot.state = state.clone();
         changed && state.error.is_some()
     });
-    if feedback {
+    if feedback && state.long.is_none() {
         let state = state.clone();
         slint::Timer::single_shot(Duration::ZERO, move || show_feedback(&state));
     }
@@ -90,7 +95,8 @@ pub(crate) fn sync(state: &ScreenshotState) {
                     state.phase,
                     ScreenshotPhase::Output | ScreenshotPhase::Recognizing
                 ));
-                main.set_feedback(state.error.as_deref().unwrap_or("").into());
+                main.set_feedback(crate::i18n::tr(state.error.as_deref().unwrap_or("")).into());
+                main.set_long_capture_available(long::available(r));
             }
             if r.screenshot.is_some() {
                 if state.phase != ScreenshotPhase::Editing {
@@ -109,6 +115,7 @@ pub(crate) fn sync(state: &ScreenshotState) {
             }
         }
     });
+    long::sync();
 }
 pub(super) fn request() {
     pin_editor::finish_now();
@@ -311,6 +318,7 @@ pub(crate) fn cancel() {
     emit(ScreenshotEvent::Cancelled { session: id });
 }
 pub(crate) fn restore(id: u64) {
+    long::clear();
     let recovery = FLOW.with(|s| {
         let mut s = s.borrow_mut();
         if s.state.session != id {
@@ -340,6 +348,7 @@ pub(crate) fn restore(id: u64) {
     show_ocr_feedback(id);
 }
 pub(crate) fn shutdown() {
+    long::clear();
     crate::screen_interaction::pixel_picker::clear();
     crate::screen_interaction::size_label::clear();
     crate::screen_interaction::screenshot_help::clear();
@@ -353,10 +362,13 @@ pub(crate) fn shutdown() {
     FLOW.with(|s| *s.borrow_mut() = Flow::default());
 }
 pub(super) fn recognizing() -> bool {
-    FLOW.with(|s| s.borrow().state.phase == ScreenshotPhase::Recognizing)
+    long::busy() || FLOW.with(|s| s.borrow().state.phase == ScreenshotPhase::Recognizing)
 }
 /// Freeze only crop identity here; OCR pixels are owned by the App capture session.
 pub(super) fn recognize_text() {
+    if long::busy() {
+        return;
+    }
     if FLOW.with(|s| s.borrow().state.phase != ScreenshotPhase::Editing) {
         return;
     }
@@ -417,6 +429,9 @@ pub(super) fn recognize_text() {
     }
 }
 pub(super) fn output(kind: ScreenshotOutput) {
+    if long::busy() && !long::frozen() {
+        return;
+    }
     REGISTRY.with(|s| {
         if let Some(r) = s.borrow_mut().as_mut() {
             size_input::close(r);
@@ -435,7 +450,7 @@ pub(super) fn output(kind: ScreenshotOutput) {
             return None;
         };
         let bounds = editing.region.bounds()?;
-        let snapshot = export::snapshot_at(
+        let mut snapshot = export::snapshot_at(
             r,
             bounds,
             r.canvas_state
@@ -445,6 +460,10 @@ pub(super) fn output(kind: ScreenshotOutput) {
                 .window()
                 .scale_factor(),
         )?;
+        if long::image_editing() {
+            snapshot.scale = 1.;
+            snapshot.monitors = vec![(bounds, 1.)];
+        }
         Some(ExportRequest {
             session: state.session,
             request: state.operation + 1,
@@ -463,6 +482,12 @@ pub(super) fn output(kind: ScreenshotOutput) {
 pub(super) fn pointer(r: &mut Registry, index: usize, event: i32, x: f32, y: f32) -> bool {
     if recognizing() {
         return true;
+    }
+    if long::image_editing() {
+        if FLOW.with(|f| f.borrow().state.phase == ScreenshotPhase::Output) {
+            return true;
+        }
+        return r.document.mode.is_mouse();
     }
     // Keep the input host/pointer current even while the numeric popup consumes
     // gestures, so dismissed input cannot restore a hint underneath the cursor.
@@ -605,6 +630,9 @@ fn pointer_help(r: &mut Registry, index: usize, event: i32, x: f32, y: f32) {
 pub(super) fn help_feedback(
     r: &Registry,
 ) -> Option<crate::screen_interaction::screenshot_help::Feedback> {
+    if long::busy() || long::image_editing() {
+        return None;
+    }
     use crate::screen_interaction::screenshot_help::Stage;
     let e = r.screenshot.as_ref().filter(|e| e.pin.is_none())?;
     let screens = r
@@ -680,6 +708,9 @@ pub(super) fn refresh_help(r: &mut Registry) {
 pub(super) fn picker_feedback(
     r: &Registry,
 ) -> Option<crate::screen_interaction::pixel_picker::Feedback> {
+    if long::busy() || long::image_editing() {
+        return None;
+    }
     let e = r.screenshot.as_ref().filter(|e| e.pin.is_none())?;
     if !r.document.mode.is_mouse()
         || size_input::busy(r)
@@ -764,6 +795,9 @@ fn queue_adjustment_toolbar(r: &mut Registry) {
 pub(super) fn label_feedback(
     r: &Registry,
 ) -> Option<crate::screen_interaction::size_label::Feedback> {
+    if long::busy() || long::image_editing() {
+        return None;
+    }
     let editing = r.screenshot.as_ref().filter(|e| e.pin.is_none())?;
     let bounds = editing.region.bounds()?;
     let screens = r
@@ -809,6 +843,7 @@ fn show_ocr_feedback(id: u64) {
         toast.set_message(crate::i18n::tr(outcome.message()).into());
         toast.set_passive(true);
         toast.set_error(outcome != lexift_core::domain::screenshot::OcrOutcome::Copied);
+        s.toast_operation = None;
         s.toast.open(toast);
         Some((prepare, lifecycle, bounds, s.toast.revision()))
     });
@@ -859,6 +894,7 @@ fn show_feedback(state: &ScreenshotState) {
                 FLOW.with(|s| s.borrow_mut().toast.clear())
             })
         });
+        slot.toast_operation = None;
         slot.toast.open(toast);
     });
     let revision = FLOW.with(|s| s.borrow().toast.revision());
@@ -871,6 +907,64 @@ fn show_feedback(state: &ScreenshotState) {
         revision,
         0,
     );
+}
+/// Long capture borrows the passive screen toast, with an independent operation guard.
+fn clear_long_feedback() {
+    FLOW.with(|slot| {
+        let mut s = slot.borrow_mut();
+        if s.toast_operation.take().is_some() {
+            s.toast_timer.stop();
+            s.toast.clear();
+            s.toast_measurement = None;
+        }
+    });
+}
+fn show_long_feedback(session: u64, operation: u64, message: &str, error: bool) {
+    let context = REGISTRY.with(|s| {
+        let s = s.borrow();
+        let r = s.as_ref()?;
+        let bounds = long::source_area()?;
+        let toast =
+            crate::screen_interaction::create(&r.lifecycle, crate::ScreenshotToastWindow::new)
+                .ok()?;
+        crate::theme::apply(&toast);
+        toast.set_message(
+            if error {
+                crate::i18n::error(message)
+            } else {
+                crate::i18n::tr(message)
+            }
+            .into(),
+        );
+        toast.set_passive(true);
+        toast.set_error(error);
+        // Register the toast below the live control owner before its first visible frame.
+        Some((r.prepare, r.lifecycle.clone(), bounds, toast))
+    });
+    let Some((prepare, lifecycle, bounds, toast)) = context else {
+        return;
+    };
+    // Native ownership must be assigned after preparation has materialized the HWND.
+    let revision = FLOW.with(|slot| {
+        let mut s = slot.borrow_mut();
+        if s.state.session != session
+            || s.state.phase != ScreenshotPhase::Editing
+            || !s.state.long.as_ref().is_some_and(|l| {
+                l.operation == operation
+                    && l.phase != lexift_core::domain::long_capture::workflow::Phase::Editing
+            })
+        {
+            return None;
+        }
+        s.toast_timer.stop();
+        s.toast.clear();
+        s.toast_measurement = None;
+        s.toast_operation = Some(operation);
+        Some(s.toast.open(toast))
+    });
+    if let Some(revision) = revision {
+        show_toast(session, bounds, prepare, lifecycle, true, revision, 0);
+    }
 }
 fn show_toast(
     id: u64,
@@ -889,6 +983,16 @@ fn show_toast(
         let Some(toast) = slot.toast.get() else {
             return;
         };
+        if let Some(operation) = slot.toast_operation
+            && (slot.state.phase != ScreenshotPhase::Editing
+                || !slot.state.long.as_ref().is_some_and(|l| {
+                    l.operation == operation
+                        && l.phase != lexift_core::domain::long_capture::workflow::Phase::Editing
+                }))
+        {
+            slot.toast.clear();
+            return;
+        }
         if ocr
             && let Some(area) = (lifecycle.popup_work_area)(Point {
                 x: bounds.left,
@@ -903,6 +1007,17 @@ fn show_toast(
         }
         match prepare(toast.window()) {
             PassiveWindowPreparation::Ready => {
+                if let Some(operation) = slot.toast_operation {
+                    let attached = REGISTRY.with(|r| {
+                        r.borrow().as_ref().is_some_and(|r| {
+                            long::attach_notification(r, toast.window(), id, operation)
+                        })
+                    });
+                    if !attached {
+                        slot.toast.clear();
+                        return;
+                    }
+                }
                 // Winit can begin at its 10px fallback width. Measure at the token width
                 // while hidden, rather than wrapping text against that native placeholder.
                 for _ in 0..3 {
@@ -982,7 +1097,14 @@ fn show_toast(
                 toast
                     .window()
                     .set_position(slint::PhysicalPosition::new(point.x, point.y));
-                let _ = toast.show();
+                if slot.toast_operation.is_some() {
+                    if !hints::show_capture_feedback(&lifecycle, toast.window()) {
+                        slot.toast.clear();
+                        return;
+                    }
+                } else {
+                    let _ = toast.show();
+                }
                 slot.toast_timer.start(
                     slint::TimerMode::SingleShot,
                     Duration::from_secs(if ocr { 3 } else { 5 }),
@@ -1028,7 +1150,7 @@ pub(super) fn toolbar_ready(generation: u64, revision: u64) {
     }
     let state = FLOW.with(|s| {
         let s = s.borrow();
-        if s.state.error.is_some() && s.toast.get().is_none() {
+        if s.state.error.is_some() && s.state.long.is_none() && s.toast.get().is_none() {
             Some(s.state.clone())
         } else {
             None
@@ -1040,12 +1162,18 @@ pub(super) fn toolbar_ready(generation: u64, revision: u64) {
 }
 
 pub(super) fn sync_region_feedback(r: &mut Registry) {
+    if long::busy() || long::image_editing() {
+        return;
+    }
     position_region_toolbar(r, false);
 }
 
 /// The sole screenshot toolbar placement path, used before show and for live crop feedback.
 /// Forced preparation bypasses cached placement after native window preparation or DPI changes.
 pub(super) fn position_region_toolbar(r: &mut Registry, force: bool) -> bool {
+    if long::busy() || long::image_editing() {
+        return true;
+    }
     let Some(editing) = r.screenshot.as_ref().filter(|e| e.pin.is_none()) else {
         return false;
     };

@@ -1822,3 +1822,60 @@ msgstr "Scroll to switch regions"
 #: ui/screenshot-help.slint
 msgid "Reuse last region"
 msgstr "Reuse last region"
+
+msgid "Long screenshot"
+msgstr "Long screenshot"
+
+msgid "Clear screenshot annotations and start long capture?"
+msgstr "Clear screenshot annotations and start long capture?"
+
+msgid "Scroll down inside the selected area. Exclude fixed headers."
+msgstr "Scroll down inside the selected area. Exclude fixed headers."
+
+msgid "Continue"
+msgstr "Continue"
+
+msgid "Pause"
+msgstr "Pause"
+
+msgid "Finish"
+msgstr "Finish"
+
+msgid "Preparing long image"
+msgstr "Preparing long image"
+
+msgid "Capture paused"
+msgstr "Capture paused"
+
+msgid "Cannot match this frame. Scroll back to the last captured area."
+msgstr "Cannot match this frame. Scroll back to the last captured area."
+
+msgid "Image limit reached. Finish the current capture."
+msgstr "Image limit reached. Finish the current capture."
+
+msgid "Scroll down to extend the image"
+msgstr "Scroll down to extend the image"
+
+msgid "Long capture unavailable. Select a smaller scrolling area."
+msgstr "Long capture unavailable. Select a smaller scrolling area."
+
+msgid "Fit image"
+msgstr "Fit image"
+
+msgid "Zoom out"
+msgstr "Zoom out"
+
+msgid "Zoom in"
+msgstr "Zoom in"
+
+msgid "Edit"
+msgstr "Edit"
+
+msgid "Fit width"
+msgstr "Fit width"
+
+msgid "Long image ready"
+msgstr "Long image ready"
+
+msgid "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
+msgstr "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"

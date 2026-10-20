@@ -68,6 +68,8 @@ mod font_workflow;
 mod fonts;
 mod frame;
 mod hints;
+mod image_navigation;
+mod image_viewport;
 #[path = "mosaic_session.rs"]
 mod mosaic;
 mod numeric;

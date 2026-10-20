@@ -89,6 +89,30 @@ fn native_pointer_reentry_is_deferred_and_retirement_cancels_replay() {
         [1., 2., 3., 3.5],
         "retirement cancels replay"
     );
+    let work = window::InputWork::new();
+    let count = Rc::new(Cell::new(0));
+    let observed = count.clone();
+    let sink = registry_pointer(
+        work.clone(),
+        Rc::new(move |_| {
+            REGISTRY.with(|slot| {
+                let _exclusive = slot.borrow_mut();
+                observed.set(observed.get() + 1);
+            });
+        }),
+    );
+    REGISTRY.with(|slot| {
+        let _placing_window = slot.borrow();
+        sink(PopupPointerInput::Moved { x: 1., y: 1. });
+        assert!(work.pending());
+        assert_eq!(count.get(), 0);
+    });
+    slint::platform::update_timers_and_animations();
+    assert_eq!(
+        count.get(),
+        1,
+        "geometry-induced input waits for shared borrows too"
+    );
 }
 #[test]
 fn interrupted_drawing_cannot_commit_after_tool_switch_escape_or_capture_loss() {

@@ -91,6 +91,7 @@ impl crate::screen_interaction::SurfaceHandle for Surface {
     }
 }
 pub(super) struct Layer {
+    pub image_view: bool,
     native_input: Option<Rc<window::InputWork>>,
     source_scale: f32,
     pub last_pointer: Option<(f32, f32)>,
@@ -105,6 +106,7 @@ pub(super) struct Layer {
 impl Layer {
     pub fn new(window: AnnotationCanvas, bounds: Rect) -> Self {
         Self {
+            image_view: false,
             native_input: None,
             source_scale: 1.,
             last_pointer: None,
@@ -127,6 +129,7 @@ impl Layer {
         input: Option<Rc<window::InputWork>>,
     ) -> Self {
         Self {
+            image_view: false,
             native_input: input,
             source_scale: scale,
             last_pointer: None,
@@ -139,6 +142,9 @@ impl Layer {
         }
     }
     pub fn scale(&self) -> f32 {
+        if self.image_view {
+            return 1.;
+        }
         if matches!(self.window, Surface::Pin(_)) {
             return self.source_scale;
         }

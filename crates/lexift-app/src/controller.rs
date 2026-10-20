@@ -61,6 +61,7 @@ pub(crate) trait ViewPort: Send + Sync {
     ) {
     }
     fn restore_screenshot(&self, _session: u64) {}
+    fn long_screenshot(&self, _command: lexift_core::domain::long_capture::workflow::Command) {}
     fn show_screenshot_capture(
         &self,
         _session: u64,
@@ -164,6 +165,9 @@ impl ViewPort for lexift_ui::UiHandle {
     }
     fn restore_screenshot(&self, session: u64) {
         self.restore_screenshot(session);
+    }
+    fn long_screenshot(&self, command: lexift_core::domain::long_capture::workflow::Command) {
+        self.long_screenshot(command);
     }
     fn show_screenshot_capture(
         &self,
@@ -276,6 +280,12 @@ pub(crate) struct AppController {
 }
 
 impl AppController {
+    pub(crate) fn physical_displays(&self) -> lexift_core::Result<Vec<Rect>> {
+        self.screen
+            .as_ref()
+            .ok_or_else(|| lexift_core::Error::new("Display enumeration unavailable"))?
+            .displays()
+    }
     pub(crate) fn new(
         runtime: Handle,
         state: Arc<Mutex<AppState>>,

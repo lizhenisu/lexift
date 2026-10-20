@@ -60,6 +60,7 @@ pub struct LastRegion {
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ScreenshotState {
+    pub long: Option<super::long_capture::workflow::State>,
     pub session: u64,
     pub source_session: u64,
     pub phase: ScreenshotPhase,
@@ -77,6 +78,13 @@ pub struct ScreenshotState {
     pub color_result: Option<ColorResult>,
 }
 impl ScreenshotState {
+    pub fn editable(&self) -> bool {
+        self.phase == ScreenshotPhase::Editing
+            && self
+                .long
+                .as_ref()
+                .is_none_or(|l| l.phase == super::long_capture::workflow::Phase::Editing)
+    }
     /// Physical layout equality ignores enumeration order and logical DPI.
     pub fn reusable_region(&self) -> Option<Rect> {
         let last = self.last_region.as_ref()?;
@@ -97,6 +105,7 @@ impl ScreenshotState {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotEvent {
+    Long(super::long_capture::workflow::Event),
     ReuseRegion {
         session: u64,
         host: u64,
@@ -157,6 +166,7 @@ pub enum ScreenshotEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotCommand {
+    Long(super::long_capture::workflow::Command),
     ReuseRegion {
         session: u64,
         host: u64,
@@ -199,6 +209,10 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
     let command = |command| vec![AppCommand::Screenshot(command)];
     let s = &mut state.screenshot;
     match event {
+        ScreenshotEvent::Long(event) => super::long_capture::workflow::reduce(s, event)
+            .into_iter()
+            .map(AppCommand::Screenshot)
+            .collect(),
         ScreenshotEvent::ReuseRegion {
             session,
             host,
@@ -216,9 +230,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             })
         }
         ScreenshotEvent::Recognize { session, bounds }
-            if s.session == session
-                && s.phase == ScreenshotPhase::Editing
-                && s.bounds == Some(bounds) =>
+            if s.session == session && s.editable() && s.bounds == Some(bounds) =>
         {
             let mut strategy = super::ocr::OcrRecognitionStrategy::from_settings(
                 state.settings.ocr_language.as_deref(),
@@ -255,6 +267,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         {
             s.phase = ScreenshotPhase::Idle;
             s.ocr_result = Some(outcome);
+            s.long = None;
             command(ScreenshotCommand::Restore { session })
         }
         ScreenshotEvent::CopyColor {
@@ -262,6 +275,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             point,
             color,
         } if s.session == session
+            && s.long.is_none()
             && matches!(
                 s.phase,
                 ScreenshotPhase::Selecting | ScreenshotPhase::Editing
@@ -286,6 +300,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             request,
             result,
         } if s.session == session
+            && s.long.is_none()
             && matches!(
                 s.phase,
                 ScreenshotPhase::Selecting | ScreenshotPhase::Editing
@@ -312,6 +327,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.element_sequence = 0;
             s.element_pending = None;
             s.operation = 0;
+            s.long = None;
             s.layout.clear();
             s.reuse_sequence = 0;
             s.ocr_result = None;
@@ -366,6 +382,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         }
         ScreenshotEvent::Selected { session, bounds }
             if s.session == session
+                && s.long.is_none()
                 && matches!(
                     s.phase,
                     ScreenshotPhase::Selecting | ScreenshotPhase::Editing
@@ -384,7 +401,11 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             kind,
             request,
         } if s.session == session
-            && s.phase == ScreenshotPhase::Editing
+            && (s.editable()
+                || s.phase == ScreenshotPhase::Editing
+                    && s.long.as_ref().is_some_and(|l| {
+                        l.phase == super::long_capture::workflow::Phase::Frozen
+                    }))
             && operation > s.operation
             && request.session == session
             && request.request == operation
@@ -412,13 +433,17 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         {
             match result {
                 Ok(SaveOutcome::Saved) => {
-                    if let Some(bounds) = s.bounds.filter(|_| !s.layout.is_empty()) {
+                    if let Some(bounds) = s
+                        .bounds
+                        .filter(|_| !s.layout.is_empty() && s.long.is_none())
+                    {
                         s.last_region = Some(LastRegion {
                             bounds,
                             layout: s.layout.clone(),
                         });
                     }
                     s.phase = ScreenshotPhase::Idle;
+                    s.long = None;
                     command(ScreenshotCommand::Restore { session })
                 }
                 Ok(SaveOutcome::Cancelled) => {
@@ -440,6 +465,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             }
             s.phase = ScreenshotPhase::Idle;
             s.element_pending = None;
+            s.long = None;
             s.color_pending = None;
             s.color_result = None;
             command(ScreenshotCommand::Restore { session })

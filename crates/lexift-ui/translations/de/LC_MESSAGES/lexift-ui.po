@@ -1822,3 +1822,60 @@ msgstr "Scrollen, um Bereiche zu wechseln"
 #: ui/screenshot-help.slint
 msgid "Reuse last region"
 msgstr "Letzten Bereich wiederverwenden"
+
+msgid "Long screenshot"
+msgstr "Scroll-Aufnahme"
+
+msgid "Clear screenshot annotations and start long capture?"
+msgstr "Anmerkungen löschen und Scroll-Aufnahme starten?"
+
+msgid "Scroll down inside the selected area. Exclude fixed headers."
+msgstr "Im Auswahlbereich nach unten scrollen. Feste Kopfzeilen ausschließen."
+
+msgid "Continue"
+msgstr "Fortsetzen"
+
+msgid "Pause"
+msgstr "Pause"
+
+msgid "Finish"
+msgstr "Fertig"
+
+msgid "Preparing long image"
+msgstr "Langes Bild wird vorbereitet"
+
+msgid "Capture paused"
+msgstr "Aufnahme pausiert"
+
+msgid "Cannot match this frame. Scroll back to the last captured area."
+msgstr "Bild nicht zuordenbar. Zum zuletzt erfassten Bereich zurückscrollen."
+
+msgid "Image limit reached. Finish the current capture."
+msgstr "Bildlimit erreicht. Aktuelle Aufnahme abschließen."
+
+msgid "Scroll down to extend the image"
+msgstr "Nach unten scrollen, um das Bild zu erweitern"
+
+msgid "Long capture unavailable. Select a smaller scrolling area."
+msgstr "Scroll-Aufnahme nicht verfügbar. Kleineren Bereich wählen."
+
+msgid "Fit image"
+msgstr "Bild einpassen"
+
+msgid "Zoom out"
+msgstr "Verkleinern"
+
+msgid "Zoom in"
+msgstr "Vergrößern"
+
+msgid "Edit"
+msgstr "Bearbeiten"
+
+msgid "Fit width"
+msgstr "Breite anpassen"
+
+msgid "Long image ready"
+msgstr "Langes Bild bereit"
+
+msgid "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
+msgstr "Mausrad: Zoom · Ziehen: Verschieben · Leertaste: Bearbeiten/Verschieben · Strg+0: Bild einpassen"

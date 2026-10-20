@@ -1822,3 +1822,60 @@ msgstr "스크롤하여 영역 전환"
 #: ui/screenshot-help.slint
 msgid "Reuse last region"
 msgstr "이전 영역 재사용"
+
+msgid "Long screenshot"
+msgstr "스크롤 캡처"
+
+msgid "Clear screenshot annotations and start long capture?"
+msgstr "주석을 지우고 스크롤 캡처를 시작할까요?"
+
+msgid "Scroll down inside the selected area. Exclude fixed headers."
+msgstr "선택 영역 안에서 아래로 스크롤하세요. 고정 머리글은 제외하세요."
+
+msgid "Continue"
+msgstr "계속"
+
+msgid "Pause"
+msgstr "일시 정지"
+
+msgid "Finish"
+msgstr "완료"
+
+msgid "Preparing long image"
+msgstr "긴 이미지 준비 중"
+
+msgid "Capture paused"
+msgstr "캡처 일시 정지됨"
+
+msgid "Cannot match this frame. Scroll back to the last captured area."
+msgstr "화면을 일치시킬 수 없습니다. 마지막 캡처 영역으로 돌아가세요."
+
+msgid "Image limit reached. Finish the current capture."
+msgstr "이미지 한도에 도달했습니다. 현재 캡처를 완료하세요."
+
+msgid "Scroll down to extend the image"
+msgstr "아래로 스크롤하여 이미지 확장"
+
+msgid "Long capture unavailable. Select a smaller scrolling area."
+msgstr "스크롤 캡처를 시작할 수 없습니다. 더 작은 영역을 선택하세요."
+
+msgid "Fit image"
+msgstr "창에 맞추기"
+
+msgid "Zoom out"
+msgstr "축소"
+
+msgid "Zoom in"
+msgstr "확대"
+
+msgid "Edit"
+msgstr "편집"
+
+msgid "Fit width"
+msgstr "너비에 맞춤"
+
+msgid "Long image ready"
+msgstr "긴 이미지 준비 완료"
+
+msgid "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
+msgstr "휠: 확대/축소 · 드래그: 이동 · 스페이스: 편집/이동 · Ctrl+0: 전체 이미지 맞춤"

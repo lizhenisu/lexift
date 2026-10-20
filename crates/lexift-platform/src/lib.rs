@@ -327,6 +327,21 @@ pub fn configure_hint_window(
     ))
 }
 
+/// Native RGBA capture feedback is passive and transparent across process boundaries.
+pub fn configure_capture_feedback(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::popup::configure_capture_feedback(window)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+        Err(lexift_core::Error::new("Capture feedback is unavailable"))
+    }
+}
+
 /// Lets the annotation canvas pass mouse input to the live desktop in operate mode.
 pub fn set_annotation_click_through(
     window: &impl raw_window_handle::HasWindowHandle,
@@ -360,6 +375,22 @@ pub fn set_annotation_corner_cursor(
         Err(lexift_core::Error::new(
             "Custom annotation cursors are unavailable on this platform",
         ))
+    }
+}
+
+/// Window-owned open/closed hand cursor; None releases it.
+pub fn set_image_pan_cursor(
+    window: &impl raw_window_handle::HasWindowHandle,
+    closed: Option<bool>,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::annotation_cursor::set_pan(window, closed)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, closed);
+        Err(lexift_core::Error::new("Image pan cursors are unavailable"))
     }
 }
 

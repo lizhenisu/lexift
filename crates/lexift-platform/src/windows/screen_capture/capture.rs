@@ -1141,13 +1141,24 @@ mod tests {
             }
         }
         let mut backend = Backend::new().unwrap();
-        let create = || unsafe {
+        let left = std::env::var("LEXIFT_CAPTURE_GATE_LEFT")
+            .ok()
+            .and_then(|s| s.parse::<i32>().ok())
+            .unwrap_or(400);
+        let create = |overlay: bool| unsafe {
             let hwnd = CreateWindowExW(
-                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                WS_EX_TOPMOST
+                    | WS_EX_TOOLWINDOW
+                    | WS_EX_NOACTIVATE
+                    | if overlay {
+                        WS_EX_LAYERED | WS_EX_TRANSPARENT
+                    } else {
+                        WINDOW_EX_STYLE(0)
+                    },
                 w!("STATIC"),
                 w!("Lexift owned toolbar coverage fixture"),
                 WS_POPUP,
-                400,
+                left,
                 400,
                 80,
                 60,
@@ -1157,6 +1168,9 @@ mod tests {
                 None,
             )
             .unwrap();
+            if overlay {
+                SetLayeredWindowAttributes(hwnd, COLORREF(0), 128, LWA_ALPHA).unwrap();
+            }
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             Owned(hwnd)
         };
@@ -1182,15 +1196,35 @@ mod tests {
             ReleaseDC(Some(hwnd), dc);
             let _ = GdiFlush();
         };
-        let source = create();
-        let toolbar = create();
+        let source = create(false);
+        let toolbar = create(true);
+        crate::windows::popup::configure_capture_feedback_hwnd(toolbar.0).unwrap();
+        unsafe {
+            SetWindowLongPtrW(toolbar.0, GWL_EXSTYLE, WS_EX_TOOLWINDOW.0 as isize);
+        }
+        let style = unsafe { GetWindowLongPtrW(toolbar.0, GWL_EXSTYLE) };
+        assert_eq!(
+            style & (WS_EX_LAYERED | WS_EX_TRANSPARENT).0 as isize,
+            (WS_EX_LAYERED | WS_EX_TRANSPARENT).0 as isize
+        );
+        // WindowFromPoint intentionally skips STATIC controls, including this source fixture.
+        assert_ne!(
+            unsafe {
+                WindowFromPoint(windows::Win32::Foundation::POINT {
+                    x: left + 40,
+                    y: 430,
+                })
+            },
+            toolbar.0,
+            "the transparent capture feedback must not intercept source input"
+        );
         paint(toolbar.0, [220, 0, 220]);
         let request = ScreenCaptureRequest {
             revision: 1,
             regions: vec![Rect {
-                left: 400,
+                left,
                 top: 400,
-                right: 480,
+                right: left + 80,
                 bottom: 460,
             }],
             paused_regions: Vec::new(),

@@ -1,6 +1,7 @@
 import { Palette } from "std-widgets.slint";
 
 export global Colors {
+    out property <color> capture-mask: #00000060;
     out property <color> screen-help-background: #202124ee;
     out property <color> screen-help-foreground: #ffffff;
     out property <color> screen-help-key-background: #f1f3f4;
@@ -8,6 +9,8 @@ export global Colors {
     // 0 = Light, 1 = Dark, 2 = System. Keep Palette's native binding intact.
     in property <int> preference: 0;
     out property <bool> dark: preference == 1 || (preference == 2 && Palette.color-scheme == ColorScheme.dark);
+    out property <color> image-workspace: dark ? #1c1f24 : #f3f4f6;
+    out property <color> image-workspace-dot: dark ? #373c44 : #d2d6dc;
     in-out property <color> background: dark ? #181a1e : #f8f9fa;
     in-out property <color> surface: dark ? #24272c : #ffffff;
     in-out property <color> foreground: dark ? #e8eaed : #202124;

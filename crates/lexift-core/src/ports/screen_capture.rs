@@ -13,7 +13,7 @@ pub struct ScreenCaptureRequest {
     pub excluded_windows: Vec<WindowToken>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CapturedRegion {
     pub bounds: Rect,
     /// Premultiplied RGBA, tightly packed, in physical pixels.

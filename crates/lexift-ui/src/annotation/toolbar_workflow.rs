@@ -244,7 +244,7 @@ pub(super) fn refresh_magnifiers() {
 }
 
 pub(super) fn check_display_layout() {
-    if pin_editor::active() {
+    if pin_editor::active() || screenshot::long::busy() || screenshot::long::image_editing() {
         return;
     }
     let changed = REGISTRY.with(|s| {
@@ -1194,7 +1194,11 @@ pub(super) fn sync_toolbar_owner(r: &mut Registry) -> bool {
         r.canvas_state.canvases.iter().map(|canvas| canvas.bounds),
         center,
     )
-    .or(r.toolbar_state.toolbar_owner.map(|owner| owner.0))
+    .or(r
+        .toolbar_state
+        .toolbar_owner
+        .map(|owner| owner.0)
+        .filter(|&index| index < r.canvas_state.canvases.len()))
     .or_else(|| (!r.canvas_state.canvases.is_empty()).then_some(0));
     let Some(owner) = owner else { return false };
     let identity = (
@@ -1401,7 +1405,9 @@ pub(super) fn registry_pointer(
     receive: crate::bridge::PopupPointerSink,
 ) -> crate::bridge::PopupPointerSink {
     input_work.pointer_sink_when_ready(
-        Rc::new(|| REGISTRY.with(|slot| slot.try_borrow().is_ok())),
+        // Read-only geometry placement can pump native messages too; pointer delivery
+        // needs exclusive access, so shared borrows must defer it just like mutations.
+        Rc::new(|| REGISTRY.with(|slot| slot.try_borrow_mut().is_ok())),
         receive,
     )
 }
@@ -1580,6 +1586,7 @@ pub(super) fn pointer_panel(
 
 impl Registry {
     pub(super) fn sync_mode_display(&self) {
+        image_navigation::sync_mode(self);
         let _guards = self.pause_native_pointer_inputs();
         crate::pinned_screenshot::set_annotation_interaction(
             self.screenshot.as_ref().is_some_and(|e| e.pin.is_some())
@@ -1590,6 +1597,7 @@ impl Registry {
         }
         if let Some(main) = self.toolbar_state.main.get() {
             main.set_operate(self.document.mode.is_mouse());
+            main.set_long_capture_available(screenshot::long::available(self));
             main.set_active_group(self.document.mode.selected_group());
         }
     }
