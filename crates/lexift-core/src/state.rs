@@ -149,6 +149,7 @@ impl AppState {
         {
             return vec![];
         }
+        crate::domain::pinned_image::before_event(&mut self.pinned_images, &event);
         match event {
             AppEvent::PinnedImage(event) => crate::domain::pinned_image::reduce(self, event),
             AppEvent::Screenshot(event) => crate::domain::screenshot::reduce(self, event),

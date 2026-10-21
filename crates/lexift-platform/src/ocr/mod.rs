@@ -3,6 +3,7 @@ mod inference;
 mod model_policy;
 mod recognition;
 mod resources;
+mod tiles;
 use lexift_core::{
     Result,
     ports::{

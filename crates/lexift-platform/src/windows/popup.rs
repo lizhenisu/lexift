@@ -1070,8 +1070,8 @@ unsafe extern "system" fn popup_input_subclass(
             && unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetCapture() }.is_invalid()
             && unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) }.as_bool();
         bridge.pending_move = None;
-        if valid {
-            return unsafe {
+        let result = if valid {
+            unsafe {
                 DefSubclassProc(
                     hwnd,
                     WM_NCLBUTTONDOWN,
@@ -1080,9 +1080,20 @@ unsafe extern "system" fn popup_input_subclass(
                     ),
                     lparam,
                 )
-            };
+            }
+        } else {
+            LRESULT(0)
+        };
+        // The posted system move owns a nested loop; returning from begin_drag
+        // only queued it. Notify only the still-attached bridge after that loop.
+        let attached = unsafe { GetPropW(hwnd, w!("Lexift.PopupInputBridge")) };
+        if attached.0 as usize == reference_data {
+            let handler = unsafe { &*(reference_data as *const PopupInputBridge) }
+                .handler
+                .clone();
+            handler(PopupPointerEvent::NativeMoveFinished);
         }
-        return LRESULT(0);
+        return result;
     }
     if message == WM_SHOWWINDOW && wparam.0 == 0 {
         unsafe { &mut *(reference_data as *mut PopupInputBridge) }.pending_move = None;
@@ -1245,13 +1256,15 @@ unsafe extern "system" fn popup_input_subclass(
             return LRESULT(0);
         }
         WM_CAPTURECHANGED | WM_CANCELMODE => {
-            if message == WM_CANCELMODE || !bridge.move_handoff {
-                bridge.pending_move = None;
-            }
+            let move_cancelled = (message == WM_CANCELMODE || !bridge.move_handoff)
+                && bridge.pending_move.take().is_some();
             if bridge.pressed {
                 bridge.pressed = false;
                 let (x, y) = bridge.last_position;
                 (bridge.handler)(PopupPointerEvent::LeftCancelled { x, y });
+            }
+            if move_cancelled {
+                (bridge.handler)(PopupPointerEvent::NativeMoveFinished);
             }
         }
         WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
@@ -1392,19 +1405,25 @@ pub(crate) fn cancel_interaction(
     };
     let hwnd = required_hwnd(window)?;
     let state = unsafe { GetPropW(hwnd, w!("Lexift.PopupInputBridge")) };
+    let mut finished = None;
     if !state.0.is_null() {
         let bridge = unsafe { &mut *(state.0 as *mut PopupInputBridge) };
-        bridge.pending_move = None;
+        if bridge.pending_move.take().is_some() {
+            finished = Some(bridge.handler.clone());
+        }
         bridge.move_handoff = false;
     }
     // No Rust state borrow crosses the synchronous cancellation message.
     unsafe { SendMessageW(hwnd, WM_CANCELMODE, Some(WPARAM(0)), Some(LPARAM(0))) };
     release_owned_capture(hwnd);
+    if let Some(handler) = finished {
+        handler(PopupPointerEvent::NativeMoveFinished);
+    }
     Ok(())
 }
 pub(crate) fn begin_drag(
     window: &impl raw_window_handle::HasWindowHandle,
-) -> lexift_core::Result<()> {
+) -> lexift_core::Result<bool> {
     use windows::{
         Win32::{
             Foundation::{LPARAM, POINT, WPARAM},
@@ -1419,11 +1438,11 @@ pub(crate) fn begin_drag(
     if unsafe { GetCapture() } != hwnd
         || !async_key_is_pressed(unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) })
     {
-        return Ok(());
+        return Ok(false);
     }
     let state = unsafe { GetPropW(hwnd, w!("Lexift.PopupInputBridge")) };
     if state.0.is_null() {
-        return Ok(());
+        return Ok(false);
     }
     let mut cursor = POINT::default();
     unsafe { GetCursorPos(&mut cursor) }
@@ -1433,7 +1452,7 @@ pub(crate) fn begin_drag(
     {
         let bridge = unsafe { &mut *(state.0 as *mut PopupInputBridge) };
         if !bridge.pressed {
-            return Ok(());
+            return Ok(false);
         }
         bridge.pending_move = Some(token);
         bridge.move_handoff = true;
@@ -1442,7 +1461,7 @@ pub(crate) fn begin_drag(
     // ReleaseCapture invokes the bridge synchronously; fetch its still-owned state again.
     let state = unsafe { GetPropW(hwnd, w!("Lexift.PopupInputBridge")) };
     if state.0.is_null() {
-        return Ok(());
+        return Ok(false);
     }
     unsafe { &mut *(state.0 as *mut PopupInputBridge) }.move_handoff = false;
     if let Err(error) = unsafe {
@@ -1458,7 +1477,7 @@ pub(crate) fn begin_drag(
             "Could not begin moving the window: {error}"
         )));
     }
-    Ok(())
+    Ok(true)
 }
 
 pub(crate) fn prepare_resize_tracking(
@@ -2435,6 +2454,40 @@ mod passive_style_regression {
         drop(b);
         assert!(!unsafe { IsWindow(Some(handle)) }.as_bool());
         assert!(unsafe { IsWindow(Some(a.0)) }.as_bool());
+    }
+    #[test]
+    fn posted_move_completion_is_reported_only_for_the_owned_request() {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        let window = capture_window();
+        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let record = events.clone();
+        enable_passive_interaction(&window, Box::new(move |e| record.borrow_mut().push(e)))
+            .unwrap();
+        assert!(!begin_drag(&window).unwrap());
+        unsafe {
+            (*bridge(&window)).pending_move = Some(3);
+            SendMessageW(
+                window.0,
+                BEGIN_MOVE_MESSAGE,
+                Some(WPARAM(2)),
+                Some(LPARAM(0)),
+            );
+        }
+        assert!(events.borrow().is_empty());
+        unsafe {
+            SendMessageW(
+                window.0,
+                BEGIN_MOVE_MESSAGE,
+                Some(WPARAM(3)),
+                Some(LPARAM(0)),
+            );
+        }
+        assert_eq!(&*events.borrow(), &[PopupPointerEvent::NativeMoveFinished]);
+        unsafe {
+            (*bridge(&window)).pending_move = Some(4);
+        }
+        cancel_interaction(&window).unwrap();
+        assert_eq!(events.borrow().len(), 2);
     }
     #[test]
     fn hints_keep_disabled_input_through_backend_rewrites_without_layering() {

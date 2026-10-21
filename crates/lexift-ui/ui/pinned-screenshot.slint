@@ -19,6 +19,10 @@ export component PinnedScreenshotWindow inherits Window {
     in property <image> decoration;
     in property <bool> interactive:true;
     in property <bool> output-busy:false;
+    in property <bool> recognizing:false;
+    in property <bool> recognition-enabled:true;
+    in property <bool> browsing:false;
+    callback recognize-requested();
     in property <bool> editing:false;
     in property <bool> cropping:false;
     in property <float> crop-left;
@@ -51,27 +55,28 @@ export component PinnedScreenshotWindow inherits Window {
         area := TouchArea {
             width:parent.width; height:parent.height; enabled:root.interactive;
             pointer-event(event)=>{
-                if !root.editing && event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.press-changed(true);root.drag-requested();}
+                if (!root.editing || root.browsing) && event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.press-changed(true);root.drag-requested();}
                 if event.kind==PointerEventKind.up || event.kind==PointerEventKind.cancel {root.press-changed(false);}
-                if root.editing {
+                if root.editing && !root.browsing {
                     if event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.edit-pointer(0,self.mouse-x/1px,self.mouse-y/1px);}
                     if event.kind==PointerEventKind.move {root.edit-pointer(1,self.mouse-x/1px,self.mouse-y/1px);}
                     if event.kind==PointerEventKind.up && event.button==PointerEventButton.left {root.edit-pointer(2,self.mouse-x/1px,self.mouse-y/1px);}
                     if event.kind==PointerEventKind.cancel {root.edit-pointer(3,self.mouse-x/1px,self.mouse-y/1px);}
                 }
             }
-            changed has-hover=>{if root.editing && !self.has-hover {root.edit-pointer(4,self.mouse-x/1px,self.mouse-y/1px);}}
-            mouse-cursor: root.editing ? (root.cursor==AnnotationCursor.moving ? move : root.cursor==AnnotationCursor.text ? text : root.cursor==AnnotationCursor.horizontal ? ew-resize : root.cursor==AnnotationCursor.vertical ? ns-resize : root.cursor==AnnotationCursor.diagonal-down ? nwse-resize : root.cursor==AnnotationCursor.diagonal-up ? nesw-resize : root.cursor==AnnotationCursor.drawing ? crosshair : default) : default;
-            scroll-event(event)=>{if root.editing {root.edit-scroll(event.delta-y/1px);return accept;}root.zoom-requested(event.delta-y/1px,self.mouse-x/1px+root.frame-inset,self.mouse-y/1px+root.frame-inset);return accept;}
+            changed has-hover=>{if root.editing && !root.browsing && !self.has-hover {root.edit-pointer(4,self.mouse-x/1px,self.mouse-y/1px);}}
+            mouse-cursor: root.editing && !root.browsing ? (root.cursor==AnnotationCursor.moving ? move : root.cursor==AnnotationCursor.text ? text : root.cursor==AnnotationCursor.horizontal ? ew-resize : root.cursor==AnnotationCursor.vertical ? ns-resize : root.cursor==AnnotationCursor.diagonal-down ? nwse-resize : root.cursor==AnnotationCursor.diagonal-up ? nesw-resize : root.cursor==AnnotationCursor.drawing ? crosshair : default) : default;
+            scroll-event(event)=>{if root.editing && !root.browsing {root.edit-scroll(event.delta-y/1px);return accept;}root.zoom-requested(event.delta-y/1px,self.mouse-x/1px+root.frame-inset,self.mouse-y/1px+root.frame-inset);return accept;}
             // The context area gets right clicks before the draggable parent's grab.
             context := ContextMenuArea {
                 width:parent.width; height:parent.height; enabled:root.interactive;
             Menu {
                 MenuItem { title:@tr("Copy image"); enabled:!root.output-busy && !root.cropping; activated=>{root.output-requested(0);} }
                 MenuItem { title:@tr("Save image"); enabled:!root.output-busy && !root.cropping; activated=>{root.output-requested(1);} }
+                MenuItem { title:root.recognizing ? @tr("Recognizing text…") : @tr("Recognize text"); enabled:root.recognition-enabled && !root.output-busy && !root.cropping; activated=>{root.recognize-requested();} }
                 MenuSeparator {}
                 MenuItem { title:@tr("Annotate"); enabled:!root.output-busy && !root.editing; activated=>{root.annotate-requested();} }
-                MenuItem { title:@tr("Hide annotations"); enabled:!root.cropping; checkable:true; checked:root.annotations-hidden; activated=>{root.visibility-requested(!root.annotations-hidden);} }
+                MenuItem { title:@tr("Hide annotations"); enabled:!root.output-busy && !root.cropping; checkable:true; checked:root.annotations-hidden; activated=>{root.visibility-requested(!root.annotations-hidden);} }
                 MenuSeparator {}
                 MenuItem { title:@tr("Window shadow"); checkable:true; checked <=> root.shadow-enabled; activated=>{root.option-requested(0,self.checked);} }
                 MenuItem { title:@tr("Always on top"); checkable:true; checked <=> root.topmost; activated=>{root.option-requested(1,self.checked);} }
@@ -79,7 +84,7 @@ export component PinnedScreenshotWindow inherits Window {
                 MenuItem { title:@tr("Close"); activated=>{root.close-requested();} }
             }
                 keys := FocusScope { key-pressed(event)=>{if root.interactive && event.text==Key.Escape {root.escape-requested();return accept;}
-                    if root.editing {
+                    if root.editing && !root.browsing {
                         if event.text==Key.Delete {root.edit-key(1);return accept;}
                         if event.text==Key.Return {root.edit-key(2);return accept;}
                         if event.text==Key.Backspace {root.edit-key(3);return accept;}

@@ -380,7 +380,8 @@ pub(super) fn language_menu_pointer_sink(
                 delta_x: delta_x / scale,
                 delta_y: delta_y / scale,
             },
-            PopupPointerInput::DismissRequested { .. }
+            PopupPointerInput::NativeMoveFinished
+            | PopupPointerInput::DismissRequested { .. }
             | PopupPointerInput::NativeTopResizeRequested => {
                 return;
             }

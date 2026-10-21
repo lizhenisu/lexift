@@ -14,10 +14,10 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-fn error(e: impl std::fmt::Display) -> Error {
+pub(super) fn error(e: impl std::fmt::Display) -> Error {
     Error::new(format!("OCR recognition: {e}"))
 }
-fn cancelled(flag: &AtomicBool) -> Result<()> {
+pub(super) fn cancelled(flag: &AtomicBool) -> Result<()> {
     if flag.load(Ordering::Acquire) {
         Err(error("cancelled"))
     } else {
@@ -93,48 +93,21 @@ impl Engine {
             .flat_map(|p| [p[0], p[1], p[2]])
             .collect();
         let image = RgbImage::from_raw(w, h, rgb).ok_or_else(|| error("invalid image"))?;
-        let ratio = (960. / w.max(h) as f32).min(1.);
-        let dw = ((w as f32 * ratio / 32.).round() as u32 * 32).max(32);
-        let dh = ((h as f32 * ratio / 32.).round() as u32 * 32).max(32);
         drop(input);
-        let resized = imageops::resize(&image, dw, dh, FilterType::Triangle);
-        let tensor = Tensor::from_array((
-            [1usize, 3, dh as usize, dw as usize],
-            normalize(&resized, true),
-        ))
-        .map_err(error)?;
-        drop(resized);
-        let outputs = self.detector.run(ort::inputs![tensor]).map_err(error)?;
-        let (shape, map) = outputs[0].try_extract_tensor::<f32>().map_err(error)?;
-        if shape.len() != 4
-            || shape[0] != 1
-            || shape[1] != 1
-            || shape[2] <= 0
-            || shape[3] <= 0
-            || shape[2].checked_mul(shape[3]) != Some(map.len() as i64)
-        {
-            return Err(error("invalid detection output"));
-        }
-        let mh = shape[shape.len() - 2] as usize;
-        let mw = shape[shape.len() - 1] as usize;
-        let boxes = regions(map, mw, mh);
+        let regions = if h > w && h > 960 {
+            super::tiles::detect(h, cancel, |top, bottom| {
+                let tile = imageops::crop_imm(&image, 0, top, w, bottom - top).to_image();
+                self.detect(&tile, top, cancel)
+            })?
+        } else {
+            self.detect(&image, 0, cancel)?
+        };
         #[cfg(test)]
         {
             self.stages_us[0] = stage_start.elapsed().as_micros();
         }
         #[cfg(test)]
         let stage_start = std::time::Instant::now();
-        drop(outputs);
-        let mut regions = Vec::new();
-        for b in boxes {
-            let left = (b.0 as f32 / mw as f32 * w as f32).floor().max(0.) as u32;
-            let top = (b.1 as f32 / mh as f32 * h as f32).floor().max(0.) as u32;
-            let right = (b.2 as f32 / mw as f32 * w as f32).ceil().min(w as f32) as u32;
-            let bottom = (b.3 as f32 / mh as f32 * h as f32).ceil().min(h as f32) as u32;
-            if right > left && bottom > top {
-                regions.push((left, top, right, bottom));
-            }
-        }
         let mut order: Vec<usize> = (0..regions.len()).collect();
         order.sort_by_key(|&i| {
             let (l, t, r, b) = regions[i];
@@ -209,6 +182,52 @@ impl Engine {
         {
             self.stages_us[2] = stage_start.elapsed().as_micros();
         }
+        Ok(result)
+    }
+    fn detect(
+        &mut self,
+        image: &RgbImage,
+        offset: u32,
+        cancel: &AtomicBool,
+    ) -> Result<Vec<super::tiles::Bounds>> {
+        cancelled(cancel)?;
+        let (w, h) = image.dimensions();
+        let ratio = (960. / w.max(h) as f32).min(1.);
+        let dw = ((w as f32 * ratio / 32.).round() as u32 * 32).max(32);
+        let dh = ((h as f32 * ratio / 32.).round() as u32 * 32).max(32);
+        let resized = imageops::resize(image, dw, dh, FilterType::Triangle);
+        let tensor = Tensor::from_array((
+            [1usize, 3, dh as usize, dw as usize],
+            normalize(&resized, true),
+        ))
+        .map_err(error)?;
+        drop(resized);
+        let outputs = self.detector.run(ort::inputs![tensor]).map_err(error)?;
+        let (shape, map) = outputs[0].try_extract_tensor::<f32>().map_err(error)?;
+        if shape.len() != 4
+            || shape[0] != 1
+            || shape[1] != 1
+            || shape[2] <= 0
+            || shape[3] <= 0
+            || shape[2].checked_mul(shape[3]) != Some(map.len() as i64)
+        {
+            return Err(error("invalid detection output"));
+        }
+        let mh = shape[shape.len() - 2] as usize;
+        let mw = shape[shape.len() - 1] as usize;
+        let boxes = regions(map, mw, mh);
+        drop(outputs);
+        let mut result = Vec::new();
+        for b in boxes {
+            let left = (b.0 as f32 / mw as f32 * w as f32).floor().max(0.) as u32;
+            let top = (b.1 as f32 / mh as f32 * h as f32).floor().max(0.) as u32;
+            let right = (b.2 as f32 / mw as f32 * w as f32).ceil().min(w as f32) as u32;
+            let bottom = (b.3 as f32 / mh as f32 * h as f32).ceil().min(h as f32) as u32;
+            if right > left && bottom > top {
+                result.push((left, top + offset, right, bottom + offset));
+            }
+        }
+        cancelled(cancel)?;
         Ok(result)
     }
     pub(super) fn release_korean(&mut self) {
@@ -550,6 +569,37 @@ mod tests {
                 .unwrap(),
             ""
         );
+    }
+    #[test]
+    #[ignore = "requires verified resources and ignored long-image fixture"]
+    fn real_long_image_numbered_lines() {
+        let folder = PathBuf::from(std::env::var_os("LEXIFT_OCR_TEST_RESOURCES").unwrap());
+        let fixture = PathBuf::from(std::env::var_os("LEXIFT_OCR_LONG_FIXTURE").unwrap());
+        let rgba = image::open(&fixture).unwrap().into_rgba8();
+        let mut engine = Engine::new(&folder).unwrap();
+        let start = std::time::Instant::now();
+        let text = engine
+            .recognize(
+                CapturedRegion {
+                    bounds: lexift_core::domain::geometry::Rect {
+                        left: 0,
+                        top: 0,
+                        right: rgba.width() as i32,
+                        bottom: rgba.height() as i32,
+                    },
+                    pixels: rgba.into_raw(),
+                },
+                &lexift_core::domain::ocr::OcrRecognitionStrategy::Automatic,
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+        std::fs::write(fixture.with_extension("actual.txt"), &text).unwrap();
+        let expected = std::fs::read_to_string(fixture.with_extension("txt")).unwrap();
+        assert_eq!(
+            text.split_whitespace().collect::<Vec<_>>(),
+            expected.split_whitespace().collect::<Vec<_>>()
+        );
+        eprintln!("long OCR elapsed_ms={}", start.elapsed().as_millis());
     }
     /// Development-only corpus runner. Inputs and candidate text stay under ignored target/.
     #[test]

@@ -211,7 +211,11 @@ pub(crate) fn reduce(state: &mut AppState, event: OcrEvent) -> Vec<AppCommand> {
     let cmd = |c| vec![AppCommand::Ocr(c)];
     match event {
         ManageResources(operation) => {
-            let active = state.screenshot.phase == super::screenshot::ScreenshotPhase::Recognizing
+            let active = state
+                .pinned_images
+                .values()
+                .any(|p| p.recognition.is_some())
+                || state.screenshot.phase == super::screenshot::ScreenshotPhase::Recognizing
                 || matches!(
                     state.ocr.phase,
                     OcrPhase::Checking | OcrPhase::Capturing | OcrPhase::Recognizing
@@ -586,6 +590,40 @@ pub(crate) fn reduce(state: &mut AppState, event: OcrEvent) -> Vec<AppCommand> {
             cmd(OcrCommand::Cancel)
         }
         _ => vec![],
+    }
+}
+
+/// Terminal copy-only OCR feedback never retains recognized text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OcrOutcome {
+    Copied,
+    Empty,
+    ResourcesUnavailable,
+    RecognitionFailed,
+    CopyFailed,
+}
+impl OcrOutcome {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Copied => "Recognized text copied",
+            Self::Empty => "No text recognized",
+            Self::ResourcesUnavailable => "OCR resources unavailable. Manage them in Settings.",
+            Self::RecognitionFailed => "Text recognition failed",
+            Self::CopyFailed => "Could not copy recognized text",
+        }
+    }
+}
+
+/// Freeze the same OCR policy for screenshot and pinned-image copy requests.
+pub fn copy_strategy(settings: &crate::domain::settings::Settings) -> OcrRecognitionStrategy {
+    let strategy = OcrRecognitionStrategy::from_settings(
+        settings.ocr_language.as_deref(),
+        settings.ui_language.code(),
+    );
+    if settings.ocr_korean_auto && strategy == OcrRecognitionStrategy::Automatic {
+        OcrRecognitionStrategy::AutomaticKorean
+    } else {
+        strategy
     }
 }
 

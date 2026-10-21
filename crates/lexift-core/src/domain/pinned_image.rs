@@ -12,6 +12,8 @@ pub enum Output {
 pub struct State {
     pub operation: u64,
     pub busy: bool,
+    pub recognition: Option<Recognition>,
+    pub ocr_result: Option<(u64, super::ocr::OcrOutcome)>,
     pub error: Option<String>,
     pub hidden: bool,
     pub editing: Option<u64>,
@@ -22,8 +24,27 @@ pub struct State {
     pub proposed: Option<ExportRequest>,
     pub proposal_ready: bool,
 }
+/// Immutable input identity; geometry changes of the pin window do not change it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Recognition {
+    pub operation: u64,
+    pub revision: u64,
+    pub bounds: super::geometry::Rect,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    Recognize {
+        id: u64,
+    },
+    CancelRecognition {
+        id: u64,
+    },
+    Recognized {
+        id: u64,
+        operation: u64,
+        revision: u64,
+        outcome: super::ocr::OcrOutcome,
+    },
     SourceReady {
         id: u64,
         bounds: super::geometry::Rect,
@@ -94,6 +115,11 @@ pub enum Event {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    Recognize {
+        id: u64,
+        request: Recognition,
+        strategy: super::ocr::OcrRecognitionStrategy,
+    },
     BeginEdit {
         id: u64,
         edit: u64,
@@ -126,9 +152,107 @@ pub enum Command {
     },
 }
 pub type States = BTreeMap<u64, State>;
+fn cancel_one(p: &mut State) {
+    if p.recognition.take().is_some() {
+        p.busy = false;
+    }
+    p.ocr_result = None;
+}
+pub(crate) fn cancel_recognition(pins: &mut States) {
+    for p in pins.values_mut() {
+        cancel_one(p);
+    }
+}
+/// Cancel copy-only work when its source or owning interaction is retired.
+pub(crate) fn before_event(pins: &mut States, event: &crate::AppEvent) {
+    use crate::AppEvent;
+    match event {
+        AppEvent::ExitRequested
+        | AppEvent::Screenshot(super::screenshot::ScreenshotEvent::Requested(_))
+        | AppEvent::Ocr(super::ocr::OcrEvent::Requested { .. }) => cancel_recognition(pins),
+        AppEvent::PinnedImage(Event::EditRequested { id } | Event::Requested { id, .. })
+            if pins
+                .get(id)
+                .is_some_and(|p| !p.busy && p.proposed.is_none()) =>
+        {
+            cancel_recognition(pins)
+        }
+        AppEvent::PinnedImage(
+            Event::Closed { id }
+            | Event::EditFinished { id, .. }
+            | Event::EditFailed { id, .. }
+            | Event::VisibilityChanged { id, .. },
+        ) => {
+            if let Some(p) = pins.get_mut(id) {
+                cancel_one(p);
+            }
+        }
+        _ => {}
+    }
+}
 pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
     let command = |c| vec![AppCommand::PinnedImage(c)];
     match event {
+        Event::Recognize { id } => {
+            if state.screenshot.active()
+                || matches!(
+                    state.ocr.phase,
+                    super::ocr::OcrPhase::Checking
+                        | super::ocr::OcrPhase::Capturing
+                        | super::ocr::OcrPhase::Recognizing
+                )
+                || !state
+                    .pinned_images
+                    .get(&id)
+                    .is_some_and(|p| !p.busy && p.proposed.is_none() && p.source.is_some())
+            {
+                return vec![];
+            }
+            cancel_recognition(&mut state.pinned_images);
+            let p = state.pinned_images.get_mut(&id).unwrap();
+            p.operation = p.operation.checked_add(1).expect("pin operation exhausted");
+            let bounds = p
+                .document
+                .as_ref()
+                .map_or(p.source.unwrap(), |d| d.snapshot.monitor);
+            let request = Recognition {
+                operation: p.operation,
+                revision: p.revision,
+                bounds,
+            };
+            p.recognition = Some(request);
+            p.busy = true;
+            p.ocr_result = None;
+            p.error = None;
+            command(Command::Recognize {
+                id,
+                request,
+                strategy: super::ocr::copy_strategy(&state.settings),
+            })
+        }
+        Event::CancelRecognition { id } => {
+            if let Some(p) = state.pinned_images.get_mut(&id) {
+                cancel_one(p);
+            }
+            vec![]
+        }
+        Event::Recognized {
+            id,
+            operation,
+            revision,
+            outcome,
+        } => {
+            if let Some(p) = state.pinned_images.get_mut(&id).filter(|p| {
+                p.recognition
+                    .is_some_and(|r| r.operation == operation && r.revision == revision)
+                    && p.revision == revision
+            }) {
+                p.recognition = None;
+                p.busy = false;
+                p.ocr_result = Some((operation, outcome));
+            }
+            vec![]
+        }
         Event::SourceReady { id, bounds } => {
             if let Some(p) = state.pinned_images.get_mut(&id) {
                 p.source = Some(bounds);
@@ -304,7 +428,7 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
             }) {
                 return vec![];
             }
-            if pin.proposed.is_some() {
+            if pin.proposed.is_some() || pin.recognition.is_some() {
                 return vec![];
             }
             pin.document = Some(document.clone());
@@ -392,7 +516,7 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
             if let Some(pin) = state
                 .pinned_images
                 .get_mut(&id)
-                .filter(|p| p.busy && p.operation == operation)
+                .filter(|p| p.busy && p.recognition.is_none() && p.operation == operation)
             {
                 pin.busy = false;
                 pin.error = result.err().map(|e| e.to_string());
@@ -440,6 +564,132 @@ mod tests {
                 title: String::new(),
             }),
         }
+    }
+    fn ocr_state() -> AppState {
+        let mut s = AppState::default();
+        for id in [1, 2] {
+            s.pinned_images.insert(
+                id,
+                State {
+                    source: Some(super::super::geometry::Rect {
+                        left: -10,
+                        top: -20,
+                        right: 20,
+                        bottom: 10,
+                    }),
+                    document: Some(document(1)),
+                    ..Default::default()
+                },
+            );
+        }
+        s
+    }
+    #[test]
+    fn recognition_freezes_confirmed_crop_and_replaces_only_other_request() {
+        let mut s = ocr_state();
+        let commands = reduce(&mut s, Event::Recognize { id: 1 });
+        let old = s.pinned_images[&1].recognition.unwrap();
+        assert_eq!(
+            old.bounds,
+            s.pinned_images[&1]
+                .document
+                .as_ref()
+                .unwrap()
+                .snapshot
+                .monitor
+        );
+        assert!(matches!(
+            commands.as_slice(),
+            [AppCommand::PinnedImage(Command::Recognize { .. })]
+        ));
+        assert!(reduce(&mut s, Event::Recognize { id: 1 }).is_empty());
+        assert_eq!(s.pinned_images[&1].recognition, Some(old));
+        reduce(&mut s, Event::Recognize { id: 2 });
+        assert!(!s.pinned_images[&1].busy);
+        reduce(
+            &mut s,
+            Event::Recognized {
+                id: 1,
+                operation: old.operation,
+                revision: old.revision,
+                outcome: super::super::ocr::OcrOutcome::Copied,
+            },
+        );
+        assert!(s.pinned_images[&1].ocr_result.is_none());
+        assert!(s.pinned_images[&2].busy);
+    }
+    #[test]
+    fn outcomes_keep_pin_and_editor_and_cancel_rejects_late_result() {
+        for outcome in [
+            super::super::ocr::OcrOutcome::Copied,
+            super::super::ocr::OcrOutcome::Empty,
+            super::super::ocr::OcrOutcome::ResourcesUnavailable,
+            super::super::ocr::OcrOutcome::RecognitionFailed,
+            super::super::ocr::OcrOutcome::CopyFailed,
+        ] {
+            let mut s = ocr_state();
+            s.pinned_images.get_mut(&1).unwrap().editing = Some(7);
+            reduce(&mut s, Event::Recognize { id: 1 });
+            let r = s.pinned_images[&1].recognition.unwrap();
+            assert!(
+                reduce(
+                    &mut s,
+                    Event::Recognized {
+                        id: 1,
+                        operation: r.operation,
+                        revision: r.revision + 1,
+                        outcome
+                    }
+                )
+                .is_empty()
+            );
+            assert!(s.pinned_images[&1].busy);
+            reduce(
+                &mut s,
+                Event::Recognized {
+                    id: 1,
+                    operation: r.operation,
+                    revision: r.revision,
+                    outcome,
+                },
+            );
+            assert_eq!(s.pinned_images[&1].editing, Some(7));
+            assert_eq!(s.pinned_images[&1].ocr_result, Some((r.operation, outcome)));
+            reduce(&mut s, Event::Recognize { id: 1 });
+            let r = s.pinned_images[&1].recognition.unwrap();
+            reduce(&mut s, Event::CancelRecognition { id: 1 });
+            reduce(
+                &mut s,
+                Event::Recognized {
+                    id: 1,
+                    operation: r.operation,
+                    revision: r.revision,
+                    outcome,
+                },
+            );
+            assert!(!s.pinned_images[&1].busy);
+            assert!(s.pinned_images[&1].ocr_result.is_none());
+        }
+    }
+    #[test]
+    fn output_of_same_pin_is_blocked_but_other_output_cancels_recognition() {
+        let mut s = ocr_state();
+        s.reduce(crate::AppEvent::PinnedImage(Event::Recognize { id: 1 }));
+        let output = |id| {
+            crate::AppEvent::PinnedImage(Event::Requested {
+                id,
+                kind: Output::Copy,
+                owner: None,
+                title: String::new(),
+            })
+        };
+        assert!(s.reduce(output(1)).is_empty());
+        assert!(s.pinned_images[&1].recognition.is_some());
+        assert!(!s.reduce(output(2)).is_empty());
+        assert!(s.pinned_images[&1].recognition.is_none());
+        s.reduce(crate::AppEvent::PinnedImage(Event::Recognize { id: 1 }));
+        s.reduce(crate::AppEvent::ExitRequested);
+        assert!(s.pinned_images.values().all(|p| p.recognition.is_none()));
     }
     #[test]
     fn crop_candidate_commits_only_after_matching_presentation_and_cancel_retires_it() {

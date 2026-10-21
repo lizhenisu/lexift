@@ -1816,6 +1816,189 @@ mod tests {
     }
 
     #[test]
+    fn pin_ocr_serializes_latest_request_and_crops_confirmed_base_without_rendering() {
+        use lexift_core::{
+            domain::{
+                annotation::Session,
+                annotation_export::{ExportRequest, ExportSnapshot},
+                ocr::OcrRecognitionStrategy,
+                pinned_image as pin,
+            },
+            ports::{
+                annotation_save::{AnnotationSavePort, PngSaveRequest, SaveOutcome},
+                ocr::{DownloadProgress, OcrPort, OcrResourceStatus, OcrResources},
+                screen_capture::{
+                    CapturedRegion, ScreenCaptureFrame, ScreenCapturePort, ScreenCaptureRequest,
+                },
+            },
+        };
+        struct Capture;
+        impl ScreenCapturePort for Capture {
+            fn is_available(&self) -> bool {
+                false
+            }
+            fn request(&self, _: ScreenCaptureRequest) -> lexift_core::Result<()> {
+                panic!("frozen source only")
+            }
+            fn latest(&self) -> lexift_core::Result<Option<Arc<ScreenCaptureFrame>>> {
+                panic!("frozen source only")
+            }
+            fn clear(&self) {}
+        }
+        struct Save;
+        impl AnnotationSavePort for Save {
+            fn is_available(&self) -> bool {
+                true
+            }
+            fn save_png(
+                &self,
+                _: PngSaveRequest,
+                _: Arc<AtomicBool>,
+            ) -> lexift_core::Result<SaveOutcome> {
+                panic!("OCR never saves pixels")
+            }
+        }
+        struct Ocr {
+            started: AtomicUsize,
+            release: AtomicBool,
+            calls: Mutex<Vec<(u8, Rect)>>,
+        }
+        impl OcrPort for Ocr {
+            fn resources(&self) -> lexift_core::Result<OcrResources> {
+                Ok(OcrResources {
+                    ready: true,
+                    status: OcrResourceStatus::Ready,
+                    download_bytes: 0,
+                    version: String::new(),
+                    installed_bytes: 0,
+                    entries: vec![],
+                    korean: None,
+                })
+            }
+            fn remove_resources(&self) -> lexift_core::Result<OcrResources> {
+                panic!()
+            }
+            fn download(&self, _: &AtomicBool, _: DownloadProgress) -> lexift_core::Result<()> {
+                panic!()
+            }
+            fn release(&self) {}
+            fn recognize(
+                &self,
+                image: CapturedRegion,
+                _: &OcrRecognitionStrategy,
+                _: &AtomicBool,
+            ) -> lexift_core::Result<String> {
+                self.calls
+                    .lock()
+                    .unwrap()
+                    .push((image.pixels[0], image.bounds));
+                if self.started.fetch_add(1, Ordering::SeqCst) == 0 {
+                    let until = Instant::now() + Duration::from_secs(5);
+                    while !self.release.load(Ordering::SeqCst) {
+                        assert!(Instant::now() < until);
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                }
+                Ok(format!("pin {}", image.pixels[0]))
+            }
+        }
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let state = Arc::new(Mutex::new(AppState::default()));
+        let clipboard = Arc::new(RecordingClipboard::default());
+        let screenshot = Arc::new(crate::screenshot::ScreenshotRuntime::new(
+            || None,
+            Arc::new(Save),
+            Arc::new(lexift_ui::SoftwareExportRenderer),
+            clipboard.clone(),
+        ));
+        let full = Rect {
+            left: -10,
+            top: -20,
+            right: 10,
+            bottom: 0,
+        };
+        let crop = Rect {
+            left: -5,
+            top: -10,
+            right: 5,
+            bottom: -5,
+        };
+        for id in [1, 2, 3] {
+            screenshot.install_test_pin_source(
+                id,
+                Arc::new(CapturedRegion {
+                    bounds: full,
+                    pixels: [id as u8, 0, 0, 255].repeat(400),
+                }),
+            );
+            state.lock().unwrap().pinned_images.insert(
+                id,
+                pin::State {
+                    source: Some(full),
+                    revision: 5,
+                    document: Some(ExportRequest {
+                        session: 1,
+                        request: 1,
+                        snapshot: Arc::new(ExportSnapshot {
+                            session: Arc::new(Session::new()),
+                            monitor: crop,
+                            scale: 1.,
+                            monitors: vec![],
+                            excluded: vec![],
+                            owner: None,
+                            name: String::new(),
+                            title: String::new(),
+                        }),
+                    }),
+                    ..Default::default()
+                },
+            );
+        }
+        let port = Arc::new(Ocr {
+            started: AtomicUsize::new(0),
+            release: AtomicBool::new(false),
+            calls: Mutex::new(vec![]),
+        });
+        let controller = Arc::new(
+            AppController::new(
+                runtime.handle().clone(),
+                state.clone(),
+                None,
+                None,
+                Arc::new(ReorderingTranslator),
+                Arc::new(RecordingSettingsStore::default()),
+                Arc::new(RecordingView::default()),
+            )
+            .with_screenshot(Some(screenshot))
+            .with_ocr(Some(Arc::new(crate::ocr::OcrRuntime::new(
+                port.clone(),
+                Arc::new(Capture),
+            )))),
+        );
+        controller.dispatch(AppEvent::PinnedImage(pin::Event::Recognize { id: 1 }));
+        let until = Instant::now() + Duration::from_secs(5);
+        while port.started.load(Ordering::SeqCst) == 0 {
+            assert!(Instant::now() < until);
+            thread::sleep(Duration::from_millis(1));
+        }
+        controller.dispatch(AppEvent::PinnedImage(pin::Event::Recognize { id: 2 }));
+        controller.dispatch(AppEvent::PinnedImage(pin::Event::Recognize { id: 3 }));
+        port.release.store(true, Ordering::SeqCst);
+        while state.lock().unwrap().pinned_images[&3].busy {
+            assert!(Instant::now() < until);
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(&*port.calls.lock().unwrap(), &[(1, crop), (3, crop)]);
+        assert_eq!(clipboard.read_text().unwrap().as_deref(), Some("pin 3"));
+        let s = state.lock().unwrap();
+        assert!(s.pinned_images[&1].ocr_result.is_none());
+        assert!(s.pinned_images[&2].ocr_result.is_none());
+    }
+    #[test]
     fn second_hotkey_during_translation_captures_and_displays_new_selection() {
         let runtime = Builder::new_multi_thread()
             .worker_threads(2)

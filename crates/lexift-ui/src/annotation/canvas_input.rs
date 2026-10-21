@@ -91,6 +91,9 @@ pub(super) fn brush_size_scrolled(index: usize, delta: f32) {
 }
 
 pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
+    if pin_editor::recognition_busy() {
+        return;
+    }
     let mut text_to_open = None;
     let result = REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
@@ -806,6 +809,9 @@ fn history(forward: bool) {
     }
 }
 pub(super) fn delete_selected() {
+    if pin_editor::recognition_busy() {
+        return;
+    }
     if image_crop::active() {
         return;
     }
@@ -894,6 +900,9 @@ impl Registry {
 
     /// Apply the native input policy before exposing a new mode in the toolbar.
     pub(super) fn set_mode(&mut self, mode: InteractionMode) -> bool {
+        if pin_editor::recognition_busy() {
+            return false;
+        }
         image_crop::cancel(self);
         if screenshot::recognizing() {
             return false;

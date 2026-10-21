@@ -80,14 +80,14 @@ impl OcrRuntime {
         });
         result
     }
-    pub(crate) fn recognize_screenshot(
+    pub(crate) fn recognize_for_copy(
         self: &Arc<Self>,
         controller: &Arc<AppController>,
         image: CapturedRegion,
         strategy: &lexift_core::domain::ocr::OcrRecognitionStrategy,
         cancel: &AtomicBool,
-    ) -> std::result::Result<String, lexift_core::domain::screenshot::OcrOutcome> {
-        use lexift_core::{domain::screenshot::OcrOutcome, ports::ocr::OcrResourceStatus};
+    ) -> std::result::Result<String, lexift_core::domain::ocr::OcrOutcome> {
+        use lexift_core::{domain::ocr::OcrOutcome, ports::ocr::OcrResourceStatus};
         let info = self
             .port
             .resources()

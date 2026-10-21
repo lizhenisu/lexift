@@ -1058,6 +1058,11 @@ fn pinned_editor_keeps_documents_history_and_hidden_output_separate() {
         recorded_sinks.borrow_mut().push(sink);
         true
     });
+    let recorded_pin_sinks = sinks.clone();
+    l.complete_passive_window_show = Rc::new(move |_, sink| {
+        recorded_pin_sinks.borrow_mut().push(sink);
+        true
+    });
     super::super::init(|_| PassiveWindowPreparation::Ready, l.clone());
     crate::pinned_screenshot::init(|_| PassiveWindowPreparation::Ready, l);
     let core = Rc::new(RefCell::new(lexift_core::AppState::default()));
@@ -1164,6 +1169,55 @@ fn pinned_editor_keeps_documents_history_and_hidden_output_separate() {
             .objects
             .clone()
     });
+    // Recognition keeps the edit session/tool, but temporarily routes pointer input to browsing.
+    let source = core.borrow().pinned_images[&id]
+        .document
+        .as_ref()
+        .unwrap()
+        .snapshot
+        .monitor;
+    core.borrow_mut()
+        .reduce(AppEvent::PinnedImage(PinEvent::SourceReady {
+            id,
+            bounds: source,
+        }));
+    pin.invoke_recognize_requested();
+    assert!(pin.get_recognizing());
+    assert!(pin.get_browsing());
+    assert!(pin.get_interactive());
+    let request = core.borrow().pinned_images[&id].recognition.unwrap();
+    for (event, x, y) in [(0, 130., 90.), (1, 210., 160.), (2, 210., 160.)] {
+        pin.invoke_edit_pointer(event, x / scale, y / scale);
+    }
+    pin.invoke_edit_key(0);
+    REGISTRY.with(|s| {
+        let mut s = s.borrow_mut();
+        let r = s.as_mut().unwrap();
+        assert_eq!(r.document.session.objects, before);
+        assert!(!r.set_mode(InteractionMode::Mouse));
+    });
+    pin.invoke_press_changed(true);
+    pin.invoke_drag_requested();
+    slint::platform::update_timers_and_animations();
+    pin.invoke_escape_requested();
+    assert!(!pin.get_recognizing());
+    assert!(
+        pin.get_browsing(),
+        "native move has only been posted; do not restore drawing yet"
+    );
+    pin_sink(PopupPointerInput::NativeMoveFinished);
+    pump("native move completion", || !pin.get_browsing());
+    assert!(!pin.get_browsing());
+    assert!(pin.get_interactive());
+    assert!(pin_editor::current().is_some_and(|p| p.0 == id));
+    core.borrow_mut()
+        .reduce(AppEvent::PinnedImage(PinEvent::Recognized {
+            id,
+            operation: request.operation,
+            revision: request.revision,
+            outcome: lexift_core::domain::ocr::OcrOutcome::Copied,
+        }));
+    assert!(core.borrow().pinned_images[&id].ocr_result.is_none());
     let px = |x: f32| (x / scale + pin.get_frame_inset()) * pin.window().scale_factor();
     pin_sink(PopupPointerInput::LeftPressed {
         x: px(220.),

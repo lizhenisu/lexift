@@ -47,6 +47,23 @@ impl Session {
         lexift_platform::clear_screenshot_surface_pixels(self.id);
     }
 }
+struct PinOcrTask {
+    id: u64,
+    request: lexift_core::domain::pinned_image::Recognition,
+    strategy: lexift_core::domain::ocr::OcrRecognitionStrategy,
+    base: Arc<CapturedRegion>,
+    cancel: Arc<AtomicBool>,
+}
+#[derive(Default)]
+struct PinOcrQueue {
+    running: bool,
+    current: Option<(
+        u64,
+        lexift_core::domain::pinned_image::Recognition,
+        Arc<AtomicBool>,
+    )>,
+    pending: Option<PinOcrTask>,
+}
 pub(crate) struct ScreenshotRuntime {
     long: Mutex<Option<long::Job>>,
     capture: CaptureFactory,
@@ -62,6 +79,7 @@ pub(crate) struct ScreenshotRuntime {
     pin_pending_samples: Mutex<BTreeMap<(u64, u64), Arc<ScreenCaptureFrame>>>,
     pin_samples: Mutex<BTreeMap<u64, Arc<ScreenCaptureFrame>>>,
     pin_previews: Mutex<BTreeMap<u64, Arc<AtomicBool>>>,
+    pin_ocr: Mutex<PinOcrQueue>,
 }
 impl ScreenshotRuntime {
     pub fn new(
@@ -83,6 +101,7 @@ impl ScreenshotRuntime {
             pin_images: Default::default(),
             pin_jobs: Default::default(),
             pin_previews: Default::default(),
+            pin_ocr: Default::default(),
             pin_pending_samples: Default::default(),
             pin_samples: Default::default(),
         }
@@ -176,6 +195,15 @@ impl ScreenshotRuntime {
         }
     }
     pub fn sync_pins(&self, pins: &PinStates, quitting: bool) {
+        {
+            let mut q = self.pin_ocr.lock().unwrap();
+            if let Some((id, request, cancel)) = &q.current
+                && (quitting || pins.get(id).is_none_or(|p| p.recognition != Some(*request)))
+            {
+                cancel.store(true, Ordering::Release);
+                q.pending = None;
+            }
+        }
         self.pin_previews.lock().unwrap().retain(|id, cancel| {
             let keep = !quitting && pins.contains_key(id);
             if !keep {
@@ -199,8 +227,56 @@ impl ScreenshotRuntime {
             keep
         });
     }
+    #[cfg(test)]
+    pub(crate) fn install_test_pin_source(&self, id: u64, image: Arc<CapturedRegion>) {
+        self.pin_images.lock().unwrap().insert(id, image);
+    }
     pub fn execute_pin(self: &Arc<Self>, controller: &Arc<AppController>, command: PinCommand) {
         match command {
+            PinCommand::Recognize {
+                id,
+                request,
+                strategy,
+            } => {
+                let base = self.pin_images.lock().unwrap().get(&id).cloned();
+                let Some(base) = base else {
+                    controller.dispatch(AppEvent::PinnedImage(PinEvent::Recognized {
+                        id,
+                        operation: request.operation,
+                        revision: request.revision,
+                        outcome: lexift_core::domain::ocr::OcrOutcome::RecognitionFailed,
+                    }));
+                    return;
+                };
+                let cancel = Arc::new(AtomicBool::new(false));
+                let start = {
+                    let mut q = self.pin_ocr.lock().unwrap();
+                    if let Some((_, _, old)) = q.current.take() {
+                        old.store(true, Ordering::Release);
+                    }
+                    q.current = Some((id, request, cancel.clone()));
+                    q.pending = Some(PinOcrTask {
+                        id,
+                        request,
+                        strategy,
+                        base,
+                        cancel,
+                    });
+                    if q.running {
+                        false
+                    } else {
+                        q.running = true;
+                        true
+                    }
+                };
+                if start {
+                    let this = self.clone();
+                    let c = controller.clone();
+                    controller
+                        .runtime
+                        .spawn_blocking(move || this.run_pin_ocr(&c));
+                }
+            }
             PinCommand::BeginEdit { id, edit } => controller.ui.begin_pinned_edit(id, edit),
             PinCommand::EndEdit { id, edit } => controller.ui.end_pinned_edit(id, edit),
             PinCommand::Render {
@@ -315,6 +391,58 @@ impl ScreenshotRuntime {
                         result: Err(Error::new(e.to_string())),
                     }));
                 }
+            }
+        }
+    }
+    /// One worker owns inference scheduling. Replacements retain only a shared base
+    /// and the latest descriptor, never a queue of full cropped input buffers.
+    fn run_pin_ocr(self: &Arc<Self>, controller: &Arc<AppController>) {
+        loop {
+            let task = {
+                let mut q = self.pin_ocr.lock().unwrap();
+                match q.pending.take() {
+                    Some(t) => t,
+                    None => {
+                        q.running = false;
+                        return;
+                    }
+                }
+            };
+            let PinOcrTask {
+                id,
+                request,
+                strategy,
+                base,
+                cancel,
+            } = task;
+            let started = std::time::Instant::now();
+            let outcome = self.recognize_text(
+                std::slice::from_ref(base.as_ref()),
+                request.bounds,
+                &cancel,
+                |image| {
+                    controller
+                        .ocr
+                        .as_ref()
+                        .ok_or(lexift_core::domain::ocr::OcrOutcome::ResourcesUnavailable)?
+                        .recognize_for_copy(controller, image, &strategy, &cancel)
+                },
+            );
+            tracing::debug!(
+                id,
+                operation = request.operation,
+                revision = request.revision,
+                elapsed_ms = started.elapsed().as_millis(),
+                ?outcome,
+                "Pinned image OCR finished"
+            );
+            if let Some(outcome) = outcome {
+                controller.dispatch(AppEvent::PinnedImage(PinEvent::Recognized {
+                    id,
+                    operation: request.operation,
+                    revision: request.revision,
+                    outcome,
+                }));
             }
         }
     }
@@ -436,7 +564,7 @@ impl ScreenshotRuntime {
                             .ok_or(
                                 lexift_core::domain::screenshot::OcrOutcome::ResourcesUnavailable,
                             )
-                            .and_then(|ocr| ocr.recognize_screenshot(&c, image, &strategy, &cancel))
+                            .and_then(|ocr| ocr.recognize_for_copy(&c, image, &strategy, &cancel))
                     });
                     if let Some(outcome) = outcome {
                         c.dispatch(AppEvent::Screenshot(ScreenshotEvent::Recognized {

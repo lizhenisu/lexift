@@ -69,20 +69,33 @@ pub(crate) fn install(
         )
     });
 }
+pub(super) fn recognition_busy() -> bool {
+    current().is_some_and(|(id, _)| crate::pinned_screenshot::recognition_input_paused(id))
+}
 pub(crate) fn cropping(id: u64) -> bool {
     current().is_some_and(|p| p.0 == id) && pin_crop::active()
 }
 pub(crate) fn active() -> bool {
     ACTIVE.with(|s| s.borrow().is_some())
 }
+pub(crate) fn refresh_recognition_busy(id: u64, busy: bool) {
+    if current().is_some_and(|p| p.0 == id) {
+        REGISTRY.with(|s| {
+            if let Some(w) = s.borrow().as_ref().and_then(|r| r.toolbar_state.main.get()) {
+                w.set_output_busy(busy);
+            }
+        });
+    }
+}
 pub(crate) fn sync_outputs(states: &lexift_core::domain::pinned_image::States) {
     let Some((id, _)) = current() else {
         return;
     };
     pin_crop::sync_state(states);
-    let busy = states
-        .get(&id)
-        .is_some_and(|p| p.busy || p.proposed.is_some());
+    let busy = crate::pinned_screenshot::recognition_input_paused(id)
+        || states
+            .get(&id)
+            .is_some_and(|p| p.busy || p.proposed.is_some());
     REGISTRY.with(|s| {
         if let Some(main) = s.borrow().as_ref().and_then(|r| r.toolbar_state.main.get()) {
             main.set_output_busy(busy);
@@ -413,8 +426,31 @@ pub(super) fn sync_watermark_anchor(r: &mut Registry) {
         }
     });
 }
+/// Finish input transactions without ending the editable pin or changing its tool.
+pub(crate) fn prepare_recognition(id: u64) -> bool {
+    if !current().is_some_and(|p| p.0 == id) {
+        return true;
+    }
+    let ready = REGISTRY.with(|s| {
+        let mut s = s.borrow_mut();
+        let Some(r) = s.as_mut() else {
+            return false;
+        };
+        if pin_crop::active() || r.gesture.is_some() || !r.pending_drawing.is_none() {
+            return false;
+        }
+        finish_text_edit_registry(r, true);
+        r.finish_style_edit();
+        r.close_panel();
+        true
+    });
+    if ready {
+        publish(id);
+    }
+    ready
+}
 pub(crate) fn output(kind: Output) {
-    if pin_crop::active() {
+    if recognition_busy() || pin_crop::active() {
         return;
     }
     let Some((id, _)) = current() else {
@@ -424,6 +460,9 @@ pub(crate) fn output(kind: Output) {
     crate::pinned_screenshot::request_output(id, if kind == Output::Copy { 0 } else { 1 });
 }
 pub(crate) fn pointer(id: u64, event: i32, x: f32, y: f32) {
+    if crate::pinned_screenshot::recognition_input_paused(id) {
+        return;
+    }
     if current().is_some_and(|p| p.0 == id) {
         if pin_crop::pointer(id, event, x, y) {
             return;
@@ -435,6 +474,12 @@ pub(crate) fn pointer(id: u64, event: i32, x: f32, y: f32) {
                 / (s.right - s.left) as f32
         });
         canvas_pointer(0, event, x, y);
+        let enabled = REGISTRY.with(|s| {
+            s.borrow()
+                .as_ref()
+                .is_some_and(|r| r.gesture.is_none() && r.pending_drawing.is_none())
+        });
+        crate::pinned_screenshot::set_recognition_entry(id, enabled);
     }
 }
 /// Retire only the gesture belonging to the focus-losing edit instance.
@@ -448,7 +493,7 @@ pub(crate) fn lost_focus(id: u64) {
     }
 }
 pub(crate) fn key(id: u64, key: i32) {
-    if !current().is_some_and(|p| p.0 == id) {
+    if crate::pinned_screenshot::recognizing(id) || !current().is_some_and(|p| p.0 == id) {
         return;
     }
     match key {
@@ -461,7 +506,7 @@ pub(crate) fn key(id: u64, key: i32) {
     }
 }
 pub(crate) fn scroll(id: u64, delta: f32) {
-    if pin_crop::active() {
+    if pin_crop::active() || crate::pinned_screenshot::recognition_input_paused(id) {
         return;
     }
     if current().is_some_and(|p| p.0 == id) {

@@ -1148,6 +1148,7 @@ pub(super) fn popup_pointer_sink(popup: slint::Weak<TranslationPopup>) -> PopupP
                 }
                 return;
             }
+            PopupPointerInput::NativeMoveFinished => return,
             PopupPointerInput::ResizeFinished { width, height } => {
                 let session_id = popup.get_session_id().max(0) as u64;
                 let weak = popup.as_weak();

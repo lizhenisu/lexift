@@ -134,7 +134,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 }
             },
             |window| match lexift_platform::begin_window_drag(&window.window_handle()) {
-                Ok(()) => true,
+                Ok(started) => started,
                 Err(error) => {
                     tracing::warn!(%error, "window drag failed");
                     false
@@ -585,6 +585,9 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
 
 fn map_pointer_event(event: lexift_platform::PopupPointerEvent) -> lexift_ui::PopupPointerInput {
     match event {
+        lexift_platform::PopupPointerEvent::NativeMoveFinished => {
+            lexift_ui::PopupPointerInput::NativeMoveFinished
+        }
         lexift_platform::PopupPointerEvent::FramePresented => {
             lexift_ui::PopupPointerInput::FramePresented
         }

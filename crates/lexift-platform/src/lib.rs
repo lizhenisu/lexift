@@ -148,6 +148,7 @@ pub enum PopupDismissCause {
 /// its logical coordinate system before dispatching them to the rendering backend.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PopupPointerEvent {
+    NativeMoveFinished,
     /// The region host released its first-frame bootstrap after a visible native paint.
     FramePresented,
     /// The first client paint after removing the region bootstrap has completed.
@@ -634,15 +635,20 @@ pub fn activate_user_requested_window(
     Ok(())
 }
 
-/// Starts the native system move operation for a custom title bar.
+/// Queue a native system move for a custom title bar. False means no move was armed;
+/// NativeMoveFinished reports completion of the posted operation, including cancellation.
 pub fn begin_window_drag(
     window: &impl raw_window_handle::HasWindowHandle,
-) -> lexift_core::Result<()> {
+) -> lexift_core::Result<bool> {
     #[cfg(target_os = "windows")]
-    windows::popup::begin_drag(window)?;
+    {
+        windows::popup::begin_drag(window)
+    }
     #[cfg(not(target_os = "windows"))]
-    let _ = window;
-    Ok(())
+    {
+        let _ = window;
+        Ok(false)
+    }
 }
 
 /// Cancel the supplied auxiliary window's move and owned capture before destruction.

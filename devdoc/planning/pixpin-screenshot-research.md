@@ -18,6 +18,7 @@
 | 比例锁定 | 已实现 | 尺寸草稿捕获比例，应用后统一约束八方向鼠标缩放、键盘及数值调整；固定已确认锚点，不跨截图记忆。见 [比例锁定验证](../releases/screenshot-aspect-lock.md) |
 | 冻结帧取色／像素放大 | 已实现，验证范围见记录 | 首次框选及截图鼠标模式显示 15×9 物理像素网格，C 复制大写 HEX；采样冻结底图，不含截图新增标注和装饰，见 [像素放大镜验证](../releases/screenshot-pixel-picker.md) |
 | 顶层窗口候选 | 已实现，验证范围见记录 | 悬停预览、单击进入编辑，超过 4px 逻辑距离转自由框选；同次截图冻结候选，内部控件见下一项，见 [窗口自动框选验证](../releases/screenshot-window-candidates.md) |
+| 贴图 OCR 复制 | 已接入，验证边界见专项记录 | 识别已确认裁剪底图；保留贴图及编辑，共用长图分块检测，不按字符串去重。见[贴图 OCR](../releases/pin-image-ocr.md) |
 | 截图 OCR 复制 | 已实现，验证范围见记录 | 识别冻结底图选区，复制文字；成功、空结果或失败均退出截图并显示 toast，不自动翻译，见 [截图 OCR 验证](../releases/screenshot-ocr.md) |
 | 内部元素候选与滚轮层级 | 已实现，验证范围见记录 | 已改为所属窗口内的有界后台按点 UIA 查询，首帧不等元素；点击采用已呈现范围，结果过期隔离。新验证见[按点优化记录](../releases/screenshot-point-query-performance.md)，[冻结快照验证](../releases/screenshot-element-candidates.md)作为历史记录 |
 | 上次选区复用 | 已实现并完成项目 Release 双屏实测 | 复制、PNG 保存、贴图成功记录物理区域；首次框选按 R 复用新底图，布局改变时禁用，重启清空。已补齐保留并聚焦贴图后的激活交接，两屏各连续 10 轮通过；不是图片历史或多条区域列表。保留贴图回归及未覆盖范围见 [区域复用验证](../releases/screenshot-region-history.md) |

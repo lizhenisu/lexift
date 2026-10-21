@@ -26,26 +26,7 @@ pub enum ScreenshotPhase {
     Output,
     Recognizing,
 }
-/// Terminal screenshot OCR feedback never retains recognized text.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OcrOutcome {
-    Copied,
-    Empty,
-    ResourcesUnavailable,
-    RecognitionFailed,
-    CopyFailed,
-}
-impl OcrOutcome {
-    pub fn message(self) -> &'static str {
-        match self {
-            Self::Copied => "Recognized text copied",
-            Self::Empty => "No text recognized",
-            Self::ResourcesUnavailable => "OCR resources unavailable. Manage them in Settings.",
-            Self::RecognitionFailed => "Text recognition failed",
-            Self::CopyFailed => "Could not copy recognized text",
-        }
-    }
-}
+pub use super::ocr::OcrOutcome;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScreenshotOutput {
     Copy,
@@ -232,15 +213,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         ScreenshotEvent::Recognize { session, bounds }
             if s.session == session && s.editable() && s.bounds == Some(bounds) =>
         {
-            let mut strategy = super::ocr::OcrRecognitionStrategy::from_settings(
-                state.settings.ocr_language.as_deref(),
-                state.settings.ui_language.code(),
-            );
-            if state.settings.ocr_korean_auto
-                && strategy == super::ocr::OcrRecognitionStrategy::Automatic
-            {
-                strategy = super::ocr::OcrRecognitionStrategy::AutomaticKorean;
-            }
+            let strategy = super::ocr::copy_strategy(&state.settings);
             s.operation = s
                 .operation
                 .checked_add(1)

@@ -98,8 +98,12 @@ struct Pin {
     gesture: Rc<Gesture>,
     close_task: slint::Timer,
     output_error: Option<String>,
+    ocr_result: Option<(u64, lexift_core::domain::ocr::OcrOutcome)>,
+    restore_interaction: Option<bool>,
+    native_drag: bool,
     feedback: Slot<crate::ScreenshotToastWindow>,
     feedback_timer: slint::Timer,
+    feedback_measurement: Option<(u64, slint::PhysicalSize)>,
 }
 struct Registry {
     prepare: fn(&slint::Window) -> PassiveWindowPreparation,
@@ -286,6 +290,84 @@ pub(crate) fn set_edit_interaction(id: u64, allowed: bool) -> bool {
         false
     }
 }
+pub(crate) fn set_recognition_entry(id: u64, enabled: bool) {
+    STATE.with(|s| {
+        if let Some(w) = s
+            .borrow()
+            .as_ref()
+            .and_then(|r| r.windows.get(&id))
+            .and_then(|p| p.window.get())
+        {
+            w.set_recognition_enabled(enabled);
+        }
+    });
+}
+pub(crate) fn recognition_input_paused(id: u64) -> bool {
+    STATE.with(|s| {
+        s.borrow()
+            .as_ref()
+            .and_then(|r| r.windows.get(&id))
+            .and_then(|p| p.window.get())
+            .is_some_and(|w| w.get_recognizing() || w.get_browsing())
+    })
+}
+pub(crate) fn recognizing(id: u64) -> bool {
+    STATE.with(|s| {
+        s.borrow()
+            .as_ref()
+            .and_then(|r| r.windows.get(&id))
+            .and_then(|p| p.window.get())
+            .is_some_and(|w| w.get_recognizing())
+    })
+}
+pub(crate) fn cancel_recognition(id: u64) -> bool {
+    if !recognizing(id) {
+        return false;
+    }
+    emit_pin(lexift_core::domain::pinned_image::Event::CancelRecognition { id });
+    true
+}
+fn request_recognition(id: u64) {
+    let allowed = STATE.with(|s| {
+        s.borrow().as_ref().is_some_and(|r| {
+            r.interactive
+                && r.windows.get(&id).is_some_and(|p| {
+                    p.phase == Phase::Visible
+                        && p.window
+                            .get()
+                            .is_some_and(|w| !w.get_output_busy() && !w.get_cropping())
+                })
+        })
+    });
+    if allowed && crate::annotation::pin_editor::prepare_recognition(id) {
+        emit_pin(lexift_core::domain::pinned_image::Event::Recognize { id });
+    }
+}
+/// Keep the temporary browsing policy until a native move loop has returned.
+fn restore_recognition_input(id: u64) {
+    let context = STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        let p = s.as_mut()?.windows.get_mut(&id)?;
+        let w = p.window.get()?.clone_strong();
+        if w.get_recognizing() || p.native_drag {
+            return None;
+        }
+        let allowed = p.restore_interaction.take()?;
+        w.set_browsing(false);
+        Some(allowed)
+    });
+    if let Some(allowed) = context {
+        set_edit_interaction(id, allowed);
+        let busy = STATE.with(|s| {
+            s.borrow()
+                .as_ref()
+                .and_then(|r| r.windows.get(&id))
+                .and_then(|p| p.window.get())
+                .is_some_and(|w| w.get_output_busy())
+        });
+        crate::annotation::pin_editor::refresh_recognition_busy(id, busy);
+    }
+}
 pub(crate) fn request_output(id: u64, kind: i32) {
     if !matches!(kind, 0 | 1) || crate::annotation::pin_editor::cropping(id) {
         return;
@@ -324,23 +406,44 @@ pub(crate) fn sync_outputs(states: &lexift_core::domain::pinned_image::States) {
         for (id, p) in &mut r.windows {
             if let Some(state) = states.get(id) {
                 if let Some(w) = p.window.get() {
-                    w.set_output_busy(state.busy);
+                    let recognizing = state.recognition.is_some();
+                    if recognizing && !w.get_recognizing() && w.get_editing() {
+                        p.restore_interaction = Some(w.get_interactive());
+                        w.set_browsing(true);
+                    }
+                    w.set_recognizing(recognizing);
+                    w.set_output_busy(state.busy || state.proposed.is_some());
                     w.set_annotations_hidden(state.hidden);
+                }
+                if p.ocr_result != state.ocr_result {
+                    p.ocr_result = state.ocr_result;
+                    errors.push((
+                        *id,
+                        state.ocr_result.map(|(_, o)| o.message().to_owned()),
+                        state.ocr_result.map(|(_, o)| o),
+                    ));
                 }
                 p.revision = state.revision;
                 if p.output_error != state.error {
                     p.output_error = state.error.clone();
-                    errors.push((*id, state.error.clone()));
+                    errors.push((*id, state.error.clone(), None));
                 }
             }
         }
         errors
     });
+    for &id in states.keys() {
+        if recognizing(id) {
+            set_edit_interaction(id, true);
+        } else {
+            restore_recognition_input(id);
+        }
+    }
     crate::annotation::pin_editor::sync_outputs(states);
-    for (id, message) in errors {
+    for (id, message, outcome) in errors {
         clear_feedback(id, None);
         if let Some(message) = message {
-            show_feedback(id, &message, 0, None);
+            show_feedback_kind(id, &message, outcome, 0, None);
         }
     }
 }
@@ -352,11 +455,21 @@ fn clear_feedback(id: u64, expected: Option<u64>) {
             return None;
         }
         p.feedback_timer.stop();
+        p.feedback_measurement = None;
         Some(std::mem::take(&mut p.feedback))
     });
     drop(retired);
 }
 fn show_feedback(id: u64, message: &str, attempt: u8, expected: Option<u64>) {
+    show_feedback_kind(id, message, None, attempt, expected);
+}
+fn show_feedback_kind(
+    id: u64,
+    message: &str,
+    outcome: Option<lexift_core::domain::ocr::OcrOutcome>,
+    attempt: u8,
+    expected: Option<u64>,
+) {
     let context = STATE.with(|s| {
         let s = s.borrow();
         let r = s.as_ref()?;
@@ -381,7 +494,19 @@ fn show_feedback(id: u64, message: &str, attempt: u8, expected: Option<u64>) {
             return;
         };
         crate::theme::apply(&w);
-        w.set_message(crate::i18n::error(message).into());
+        w.set_message(
+            if outcome.is_some() {
+                crate::i18n::tr(message)
+            } else {
+                crate::i18n::error(message)
+            }
+            .into(),
+        );
+        if outcome.is_some() {
+            w.window().set_position(position);
+        }
+        w.set_passive(outcome.is_some());
+        w.set_error(outcome != Some(lexift_core::domain::ocr::OcrOutcome::Copied));
         let revision = STATE.with(|s| {
             let mut s = s.borrow_mut();
             let p = s.as_mut()?.windows.get_mut(&id)?;
@@ -400,11 +525,32 @@ fn show_feedback(id: u64, message: &str, attempt: u8, expected: Option<u64>) {
     let Some((w, revision)) = current else { return };
     match prepare(w.window()) {
         PassiveWindowPreparation::Ready => {
+            if outcome.is_some() {
+                for _ in 0..3 {
+                    w.window().set_size(slint::LogicalSize::new(
+                        w.get_content_width(),
+                        w.get_content_height(),
+                    ));
+                    let _ = w.window().take_snapshot();
+                }
+                if !(lifecycle.configure_hint_window)(w.window()) {
+                    clear_feedback(id, Some(revision));
+                    return;
+                }
+            }
             if let Some(area) = (lifecycle.popup_work_area)(lexift_core::domain::geometry::Point {
                 x: position.x,
                 y: position.y,
             }) {
-                let size = w.window().size();
+                let size = if outcome.is_some() {
+                    let scale = w.window().scale_factor();
+                    slint::PhysicalSize::new(
+                        (w.get_content_width() * scale).round().max(1.) as u32,
+                        (w.get_content_height() * scale).round().max(1.) as u32,
+                    )
+                } else {
+                    w.window().size()
+                };
                 let width = size.width.min((area.right - area.left - 16).max(1) as u32);
                 let height = size.height.min((area.bottom - area.top - 16).max(1) as u32);
                 w.window().set_size(slint::PhysicalSize::new(width, height));
@@ -419,12 +565,50 @@ fn show_feedback(id: u64, message: &str, attempt: u8, expected: Option<u64>) {
                     ),
                 ));
             }
+            if outcome.is_some() {
+                let scale = w.window().scale_factor();
+                let size = slint::PhysicalSize::new(
+                    (w.get_content_width() * scale).round().max(1.) as u32,
+                    (w.get_content_height() * scale).round().max(1.) as u32,
+                );
+                let stable = STATE.with(|s| {
+                    let mut s = s.borrow_mut();
+                    let Some(p) = s.as_mut().and_then(|r| r.windows.get_mut(&id)) else {
+                        return false;
+                    };
+                    let stable = p.feedback_measurement == Some((revision, size));
+                    p.feedback_measurement = Some((revision, size));
+                    stable
+                });
+                if !stable {
+                    if attempt >= 20 {
+                        clear_feedback(id, Some(revision));
+                        return;
+                    }
+                    let message = message.to_owned();
+                    STATE.with(|s| {
+                        if let Some(p) = s.borrow().as_ref().and_then(|r| r.windows.get(&id)) {
+                            p.feedback
+                                .prepare_after(Duration::from_millis(16), move || {
+                                    show_feedback_kind(
+                                        id,
+                                        &message,
+                                        outcome,
+                                        attempt + 1,
+                                        Some(revision),
+                                    )
+                                });
+                        }
+                    });
+                    return;
+                }
+            }
             let _ = w.show();
             STATE.with(|s| {
                 if let Some(p) = s.borrow_mut().as_mut().and_then(|r| r.windows.get_mut(&id)) {
                     p.feedback_timer.start(
                         slint::TimerMode::SingleShot,
-                        Duration::from_secs(4),
+                        Duration::from_secs(if outcome.is_some() { 3 } else { 4 }),
                         move || clear_feedback(id, Some(revision)),
                     );
                 }
@@ -436,7 +620,7 @@ fn show_feedback(id: u64, message: &str, attempt: u8, expected: Option<u64>) {
                 if let Some(p) = s.borrow().as_ref().and_then(|r| r.windows.get(&id)) {
                     p.feedback
                         .prepare_after(Duration::from_millis(16), move || {
-                            show_feedback(id, &message, attempt + 1, Some(revision))
+                            show_feedback_kind(id, &message, outcome, attempt + 1, Some(revision))
                         });
                 }
             });
@@ -570,12 +754,16 @@ pub(crate) fn edit_window(id: u64, editing: bool) -> Option<PinnedScreenshotWind
             return None;
         }
         p.gesture.cancel();
+        p.native_drag = false;
+        p.restore_interaction = None;
         Some((p.window.get()?.clone_strong(), r.lifecycle.clone()))
     });
     let (window, lifecycle) = context?;
     window.invoke_close_menu();
     (lifecycle.cancel_window_interaction)(window.window());
     window.set_editing(editing);
+    window.set_browsing(false);
+    window.set_recognition_enabled(true);
     if !editing {
         window.set_decoration(slint::Image::default());
     }
@@ -754,6 +942,7 @@ pub(crate) fn show_document(
             EventResult::Propagate
         });
         window.on_close_requested(move || request_close(id));
+        window.on_recognize_requested(move || request_recognition(id));
         window.on_output_requested(move |kind| request_output(id, kind));
         window.on_option_requested(move |kind, value| change_option(id, kind, value));
         window.on_annotate_requested(move || {
@@ -771,6 +960,9 @@ pub(crate) fn show_document(
         window.on_edit_key(move |key| crate::annotation::pin_editor::key(id, key));
         window.on_edit_scroll(move |delta| crate::annotation::pin_editor::scroll(id, delta));
         window.on_escape_requested(move || {
+            if cancel_recognition(id) {
+                return;
+            }
             if crate::annotation::pin_editor::current().is_some_and(|p| p.0 == id) {
                 crate::annotation::pin_editor::escape(id);
             } else {
@@ -832,8 +1024,12 @@ pub(crate) fn show_document(
                 gesture,
                 close_task: slint::Timer::default(),
                 output_error: None,
+                ocr_result: None,
+                restore_interaction: None,
+                native_drag: false,
                 feedback: Slot::default(),
                 feedback_timer: slint::Timer::default(),
+                feedback_measurement: None,
             },
         );
         Ok(id)
@@ -854,13 +1050,24 @@ pub(crate) fn show_document(
 }
 /// ReleaseCapture may synchronously deliver Slint cancellation. Enter native dragging
 /// only after the component callback and registry borrow have both returned.
+fn finish_native_drag(id: u64) {
+    STATE.with(|s| {
+        if let Some(p) = s.borrow_mut().as_mut().and_then(|r| r.windows.get_mut(&id)) {
+            p.native_drag = false;
+        }
+    });
+    restore_recognition_input(id);
+}
 fn begin_drag(id: u64, serial: u64) {
     let pair = STATE.with(|s| {
         let s = s.borrow();
         let r = s.as_ref()?;
         let pin = r.windows.get(&id)?;
         if !r.interactive
-            || pin.window.get().is_some_and(|w| w.get_editing())
+            || pin
+                .window
+                .get()
+                .is_some_and(|w| w.get_editing() && !w.get_browsing())
             || pin.phase != Phase::Visible
             || !pin.gesture.take(serial)
         {
@@ -870,7 +1077,14 @@ fn begin_drag(id: u64, serial: u64) {
     });
     if let Some((window, lifecycle)) = pair.filter(|(window, _)| window.window().is_visible()) {
         (lifecycle.activate_user_requested_window)(window.window());
-        (lifecycle.begin_window_drag)(window.window());
+        STATE.with(|s| {
+            if let Some(p) = s.borrow_mut().as_mut().and_then(|r| r.windows.get_mut(&id)) {
+                p.native_drag = true;
+            }
+        });
+        if !(lifecycle.begin_window_drag)(window.window()) {
+            finish_native_drag(id);
+        }
     }
 }
 fn prepare(id: u64, attempt: u8) {
@@ -905,6 +1119,13 @@ fn prepare(id: u64, attempt: u8) {
             let weak = window.as_weak();
             let deferred = input.clone();
             let sink = input.pointer_sink(move |event| {
+                if matches!(event, crate::PopupPointerInput::NativeMoveFinished) {
+                    deferred.post(move || finish_native_drag(id));
+                    return;
+                }
+                if matches!(event, crate::PopupPointerInput::LeftReleased { .. }) {
+                    deferred.post(move || finish_native_drag(id));
+                }
                 if matches!(
                     event,
                     crate::PopupPointerInput::RightPressed { .. }
@@ -1032,7 +1253,7 @@ fn zoom(id: u64, delta: f32, x: f32, y: f32) {
     });
     if allowed
         && delta != 0.
-        && !crate::annotation::pin_editor::current().is_some_and(|p| p.0 == id)
+        && (!crate::annotation::pin_editor::current().is_some_and(|p| p.0 == id) || recognizing(id))
     {
         fit(id, Some((if delta > 0. { 1.1 } else { 1. / 1.1 }, x, y)));
     }
