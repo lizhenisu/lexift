@@ -39,7 +39,7 @@ pub(super) fn escape() {
 }
 
 pub(super) fn escape_from(origin: focus::Origin) {
-    if REGISTRY.with(|s| s.borrow().as_ref().is_some_and(image_crop::cancel)) {
+    if REGISTRY.with(|s| s.borrow_mut().as_mut().is_some_and(image_crop::cancel)) {
         return;
     }
     if image_navigation::escape() {
@@ -309,6 +309,12 @@ pub(crate) fn toggle(requested_at: Instant) {
         });
         let input = r.toolbar_state.main.input();
         main.on_crop_requested(move || later_main(&input, generation, revision, image_crop::begin));
+        let input = r.toolbar_state.main.input();
+        main.on_crop_action(move |apply| {
+            later_main(&input, generation, revision, move || {
+                image_crop::finish(apply)
+            })
+        });
         let input = r.toolbar_state.main.input();
         main.on_long_capture_requested(move || {
             later_main(&input, generation, revision, screenshot::long::request)

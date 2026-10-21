@@ -101,10 +101,13 @@ export component AnnotationToolbar inherits Window {
     in property <bool> long-capture-available: false;
     in property <bool> image-edit-mode: false;
     in property <bool> image-cropping: false;
+    in property <bool> crop-pending:false;
+    in property <string> crop-dimensions;
+    callback crop-action(bool);
     callback crop-requested();
     in property <string> feedback;
     private property <int> action-count: root.screenshot-mode && !root.pin-edit-mode ? 8 : 5;
-    out property <length> toolbar-width: root.collapsed ? 80px : 34px + 38px + 7 * 38px + 5 * 18px + 1px + root.action-count * 38px + (9 + root.action-count) * 7px + 51px;
+    out property <length> toolbar-width: root.collapsed ? 80px : 34px + 38px + 7 * 38px + 5 * 18px + 1px + root.action-count * 38px + (9 + root.action-count) * 7px + 51px + (root.pin-edit-mode ? 45px : 0px) + (root.pin-edit-mode && root.image-cropping ? 230px : 0px);
     callback screenshot-requested();
     callback recognize-text-requested();
     callback long-capture-requested();
@@ -187,12 +190,18 @@ export component AnnotationToolbar inherits Window {
             }
             Rectangle { width: 1px; background: Colors.outline; }
             if !root.screenshot-mode: ToolButton { kind: 22; label:@tr("Screenshot"); clicked => { root.screenshot-requested(); } }
+            if root.pin-edit-mode && root.image-cropping: HorizontalLayout {
+                spacing:7px;
+                Text {width:140px;height:38px;vertical-alignment:center;color:Colors.secondary-foreground;font-size:12px;text:root.crop-dimensions;}
+                ToolButton {kind:25;label:@tr("Cancel");clicked=>{root.crop-action(false);}}
+                ToolButton {kind:16;label:@tr("Apply");selected:true;enabled:!root.crop-pending;clicked=>{root.crop-action(true);}}
+            }
             ToolButton { kind: 14; enabled: root.can-undo && !root.output-busy && !root.image-cropping; clicked => { root.undo-requested(); } }
             ToolButton { kind:28; enabled:root.can-redo && !root.output-busy && !root.image-cropping; clicked=>{root.redo-requested();} }
                 ToolButton { kind: 15; label: root.screenshot-mode ? @tr("Save screenshot") : @tr("Save annotation screenshot"); enabled: root.can-download && !root.output-busy && !root.image-cropping; clicked => { root.download-requested(); } }
             if root.screenshot-mode: ToolButton { kind:23; label:@tr("Copy screenshot"); enabled:!root.output-busy && !root.image-cropping; clicked => { root.copy-screenshot-requested(); } }
             if root.screenshot-mode && !root.pin-edit-mode: ToolButton { kind:26; busy:root.output-busy; label:root.output-busy ? @tr("Processing screenshot") : @tr("Recognize text"); enabled:!root.output-busy && !root.image-cropping; clicked => { root.recognize-text-requested(); } }
-            if root.image-edit-mode: ToolButton { kind:29; label:@tr("Crop image"); selected:root.image-cropping; enabled:!root.output-busy; clicked=>{root.crop-requested();} }
+            if root.image-edit-mode || root.pin-edit-mode: ToolButton { kind:29; label:@tr("Crop image"); selected:root.image-cropping; enabled:!root.output-busy; clicked=>{root.crop-requested();} }
             if root.screenshot-mode && !root.pin-edit-mode && !root.image-edit-mode: ToolButton { kind:27; label:@tr("Long screenshot"); enabled:root.long-capture-available && !root.output-busy && !root.image-edit-mode; clicked => { root.long-capture-requested(); } }
             if root.screenshot-mode && !root.pin-edit-mode: ToolButton { kind:24; label:@tr("Pin screenshot"); enabled:!root.output-busy && !root.image-cropping; clicked => { root.pin-screenshot-requested(); } }
             ToolButton { kind: root.screenshot-mode && !root.pin-edit-mode ? 25 : 16; label:root.screenshot-mode && !root.pin-edit-mode ? @tr("Cancel") : @tr("Finish annotation"); clicked => { root.finish-requested(); } }

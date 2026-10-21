@@ -26,8 +26,6 @@ struct Recovery {
     open: bool,
     pin: u64,
     edit: u64,
-    source: Rect,
-    display: Rect,
 }
 thread_local! {
     static DOCUMENTS:RefCell<BTreeMap<u64,Stored>>=const{RefCell::new(BTreeMap::new())};
@@ -54,6 +52,7 @@ pub(crate) fn install(
         .with(|s| s.borrow().as_ref().map(|r| r.document.clone()))
         .unwrap_or_default();
     document.session = document.session.freeze_visible(&request.snapshot.session);
+    document.session.image_source = Some(base.bounds);
     document.mode = InteractionMode::Mouse;
     document.session.set_edit_scope(EditScope::None);
     DOCUMENTS.with(|s| {
@@ -70,6 +69,9 @@ pub(crate) fn install(
         )
     });
 }
+pub(crate) fn cropping(id: u64) -> bool {
+    current().is_some_and(|p| p.0 == id) && pin_crop::active()
+}
 pub(crate) fn active() -> bool {
     ACTIVE.with(|s| s.borrow().is_some())
 }
@@ -77,7 +79,10 @@ pub(crate) fn sync_outputs(states: &lexift_core::domain::pinned_image::States) {
     let Some((id, _)) = current() else {
         return;
     };
-    let busy = states.get(&id).is_some_and(|p| p.busy);
+    pin_crop::sync_state(states);
+    let busy = states
+        .get(&id)
+        .is_some_and(|p| p.busy || p.proposed.is_some());
     REGISTRY.with(|s| {
         if let Some(main) = s.borrow().as_ref().and_then(|r| r.toolbar_state.main.get()) {
             main.set_output_busy(busy);
@@ -151,7 +156,7 @@ pub(crate) fn begin(id: u64, edit: u64) {
             id: edit,
             pin: Some((id, edit)),
             frames: frames.clone(),
-            region: RegionEditor::new(stored.base.bounds),
+            region: RegionEditor::new(r.document.session.image_crop.unwrap_or(stored.base.bounds)),
             capture: Arc::new(ScreenCaptureFrame {
                 revision: edit,
                 serial: 1,
@@ -169,11 +174,10 @@ pub(crate) fn begin(id: u64, edit: u64) {
         });
         r.canvas_state.canvases.push(CanvasLayer::pin(
             window.clone_strong(),
-            stored.base.bounds,
+            r.document.session.image_crop.unwrap_or(stored.base.bounds),
             stored.request.snapshot.scale,
             crate::pinned_screenshot::input(id),
         ));
-        let layer = &r.canvas_state.canvases[0];
         Some(Recovery {
             document,
             lifecycle,
@@ -182,8 +186,6 @@ pub(crate) fn begin(id: u64, edit: u64) {
             open,
             pin: id,
             edit,
-            source: layer.bounds,
-            display: layer.display_bounds(),
         })
     });
     DOCUMENTS.with(|s| s.borrow_mut().insert(id, stored));
@@ -210,35 +212,62 @@ pub(super) fn view_point(point: (f32, f32), reverse: bool) -> (f32, f32) {
     if let Some(point) = screenshot::long_editor::view_point(point, reverse) {
         return point;
     }
-    ACTIVE.with(|s| {
-        let s = s.borrow();
-        let Some(a) = s.as_ref() else {
-            return point;
-        };
-        let (from, to) = if reverse {
-            (a.display, a.source)
-        } else {
-            (a.source, a.display)
-        };
-        let z = (to.right - to.left) as f32 / (from.right - from.left) as f32;
-        (
-            to.left as f32 + (point.0 - from.left as f32) * z,
-            to.top as f32 + (point.1 - from.top as f32) * z,
-        )
-    })
+    current()
+        .and_then(|(id, _)| crate::pinned_screenshot::geometry(id))
+        .map_or(point, |(source, display)| {
+            let (from, to) = if reverse {
+                (display, source)
+            } else {
+                (source, display)
+            };
+            let z = (to.right - to.left) as f32 / (from.right - from.left) as f32;
+            (
+                to.left as f32 + (point.0 - from.left as f32) * z,
+                to.top as f32
+                    + (point.1 - from.top as f32) * (to.bottom - to.top) as f32
+                        / (from.bottom - from.top) as f32,
+            )
+        })
 }
 pub(super) fn view_zoom() -> f32 {
-    if let Some(zoom) = screenshot::long_editor::view_zoom() {
-        return zoom;
-    }
-    ACTIVE.with(|s| {
-        s.borrow().as_ref().map_or(1., |a| {
-            (a.display.right - a.display.left) as f32 / (a.source.right - a.source.left) as f32
+    screenshot::long_editor::view_zoom().unwrap_or_else(|| {
+        current()
+            .and_then(|(id, _)| crate::pinned_screenshot::geometry(id))
+            .map_or(1., |(s, d)| {
+                (d.right - d.left) as f32 / (s.right - s.left) as f32
+            })
+    })
+}
+pub(crate) fn candidate_present(id: u64, revision: u64, image: Arc<CapturedRegion>) -> bool {
+    pin_crop::present(id, revision, image)
+}
+pub(super) fn source(id: u64) -> Option<Rect> {
+    DOCUMENTS.with(|s| s.borrow().get(&id).map(|p| p.base.bounds))
+}
+pub(super) fn propose(r: &Registry, session: Session) -> Option<ExportRequest> {
+    let (id, edit) = current()?;
+    let bounds = session.image_crop.or(session.image_source)?;
+    let mut snapshot = export::snapshot_at(r, bounds, r.canvas_state.canvases.first()?.scale())?;
+    source_metadata(id, &mut snapshot);
+    snapshot.session = Arc::new(session);
+    DOCUMENTS.with(|s| {
+        let mut s = s.borrow_mut();
+        let p = s.get_mut(&id)?;
+        p.request.request += 1;
+        Some(ExportRequest {
+            session: edit,
+            request: p.request.request,
+            snapshot: Arc::new(snapshot),
         })
     })
 }
 pub(crate) fn end(id: u64, edit: u64) {
     if current() == Some((id, edit)) {
+        REGISTRY.with(|s| {
+            if let Some(r) = s.borrow_mut().as_mut() {
+                pin_crop::cancel(r);
+            }
+        });
         REGISTRY.with(|s| {
             let mut s = s.borrow_mut();
             let Some(r) = s.as_mut().filter(|r| {
@@ -385,6 +414,9 @@ pub(super) fn sync_watermark_anchor(r: &mut Registry) {
     });
 }
 pub(crate) fn output(kind: Output) {
+    if pin_crop::active() {
+        return;
+    }
     let Some((id, _)) = current() else {
         return;
     };
@@ -393,7 +425,26 @@ pub(crate) fn output(kind: Output) {
 }
 pub(crate) fn pointer(id: u64, event: i32, x: f32, y: f32) {
     if current().is_some_and(|p| p.0 == id) {
+        if pin_crop::pointer(id, event, x, y) {
+            return;
+        }
+        // The OS rounds width and height independently at fractional DPI. Match
+        // the actual filled image on each axis, rather than deriving Y from width.
+        let y = crate::pinned_screenshot::geometry(id).map_or(y, |(s, d)| {
+            y * (s.bottom - s.top) as f32 / (d.bottom - d.top) as f32 * (d.right - d.left) as f32
+                / (s.right - s.left) as f32
+        });
         canvas_pointer(0, event, x, y);
+    }
+}
+/// Retire only the gesture belonging to the focus-losing edit instance.
+pub(crate) fn lost_focus(id: u64) {
+    if let Some(owner) = current().filter(|p| p.0 == id) {
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            if current() == Some(owner) {
+                pointer(id, 3, 0., 0.);
+            }
+        });
     }
 }
 pub(crate) fn key(id: u64, key: i32) {
@@ -410,6 +461,9 @@ pub(crate) fn key(id: u64, key: i32) {
     }
 }
 pub(crate) fn scroll(id: u64, delta: f32) {
+    if pin_crop::active() {
+        return;
+    }
     if current().is_some_and(|p| p.0 == id) {
         brush_size_scrolled(0, delta);
     }
@@ -420,6 +474,7 @@ pub(crate) fn escape(id: u64) {
     }
 }
 pub(crate) fn shutdown() {
+    pin_crop::clear();
     ACTIVE.with(|s| s.borrow_mut().take());
     DOCUMENTS.with(|s| s.borrow_mut().clear());
 }

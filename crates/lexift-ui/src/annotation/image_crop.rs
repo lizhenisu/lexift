@@ -9,7 +9,7 @@ struct Draft {
 }
 thread_local! { static DRAFT: RefCell<Option<Draft>> = const { RefCell::new(None) }; }
 pub(super) fn active() -> bool {
-    DRAFT.with(|s| s.borrow().is_some())
+    pin_crop::active() || DRAFT.with(|s| s.borrow().is_some())
 }
 pub(super) fn clear() {
     DRAFT.with(|s| s.borrow_mut().take());
@@ -18,6 +18,10 @@ pub(super) fn begin() {
     REGISTRY.with(|s| {
         let mut s = s.borrow_mut();
         let Some(r) = s.as_mut() else { return };
+        if pin_editor::active() {
+            pin_crop::begin(r);
+            return;
+        }
         if active()
             || !screenshot::long::image_editing()
             || screenshot::long_editor::outputting()
@@ -55,7 +59,10 @@ pub(super) fn begin() {
         sync(r, true);
     });
 }
-pub(super) fn cancel(r: &Registry) -> bool {
+pub(super) fn cancel(r: &mut Registry) -> bool {
+    if pin_crop::cancel(r) {
+        return true;
+    }
     if !active() {
         return false;
     }
@@ -64,6 +71,10 @@ pub(super) fn cancel(r: &Registry) -> bool {
     true
 }
 pub(super) fn finish(apply: bool) {
+    if pin_crop::active() {
+        pin_crop::finish(apply);
+        return;
+    }
     REGISTRY.with(|s| {
         let mut s = s.borrow_mut();
         let Some(r) = s.as_mut() else { return };

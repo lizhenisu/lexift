@@ -227,6 +227,10 @@ impl ScreenshotRuntime {
                         if !cancel.load(Ordering::Acquire) {
                             match result {
                                 Ok(image) => {
+                                    c.dispatch(AppEvent::PinnedImage(PinEvent::Rendered {
+                                        id,
+                                        revision,
+                                    }));
                                     c.ui.present_pinned_image(id, revision, Arc::new(image))
                                 }
                                 Err(error) => {
@@ -253,7 +257,10 @@ impl ScreenshotRuntime {
                 }
                 let image = self.pin_pending.lock().unwrap().remove(&source);
                 if let Some(image) = image {
+                    let bounds = image.bounds;
                     self.pin_images.lock().unwrap().insert(id, image);
+                    controller
+                        .dispatch(AppEvent::PinnedImage(PinEvent::SourceReady { id, bounds }));
                 }
             }
             PinCommand::Drop { id } => {
@@ -323,8 +330,11 @@ impl ScreenshotRuntime {
         if cancel.load(Ordering::Acquire) {
             return Err(Error::new("Screenshot cancelled"));
         }
+        let visible = document.map_or(base.bounds, |d| {
+            d.snapshot.session.image_crop.unwrap_or(base.bounds)
+        });
         let Some(document) = document.filter(|_| !hidden) else {
-            return Ok((**base).clone());
+            return crop_frames(&[(**base).clone()], visible);
         };
         let mut snapshot = (*document.snapshot).clone();
         snapshot.monitor = base.bounds;
@@ -346,7 +356,7 @@ impl ScreenshotRuntime {
             snapshot.scale = scale;
             rendered.push(self.render.compose(&snapshot, capture.clone(), cancel)?);
         }
-        crop_frames(&rendered, base.bounds)
+        crop_frames(&rendered, visible)
     }
 
     fn output_pin_image(
@@ -662,7 +672,7 @@ impl ScreenshotRuntime {
                                     ScreenshotOutput::Pin => {
                                         let base = Arc::new(crop_frames(
                                             &frames,
-                                            request.snapshot.monitor,
+                                            if request.snapshot.session.image_crop.is_some() { request.snapshot.session.image_source.unwrap_or(request.snapshot.monitor) } else { request.snapshot.monitor },
                                         )?);
                                         let mut pin_snapshot = (*request.snapshot).clone();
                                         if request.snapshot.session.image_crop.is_none() {
@@ -1119,6 +1129,7 @@ mod tests {
         }]);
         for effect in [MosaicEffect::Pixelate, MosaicEffect::Blur] {
             let mut doc = Session::new();
+            doc.image_source = Some(full);
             let mut mosaic = MosaicAnnotation::new(effect, 60, 12., 1.);
             mosaic.id = 1;
             doc.add(Object {
@@ -1190,7 +1201,7 @@ mod tests {
             let expected = crop_frames(&[original], crop).unwrap();
             assert_eq!(actual.pixels, expected.pixels);
             assert_eq!(actual.bounds, crop);
-            let base = Arc::new(crop_frames(&frames, crop).unwrap());
+            let base = Arc::new(crop_frames(&frames, full).unwrap());
             let samples = Arc::new(ScreenCaptureFrame {
                 revision: 1,
                 serial: 1,
@@ -1203,13 +1214,50 @@ mod tests {
                     Some(&ExportRequest {
                         session: 1,
                         request: 3,
-                        snapshot: Arc::new(snapshot),
+                        snapshot: Arc::new(snapshot.clone()),
                     }),
                     false,
                     &AtomicBool::new(false),
                 )
                 .unwrap();
             assert_eq!(pinned.pixels, expected.pixels);
+            let mut request = ExportRequest {
+                session: 1,
+                request: 4,
+                snapshot: Arc::new(snapshot),
+            };
+            let hidden = runtime
+                .compose_pin(&base, None, Some(&request), true, &AtomicBool::new(false))
+                .unwrap();
+            assert_eq!(
+                hidden,
+                crop_frames(&frames, crop).unwrap(),
+                "hiding annotations retains crop"
+            );
+            let restored = Arc::make_mut(&mut request.snapshot);
+            Arc::make_mut(&mut restored.session).set_image_crop(full, full);
+            restored.monitor = full;
+            let expanded = runtime
+                .compose_pin(
+                    &base,
+                    Some(Arc::new(ScreenCaptureFrame {
+                        revision: 1,
+                        serial: 1,
+                        regions: frames.as_ref().clone(),
+                    })),
+                    Some(&request),
+                    false,
+                    &AtomicBool::new(false),
+                )
+                .unwrap();
+            assert_eq!(
+                expanded.pixels,
+                runtime
+                    .output_image(&request, frames.clone(), &AtomicBool::new(false))
+                    .unwrap()
+                    .pixels
+            );
+            assert_eq!(expanded.bounds, full, "pin can restore complete long image");
         }
     }
     #[test]

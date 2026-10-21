@@ -219,7 +219,11 @@ fn compose_base(
 ) -> Option<tiny_skia::Pixmap> {
     let snapshot = &input.snapshot;
     let monitor = snapshot.monitor;
-    let base = input.capture.regions.iter().find(|f| f.bounds == monitor).or_else(|| {
+    let base = input.capture.regions.iter().find(|f| {
+        f.bounds == monitor || !input.crop_border
+            && f.bounds.left <= monitor.left && f.bounds.top <= monitor.top
+            && f.bounds.right >= monitor.right && f.bounds.bottom >= monitor.bottom
+    }).or_else(|| {
         tracing::debug!(?monitor, capture_bounds=?input.capture.regions.iter().map(|r|r.bounds).collect::<Vec<_>>(), "Frozen preview source geometry mismatch");
         None
     })?;

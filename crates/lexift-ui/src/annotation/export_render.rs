@@ -54,7 +54,7 @@ pub(crate) fn compose_frozen(
 ) -> Result<CapturedRegion> {
     let mut rendered = Vec::new();
     for (monitor, scale) in lexift_core::domain::screen_snapshot::render_partitions(
-        snapshot.monitor,
+        snapshot.session.image_source.unwrap_or(snapshot.monitor),
         &snapshot.monitors,
         snapshot.scale,
     ) {

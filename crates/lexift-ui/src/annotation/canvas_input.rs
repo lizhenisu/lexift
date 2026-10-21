@@ -664,7 +664,7 @@ pub(super) fn refresh_hovered(r: &mut Registry) {
 
 pub(super) fn activate_mouse_mode() {
     REGISTRY.with(|s| {
-        if let Some(r) = s.borrow().as_ref() {
+        if let Some(r) = s.borrow_mut().as_mut() {
             image_crop::cancel(r);
         }
     });
@@ -756,6 +756,18 @@ fn history(forward: bool) {
             finish_text_edit_registry(r, true);
         }
         r.finish_style_edit();
+        if pin_editor::active() {
+            let mut candidate = r.document.session.clone();
+            let changed = if forward {
+                candidate.redo()
+            } else {
+                candidate.undo()
+            };
+            if changed && candidate.image_crop != r.document.session.image_crop {
+                pin_crop::history(r, candidate);
+                return None;
+            }
+        }
         let previous_crop = r.document.session.image_crop;
         let erased = eraser::has_coverage(&r.document.session);
         let changed = if forward {

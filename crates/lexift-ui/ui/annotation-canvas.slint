@@ -1,3 +1,4 @@
+import { ImageCropFeedback } from "image-crop-feedback.slint";
 import { SettingsButton } from "settings-controls.slint";
 import { AnnotationHistory } from "annotation-hint.slint";
 import { AnnotationHintTarget } from "annotation-hint.slint";
@@ -112,23 +113,11 @@ export component AnnotationCanvas inherits Window {
             Image { x:-root.content-left * root.image-zoom * 1px; y:-root.content-top * root.image-zoom * 1px; width:root.frame.width * root.image-zoom * 1px; height:root.frame.height * root.image-zoom * 1px; source:root.frame; image-fit:fill; }
             if !root.image-cropping: Image { x:-root.content-left * root.image-zoom * 1px; y:-root.content-top * root.image-zoom * 1px; width:root.frame.width * root.image-zoom * 1px; height:root.frame.height * root.image-zoom * 1px; source:root.controls; image-fit:fill; }
         }
-        if root.image-cropping: Rectangle {
+        if root.image-cropping: ImageCropFeedback {
             x:root.image-pan-x; y:root.image-pan-y;
             width:root.frame.width * root.image-zoom * 1px; height:root.frame.height * root.image-zoom * 1px;
-            private property <length> l: root.crop-left * root.image-zoom * 1px;
-            private property <length> t: root.crop-top * root.image-zoom * 1px;
-            private property <length> r: root.crop-right * root.image-zoom * 1px;
-            private property <length> b: root.crop-bottom * root.image-zoom * 1px;
-            Rectangle { x:0px; y:0px; width:parent.width; height:parent.t; background:Colors.capture-mask; }
-            Rectangle { x:0px; y:parent.b; width:parent.width; height:max(0px,parent.height - parent.b); background:Colors.capture-mask; }
-            Rectangle { x:0px; y:parent.t; width:parent.l; height:parent.b - parent.t; background:Colors.capture-mask; }
-            Rectangle { x:parent.r; y:parent.t; width:max(0px,parent.width - parent.r); height:parent.b - parent.t; background:Colors.capture-mask; }
-            Rectangle { x:parent.l; y:parent.t; width:parent.r - parent.l; height:parent.b - parent.t; border-width:1px; border-color:Colors.primary; }
-            for handle in [0,1,2,3,4,5,6,7]: Rectangle {
-                x: (handle == 0 || handle == 6 || handle == 7 ? parent.l : handle == 2 || handle == 3 || handle == 4 ? parent.r : (parent.l+parent.r)/2) - 3px;
-                y: (handle <= 2 ? parent.t : handle >= 4 && handle <= 6 ? parent.b : (parent.t+parent.b)/2) - 3px;
-                width:6px; height:6px; background:Colors.surface; border-width:1px; border-color:Colors.primary;
-            }
+            source-width:root.frame.width; source-height:root.frame.height;
+            selection-left:root.crop-left;selection-top:root.crop-top;selection-right:root.crop-right;selection-bottom:root.crop-bottom;
         }
         image-input := TouchArea {
             mouse-cursor: root.image-cropping ? (root.crop-cursor == AnnotationCursor.moving ? move : root.crop-cursor == AnnotationCursor.horizontal ? ew-resize : root.crop-cursor == AnnotationCursor.vertical ? ns-resize : root.crop-cursor == AnnotationCursor.diagonal-down ? nwse-resize : root.crop-cursor == AnnotationCursor.diagonal-up ? nesw-resize : crosshair) : root.image-browsing ? (root.image-panning ? grabbing : grab)

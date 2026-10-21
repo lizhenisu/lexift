@@ -1,3 +1,4 @@
+import { ImageCropFeedback } from "image-crop-feedback.slint";
 import { AnnotationHistory } from "annotation-hint.slint";
 import { Colors } from "design/colors.slint";
 import { Metrics } from "design/metrics.slint";
@@ -19,6 +20,13 @@ export component PinnedScreenshotWindow inherits Window {
     in property <bool> interactive:true;
     in property <bool> output-busy:false;
     in property <bool> editing:false;
+    in property <bool> cropping:false;
+    in property <float> crop-left;
+    in property <float> crop-top;
+    in property <float> crop-right;
+    in property <float> crop-bottom;
+    in property <float> crop-source-width:1;
+    in property <float> crop-source-height:1;
     in property <bool> annotations-hidden:false;
     in property <AnnotationCursor> cursor:AnnotationCursor.idle;
     callback annotate-requested(); callback visibility-requested(bool); callback edit-pointer(int,float,float); callback escape-requested(); callback edit-key(int); callback edit-scroll(float);
@@ -35,7 +43,11 @@ export component PinnedScreenshotWindow inherits Window {
         width:parent.width - 2 * MenuMetrics.shadow-inset; height:parent.height - 2 * MenuMetrics.shadow-inset;
         background:Colors.surface;
         Image { source:root.picture; width:parent.width; height:parent.height; image-fit:fill; }
-        if root.editing: Image {source:root.decoration;width:parent.width;height:parent.height;image-fit:fill;}
+        if root.editing && !root.cropping: Image {source:root.decoration;width:parent.width;height:parent.height;image-fit:fill;}
+        if root.cropping: ImageCropFeedback {x:0px;y:0px;width:parent.width;height:parent.height;
+            source-width:root.crop-source-width;source-height:root.crop-source-height;
+            selection-left:root.crop-left;selection-top:root.crop-top;selection-right:root.crop-right;selection-bottom:root.crop-bottom;
+        }
         area := TouchArea {
             width:parent.width; height:parent.height; enabled:root.interactive;
             pointer-event(event)=>{
@@ -55,11 +67,11 @@ export component PinnedScreenshotWindow inherits Window {
             context := ContextMenuArea {
                 width:parent.width; height:parent.height; enabled:root.interactive;
             Menu {
-                MenuItem { title:@tr("Copy image"); enabled:!root.output-busy; activated=>{root.output-requested(0);} }
-                MenuItem { title:@tr("Save image"); enabled:!root.output-busy; activated=>{root.output-requested(1);} }
+                MenuItem { title:@tr("Copy image"); enabled:!root.output-busy && !root.cropping; activated=>{root.output-requested(0);} }
+                MenuItem { title:@tr("Save image"); enabled:!root.output-busy && !root.cropping; activated=>{root.output-requested(1);} }
                 MenuSeparator {}
                 MenuItem { title:@tr("Annotate"); enabled:!root.output-busy && !root.editing; activated=>{root.annotate-requested();} }
-                MenuItem { title:@tr("Hide annotations"); checkable:true; checked:root.annotations-hidden; activated=>{root.visibility-requested(!root.annotations-hidden);} }
+                MenuItem { title:@tr("Hide annotations"); enabled:!root.cropping; checkable:true; checked:root.annotations-hidden; activated=>{root.visibility-requested(!root.annotations-hidden);} }
                 MenuSeparator {}
                 MenuItem { title:@tr("Window shadow"); checkable:true; checked <=> root.shadow-enabled; activated=>{root.option-requested(0,self.checked);} }
                 MenuItem { title:@tr("Always on top"); checkable:true; checked <=> root.topmost; activated=>{root.option-requested(1,self.checked);} }

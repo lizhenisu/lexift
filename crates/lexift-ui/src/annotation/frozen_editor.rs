@@ -158,7 +158,13 @@ pub(super) fn present(
                 failed = true;
                 return;
             };
+            if revision != editing.revision || pin_crop::waiting() {
+                return;
+            }
             editing.presented = revision;
+            if !pin_crop::preview_ready(r, pin) {
+                return;
+            }
             crate::pinned_screenshot::present_edit(pin, image, controls);
             return;
         }
@@ -225,6 +231,11 @@ pub(super) fn present(
 }
 fn report_failure(id: u64) {
     tracing::debug!(session = id, "Frozen editor presentation failed");
+    if pin_editor::current().is_some_and(|p| p.1 == id)
+        && REGISTRY.with(|s| s.borrow_mut().as_mut().is_some_and(pin_crop::cancel))
+    {
+        return;
+    }
     if let Some((pin, edit)) = pin_editor::current().filter(|p| p.1 == id) {
         emit_pin(lexift_core::domain::pinned_image::Event::EditFailed {
             id: pin,

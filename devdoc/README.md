@@ -112,6 +112,7 @@
 - [截图尺寸同帧呈现验证](releases/screenshot-same-frame.md)
 - [贴图菜单与恢复行为验证](releases/pinned-image-menu-2026-10-14.md)
 - [贴图可编辑标注验证](releases/pinned-image-annotation-2026-10-14.md)
+- [贴图编辑裁剪验证](releases/pin-image-crop.md)
 
 - [标注、窗口 Bridge 与 OCR 职责整理验证](releases/responsibility-refactor-validation.md)
 

@@ -293,6 +293,7 @@ fn install() {
         r.canvas_state.pending_displays = vec![];
         r.canvas_state.annotation_ready = true;
         r.document.session = Session::new();
+        r.document.session.image_source = Some(p.image.bounds);
         r.document.session.displays = vec![p.image.bounds];
         r.document.mode = InteractionMode::Mouse;
         r.sync_edit_scope();

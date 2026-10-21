@@ -982,6 +982,8 @@ pub enum Hit {
 pub struct Session {
     /// Source-pixel visible range for image editors; None means the complete image.
     pub image_crop: Option<Rect>,
+    /// Immutable editable image extent; extra effect samples are not editable pixels.
+    pub image_source: Option<Rect>,
     pub next_sequence: i32,
     pub objects: Vec<Object>,
     pub selected: Option<usize>,
@@ -1020,6 +1022,7 @@ impl Session {
             .collect();
         frozen.displays = visible.displays.clone();
         frozen.image_crop = visible.image_crop;
+        frozen.image_source = visible.image_source;
         frozen.watermark = visible.watermark.clone();
         frozen.watermark_erased = visible.watermark_erased.clone();
         frozen.spotlight_erased = visible.spotlight_erased.clone();

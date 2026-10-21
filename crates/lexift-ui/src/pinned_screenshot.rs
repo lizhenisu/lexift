@@ -1,4 +1,4 @@
-//! Independent pinned result windows. Each instance owns only its cropped image.
+//! Independent pinned result windows; editable source pixels are retained separately.
 use crate::{
     PassiveWindowPreparation, PinnedScreenshotWindow, WindowLifecycleCallbacks,
     screen_interaction::window::Slot,
@@ -8,6 +8,7 @@ use lexift_core::{
     ports::{annotation_save::SaveOutcome, screen_capture::CapturedRegion},
 };
 use slint::ComponentHandle;
+use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
@@ -85,6 +86,7 @@ impl Gesture {
 struct Pin {
     window: Slot<PinnedScreenshotWindow>,
     image: Arc<CapturedRegion>,
+    visible: lexift_core::domain::geometry::Rect,
     session: u64,
     operation: u64,
     document: Option<lexift_core::domain::annotation_export::ExportRequest>,
@@ -285,7 +287,7 @@ pub(crate) fn set_edit_interaction(id: u64, allowed: bool) -> bool {
     }
 }
 pub(crate) fn request_output(id: u64, kind: i32) {
-    if !matches!(kind, 0 | 1) {
+    if !matches!(kind, 0 | 1) || crate::annotation::pin_editor::cropping(id) {
         return;
     }
     let owner = STATE.with(|s| {
@@ -296,7 +298,7 @@ pub(crate) fn request_output(id: u64, kind: i32) {
             return None;
         };
         let w = p.window.get()?;
-        if w.get_output_busy() {
+        if w.get_output_busy() || w.get_cropping() {
             return None;
         };
         Some((r.lifecycle.annotation_window_token)(w.window()))
@@ -582,17 +584,29 @@ pub(crate) fn edit_window(id: u64, editing: bool) -> Option<PinnedScreenshotWind
     Some(window)
 }
 pub(crate) fn present(id: u64, revision: u64, image: Arc<CapturedRegion>) {
-    STATE.with(|s| {
-        let s = s.borrow();
-        let Some(p) = s
+    let current = STATE.with(|s| {
+        s.borrow()
             .as_ref()
             .and_then(|r| r.windows.get(&id))
+            .is_some_and(|p| p.revision == revision)
+    });
+    if !current {
+        return;
+    }
+    let candidate = crate::annotation::pin_editor::candidate_present(id, revision, image.clone());
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        let Some(p) = s
+            .as_mut()
+            .and_then(|r| r.windows.get_mut(&id))
             .filter(|p| p.phase == Phase::Visible && p.revision == revision)
         else {
             return;
         };
-        if let Some(w) = p.window.get().filter(|w| !w.get_editing()) {
+        if let Some(w) = p.window.get().filter(|w| !w.get_editing() || candidate) {
             set_picture(w, &image);
+            p.visible = image.bounds;
+            p.image = image;
         }
     });
 }
@@ -604,6 +618,62 @@ fn set_picture(window: &PinnedScreenshotWindow, image: &CapturedRegion) {
             (image.bounds.bottom - image.bounds.top) as u32,
         ),
     ));
+}
+/// Current content geometry, excluding the glow; independent of the source image extent.
+pub(crate) fn geometry(
+    id: u64,
+) -> Option<(
+    lexift_core::domain::geometry::Rect,
+    lexift_core::domain::geometry::Rect,
+)> {
+    STATE.with(|s| {
+        let s = s.borrow();
+        let p = s.as_ref()?.windows.get(&id)?;
+        let w = p.window.get()?;
+        let pos = w.window().position();
+        let size = w.window().size();
+        let inset = (w.get_frame_inset() * w.window().scale_factor()).round() as i32;
+        Some((
+            p.visible,
+            lexift_core::domain::geometry::Rect {
+                left: pos.x + inset,
+                top: pos.y + inset,
+                right: pos.x + size.width as i32 - inset,
+                bottom: pos.y + size.height as i32 - inset,
+            },
+        ))
+    })
+}
+pub(crate) fn set_geometry(
+    id: u64,
+    visible: lexift_core::domain::geometry::Rect,
+    position: slint::PhysicalPosition,
+    size: slint::PhysicalSize,
+) -> bool {
+    let context = STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        let p = s.as_mut()?.windows.get_mut(&id)?;
+        let w = p.window.get()?.clone_strong();
+        let old = (p.visible, w.window().position(), w.window().size());
+        p.visible = visible;
+        Some((w, old))
+    });
+    let Some((w, old)) = context else {
+        return false;
+    };
+    w.window().set_position(position);
+    w.window().set_size(size);
+    if apply_policy(id) {
+        return true;
+    }
+    STATE.with(|s| {
+        if let Some(p) = s.borrow_mut().as_mut().and_then(|r| r.windows.get_mut(&id)) {
+            p.visible = old.0;
+        }
+    });
+    w.window().set_position(old.1);
+    w.window().set_size(old.2);
+    false
 }
 pub(crate) fn present_edit(id: u64, frame: tiny_skia::Pixmap, controls: tiny_skia::Pixmap) {
     STATE.with(|s| {
@@ -677,6 +747,12 @@ pub(crate) fn show_document(
         let mut owned = Slot::default();
         owned.open(window);
         let window = owned.get().ok_or(())?;
+        window.window().on_winit_window_event(move |_, event| {
+            if matches!(event, winit::event::WindowEvent::Focused(false)) {
+                crate::annotation::pin_editor::lost_focus(id);
+            }
+            EventResult::Propagate
+        });
         window.on_close_requested(move || request_close(id));
         window.on_output_requested(move |kind| request_output(id, kind));
         window.on_option_requested(move |kind, value| change_option(id, kind, value));
@@ -684,6 +760,9 @@ pub(crate) fn show_document(
             emit_pin(lexift_core::domain::pinned_image::Event::EditRequested { id })
         });
         window.on_visibility_requested(move |hidden| {
+            if crate::annotation::pin_editor::cropping(id) {
+                return;
+            }
             emit_pin(lexift_core::domain::pinned_image::Event::VisibilityChanged { id, hidden })
         });
         window.on_edit_pointer(move |event, x, y| {
@@ -740,6 +819,7 @@ pub(crate) fn show_document(
             id,
             Pin {
                 window: owned,
+                visible: image.bounds,
                 image,
                 session,
                 operation,
@@ -968,7 +1048,7 @@ fn fit(id: u64, zoom: Option<(f32, f32, f32)>) {
         Some((
             p.window.get()?.clone_strong(),
             r.lifecycle.clone(),
-            p.image.bounds,
+            p.visible,
             p.phase,
             p.prepared_inset,
         ))

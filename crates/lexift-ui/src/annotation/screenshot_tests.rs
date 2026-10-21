@@ -999,9 +999,16 @@ fn screenshot_toolbars_render_all_locales_themes_and_dpi() {
                 .global::<crate::Colors>()
                 .set_preference(i32::from(dark));
             for scale in [1., 1.25] {
-                for (screenshot, pin) in [(false, false), (true, false), (true, true)] {
+                for (screenshot, pin, crop) in [
+                    (false, false, false),
+                    (true, false, false),
+                    (true, true, false),
+                    (true, true, true),
+                ] {
                     toolbar.set_screenshot_mode(screenshot);
                     toolbar.set_pin_edit_mode(pin);
+                    toolbar.set_image_cropping(crop);
+                    toolbar.set_crop_dimensions("32768 × 32768 px".into());
                     adapter
                         .window()
                         .dispatch_event(WindowEvent::ScaleFactorChanged {
@@ -1023,7 +1030,7 @@ fn screenshot_toolbars_render_all_locales_themes_and_dpi() {
                         crate::i18n::write_test_bitmap(
                             &directory,
                             &format!(
-                                "toolbar-{}-{dark}-{scale}-{screenshot}-{pin}",
+                                "toolbar-{}-{dark}-{scale}-{screenshot}-{pin}-{crop}",
                                 language.code()
                             ),
                             width,
@@ -1262,6 +1269,223 @@ fn pinned_editor_keeps_documents_history_and_hidden_output_separate() {
         crate::pinned_screenshot::diagnostic_windows().is_empty()
     });
     assert!(!core.borrow().pinned_images.contains_key(&id));
+    crate::pinned_screenshot::close_all();
+    super::super::shutdown();
+}
+
+#[test]
+fn pin_crop_presents_atomically_restores_geometry_and_keeps_shared_history() {
+    use lexift_core::domain::{
+        annotation_export::ExportRequest,
+        pinned_image::{Command as C, Event as E},
+    };
+    slint::platform::set_platform(position_platform()).unwrap();
+    let mut l = lifecycle();
+    l.popup_work_area = Rc::new(|_| {
+        Some(Rect {
+            left: 0,
+            top: 0,
+            right: 1200,
+            bottom: 900,
+        })
+    });
+    super::super::init(|_| PassiveWindowPreparation::Ready, l.clone());
+    crate::pinned_screenshot::init(|_| PassiveWindowPreparation::Ready, l);
+    let core = Rc::new(RefCell::new(lexift_core::AppState::default()));
+    let state = core.clone();
+    let fail = Rc::new(Cell::new(false));
+    let fail_render = fail.clone();
+    super::super::set_handler(Rc::new(move |event| {
+        let commands = state.borrow_mut().reduce(event);
+        let snapshot = state.borrow().clone();
+        sync(&snapshot.screenshot);
+        crate::pinned_screenshot::sync_outputs(&snapshot.pinned_images);
+        for command in commands {
+            match command {
+                lexift_core::AppCommand::PinnedImage(C::BeginEdit { id, edit }) => {
+                    slint::Timer::single_shot(Duration::ZERO, move || pin_editor::begin(id, edit))
+                }
+                lexift_core::AppCommand::PinnedImage(C::EndEdit { id, edit }) => {
+                    slint::Timer::single_shot(Duration::ZERO, move || pin_editor::end(id, edit))
+                }
+                lexift_core::AppCommand::PinnedImage(C::Render {
+                    id,
+                    revision,
+                    document,
+                    ..
+                }) => {
+                    let fail = fail_render.replace(false);
+                    slint::Timer::single_shot(Duration::ZERO, move || {
+                        if fail {
+                            emit_pin(E::PreviewFailed {
+                                id,
+                                revision,
+                                error: "fixture".into(),
+                            });
+                            return;
+                        }
+                        let b = document.snapshot.monitor;
+                        emit_pin(E::Rendered { id, revision });
+                        crate::pinned_screenshot::present(
+                            id,
+                            revision,
+                            Arc::new(CapturedRegion {
+                                bounds: b,
+                                pixels: [220, 220, 220, 255]
+                                    .repeat(((b.right - b.left) * (b.bottom - b.top)) as usize),
+                            }),
+                        );
+                    });
+                }
+                _ => {}
+            }
+        }
+    }));
+    toggle(Instant::now());
+    pump("desktop", || {
+        REGISTRY.with(|s| s.borrow().as_ref().unwrap().canvas_state.annotation_ready)
+    });
+    let full = Rect {
+        left: 0,
+        top: 0,
+        right: 300,
+        bottom: 200,
+    };
+    let snapshot =
+        REGISTRY.with(|s| export::snapshot_at(s.borrow().as_ref().unwrap(), full, 1.).unwrap());
+    let base = Arc::new(CapturedRegion {
+        bounds: full,
+        pixels: [220, 220, 220, 255].repeat(300 * 200),
+    });
+    let samples = Arc::new(ScreenCaptureFrame {
+        revision: 1,
+        serial: 1,
+        regions: vec![],
+    });
+    {
+        let mut s = core.borrow_mut();
+        s.screenshot.session = 1;
+        s.screenshot.operation = 1;
+        s.screenshot.phase = ScreenshotPhase::Output;
+    }
+    sync(&core.borrow().screenshot);
+    crate::pinned_screenshot::show_document(
+        1,
+        1,
+        base.clone(),
+        Some((
+            base,
+            samples,
+            ExportRequest {
+                session: 1,
+                request: 1,
+                snapshot: Arc::new(snapshot),
+            },
+        )),
+    );
+    let (id, pin) = crate::pinned_screenshot::diagnostic_windows()
+        .pop()
+        .unwrap();
+    emit_pin(E::SourceReady { id, bounds: full });
+    pin.invoke_annotate_requested();
+    pump("pin", || {
+        pin_editor::active()
+            && REGISTRY.with(|s| s.borrow().as_ref().unwrap().canvas_state.annotation_ready)
+    });
+    let old_pos = pin.window().position();
+    let old_size = pin.window().size();
+    let open_crop = || {
+        image_crop::begin();
+        REGISTRY.with(|s| {
+            let s = s.borrow();
+            let r = s.as_ref().unwrap();
+            let frame = frozen_editor::frame(r, 0).expect("full source composition");
+            pin_crop::preview_ready(r, id);
+            crate::pinned_screenshot::present_edit(
+                id,
+                frame,
+                tiny_skia::Pixmap::new(300, 200).unwrap(),
+            );
+        });
+    };
+    open_crop();
+    pump("full crop source", || pin.get_cropping());
+    assert!(
+        pin.get_interactive(),
+        "crop temporarily accepts pointer input in mouse mode"
+    );
+    let drag = |a: (f32, f32), b: (f32, f32)| {
+        let scale =
+            REGISTRY.with(|s| s.borrow().as_ref().unwrap().canvas_state.canvases[0].input_scale());
+        for (kind, p) in [(0, a), (1, b), (2, b)] {
+            pin.invoke_edit_pointer(kind, p.0 / scale, p.1 / scale);
+        }
+    };
+    drag((50., 40.), (250., 170.));
+    assert_eq!(
+        REGISTRY.with(|s| s.borrow().as_ref().unwrap().document.session.image_crop),
+        None
+    );
+    fail.set(true);
+    image_crop::finish(true);
+    pump("failed candidate retains draft", || {
+        core.borrow().pinned_images[&id].error.is_some()
+    });
+    assert!(pin.get_cropping());
+    assert_eq!(pin.window().size(), old_size);
+    assert_eq!(
+        REGISTRY.with(|s| s.borrow().as_ref().unwrap().document.session.image_crop),
+        None
+    );
+    image_crop::finish(true);
+    pump("confirmed", || {
+        !image_crop::active() && core.borrow().pinned_images[&id].proposed.is_none()
+    });
+    let crop = Rect {
+        left: 50,
+        top: 40,
+        right: 250,
+        bottom: 170,
+    };
+    assert_eq!(
+        REGISTRY.with(|s| s.borrow().as_ref().unwrap().document.session.image_crop),
+        Some(crop)
+    );
+    assert_eq!(pin.window().position(), old_pos);
+    assert_eq!(crate::pinned_screenshot::geometry(id).unwrap().0, crop);
+    assert!(!pin.get_interactive());
+    undo();
+    pump("crop undo", || {
+        !image_crop::active() && core.borrow().pinned_images[&id].proposed.is_none()
+    });
+    assert_eq!(crate::pinned_screenshot::geometry(id).unwrap().0, full);
+    assert_eq!(pin.window().size(), old_size);
+    open_crop();
+    pump("recrop", || pin.get_cropping());
+    drag((20., 20.), (80., 80.));
+    image_crop::finish(false);
+    assert_eq!(pin.window().position(), old_pos);
+    assert_eq!(pin.window().size(), old_size);
+    assert!(REGISTRY.with(|s| s.borrow().as_ref().unwrap().document.session.can_redo()));
+    redo();
+    pump("crop redo", || {
+        !image_crop::active() && core.borrow().pinned_images[&id].proposed.is_none()
+    });
+    assert_eq!(crate::pinned_screenshot::geometry(id).unwrap().0, crop);
+    open_crop();
+    pump("cancel queued crop", || pin.get_cropping());
+    drag((10., 10.), (100., 100.));
+    image_crop::finish(true);
+    image_crop::finish(false);
+    for _ in 0..20 {
+        slint::platform::update_timers_and_animations();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(crate::pinned_screenshot::geometry(id).unwrap().0, crop);
+    assert_eq!(
+        REGISTRY.with(|s| s.borrow().as_ref().unwrap().document.session.image_crop),
+        Some(crop)
+    );
     crate::pinned_screenshot::close_all();
     super::super::shutdown();
 }
