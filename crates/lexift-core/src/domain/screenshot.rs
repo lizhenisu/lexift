@@ -409,7 +409,20 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             && operation > s.operation
             && request.session == session
             && request.request == operation
-            && s.bounds == Some(request.snapshot.monitor) =>
+            && (s.bounds == Some(request.snapshot.monitor)
+                || s.long
+                    .as_ref()
+                    .is_some_and(|l| l.phase == super::long_capture::workflow::Phase::Editing)
+                    && s.bounds.is_some_and(|full| {
+                        let b = request.snapshot.monitor;
+                        request.snapshot.session.image_crop == Some(b)
+                            && b.left >= full.left
+                            && b.top >= full.top
+                            && b.right <= full.right
+                            && b.bottom <= full.bottom
+                            && b.right > b.left
+                            && b.bottom > b.top
+                    })) =>
         {
             s.operation = operation;
             s.phase = ScreenshotPhase::Output;
@@ -525,6 +538,61 @@ mod tests {
             AppCommand::Screenshot(ScreenshotCommand::Prepare { session: 1, .. })
         ));
         s
+    }
+    #[test]
+    fn cropped_long_output_requires_valid_image_metadata_and_ignores_stale_results() {
+        use super::super::long_capture::{
+            Feedback,
+            workflow::{Phase, State},
+        };
+        let full = Rect {
+            left: 0,
+            top: 0,
+            right: 600,
+            bottom: 2000,
+        };
+        let crop = Rect {
+            left: 80,
+            top: 200,
+            right: 520,
+            bottom: 1800,
+        };
+        for phase in [Phase::Editing, Phase::Capturing] {
+            for metadata in [false, true] {
+                let mut s = AppState::default();
+                s.screenshot.session = 10;
+                s.screenshot.phase = ScreenshotPhase::Editing;
+                s.screenshot.bounds = Some(full);
+                s.screenshot.long = Some(State {
+                    operation: 1,
+                    source: full,
+                    phase,
+                    sequence: 1,
+                    width: 600,
+                    height: 2000,
+                    feedback: Feedback::Accepted,
+                    target: None,
+                });
+                let mut req = request(10, 2, crop);
+                if metadata {
+                    Arc::make_mut(&mut Arc::make_mut(&mut req.snapshot).session)
+                        .set_image_crop(crop, full);
+                }
+                let commands = s.reduce(AppEvent::Screenshot(ScreenshotEvent::Output {
+                    session: 10,
+                    operation: 2,
+                    kind: ScreenshotOutput::Copy,
+                    request: req,
+                }));
+                assert_eq!(!commands.is_empty(), phase == Phase::Editing && metadata);
+                s.reduce(AppEvent::Screenshot(ScreenshotEvent::Completed {
+                    session: 9,
+                    operation: 2,
+                    result: Ok(SaveOutcome::Saved),
+                }));
+                assert_eq!(s.screenshot.session, 10);
+            }
+        }
     }
     #[test]
     fn last_region_records_only_successful_image_outputs_and_uses_final_bounds() {

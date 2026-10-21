@@ -1882,3 +1882,6 @@ msgstr "Molette : zoom · Glisser : déplacer · Espace : modifier/déplacer · 
 
 msgid "Redo"
 msgstr "Rétablir"
+
+msgid "Crop image"
+msgstr "Recadrer l’image"

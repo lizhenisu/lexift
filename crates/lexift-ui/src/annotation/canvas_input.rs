@@ -663,6 +663,11 @@ pub(super) fn refresh_hovered(r: &mut Registry) {
 }
 
 pub(super) fn activate_mouse_mode() {
+    REGISTRY.with(|s| {
+        if let Some(r) = s.borrow().as_ref() {
+            image_crop::cancel(r);
+        }
+    });
     if screenshot::recognizing() {
         return;
     }
@@ -719,7 +724,7 @@ pub(super) fn redo() {
 }
 /// Both directions must invalidate the same render and parameter projections.
 fn history(forward: bool) {
-    if screenshot::recognizing() || screenshot::long_editor::outputting() {
+    if image_crop::active() || screenshot::recognizing() || screenshot::long_editor::outputting() {
         return;
     }
     let generation = REGISTRY.with(|s| {
@@ -751,6 +756,7 @@ fn history(forward: bool) {
             finish_text_edit_registry(r, true);
         }
         r.finish_style_edit();
+        let previous_crop = r.document.session.image_crop;
         let erased = eraser::has_coverage(&r.document.session);
         let changed = if forward {
             r.document.session.redo()
@@ -772,6 +778,9 @@ fn history(forward: bool) {
                 layer.signature = None;
             }
         }
+        if previous_crop != r.document.session.image_crop {
+            image_crop::sync(r, true);
+        }
         restore_parameter_projection(r);
         sync_sequence_counter(r);
         adopt_watermark_style(r);
@@ -785,6 +794,9 @@ fn history(forward: bool) {
     }
 }
 pub(super) fn delete_selected() {
+    if image_crop::active() {
+        return;
+    }
     if screenshot::recognizing() {
         return;
     }
@@ -870,6 +882,7 @@ impl Registry {
 
     /// Apply the native input policy before exposing a new mode in the toolbar.
     pub(super) fn set_mode(&mut self, mode: InteractionMode) -> bool {
+        image_crop::cancel(self);
         if screenshot::recognizing() {
             return false;
         }

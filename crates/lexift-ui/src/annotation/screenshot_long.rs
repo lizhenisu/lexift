@@ -1769,6 +1769,109 @@ mod tests {
         crate::annotation::shutdown();
     }
     #[test]
+    fn crop_editor_native_routing_history_cancel_and_output_snapshot() {
+        let (events, _) = fixture();
+        let full = Rect {
+            left: 0,
+            top: 0,
+            right: 600,
+            bottom: 2000,
+        };
+        FLOW.with(|f| {
+            let mut f = f.borrow_mut();
+            f.state.bounds = Some(full);
+            f.state.long = Some(lexift_core::domain::long_capture::workflow::State {
+                operation: 3,
+                source: full,
+                phase: Phase::Editing,
+                sequence: 1,
+                width: 600,
+                height: 2000,
+                feedback: Feedback::Accepted,
+                target: None,
+            });
+        });
+        let w = AnnotationCanvas::new().unwrap();
+        w.set_image_view(true);
+        w.window().set_size(slint::PhysicalSize::new(960, 760));
+        w.set_frame(slint::Image::from_rgba8_premultiplied(
+            slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(600, 2000),
+        ));
+        set_editor(&w);
+        REGISTRY.with(|s| {
+            let mut s = s.borrow_mut();
+            let r = s.as_mut().unwrap();
+            r.screenshot.as_mut().unwrap().region = RegionEditor::new(full);
+            r.canvas_state.canvases = vec![CanvasLayer::new(w.clone_strong(), full)];
+        });
+        image_navigation::bind(&w);
+        image_crop::begin();
+        assert!(w.get_image_cropping());
+        let before = REGISTRY.with(|s| s.borrow().as_ref().unwrap().document.session.can_undo());
+        let p = image_navigation::map(&w, [100., 200.], false).unwrap();
+        let q = image_navigation::map(&w, [500., 1800.], false).unwrap();
+        let header = w.get_image_header_height();
+        image_navigation::native(
+            &w,
+            PopupPointerInput::LeftPressed {
+                x: p[0],
+                y: p[1] + header,
+            },
+        );
+        image_navigation::native(
+            &w,
+            PopupPointerInput::Moved {
+                x: q[0],
+                y: q[1] + header,
+            },
+        );
+        image_navigation::scroll(&w, [200., 200.], 0., 60., false);
+        image_navigation::native(
+            &w,
+            PopupPointerInput::LeftReleased {
+                x: q[0],
+                y: q[1] + header,
+            },
+        );
+        assert!(
+            (w.get_crop_left() - 100.).abs() <= 1. && (w.get_crop_bottom() - 1800.).abs() <= 1.
+        );
+        super::output(ScreenshotOutput::Copy);
+        assert!(events.borrow().is_empty());
+        image_crop::finish(true);
+        assert!(!w.get_image_cropping());
+        let saved = REGISTRY.with(|s| {
+            s.borrow()
+                .as_ref()
+                .unwrap()
+                .document
+                .session
+                .image_crop
+                .unwrap()
+        });
+        assert_eq!(w.get_content_left(), saved.left as f32);
+        super::super::undo();
+        assert_eq!(w.get_content_left(), 0.);
+        super::super::redo();
+        assert_eq!(w.get_content_left(), saved.left as f32);
+        image_crop::begin();
+        assert_eq!(w.get_content_left(), 0.);
+        let p = image_navigation::map(&w, [300., 1000.], false).unwrap();
+        image_navigation::pointer(&w, 0, p);
+        image_navigation::pointer(&w, 1, [p[0] + 30., p[1] + 20.]);
+        image_navigation::lost_focus();
+        assert_eq!(w.get_crop_left(), saved.left as f32);
+        super::super::escape_from(super::super::current_focus_origin());
+        assert!(!w.get_image_cropping());
+        assert!(!before);
+        super::output(ScreenshotOutput::Copy);
+        assert!(events.borrow().iter().any(|e|matches!(e,ScreenshotEvent::Output{request,..} if request.snapshot.monitor==saved && request.snapshot.monitors==vec![(full,1.)])));
+        image_crop::begin();
+        clear();
+        assert!(!image_crop::active());
+        crate::annotation::shutdown();
+    }
+    #[test]
     fn controls_render_every_language_theme_and_dpi() {
         use slint::platform::{
             Platform, PointerEventButton, WindowAdapter, WindowEvent,
@@ -1823,6 +1926,7 @@ mod tests {
                     pixels.iter().map(|p| [p.r, p.g, p.b, 255]),
                 );
             }
+            pixels
         };
         w.set_ready(true);
         w.set_dimensions("600 × 2400 px".into());
@@ -1893,6 +1997,36 @@ mod tests {
                         (960. * scale) as u32,
                         (760. * scale) as u32,
                     );
+                    editor.set_image_cropping(true);
+                    editor.set_crop_left(80.);
+                    editor.set_crop_top(200.);
+                    editor.set_crop_right(520.);
+                    editor.set_crop_bottom(1800.);
+                    editor.invoke_fit_image();
+                    let crop_pixels = draw(
+                        &editor_adapter,
+                        format!("crop-{}-{dark}-{scale}", language.code()),
+                        (960. * scale) as u32,
+                        (760. * scale) as u32,
+                    );
+                    let sample = |source: [f32; 2]| {
+                        let p = image_navigation::map(&editor, source, false).unwrap();
+                        crop_pixels[((p[1] + editor.get_image_header_height() * scale).round()
+                            as usize)
+                            * (960. * scale) as usize
+                            + p[0].round() as usize]
+                    };
+                    assert!(
+                        sample([300., 550.]).r > 240,
+                        "crop interior stays unchanged"
+                    );
+                    for source in [[20., 550.], [580., 550.], [300., 150.], [300., 1850.]] {
+                        assert!(
+                            sample(source).r < 210,
+                            "only the four exterior bands are dimmed: {source:?}"
+                        );
+                    }
+                    editor.set_image_cropping(false);
                     assert!(editor.get_image_zoom() * scale <= 1.);
                     let before = dragged.get();
                     editor.window().dispatch_event(WindowEvent::PointerPressed {

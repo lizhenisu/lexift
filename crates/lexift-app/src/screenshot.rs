@@ -665,18 +665,23 @@ impl ScreenshotRuntime {
                                             request.snapshot.monitor,
                                         )?);
                                         let mut pin_snapshot = (*request.snapshot).clone();
-                                        pin_snapshot.monitors =
-                                            lexift_core::domain::screen_snapshot::render_partitions(
-                                                base.bounds,
-                                                &pin_snapshot.monitors,
-                                                pin_snapshot.scale,
-                                            );
+                                        if request.snapshot.session.image_crop.is_none() {
+                                            pin_snapshot.monitors =
+                                                lexift_core::domain::screen_snapshot::render_partitions(
+                                                    base.bounds, &pin_snapshot.monitors, pin_snapshot.scale,
+                                                );
+                                        }
                                         let pin_request = ExportRequest {
                                             session: request.session,
                                             request: request.request,
                                             snapshot: Arc::new(pin_snapshot),
                                         };
-                                        let required = this.render.regions(&pin_request.snapshot);
+                                        let mut required =
+                                            this.render.regions(&pin_request.snapshot);
+                                        // Keep complete frozen sampling pixels for effects crossing a crop edge.
+                                        if request.snapshot.session.image_crop.is_some() {
+                                            required.extend(frames.iter().map(|f| f.bounds));
+                                        }
                                         let samples = Arc::new(ScreenCaptureFrame {
                                             revision: operation,
                                             serial: operation,
@@ -1080,6 +1085,132 @@ mod tests {
                 .output_image(&request, frames, &AtomicBool::new(true))
                 .is_err()
         );
+    }
+    #[test]
+    fn long_image_crop_outputs_exact_full_composition_slice_and_retains_effect_sampling() {
+        use lexift_core::domain::annotation::{
+            Bounds, Extra, Kind, MagnifierConnector, MosaicAnnotation, MosaicEffect, Object, Style,
+        };
+        let full = Rect {
+            left: 0,
+            top: 0,
+            right: 200,
+            bottom: 300,
+        };
+        let crop = Rect {
+            left: 80,
+            top: 90,
+            right: 170,
+            bottom: 260,
+        };
+        let pixels = (0..200 * 300)
+            .flat_map(|n| {
+                [
+                    (n % 251) as u8,
+                    (n * 7 % 253) as u8,
+                    (n * 13 % 255) as u8,
+                    255,
+                ]
+            })
+            .collect();
+        let frames = Arc::new(vec![CapturedRegion {
+            bounds: full,
+            pixels,
+        }]);
+        for effect in [MosaicEffect::Pixelate, MosaicEffect::Blur] {
+            let mut doc = Session::new();
+            let mut mosaic = MosaicAnnotation::new(effect, 60, 12., 1.);
+            mosaic.id = 1;
+            doc.add(Object {
+                id: Default::default(),
+                kind: Kind::MosaicArea,
+                bounds: Bounds::from_corners((50., 50.), (140., 190.)),
+                points: vec![],
+                erased: vec![],
+                style: Style::default(),
+                extra: Extra::Mosaic(mosaic),
+            });
+            doc.add(Object {
+                id: Default::default(),
+                kind: Kind::Magnifier,
+                bounds: Bounds::from_corners((50., 50.), (70., 70.)),
+                points: vec![],
+                erased: vec![],
+                style: Style::default(),
+                extra: Extra::Magnifier {
+                    output: Bounds::from_corners((145., 220.), (180., 255.)),
+                    zoom: 2.,
+                    erase_annotations: false,
+                    ellipse: false,
+                    connector: MagnifierConnector::None,
+                    antialias: true,
+                    shadow: false,
+                },
+            });
+            let mut snapshot = ExportSnapshot {
+                session: Arc::new(doc),
+                monitor: full,
+                scale: 1.,
+                monitors: vec![(full, 1.)],
+                excluded: vec![],
+                owner: None,
+                name: String::new(),
+                title: String::new(),
+            };
+            let runtime = ScreenshotRuntime::new(
+                || None,
+                Arc::new(Save),
+                Arc::new(lexift_ui::SoftwareExportRenderer),
+                Arc::new(Clipboard),
+            );
+            let original = runtime
+                .output_image(
+                    &ExportRequest {
+                        session: 1,
+                        request: 1,
+                        snapshot: Arc::new(snapshot.clone()),
+                    },
+                    frames.clone(),
+                    &AtomicBool::new(false),
+                )
+                .unwrap();
+            Arc::make_mut(&mut snapshot.session).set_image_crop(crop, full);
+            snapshot.monitor = crop;
+            let actual = runtime
+                .output_image(
+                    &ExportRequest {
+                        session: 1,
+                        request: 2,
+                        snapshot: Arc::new(snapshot.clone()),
+                    },
+                    frames.clone(),
+                    &AtomicBool::new(false),
+                )
+                .unwrap();
+            let expected = crop_frames(&[original], crop).unwrap();
+            assert_eq!(actual.pixels, expected.pixels);
+            assert_eq!(actual.bounds, crop);
+            let base = Arc::new(crop_frames(&frames, crop).unwrap());
+            let samples = Arc::new(ScreenCaptureFrame {
+                revision: 1,
+                serial: 1,
+                regions: frames.as_ref().clone(),
+            });
+            let pinned = runtime
+                .compose_pin(
+                    &base,
+                    Some(samples),
+                    Some(&ExportRequest {
+                        session: 1,
+                        request: 3,
+                        snapshot: Arc::new(snapshot),
+                    }),
+                    false,
+                    &AtomicBool::new(false),
+                )
+                .unwrap();
+            assert_eq!(pinned.pixels, expected.pixels);
+        }
     }
     #[test]
     fn pin_output_preserves_source_pixels_and_cancellation_prevents_both_ports() {

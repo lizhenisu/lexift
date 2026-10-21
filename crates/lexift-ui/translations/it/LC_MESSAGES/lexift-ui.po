@@ -1882,3 +1882,6 @@ msgstr "Rotella: zoom · Trascina: sposta · Spazio: modifica/sposta · Ctrl+0: 
 
 msgid "Redo"
 msgstr "Ripristina"
+
+msgid "Crop image"
+msgstr "Ritaglia immagine"

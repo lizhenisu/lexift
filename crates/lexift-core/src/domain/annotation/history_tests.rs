@@ -184,3 +184,43 @@ fn history_redo_failed_mosaic_is_removed_without_losing_other_edits() {
     assert_eq!(s.objects[0].kind, Kind::Rectangle);
     assert!(!s.redo());
 }
+
+#[test]
+fn image_crop_shares_annotation_chronology_and_preserves_hidden_objects() {
+    let full = Rect {
+        left: 0,
+        top: 0,
+        right: 600,
+        bottom: 2000,
+    };
+    let crop = Rect {
+        left: 100,
+        top: 200,
+        right: 500,
+        bottom: 1800,
+    };
+    let mut s = Session::new();
+    s.add(object(Kind::Rectangle));
+    let id = s.objects[0].id;
+    assert!(s.set_image_crop(crop, full));
+    s.update_selected(|o| o.style.width = 17.);
+    assert!(s.undo());
+    assert_eq!(s.image_crop, Some(crop));
+    assert!(s.undo());
+    assert_eq!(s.image_crop, None);
+    assert_eq!(s.objects[0].id, id);
+    assert!(!s.set_image_crop(full, full));
+    assert!(s.can_redo());
+    assert!(s.redo());
+    assert_eq!(s.image_crop, Some(crop));
+    assert!(!s.set_image_crop(crop, full));
+    assert!(s.can_redo());
+    assert!(s.redo());
+    assert_eq!(s.objects[0].style.width, 17.);
+    let frozen = s.freeze_visible(&s);
+    assert_eq!(frozen.image_crop, Some(crop));
+    assert!(s.set_image_crop(full, full));
+    assert!(s.undo());
+    assert_eq!(s.image_crop, Some(crop));
+    assert!(!s.set_image_crop(Rect { right: 601, ..full }, full));
+}

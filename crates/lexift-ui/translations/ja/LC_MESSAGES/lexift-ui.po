@@ -1882,3 +1882,6 @@ msgstr "ホイール：拡大縮小 · ドラッグ：移動 · スペース：�
 
 msgid "Redo"
 msgstr "やり直す"
+
+msgid "Crop image"
+msgstr "画像を切り抜く"

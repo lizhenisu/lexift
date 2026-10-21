@@ -1882,3 +1882,6 @@ msgstr "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
 
 msgid "Redo"
 msgstr "Redo"
+
+msgid "Crop image"
+msgstr "Crop image"

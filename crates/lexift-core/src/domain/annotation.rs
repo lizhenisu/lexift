@@ -949,6 +949,7 @@ fn segment_distance(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
 
 #[derive(Clone, Debug, PartialEq)]
 struct Snapshot {
+    image_crop: Option<Rect>,
     next_sequence: i32,
     objects: Vec<Object>,
     selected: Option<usize>,
@@ -960,7 +961,8 @@ struct Snapshot {
 
 impl Snapshot {
     fn same_content(&self, other: &Self) -> bool {
-        self.next_sequence == other.next_sequence
+        self.image_crop == other.image_crop
+            && self.next_sequence == other.next_sequence
             && self.objects == other.objects
             && self.opacity == other.opacity
             && self.watermark == other.watermark
@@ -978,6 +980,8 @@ pub enum Hit {
 /// Owns the undoable document; a drag is committed as one undo step on release.
 #[derive(Clone, Default)]
 pub struct Session {
+    /// Source-pixel visible range for image editors; None means the complete image.
+    pub image_crop: Option<Rect>,
     pub next_sequence: i32,
     pub objects: Vec<Object>,
     pub selected: Option<usize>,
@@ -1015,6 +1019,7 @@ impl Session {
             .cloned()
             .collect();
         frozen.displays = visible.displays.clone();
+        frozen.image_crop = visible.image_crop;
         frozen.watermark = visible.watermark.clone();
         frozen.watermark_erased = visible.watermark_erased.clone();
         frozen.spotlight_erased = visible.spotlight_erased.clone();
@@ -1033,6 +1038,7 @@ impl Session {
     }
     fn snapshot(&self) -> Snapshot {
         Snapshot {
+            image_crop: self.image_crop,
             next_sequence: self.next_sequence,
             objects: self.objects.clone(),
             selected: self.editable_selected(),
@@ -1075,6 +1081,25 @@ impl Session {
             self.watermark = watermark;
             self.watermark_erased.clear();
         }
+    }
+    /// Commit one non-destructive crop in the same chronology as annotation edits.
+    pub fn set_image_crop(&mut self, bounds: Rect, image: Rect) -> bool {
+        if bounds.left < image.left
+            || bounds.top < image.top
+            || bounds.right > image.right
+            || bounds.bottom > image.bottom
+            || bounds.right <= bounds.left
+            || bounds.bottom <= bounds.top
+        {
+            return false;
+        }
+        let next = (bounds != image).then_some(bounds);
+        if self.image_crop == next {
+            return false;
+        }
+        self.commit_snapshot(self.snapshot());
+        self.image_crop = next;
+        true
     }
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
@@ -1172,6 +1197,7 @@ impl Session {
     }
     fn restore_snapshot(&mut self, before: Snapshot) {
         // Identity allocation belongs to the session lifetime, not undo history.
+        self.image_crop = before.image_crop;
         self.objects = before.objects;
         self.next_sequence = before.next_sequence;
         self.selected = before.selected;

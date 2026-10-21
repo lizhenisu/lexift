@@ -70,6 +70,7 @@ mod frame;
 mod hints;
 #[cfg(test)]
 mod history_tests;
+mod image_crop;
 mod image_navigation;
 mod image_viewport;
 #[path = "mosaic_session.rs"]
@@ -279,8 +280,8 @@ pub(crate) fn apply_theme() {
 
 fn sync_history_controls(r: &Registry) {
     if let Some(main) = r.toolbar_state.main.get() {
-        main.set_can_undo(r.document.session.can_undo());
-        main.set_can_redo(r.document.session.can_redo());
+        main.set_can_undo(!image_crop::active() && r.document.session.can_undo());
+        main.set_can_redo(!image_crop::active() && r.document.session.can_redo());
     }
     if let Some(panel) = r.toolbar_state.panel.get() {
         panel.set_can_clear(r.document.session.has_content());

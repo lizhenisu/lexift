@@ -1882,3 +1882,6 @@ msgstr "Mausrad: Zoom · Ziehen: Verschieben · Leertaste: Bearbeiten/Verschiebe
 
 msgid "Redo"
 msgstr "Wiederholen"
+
+msgid "Crop image"
+msgstr "Bild zuschneiden"

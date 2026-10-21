@@ -128,6 +128,12 @@ fn install() {
         layer.bootstrap = CanvasBootstrap::Ready;
         let revision = layer.revision();
         image_navigation::bind(&w);
+        let weak = w.as_weak();
+        w.on_crop_action(move |apply| {
+            if canvas_current(generation, 0, revision) && weak.upgrade().is_some() {
+                image_crop::finish(apply);
+            }
+        });
         image_navigation::attach_cursor(r.lifecycle.image_pan_cursor.clone());
         hints::bind_image_editor(&w, generation, hints::Owner::ImageEditor(revision));
         w.on_region_key(keyboard::bind(
@@ -381,6 +387,23 @@ pub(in crate::annotation) fn clip_text(mut bounds: Bounds) -> Bounds {
         let top = p.y as f32 + w.get_image_header_height() * dpi;
         let right = left + s.width as f32;
         let bottom = p.y as f32 + s.height as f32 - w.get_image_footer_height() * dpi;
+        let (left, top, right, bottom) = if !w.get_image_cropping() {
+            let a = image_navigation::map(&w, [w.get_content_left(), w.get_content_top()], false)
+                .unwrap_or([0., 0.]);
+            let b =
+                image_navigation::map(&w, [w.get_content_right(), w.get_content_bottom()], false)
+                    .unwrap_or([s.width as f32, s.height as f32]);
+            let crop_left = (p.x as f32 + a[0]).clamp(left, right - 1.);
+            let crop_top = (top + a[1]).clamp(top, bottom - 1.);
+            (
+                crop_left,
+                crop_top,
+                (p.x as f32 + b[0]).clamp(crop_left + 1., right),
+                (top + b[1]).clamp(crop_top + 1., bottom),
+            )
+        } else {
+            (left, top, right, bottom)
+        };
         bounds.left = bounds.left.clamp(left, right - 1.);
         bounds.top = bounds.top.clamp(top, bottom - 1.);
         bounds.right = bounds.right.clamp(bounds.left + 1., right);

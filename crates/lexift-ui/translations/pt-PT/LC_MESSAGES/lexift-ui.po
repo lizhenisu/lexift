@@ -1882,3 +1882,6 @@ msgstr "Roda: zoom · Arrastar: mover · Espaço: editar/mover · Ctrl+0: ajusta
 
 msgid "Redo"
 msgstr "Refazer"
+
+msgid "Crop image"
+msgstr "Recortar imagem"

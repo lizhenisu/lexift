@@ -3,6 +3,7 @@
 pub(super) struct Viewport {
     pub image: [f32; 2],
     pub size: [f32; 2],
+    pub content: [f32; 4],
     pub scale: f32,
     pub offset: [f32; 2],
     pan: Option<([f32; 2], [f32; 2])>,
@@ -12,6 +13,7 @@ impl Viewport {
     pub fn new(image: [f32; 2], size: [f32; 2]) -> Self {
         let mut v = Self {
             image,
+            content: [0., 0., image[0], image[1]],
             size,
             scale: 1.,
             offset: [0.; 2],
@@ -29,13 +31,19 @@ impl Viewport {
     }
     pub fn contains(&self, point: [f32; 2]) -> bool {
         let q = self.source(point);
-        (0..2).all(|i| q[i] >= 0. && q[i] < self.image[i])
+        (0..2).all(|i| q[i] >= self.content[i] && q[i] < self.content[i + 2])
     }
     pub fn fit(&mut self) {
-        self.scale = ((self.size[0] - 16.).max(1.) / self.image[0].max(1.))
-            .min((self.size[1] - 16.).max(1.) / self.image[1].max(1.))
+        let extent = [
+            self.content[2] - self.content[0],
+            self.content[3] - self.content[1],
+        ];
+        self.scale = ((self.size[0] - 16.).max(1.) / extent[0].max(1.))
+            .min((self.size[1] - 16.).max(1.) / extent[1].max(1.))
             .clamp(0.001, 1.);
-        self.offset = std::array::from_fn(|i| (self.size[i] - self.image[i] * self.scale) / 2.);
+        self.offset = std::array::from_fn(|i| {
+            (self.size[i] - extent[i] * self.scale) / 2. - self.content[i] * self.scale
+        });
         self.pan = None;
         self.wheel = 0.;
     }
@@ -111,6 +119,25 @@ mod tests {
         for i in 0..2 {
             assert!((a[i] - b[i]).abs() < 0.01, "{a:?} {b:?}");
         }
+    }
+    #[test]
+    fn cropped_content_fits_without_changing_original_coordinates() {
+        let mut v = Viewport::new([600., 2000.], [900., 700.]);
+        v.content = [80., 200., 520., 1800.];
+        v.fit();
+        let midpoint = [300., 1000.];
+        near(v.screen(midpoint), [450., 350.]);
+        assert!(!v.contains(v.screen([20., 400.])));
+        assert!(v.contains(v.screen([100., 400.])));
+        let anchor = [200., 300.];
+        let q = v.source(anchor);
+        v.zoom_at(anchor, 1.25);
+        near(v.source(anchor), q);
+        let center = v.source([450., 350.]);
+        v.resize([1125., 875.]);
+        near(v.source([562.5, 437.5]), center);
+        assert_eq!(v.scale, 1.25);
+        assert_eq!(v.image, [600., 2000.]);
     }
     #[test]
     fn anchor_roundtrip_fine_wheel_and_hundred_percent_snap() {

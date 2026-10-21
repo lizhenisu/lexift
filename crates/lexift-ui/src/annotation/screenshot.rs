@@ -366,6 +366,9 @@ pub(super) fn recognizing() -> bool {
 }
 /// Freeze only crop identity here; OCR pixels are owned by the App capture session.
 pub(super) fn recognize_text() {
+    if image_crop::active() {
+        return;
+    }
     if long::busy() {
         return;
     }
@@ -429,6 +432,9 @@ pub(super) fn recognize_text() {
     }
 }
 pub(super) fn output(kind: ScreenshotOutput) {
+    if image_crop::active() {
+        return;
+    }
     if long::busy() && !long::frozen() {
         return;
     }
@@ -449,7 +455,11 @@ pub(super) fn output(kind: ScreenshotOutput) {
         if editing.id != state.session {
             return None;
         };
-        let bounds = editing.region.bounds()?;
+        let bounds = if long::image_editing() {
+            r.document.session.image_crop.or(editing.region.bounds())?
+        } else {
+            editing.region.bounds()?
+        };
         let mut snapshot = export::snapshot_at(
             r,
             bounds,
@@ -462,7 +472,7 @@ pub(super) fn output(kind: ScreenshotOutput) {
         )?;
         if long::image_editing() {
             snapshot.scale = 1.;
-            snapshot.monitors = vec![(bounds, 1.)];
+            snapshot.monitors = vec![(editing.region.bounds()?, 1.)];
         }
         Some(ExportRequest {
             session: state.session,

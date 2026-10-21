@@ -1882,3 +1882,6 @@ msgstr "滾輪縮放 · 拖曳平移 · 空白鍵切換編輯／平移 · Ctrl+0
 
 msgid "Redo"
 msgstr "重做"
+
+msgid "Crop image"
+msgstr "裁剪圖片"

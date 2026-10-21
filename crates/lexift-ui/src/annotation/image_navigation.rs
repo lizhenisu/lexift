@@ -38,7 +38,8 @@ fn publish(n: &mut Navigation, w: &AnnotationCanvas) {
     w.set_image_pan_y(n.view.offset[1] / dpi);
     w.set_image_panning(n.view.panning());
     if let Some(cursor) = &n.cursor {
-        let active = w.get_image_browsing() && (n.over || n.view.panning());
+        let active =
+            !w.get_image_cropping() && w.get_image_browsing() && (n.over || n.view.panning());
         if active || n.cursor_active {
             cursor(w.window(), active.then_some(n.view.panning()));
         }
@@ -62,9 +63,11 @@ pub(super) fn attach_cursor(cursor: PanCursor) {
     });
 }
 pub(super) fn clear() {
+    image_crop::clear();
     NAV.with(|s| s.borrow_mut().take());
 }
 pub(super) fn bind(w: &AnnotationCanvas) {
+    image_crop::clear();
     let image = w.get_frame().size();
     NAV.with(|s| {
         *s.borrow_mut() = Some(Navigation {
@@ -144,6 +147,23 @@ pub(super) fn refresh_geometry() {
         resize(&w);
     }
 }
+pub(super) fn content(w: &AnnotationCanvas, bounds: Rect, fit: bool) {
+    NAV.with(|s| {
+        if let Some(n) = s.borrow_mut().as_mut().filter(|n| matches(n, w)) {
+            n.view.content = [
+                (bounds.left as f32).clamp(0., n.view.image[0]),
+                (bounds.top as f32).clamp(0., n.view.image[1]),
+                (bounds.right as f32).clamp(0., n.view.image[0]),
+                (bounds.bottom as f32).clamp(0., n.view.image[1]),
+            ];
+            n.view.resize(size(w));
+            if fit {
+                n.view.fit();
+            }
+            publish(n, w);
+        }
+    });
+}
 fn blocked() -> bool {
     REGISTRY.with(|s| {
         let Ok(s) = s.try_borrow() else {
@@ -179,6 +199,13 @@ pub(super) fn pointer(w: &AnnotationCanvas, kind: i32, point: [f32; 2]) -> bool 
     }
     if blocked() && kind != 3 {
         return true;
+    }
+    if w.get_image_cropping() {
+        let Some(q) = map(w, point, true) else {
+            return true;
+        };
+        let tolerance = 6. / f64::from((w.get_image_zoom() * w.window().scale_factor()).max(0.001));
+        return image_crop::pointer(w, kind, q, tolerance);
     }
     let mut drawing = None;
     let handled = NAV.with(|s| {
@@ -230,7 +257,7 @@ pub(super) fn pointer(w: &AnnotationCanvas, kind: i32, point: [f32; 2]) -> bool 
     handled
 }
 pub(super) fn scroll(w: &AnnotationCanvas, point: [f32; 2], dx: f32, dy: f32, modified: bool) {
-    if blocked() || modified || document_gesture() {
+    if blocked() || modified || document_gesture() || image_crop::dragging() {
         return;
     }
     let mut brush = false;
@@ -242,7 +269,7 @@ pub(super) fn scroll(w: &AnnotationCanvas, point: [f32; 2], dx: f32, dy: f32, mo
         if n.modifiers || n.route != 0 || dx != 0. {
             return;
         }
-        if w.get_image_browsing() {
+        if w.get_image_browsing() || w.get_image_cropping() {
             let dpi = w.window().scale_factor();
             if n.view.wheel(point.map(|p| p * dpi), dy) {
                 publish(n, w);
@@ -299,6 +326,7 @@ pub(super) fn escape() -> bool {
     })
 }
 pub(super) fn lost_focus() {
+    image_crop::lost_focus();
     let drawing = NAV.with(|s| {
         if let Some(n) = s.borrow_mut().as_mut() {
             n.space = false;
@@ -330,6 +358,9 @@ pub(super) fn key(text: &str, down: bool, control: bool, shift: bool, repeat: bo
     let fit = text == "0" && control && !shift;
     if !space && !fit {
         return false;
+    }
+    if image_crop::active() {
+        return true;
     }
     if blocked() {
         return false;
@@ -442,7 +473,7 @@ fn route_native(w: &AnnotationCanvas, event: PopupPointerInput) -> bool {
                     .filter(|n| matches(n, w))
                     .map(|n| n.route)
             });
-            if route == Some(2) || (!hit(x, y) && route == Some(0)) {
+            if route == Some(2) || (!hit(x, y) && route == Some(0) && !image_crop::dragging()) {
                 pointer(w, 4, [0.; 2]);
                 false
             } else {

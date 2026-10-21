@@ -39,6 +39,9 @@ pub(super) fn escape() {
 }
 
 pub(super) fn escape_from(origin: focus::Origin) {
+    if REGISTRY.with(|s| s.borrow().as_ref().is_some_and(image_crop::cancel)) {
+        return;
+    }
     if image_navigation::escape() {
         return;
     }
@@ -167,6 +170,10 @@ pub(super) fn escape_from(origin: focus::Origin) {
 }
 
 pub(super) fn finish_polyline() {
+    if image_crop::active() {
+        image_crop::finish(true);
+        return;
+    }
     if screenshot::recognizing() {
         return;
     }
@@ -300,6 +307,8 @@ pub(crate) fn toggle(requested_at: Instant) {
         main.on_recognize_text_requested(move || {
             later_main(&input, generation, revision, screenshot::recognize_text)
         });
+        let input = r.toolbar_state.main.input();
+        main.on_crop_requested(move || later_main(&input, generation, revision, image_crop::begin));
         let input = r.toolbar_state.main.input();
         main.on_long_capture_requested(move || {
             later_main(&input, generation, revision, screenshot::long::request)
