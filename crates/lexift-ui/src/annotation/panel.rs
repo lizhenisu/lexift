@@ -27,6 +27,7 @@ pub(super) enum Input {
     },
     Escape(Origin),
     Undo,
+    Redo,
     ClearAll,
 }
 
@@ -85,6 +86,8 @@ pub(super) fn bind_input(
     panel.on_clear_all_requested(move || clear(Input::ClearAll));
     let undo = queue.clone();
     panel.on_undo_requested(move || undo(Input::Undo));
+    let redo = queue.clone();
+    panel.on_redo_requested(move || redo(Input::Redo));
     panel.window().on_close_requested(move || {
         queue(Input::Escape(origin()));
         slint::CloseRequestResponse::KeepWindowShown
@@ -369,6 +372,7 @@ mod tests {
                     }
                     Input::Escape(origin) => ("escape", Some(origin)),
                     Input::Undo => ("undo", None),
+                    Input::Redo => ("redo", None),
                     _ => panic!("unexpected panel event"),
                 };
                 if let Some(at) = at {

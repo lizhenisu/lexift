@@ -35,6 +35,14 @@ impl Surface {
         }
     }
     #[cfg(test)]
+    pub fn invoke_redo_requested(&self) {
+        match self {
+            Self::Canvas(w) => w.invoke_redo_requested(),
+            Self::Pin(_) => super::redo(),
+        }
+    }
+
+    #[cfg(test)]
     pub fn invoke_undo_requested(&self) {
         match self {
             Self::Canvas(w) => w.invoke_undo_requested(),

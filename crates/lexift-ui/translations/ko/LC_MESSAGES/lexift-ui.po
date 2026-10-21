@@ -1879,3 +1879,6 @@ msgstr "긴 이미지 준비 완료"
 
 msgid "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
 msgstr "휠: 확대/축소 · 드래그: 이동 · 스페이스: 편집/이동 · Ctrl+0: 전체 이미지 맞춤"
+
+msgid "Redo"
+msgstr "다시 실행"

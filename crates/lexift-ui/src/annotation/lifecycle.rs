@@ -265,6 +265,12 @@ pub(crate) fn toggle(requested_at: Instant) {
         let input = r.toolbar_state.main.input();
         main.on_undo_requested(move || later_main(&input, generation, revision, undo));
         let input = r.toolbar_state.main.input();
+        main.on_redo_requested(move || later_main(&input, generation, revision, redo));
+        let input = r.toolbar_state.main.input();
+        main.on_history_key(move |action| {
+            later_main(&input, generation, revision, move || history_key(action))
+        });
+        let input = r.toolbar_state.main.input();
         main.on_download_requested(move || {
             later_main(&input, generation, revision, || {
                 if pin_editor::active() {

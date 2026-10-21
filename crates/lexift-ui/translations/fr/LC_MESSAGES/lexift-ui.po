@@ -1879,3 +1879,6 @@ msgstr "Image longue prête"
 
 msgid "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
 msgstr "Molette : zoom · Glisser : déplacer · Espace : modifier/déplacer · Ctrl+0 : ajuster l’image"
+
+msgid "Redo"
+msgstr "Rétablir"

@@ -149,6 +149,16 @@ fn install() {
                 escape_from(current_focus_origin());
             }
         });
+        w.on_history_key(move |action| {
+            if canvas_current(generation, 0, revision) {
+                history_key(action);
+            }
+        });
+        w.on_redo_requested(move || {
+            if canvas_current(generation, 0, revision) {
+                redo();
+            }
+        });
         w.on_undo_requested(move || {
             if canvas_current(generation, 0, revision) {
                 undo();

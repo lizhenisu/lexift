@@ -1,3 +1,4 @@
+import { AnnotationHistory } from "annotation-hint.slint";
 import { Colors } from "design/colors.slint";
 import { Metrics } from "design/metrics.slint";
 import { Spacing } from "design/spacing.slint";
@@ -70,7 +71,8 @@ export component PinnedScreenshotWindow inherits Window {
                         if event.text==Key.Delete {root.edit-key(1);return accept;}
                         if event.text==Key.Return {root.edit-key(2);return accept;}
                         if event.text==Key.Backspace {root.edit-key(3);return accept;}
-                        if event.text=="z" && event.modifiers.control {root.edit-key(0);return accept;}
+                        if AnnotationHistory.action(event.text,event.modifiers.control,event.modifiers.shift,event.modifiers.alt,event.modifiers.meta)==2 {root.edit-key(4);return accept;}
+                        if AnnotationHistory.action(event.text,event.modifiers.control,event.modifiers.shift,event.modifiers.alt,event.modifiers.meta)==1 {root.edit-key(0);return accept;}
                     }return reject;} }
             }
         }

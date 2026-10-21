@@ -1879,3 +1879,6 @@ msgstr "Long image ready"
 
 msgid "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
 msgstr "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
+
+msgid "Redo"
+msgstr "Redo"

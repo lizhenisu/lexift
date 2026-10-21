@@ -625,13 +625,11 @@ pub(super) fn apply_panel_input(generation: u64, revision: u64, group: usize, ev
                     if let Some(panel) = r.toolbar_state.panel.get() {
                         panel.set_can_clear(r.document.session.has_content());
                     }
-                    if let Some(main) = r.toolbar_state.main.get() {
-                        main.set_can_undo(r.document.session.can_undo());
-                    }
+                    sync_history_controls(r);
                 });
             }
         }
-        panel::Input::Undo => {
+        action @ (panel::Input::Undo | panel::Input::Redo) => {
             let current = REGISTRY.with(|slot| {
                 slot.borrow().as_ref().is_some_and(|r| {
                     r.generation == generation
@@ -643,7 +641,10 @@ pub(super) fn apply_panel_input(generation: u64, revision: u64, group: usize, ev
                 })
             });
             if current {
-                undo();
+                match action {
+                    panel::Input::Redo => history_key(2),
+                    _ => history_key(1),
+                }
             }
         }
     }

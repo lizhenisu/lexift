@@ -230,6 +230,68 @@ mod tests {
         }
     }
     #[test]
+    fn export_redo_restores_exact_pixels_for_effects_watermark_and_erase() {
+        use lexift_core::domain::annotation::{Watermark, WatermarkPosition};
+        for scale in [1., 1.25] {
+            let mut snapshot = fixture();
+            snapshot.scale = scale;
+            let session = Arc::get_mut(&mut snapshot.session).unwrap();
+            session.add(rectangle((-12., -12.), (12., 12.), [210, 0, 0]));
+            let id = session.objects[0].id;
+            session.erase(
+                EraseRegion::Rectangle(Bounds::from_corners((-5., -5.), (5., 5.))),
+                &[lexift_core::domain::annotation_erase::EraseTarget::Object(
+                    id,
+                )],
+            );
+            let mut spot = rectangle((-7., -7.), (7., 7.), [0, 0, 255]);
+            spot.kind = Kind::SpotlightRectangle;
+            session.add(spot);
+            session.set_spotlight_opacity(0.6);
+            let mut mask = rectangle((4., 4.), (12., 12.), [0, 0, 0]);
+            mask.kind = Kind::MosaicArea;
+            mask.extra = Extra::Mosaic(MosaicAnnotation::new(
+                MosaicEffect::Pixelate,
+                50,
+                12.,
+                scale,
+            ));
+            session.add(mask);
+            session.set_watermark(Some(Watermark {
+                template: "mark".into(),
+                content: "mark".into(),
+                font_family: "Arial".into(),
+                font_size: 8.,
+                opacity: 90,
+                color: [20, 200, 80],
+                position: WatermarkPosition::Center,
+            }));
+            let source = frame(
+                Rect {
+                    left: -100,
+                    top: -100,
+                    right: 100,
+                    bottom: 100,
+                },
+                [45, 90, 135, 255],
+            );
+            let expected = compose(&snapshot, source.clone(), &AtomicBool::new(false)).unwrap();
+            let session = Arc::get_mut(&mut snapshot.session).unwrap();
+            let mut count = 0;
+            while session.undo() {
+                count += 1;
+            }
+            assert_eq!(count, 6);
+            for _ in 0..count {
+                assert!(session.redo());
+            }
+            assert!(!session.redo());
+            let actual = compose(&snapshot, source, &AtomicBool::new(false)).unwrap();
+            assert_eq!(actual.bounds, expected.bounds);
+            assert_eq!(actual.pixels, expected.pixels);
+        }
+    }
+    #[test]
     fn empty_document_preserves_source_pixels_and_rejects_cancelled_export() {
         let snapshot = fixture();
         let source = frame(snapshot.monitor, [31, 62, 93, 255]);

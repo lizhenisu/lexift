@@ -783,6 +783,7 @@ pub(super) fn magnifier_from_source(
 
 impl Registry {
     pub(super) fn queue_render(&mut self) {
+        sync_history_controls(self);
         cursor::refresh(self);
         self.render_state
             .frame_tasks

@@ -4,7 +4,7 @@ use super::document_signature;
 #[cfg(test)]
 use super::gestures::Active;
 use super::gestures::{GeometryDrag, Gesture};
-use super::{REGISTRY, Registry, capture_exclusions, schedule_render};
+use super::{REGISTRY, Registry, capture_exclusions, schedule_render, sync_history_controls};
 use crate::annotation_signature::{Content, Frame, Replacement};
 use crate::{AnnotationToolbar, AnnotationValues};
 use lexift_core::domain::{
@@ -632,9 +632,7 @@ pub(super) fn cancel_pending(r: &mut Registry) {
         .mosaic
         .cancel_pending(&mut r.document.session);
     r.hovered = None;
-    if let Some(main) = r.toolbar_state.main.get() {
-        main.set_can_undo(r.document.session.can_undo());
-    }
+    sync_history_controls(r);
 }
 
 /// A failed first sample never leaves an invisible mask in the document or undo.

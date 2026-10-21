@@ -1879,3 +1879,6 @@ msgstr "Langes Bild bereit"
 
 msgid "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
 msgstr "Mausrad: Zoom · Ziehen: Verschieben · Leertaste: Bearbeiten/Verschieben · Strg+0: Bild einpassen"
+
+msgid "Redo"
+msgstr "Wiederholen"

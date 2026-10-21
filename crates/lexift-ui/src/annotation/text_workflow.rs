@@ -84,12 +84,7 @@ pub(super) fn finish_text_edit_registry(r: &mut Registry, commit: bool) {
                 }
                 crate::annotation_sequence::layout(object);
             });
-            if let Some(main) = r.toolbar_state.main.get() {
-                main.set_can_undo(r.document.session.can_undo());
-                if let Some(panel) = r.toolbar_state.panel.get() {
-                    panel.set_can_clear(r.document.session.has_content());
-                }
-            }
+            sync_history_controls(r);
             return;
         }
         editor::EditChange::Text {
@@ -118,9 +113,7 @@ pub(super) fn finish_text_edit_registry(r: &mut Registry, commit: bool) {
         }
     }
     restore_parameter_projection(r);
-    if let Some(main) = r.toolbar_state.main.get() {
-        main.set_can_undo(r.document.session.can_undo());
-    }
+    sync_history_controls(r);
 }
 
 pub(super) fn finish_text_edit(generation: u64, commit: bool) {

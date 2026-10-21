@@ -93,7 +93,7 @@ fn collapse_preserves_tool_and_document_retires_panel_and_startup_placement() {
         assert!(!r.toolbar_state.main.get().unwrap().get_collapsed());
         assert_eq!(
             r.toolbar_state.main.get().unwrap().window().size().width,
-            723
+            768
         );
         assert!(r.toolbar_state.panel.get().is_none());
         r.close();

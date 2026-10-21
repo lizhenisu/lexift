@@ -408,12 +408,7 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                     r.gesture = None;
                     r.flush_deferred_parameters();
                     r.document.session.selected = r.document.session.object_index(target);
-                    if let Some(main) = r.toolbar_state.main.get() {
-                        main.set_can_undo(r.document.session.can_undo());
-                        if let Some(panel) = r.toolbar_state.panel.get() {
-                            panel.set_can_clear(r.document.session.has_content());
-                        }
-                    }
+                    sync_history_controls(r);
                     cursor::refresh(r);
                     return Some((r.generation, false));
                 }
@@ -449,12 +444,7 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                             });
                         }
                     }
-                    if let Some(main) = r.toolbar_state.main.get() {
-                        main.set_can_undo(r.document.session.can_undo());
-                        if let Some(panel) = r.toolbar_state.panel.get() {
-                            panel.set_can_clear(r.document.session.has_content());
-                        }
-                    }
+                    sync_history_controls(r);
                     cursor::refresh(r);
                     return Some((r.generation, false));
                 }
@@ -698,14 +688,62 @@ pub(super) fn activate_mouse_mode() {
     }
 }
 
+/// Only unconsumed local keys may operate the document; toolbar clicks may
+/// explicitly commit a draft using the existing edit-completion path.
+pub(super) fn history_key(action: i32) {
+    let blocked = REGISTRY.with(|s| {
+        s.borrow().as_ref().is_none_or(|r| {
+            r.editor.window().is_some()
+                || r.toolbar_state.watermark.get().is_some()
+                || r.toolbar_state.menus.current.is_some()
+                || r.toolbar_state
+                    .panel
+                    .get()
+                    .is_some_and(|p| p.get_menu() || p.get_parameter_input_active())
+        })
+    });
+    if !blocked {
+        match action {
+            1 => undo(),
+            2 => redo(),
+            _ => {}
+        }
+    }
+}
+
 pub(super) fn undo() {
-    if screenshot::recognizing() {
+    history(false);
+}
+pub(super) fn redo() {
+    history(true);
+}
+/// Both directions must invalidate the same render and parameter projections.
+fn history(forward: bool) {
+    if screenshot::recognizing() || screenshot::long_editor::outputting() {
         return;
     }
     let generation = REGISTRY.with(|s| {
         let mut slot = s.borrow_mut();
         let r = slot.as_mut()?;
-        if cancel_object_gesture(r) {
+        if r.export.pending()
+            || r.toolbar_state
+                .main
+                .get()
+                .is_some_and(|w| w.get_output_busy())
+            || r.toolbar_state.watermark.get().is_some()
+            || screenshot::size_input::busy(r)
+            || screenshot::long::editor().is_some_and(|w| w.get_image_panning())
+        {
+            return None;
+        }
+        if forward
+            && (r.gesture().is_some()
+                || !r.pending_drawing.is_none()
+                || r.screenshot.as_ref().is_some_and(|e| e.region.dragging()))
+        {
+            return None;
+        }
+        if !forward && cancel_object_gesture(r) {
             cursor::refresh(r);
             return Some(r.generation);
         }
@@ -714,7 +752,13 @@ pub(super) fn undo() {
         }
         r.finish_style_edit();
         let erased = eraser::has_coverage(&r.document.session);
-        if !r.document.session.undo() {
+        let changed = if forward {
+            r.document.session.redo()
+        } else {
+            r.document.session.undo()
+        };
+        if !changed {
+            sync_history_controls(r);
             return None;
         }
         if erased || eraser::has_coverage(&r.document.session) {

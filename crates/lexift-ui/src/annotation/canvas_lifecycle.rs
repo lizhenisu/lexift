@@ -139,6 +139,14 @@ pub(super) fn create_canvas(r: &mut Registry, index: usize) {
     let input = layer.input();
     window.on_undo_requested(move || later_canvas(&input, generation, index, revision, undo));
     let input = layer.input();
+    window.on_redo_requested(move || later_canvas(&input, generation, index, revision, redo));
+    let input = layer.input();
+    window.on_history_key(move |action| {
+        later_canvas(&input, generation, index, revision, move || {
+            history_key(action)
+        })
+    });
+    let input = layer.input();
     window.on_delete_requested(move || {
         later_canvas(&input, generation, index, revision, delete_selected)
     });

@@ -1879,3 +1879,6 @@ msgstr "長圖已就緒"
 
 msgid "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
 msgstr "滾輪縮放 · 拖曳平移 · 空白鍵切換編輯／平移 · Ctrl+0 適應整張圖片"
+
+msgid "Redo"
+msgstr "重做"

@@ -599,9 +599,7 @@ pub(super) fn apply_parameter_values(
     {
         r.document.session.set_watermark(Some(watermark));
     }
-    if let Some(main) = r.toolbar_state.main.get() {
-        main.set_can_undo(r.document.session.can_undo());
-    }
+    sync_history_controls(r);
     if tool == 10 {
         sync_sequence_counter(r);
     }
@@ -872,13 +870,8 @@ impl Registry {
     }
 
     pub(super) fn finish_style_edit(&mut self) {
-        if self.parameter_edit.finish(&mut self.document.session)
-            && let Some(main) = self.toolbar_state.main.get()
-        {
-            main.set_can_undo(self.document.session.can_undo());
-            if let Some(panel) = self.toolbar_state.panel.get() {
-                panel.set_can_clear(self.document.session.has_content());
-            }
+        if self.parameter_edit.finish(&mut self.document.session) {
+            sync_history_controls(self);
         }
     }
 }

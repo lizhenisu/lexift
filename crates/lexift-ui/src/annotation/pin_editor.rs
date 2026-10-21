@@ -401,7 +401,8 @@ pub(crate) fn key(id: u64, key: i32) {
         return;
     }
     match key {
-        0 => undo(),
+        0 => history_key(1),
+        4 => history_key(2),
         1 => delete_selected(),
         2 => finish_polyline(),
         3 => backspace_polyline(),

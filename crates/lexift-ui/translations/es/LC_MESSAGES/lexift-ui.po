@@ -1879,3 +1879,6 @@ msgstr "Imagen larga lista"
 
 msgid "Wheel: zoom · Drag: pan · Space: edit/pan · Ctrl+0: fit image"
 msgstr "Rueda: zoom · Arrastrar: desplazar · Espacio: editar/desplazar · Ctrl+0: ajustar imagen"
+
+msgid "Redo"
+msgstr "Rehacer"

@@ -1,3 +1,4 @@
+import { AnnotationHistory } from "annotation-hint.slint";
 import { AnnotationHintTarget } from "annotation-hint.slint";
 import { Colors } from "design/colors.slint";
 import { Metrics } from "design/metrics.slint";
@@ -38,6 +39,8 @@ export component AnnotationCanvas inherits Window {
     callback brush-size-scrolled(float);
     callback escape-requested();
     callback undo-requested();
+    callback redo-requested();
+    callback history-key(int);
     callback delete-requested();
     callback finish-path-requested();
     callback backspace-requested();
@@ -136,7 +139,8 @@ export component AnnotationCanvas inherits Window {
             if event.text == Key.Delete { root.delete-requested(); return accept; }
             if event.text == Key.Return { root.finish-path-requested(); return accept; }
             if event.text == Key.Backspace { root.backspace-requested(); return accept; }
-            if event.text == "z" && event.modifiers.control { root.undo-requested(); return accept; }
+            if AnnotationHistory.action(event.text, event.modifiers.control, event.modifiers.shift, event.modifiers.alt, event.modifiers.meta) == 2 { root.history-key(2); return accept; }
+            if AnnotationHistory.action(event.text, event.modifiers.control, event.modifiers.shift, event.modifiers.alt, event.modifiers.meta) == 1 { root.history-key(1); return accept; }
             if !event.modifiers.alt && !event.modifiers.meta && root.region-key(event.text, true, event.modifiers.control, event.modifiers.shift) { return accept; }
             return reject;
         }

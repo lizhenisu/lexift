@@ -3,6 +3,8 @@ use crate::domain::geometry::Rect;
 mod mosaic;
 mod sticker;
 pub use sticker::{StickerAnnotation, StickerTexture};
+#[cfg(test)]
+mod history_tests;
 mod sequence;
 pub use mosaic::{MosaicAnnotation, MosaicEffect};
 pub use sequence::{SequenceAnnotation, SequenceFormat, SequenceShape, sequence_label};
@@ -956,6 +958,17 @@ struct Snapshot {
     spotlight_erased: Vec<super::annotation_erase::ErasedCoverage>,
 }
 
+impl Snapshot {
+    fn same_content(&self, other: &Self) -> bool {
+        self.next_sequence == other.next_sequence
+            && self.objects == other.objects
+            && self.opacity == other.opacity
+            && self.watermark == other.watermark
+            && self.watermark_erased == other.watermark_erased
+            && self.spotlight_erased == other.spotlight_erased
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hit {
     Handle(usize),
@@ -975,6 +988,7 @@ pub struct Session {
     /// Current monitor layout for drawing one watermark consistently across magnified samples.
     pub displays: Vec<Rect>,
     undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
     drag_before: Option<Snapshot>,
     next_object_id: u64,
     edit_scope: EditScope,
@@ -1005,8 +1019,8 @@ impl Session {
         frozen.watermark_erased = visible.watermark_erased.clone();
         frozen.spotlight_erased = visible.spotlight_erased.clone();
         frozen.spotlight_opacity = visible.spotlight_opacity;
-        if frozen.drag_before.is_none() && frozen.snapshot() != self.snapshot() {
-            frozen.undo.push(self.snapshot());
+        if frozen.drag_before.is_none() && !frozen.snapshot().same_content(&self.snapshot()) {
+            frozen.commit_snapshot(self.snapshot());
         }
         frozen.finish_drag();
         frozen.finish_rectangle_erase();
@@ -1047,7 +1061,7 @@ impl Session {
         let opacity = opacity.clamp(0., 1.);
         if (self.spotlight_opacity - opacity).abs() > 0.0001 {
             if self.drag_before.is_none() {
-                self.undo.push(self.snapshot());
+                self.commit_snapshot(self.snapshot());
             }
             self.spotlight_opacity = opacity;
             self.spotlight_erased.clear();
@@ -1056,7 +1070,7 @@ impl Session {
     pub fn set_watermark(&mut self, watermark: Option<Watermark>) {
         if self.watermark != watermark || !self.watermark_erased.is_empty() {
             if self.drag_before.is_none() {
-                self.undo.push(self.snapshot());
+                self.commit_snapshot(self.snapshot());
             }
             self.watermark = watermark;
             self.watermark_erased.clear();
@@ -1064,6 +1078,14 @@ impl Session {
     }
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
+    }
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+    /// Only committed document changes invalidate the abandoned history branch.
+    fn commit_snapshot(&mut self, before: Snapshot) {
+        self.redo.clear();
+        self.undo.push(before);
     }
     /// Resolve a committed identity without retaining an index across document edits.
     pub fn object_index(&self, id: ObjectId) -> Option<usize> {
@@ -1090,7 +1112,7 @@ impl Session {
         }
         // Creation can be part of a placement drag; its snapshot is committed on release.
         if self.drag_before.is_none() {
-            self.undo.push(self.snapshot());
+            self.commit_snapshot(self.snapshot());
         }
         if object.kind == Kind::Sequence {
             self.next_sequence = self.next_sequence.max(1) + 1;
@@ -1124,9 +1146,9 @@ impl Session {
             return;
         }
         if let Some(before) = self.drag_before.take()
-            && before != self.snapshot()
+            && !before.same_content(&self.snapshot())
         {
-            self.undo.push(before);
+            self.commit_snapshot(before);
         }
         self.erase_drag_before = None;
     }
@@ -1200,15 +1222,15 @@ impl Session {
             mosaic.id = id.value();
         }
         if let Some(before) = before
-            && before != self.snapshot()
+            && !before.same_content(&self.snapshot())
         {
-            self.undo.push(before);
+            self.commit_snapshot(before);
         }
     }
     pub fn delete_selected(&mut self) {
         if let Some(index) = self.editable_selected() {
             if self.drag_before.is_none() {
-                self.undo.push(self.snapshot());
+                self.commit_snapshot(self.snapshot());
             }
             self.selected = None;
             if self.objects[index].kind.is_spotlight() {
@@ -1218,12 +1240,26 @@ impl Session {
         }
     }
     pub fn undo(&mut self) -> bool {
-        self.finish_rectangle_erase();
         let Some(before) = self.undo.pop() else {
             return false;
         };
+        self.finish_rectangle_erase();
+        self.redo.push(self.snapshot());
         self.drag_before = None;
         self.restore_snapshot(before);
+        true
+    }
+    /// Restore one committed edit without allocating new object identities.
+    pub fn redo(&mut self) -> bool {
+        if self.drag_before.is_some() {
+            return false;
+        }
+        let Some(after) = self.redo.pop() else {
+            return false;
+        };
+        self.finish_rectangle_erase();
+        self.undo.push(self.snapshot());
+        self.restore_snapshot(after);
         true
     }
     /// Undoable document clear, distinct from session teardown.
@@ -1233,7 +1269,7 @@ impl Session {
             return false;
         }
         if self.drag_before.is_none() {
-            self.undo.push(self.snapshot());
+            self.commit_snapshot(self.snapshot());
         }
         self.objects.clear();
         self.watermark = None;
@@ -1290,7 +1326,7 @@ impl Session {
             return;
         }
         if self.drag_before.is_none() {
-            self.undo.push(self.snapshot());
+            self.commit_snapshot(self.snapshot());
         }
         for target in targets {
             if let EraseTarget::Object(id) = target {
@@ -1383,6 +1419,21 @@ impl Session {
         for before in &mut self.undo {
             remove(before, ids);
         }
+        for after in &mut self.redo {
+            remove(after, ids);
+        }
+        // Redo is traversed from the end, so compare each remaining destination
+        // with the preceding state in traversal order after failed masks vanish.
+        let mut previous = &current;
+        let mut redo = Vec::new();
+        for after in self.redo.iter().rev() {
+            if !after.same_content(previous) {
+                redo.push(after.clone());
+                previous = after;
+            }
+        }
+        redo.reverse();
+        self.redo = redo;
         if let Some(before) = &mut self.drag_before {
             remove(before, ids);
         }

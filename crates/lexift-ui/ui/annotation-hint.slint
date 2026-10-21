@@ -31,6 +31,15 @@ export component AnnotationHintTarget inherits Rectangle {
         }
     }
 }
+export global AnnotationHistory {
+    // Shared by every editor; child text inputs get first refusal.
+    public pure function action(text: string, control: bool, shift: bool, alt: bool, meta: bool) -> int {
+        if !control || alt || meta { return 0; }
+        if ((text == "z" || text == "Z") && shift) || ((text == "y" || text == "Y") && !shift) { return 2; }
+        if (text == "z" || text == "Z") && !shift { return 1; }
+        return 0;
+    }
+}
 export global AnnotationPresentation {
     public pure function tool(kind: int, style: int, mosaic: int) -> string {
         return style == 1 ? @tr("Italic text") : style == 2 ? @tr("Outline") : style == 3 ? @tr("Text background")
@@ -40,6 +49,7 @@ export global AnnotationPresentation {
             : kind == 6 ? @tr("Polyline") : kind == 7 ? @tr("Magnifier") : kind == 8 ? @tr("Text")
             : kind == 9 ? @tr("Watermark") : kind == 10 ? @tr("Sequence") : kind == 11 ? @tr("Mosaic")
             : kind == 12 ? @tr("Mosaic sticker") : kind == 13 ? @tr("Eraser") : kind == 14 ? @tr("Undo") + " (Ctrl+Z)"
+            : kind == 28 ? @tr("Redo") + " (Ctrl+Y / Ctrl+Shift+Z)"
             : kind == 15 ? @tr("Save annotation screenshot") : kind == 16 ? @tr("Finish annotation")
             : kind == 17 ? @tr("Mouse mode") : kind == 18 ? @tr("Straight line") : @tr("Curved line");
     }
