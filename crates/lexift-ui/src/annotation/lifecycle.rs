@@ -16,6 +16,10 @@ pub(crate) fn shutdown() {
     EXPORT_HANDLER.with(|h| h.borrow_mut().take());
 }
 pub(crate) fn close() {
+    if history_editor::active() {
+        history_editor::close();
+        return;
+    }
     if pin_editor::active() {
         pin_editor::finish();
         return;
@@ -165,6 +169,8 @@ pub(super) fn escape_from(origin: focus::Origin) {
     } else {
         if pin_editor::active() {
             pin_editor::finish();
+        } else if history_editor::active() {
+            history_editor::close();
         } else if screenshot::active() {
             screenshot::cancel();
         } else {
@@ -245,6 +251,7 @@ pub(crate) fn toggle(requested_at: Instant) {
         };
         crate::theme::apply(&main);
         main.set_screenshot_mode(r.screenshot.is_some());
+        main.set_image_edit_mode(history_editor::active());
         main.set_pin_edit_mode(r.screenshot.as_ref().is_some_and(|e| e.pin.is_some()));
         if let Some((_, collapsed)) = r.toolbar_state.resume {
             main.set_collapsed(collapsed);
@@ -294,6 +301,30 @@ pub(crate) fn toggle(requested_at: Instant) {
             })
         });
         let input = r.toolbar_state.main.input();
+        main.on_image_history_requested(move || {
+            slint::Timer::single_shot(Duration::ZERO, || {
+                let request = REGISTRY.with(|slot| {
+                    let r = slot.borrow();
+                    let r = r.as_ref()?;
+                    let anchor = r.toolbar_state.main.get()?.window().position();
+                    Some(Point {
+                        x: anchor.x,
+                        y: anchor.y,
+                    })
+                });
+                if let Some(anchor) = request {
+                    EXPORT_HANDLER.with(|h| {
+                        if let Some(handler) = h.borrow().clone() {
+                            handler(lexift_core::AppEvent::ImageHistory(
+                                lexift_core::domain::image_history::workflow::Event::Open {
+                                    anchor,
+                                },
+                            ));
+                        }
+                    });
+                }
+            });
+        });
         main.on_screenshot_requested(move || {
             later_main(&input, generation, revision, screenshot::request)
         });
@@ -388,13 +419,14 @@ pub(crate) fn toggle(requested_at: Instant) {
         }
         r.sync_mode_display();
         let query_start = Instant::now();
-        r.canvas_state.pending_displays = if r.screenshot.as_ref().is_some_and(|e| e.pin.is_some())
-        {
+        r.canvas_state.pending_displays = if history_editor::active() {
+            vec![]
+        } else if r.screenshot.as_ref().is_some_and(|e| e.pin.is_some()) {
             r.canvas_state.canvases.iter().map(|c| c.bounds).collect()
         } else {
             (r.lifecycle.annotation_displays)()
         };
-        if !r.screenshot.as_ref().is_some_and(|e| e.pin.is_some()) {
+        if !history_editor::active() && !r.screenshot.as_ref().is_some_and(|e| e.pin.is_some()) {
             r.document.session.displays = r.canvas_state.pending_displays.clone();
         }
         if let Some(timing) = r.canvas_state.cold_open_timing.as_mut() {

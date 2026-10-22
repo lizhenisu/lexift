@@ -22,6 +22,8 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
+#[path = "screenshot_history.rs"]
+mod history;
 #[path = "screenshot_long.rs"]
 mod long;
 type CaptureFactory = fn() -> Option<Arc<dyn ScreenCapturePort>>;
@@ -65,6 +67,7 @@ struct PinOcrQueue {
     pending: Option<PinOcrTask>,
 }
 pub(crate) struct ScreenshotRuntime {
+    history: Mutex<history::Cache>,
     long: Mutex<Option<long::Job>>,
     capture: CaptureFactory,
     save: Arc<dyn AnnotationSavePort>,
@@ -89,6 +92,7 @@ impl ScreenshotRuntime {
         clipboard: Arc<dyn ClipboardPort>,
     ) -> Self {
         Self {
+            history: Default::default(),
             long: Default::default(),
             capture,
             save,
@@ -233,6 +237,23 @@ impl ScreenshotRuntime {
     }
     pub fn execute_pin(self: &Arc<Self>, controller: &Arc<AppController>, command: PinCommand) {
         match command {
+            PinCommand::RetainHistory { id, ticket } => {
+                let asset = self.history.lock().unwrap().assets.get(&ticket).cloned();
+                if let Some(asset) = asset {
+                    self.pin_images
+                        .lock()
+                        .unwrap()
+                        .insert(id, asset.base.clone());
+                    self.pin_samples
+                        .lock()
+                        .unwrap()
+                        .insert(id, asset.samples.clone());
+                    controller.dispatch(AppEvent::PinnedImage(PinEvent::SourceReady {
+                        id,
+                        bounds: asset.base.bounds,
+                    }));
+                }
+            }
             PinCommand::Recognize {
                 id,
                 request,
@@ -374,9 +395,17 @@ impl ScreenshotRuntime {
                     .name("pinned-image-output".into())
                     .spawn(move || {
                         let result = this
-                            .compose_pin(&image, samples, document.as_ref(), hidden, &cancel)
-                            .and_then(|image| {
-                                this.output_pin_image(&image, kind, owner, title, &cancel)
+                            .compose_pin(&image, samples.clone(), document.as_ref(), hidden, &cancel)
+                            .and_then(|output| {
+                                let result = this.output_pin_image(&output, kind, owner, title, &cancel);
+                                if matches!(result, Ok(SaveOutcome::Saved)) {
+                                    this.retain_history(&c,
+                                        lexift_core::domain::image_history::workflow::OutputKey::Pin { id, operation },
+                                        lexift_core::domain::image_history::ImageSnapshot {
+                                            base:image.clone(), samples:samples.unwrap_or_else(|| Arc::new(ScreenCaptureFrame { revision: 0, serial: 0, regions: vec![] })),
+                                            document:history::retained_document(document.as_ref(),image.bounds), hidden }, Arc::new(output));
+                                }
+                                result
                             });
                         c.dispatch(AppEvent::PinnedImage(PinEvent::Completed {
                             id,
@@ -783,14 +812,15 @@ impl ScreenshotRuntime {
                                 if cancelled.load(Ordering::Acquire) {
                                     return Ok(SaveOutcome::Cancelled);
                                 }
-                                match kind {
+                                let image = Arc::new(image);
+                                let outcome = match kind {
                                     ScreenshotOutput::Copy => {
                                         this.write_image(&image, &cancelled)?;
                                         Ok(SaveOutcome::Saved)
                                     }
                                     ScreenshotOutput::Save => this.save.save_png(
                                         PngSaveRequest {
-                                            image,
+                                            image: (*image).clone(),
                                             owner: request.snapshot.owner,
                                             default_name: request.snapshot.name.clone(),
                                             title: request.snapshot.title.clone(),
@@ -798,43 +828,10 @@ impl ScreenshotRuntime {
                                         cancelled.clone(),
                                     ),
                                     ScreenshotOutput::Pin => {
-                                        let base = Arc::new(crop_frames(
-                                            &frames,
-                                            if request.snapshot.session.image_crop.is_some() { request.snapshot.session.image_source.unwrap_or(request.snapshot.monitor) } else { request.snapshot.monitor },
-                                        )?);
-                                        let mut pin_snapshot = (*request.snapshot).clone();
-                                        if request.snapshot.session.image_crop.is_none() {
-                                            pin_snapshot.monitors =
-                                                lexift_core::domain::screen_snapshot::render_partitions(
-                                                    base.bounds, &pin_snapshot.monitors, pin_snapshot.scale,
-                                                );
-                                        }
-                                        let pin_request = ExportRequest {
-                                            session: request.session,
-                                            request: request.request,
-                                            snapshot: Arc::new(pin_snapshot),
-                                        };
-                                        let mut required =
-                                            this.render.regions(&pin_request.snapshot);
-                                        // Keep complete frozen sampling pixels for effects crossing a crop edge.
-                                        if request.snapshot.session.image_crop.is_some() {
-                                            required.extend(frames.iter().map(|f| f.bounds));
-                                        }
-                                        let samples = Arc::new(ScreenCaptureFrame {
-                                            revision: operation,
-                                            serial: operation,
-                                            regions: required
-                                                .into_iter()
-                                                .filter(|b| {
-                                                    !(b.left >= base.bounds.left
-                                                        && b.top >= base.bounds.top
-                                                        && b.right <= base.bounds.right
-                                                        && b.bottom <= base.bounds.bottom)
-                                                })
-                                                .map(|b| crop_frames(&frames, b))
-                                                .collect::<Result<Vec<_>>>()?,
-                                        });
-                                        let image = Arc::new(image);
+                                        let (base, samples, pin_request) = this.retained_source(&frames, &request, operation)?;
+                                        this.retain_history(&worker_controller,
+                                            lexift_core::domain::image_history::workflow::OutputKey::Screenshot { session, operation },
+                                            lexift_core::domain::image_history::ImageSnapshot {base:base.clone(),samples:samples.clone(),document:pin_request.clone(),hidden:false}, image.clone());
                                         let current = this.session.lock().unwrap();
                                         if current.as_ref().is_some_and(|s| {
                                             s.id == session && !s.cancelled.load(Ordering::Acquire)
@@ -851,7 +848,7 @@ impl ScreenshotRuntime {
                                             worker_controller.ui.show_editable_pinned_screenshot(
                                                 session,
                                                 operation,
-                                                image,
+                                                image.clone(),
                                                 base,
                                                 samples,
                                                 pin_request,
@@ -859,7 +856,22 @@ impl ScreenshotRuntime {
                                         }
                                         Ok(SaveOutcome::Cancelled)
                                     }
+                                };
+                                if kind != ScreenshotOutput::Pin && matches!(outcome, Ok(SaveOutcome::Saved)) {
+                                    let key = lexift_core::domain::image_history::workflow::OutputKey::Screenshot { session, operation };
+                                    match this.retained_source(&frames, &request, operation) {
+                                        Ok((base, samples, document)) => this.retain_history(&worker_controller,
+                                            key, lexift_core::domain::image_history::ImageSnapshot {base,samples,document,hidden:false}, image),
+                                        Err(_) => {
+                                            let ticket = worker_controller.state.lock().unwrap().image_history.ticket(key);
+                                            if let Some((ticket, _)) = ticket {
+                                                worker_controller.dispatch(AppEvent::ImageHistory(
+                                                    lexift_core::domain::image_history::workflow::Event::Unavailable { key, ticket }));
+                                            }
+                                        }
+                                    }
                                 }
+                                outcome
                             });
                         if kind != ScreenshotOutput::Pin || result.is_err() {
                             worker_controller.dispatch(AppEvent::Screenshot(
@@ -880,6 +892,58 @@ impl ScreenshotRuntime {
                 }
             }
         }
+    }
+    fn retained_source(
+        &self,
+        frames: &[CapturedRegion],
+        request: &ExportRequest,
+        operation: u64,
+    ) -> Result<(Arc<CapturedRegion>, Arc<ScreenCaptureFrame>, ExportRequest)> {
+        let base = Arc::new(crop_frames(
+            frames,
+            if request.snapshot.session.image_crop.is_some() {
+                request
+                    .snapshot
+                    .session
+                    .image_source
+                    .unwrap_or(request.snapshot.monitor)
+            } else {
+                request.snapshot.monitor
+            },
+        )?);
+        let mut pin_snapshot = (*request.snapshot).clone();
+        if request.snapshot.session.image_crop.is_none() {
+            pin_snapshot.monitors = lexift_core::domain::screen_snapshot::render_partitions(
+                base.bounds,
+                &pin_snapshot.monitors,
+                pin_snapshot.scale,
+            );
+        }
+        let pin_request = ExportRequest {
+            session: request.session,
+            request: request.request,
+            snapshot: Arc::new(pin_snapshot),
+        };
+        let mut required = self.render.regions(&pin_request.snapshot);
+        // Keep complete frozen sampling pixels for effects crossing a crop edge.
+        if request.snapshot.session.image_crop.is_some() {
+            required.extend(frames.iter().map(|f| f.bounds));
+        }
+        let samples = Arc::new(ScreenCaptureFrame {
+            revision: operation,
+            serial: operation,
+            regions: required
+                .into_iter()
+                .filter(|b| {
+                    !(b.left >= base.bounds.left
+                        && b.top >= base.bounds.top
+                        && b.right <= base.bounds.right
+                        && b.bottom <= base.bounds.bottom)
+                })
+                .map(|b| crop_frames(frames, b))
+                .collect::<Result<Vec<_>>>()?,
+        });
+        Ok((base, samples, pin_request))
     }
     fn prepare(
         &self,

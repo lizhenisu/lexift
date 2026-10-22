@@ -112,7 +112,7 @@ pub(crate) fn show(request: TrayMenuRequest) {
         window.set_selected(if request.keyboard { 0 } else { -1 });
         let generation = r.generation;
         window.on_action(move |index| {
-            if let Some(event) = action_for_index(index) {
+            if let Some(event) = action_for_index(index, request.anchor) {
                 finish_later(generation, Some(event), false);
             }
         });
@@ -120,9 +120,21 @@ pub(crate) fn show(request: TrayMenuRequest) {
         let weak = window.as_weak();
         window.on_character(move |text| {
             let Some(window) = weak.upgrade() else { return };
-            let matches = initial_matches(&[&labels.open, &labels.settings, &labels.quit], &text);
+            let matches = initial_matches(
+                &[
+                    &labels.open,
+                    &labels.settings,
+                    &crate::i18n::tr("Image history"),
+                    &labels.quit,
+                ],
+                &text,
+            );
             if matches.len() == 1 {
-                finish_later(generation, action_for_index(matches[0]), false);
+                finish_later(
+                    generation,
+                    action_for_index(matches[0], request.anchor),
+                    false,
+                );
             } else if let Some(next) = matches
                 .iter()
                 .copied()
@@ -234,11 +246,14 @@ fn place(window: &TrayMenuWindow, request: TrayMenuRequest, lifecycle: &WindowLi
     }
 }
 
-fn action_for_index(index: i32) -> Option<AppEvent> {
+fn action_for_index(index: i32, anchor: lexift_core::domain::geometry::Point) -> Option<AppEvent> {
     Some(match index {
         0 => AppEvent::MainWindowRequested,
         1 => AppEvent::SettingsWindowRequested,
-        2 => AppEvent::ExitRequested,
+        2 => AppEvent::ImageHistory(lexift_core::domain::image_history::workflow::Event::Open {
+            anchor,
+        }),
+        3 => AppEvent::ExitRequested,
         _ => return None,
     })
 }
@@ -342,10 +357,19 @@ mod tests {
     }
     #[test]
     fn menu_actions_preserve_existing_application_intents() {
-        assert_eq!(action_for_index(0), Some(AppEvent::MainWindowRequested));
-        assert_eq!(action_for_index(1), Some(AppEvent::SettingsWindowRequested));
-        assert_eq!(action_for_index(2), Some(AppEvent::ExitRequested));
-        assert_eq!(action_for_index(-1), None);
-        assert_eq!(action_for_index(3), None);
+        assert_eq!(
+            action_for_index(0, Default::default()),
+            Some(AppEvent::MainWindowRequested)
+        );
+        assert_eq!(
+            action_for_index(1, Default::default()),
+            Some(AppEvent::SettingsWindowRequested)
+        );
+        assert_eq!(
+            action_for_index(3, Default::default()),
+            Some(AppEvent::ExitRequested)
+        );
+        assert_eq!(action_for_index(-1, Default::default()), None);
+        assert_eq!(action_for_index(4, Default::default()), None);
     }
 }

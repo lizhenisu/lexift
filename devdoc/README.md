@@ -43,6 +43,8 @@
 - [屏幕区域选择基础](features/region-selection.md)
 - [共用屏幕交互宿主](features/screen-interaction.md)
 - [截图模式与临时贴图](features/screenshot-mode.md)
+- [截图／长图图片历史](features/image-history.md)
+- [图片历史验证](releases/screenshot-image-history.md)
 - [标注撤销与重做](annotation/annotation-history.md)
 - [选区历史与区域复用验证](releases/screenshot-region-history.md)
 - [截图模式验证](releases/screenshot-mode-2026-10-13.md)

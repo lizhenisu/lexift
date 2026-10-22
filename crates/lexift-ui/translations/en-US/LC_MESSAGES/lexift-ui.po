@@ -1885,3 +1885,21 @@ msgstr "Redo"
 
 msgid "Crop image"
 msgstr "Crop image"
+
+msgid "Image history"
+msgstr "Image history"
+
+msgid "No images yet"
+msgstr "No images yet"
+
+msgid "Finish the current image edit first"
+msgstr "Finish the current image edit first"
+
+msgid "Operation failed. Try again."
+msgstr "Operation failed. Try again."
+
+msgid "Clear image history?"
+msgstr "Clear image history?"
+
+msgid "Image exceeds the history limit and was not added"
+msgstr "Image exceeds the history limit and was not added"

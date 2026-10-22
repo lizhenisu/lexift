@@ -114,7 +114,12 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
         let layer = r.canvas_state.canvases.get(index)?;
         let scale = layer.scale();
         let mut point = cursor::screen_point(layer.bounds, (x, y), layer.input_scale());
-        if let Some(bounds) = r.screenshot.as_ref().and_then(|e| e.region.bounds()) {
+        if let Some(full) = r.screenshot.as_ref().and_then(|e| e.region.bounds()) {
+            let bounds = if screenshot::long::image_editing() {
+                r.document.session.image_crop.unwrap_or(full)
+            } else {
+                full
+            };
             // A captured drag still receives its release outside the crop, but
             // drawing may only modify pixels inside the selected region.
             if !r.document.mode.is_mouse() {

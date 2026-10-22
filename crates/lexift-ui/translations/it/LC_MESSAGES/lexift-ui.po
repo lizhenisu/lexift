@@ -1885,3 +1885,21 @@ msgstr "Ripristina"
 
 msgid "Crop image"
 msgstr "Ritaglia immagine"
+
+msgid "Image history"
+msgstr "Cronologia immagini"
+
+msgid "No images yet"
+msgstr "Nessuna immagine"
+
+msgid "Finish the current image edit first"
+msgstr "Termina prima la modifica corrente"
+
+msgid "Operation failed. Try again."
+msgstr "Operazione non riuscita. Riprova."
+
+msgid "Clear image history?"
+msgstr "Cancellare la cronologia immagini?"
+
+msgid "Image exceeds the history limit and was not added"
+msgstr "L’immagine supera il limite della cronologia e non è stata aggiunta"

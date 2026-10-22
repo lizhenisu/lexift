@@ -9,6 +9,7 @@ use crate::ports::credential::{CredentialAccessPurpose, CredentialSecret};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppEvent {
+    ImageHistory(crate::domain::image_history::workflow::Event),
     PinnedImage(crate::domain::pinned_image::Event),
     Screenshot(crate::domain::screenshot::ScreenshotEvent),
     AnnotationExport(crate::domain::annotation_export::ExportEvent),

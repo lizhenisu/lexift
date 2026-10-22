@@ -1885,3 +1885,21 @@ msgstr "Refazer"
 
 msgid "Crop image"
 msgstr "Recortar imagem"
+
+msgid "Image history"
+msgstr "Histórico de imagens"
+
+msgid "No images yet"
+msgstr "Nenhuma imagem ainda"
+
+msgid "Finish the current image edit first"
+msgstr "Conclua a edição atual primeiro"
+
+msgid "Operation failed. Try again."
+msgstr "A operação falhou. Tente novamente."
+
+msgid "Clear image history?"
+msgstr "Limpar o histórico de imagens?"
+
+msgid "Image exceeds the history limit and was not added"
+msgstr "A imagem excede o limite do histórico e não foi adicionada"

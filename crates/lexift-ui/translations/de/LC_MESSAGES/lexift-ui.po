@@ -1885,3 +1885,21 @@ msgstr "Wiederholen"
 
 msgid "Crop image"
 msgstr "Bild zuschneiden"
+
+msgid "Image history"
+msgstr "Bildverlauf"
+
+msgid "No images yet"
+msgstr "Noch keine Bilder"
+
+msgid "Finish the current image edit first"
+msgstr "Beenden Sie zuerst die aktuelle Bildbearbeitung"
+
+msgid "Operation failed. Try again."
+msgstr "Vorgang fehlgeschlagen. Erneut versuchen."
+
+msgid "Clear image history?"
+msgstr "Bildverlauf leeren?"
+
+msgid "Image exceeds the history limit and was not added"
+msgstr "Das Bild überschreitet das Verlaufslimit und wurde nicht hinzugefügt"

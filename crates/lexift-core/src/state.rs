@@ -44,6 +44,7 @@ pub struct PopupSessionState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppState {
+    pub image_history: crate::domain::image_history::workflow::Workflow,
     pub last_pin_id: u64,
     pub pinned_images: crate::domain::pinned_image::States,
     pub screenshot: crate::domain::screenshot::ScreenshotState,
@@ -91,6 +92,7 @@ impl Default for AppState {
 impl AppState {
     pub fn new(settings: Settings) -> Self {
         Self {
+            image_history: Default::default(),
             last_pin_id: 0,
             pinned_images: Default::default(),
             screenshot: Default::default(),
@@ -138,6 +140,23 @@ impl AppState {
 
     /// Applies a domain event and returns the capabilities the app must execute.
     pub fn reduce(&mut self, event: AppEvent) -> Vec<AppCommand> {
+        let success = crate::domain::image_history::workflow::successful_output(self, &event);
+        let quitting = matches!(event, AppEvent::ExitRequested);
+        let commands = self.reduce_inner(event);
+        crate::domain::image_history::workflow::after(self, quitting, &commands, success);
+        commands
+    }
+
+    fn reduce_inner(&mut self, event: AppEvent) -> Vec<AppCommand> {
+        if self.image_history.editor.is_some()
+            && matches!(
+                event,
+                AppEvent::Screenshot(crate::domain::screenshot::ScreenshotEvent::Requested(_))
+                    | AppEvent::Ocr(crate::domain::ocr::OcrEvent::Requested { .. })
+            )
+        {
+            return vec![];
+        }
         if self.screenshot.active()
             && matches!(
                 event,
@@ -151,6 +170,9 @@ impl AppState {
         }
         crate::domain::pinned_image::before_event(&mut self.pinned_images, &event);
         match event {
+            AppEvent::ImageHistory(event) => {
+                crate::domain::image_history::workflow::reduce(self, event)
+            }
             AppEvent::PinnedImage(event) => crate::domain::pinned_image::reduce(self, event),
             AppEvent::Screenshot(event) => crate::domain::screenshot::reduce(self, event),
             AppEvent::AnnotationExport(event) => {

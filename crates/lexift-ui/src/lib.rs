@@ -13,6 +13,8 @@ mod i18n;
 mod llm_settings;
 mod mapper;
 pub use llm_settings::{LlmQueryCancellation, LlmQueryCompletion};
+#[cfg(test)]
+mod image_history_tests;
 mod placement;
 #[cfg(test)]
 mod settings_theme_tests;

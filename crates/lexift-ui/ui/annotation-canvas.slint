@@ -8,7 +8,7 @@ export enum AnnotationCursor { idle, drawing, text, moving, horizontal, vertical
 
 // A transparent, live-desktop overlay. Pixel content is produced from Core objects in Rust.
 export component AnnotationCanvas inherits Window {
-    title: root.image-view ? @tr("Long screenshot") : "Lexift Annotation Canvas";
+    title: root.image-view ? (root.history-image ? @tr("Image history") : @tr("Long screenshot")) : "Lexift Annotation Canvas";
     no-frame: true;
     always-on-top: true;
     min-width: root.image-view ? 640px : 0px;
@@ -18,6 +18,12 @@ export component AnnotationCanvas inherits Window {
     in property <image> frame;
     in property <image> controls;
     in property <bool> image-view: false;
+    in property <float> source-left: 0;
+    in property <float> source-top: 0;
+    in property <bool> history-image: false;
+    in property <bool> image-output-busy: false;
+    in property <bool> annotations-hidden: false;
+    callback visibility-requested(bool);
     out property <length> image-header-height: Metrics.image-view-header-height;
     in-out property <float> image-zoom: 1;
     in property <float> image-pixel-scale: 1;
@@ -64,8 +70,8 @@ export component AnnotationCanvas inherits Window {
     if root.image-view: Rectangle { width: 100%; height: 100%; background: Colors.background; }
     if root.image-view: Rectangle {
         x: 0px; y: 0px; width: 100%; height: 32px; background: Colors.surface;
-        accessible-role: window-title-bar; accessible-label: @tr("Long screenshot");
-        Text { x: 12px; width: parent.width - 52px; height: 100%; text: @tr("Long screenshot"); color: Colors.foreground; vertical-alignment: center; }
+        accessible-role: window-title-bar; accessible-label: root.history-image ? @tr("Image history") : @tr("Long screenshot");
+        Text { x: 12px; width: parent.width - 52px; height: 100%; text: root.history-image ? @tr("Image history") : @tr("Long screenshot"); color: Colors.foreground; vertical-alignment: center; }
         TouchArea { width: parent.width - 36px; height: 100%; mouse-cursor: move;
             pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.header-drag-requested(); } }
         }
@@ -105,19 +111,19 @@ export component AnnotationCanvas inherits Window {
             }
         }
         Rectangle {
-            x: root.image-pan-x + root.content-left * root.image-zoom * 1px;
-            y: root.image-pan-y + root.content-top * root.image-zoom * 1px;
+            x: root.image-pan-x + (root.content-left - root.source-left) * root.image-zoom * 1px;
+            y: root.image-pan-y + (root.content-top - root.source-top) * root.image-zoom * 1px;
             width: (root.content-right - root.content-left) * root.image-zoom * 1px;
             height: (root.content-bottom - root.content-top) * root.image-zoom * 1px;
             clip:true;
-            Image { x:-root.content-left * root.image-zoom * 1px; y:-root.content-top * root.image-zoom * 1px; width:root.frame.width * root.image-zoom * 1px; height:root.frame.height * root.image-zoom * 1px; source:root.frame; image-fit:fill; }
-            if !root.image-cropping: Image { x:-root.content-left * root.image-zoom * 1px; y:-root.content-top * root.image-zoom * 1px; width:root.frame.width * root.image-zoom * 1px; height:root.frame.height * root.image-zoom * 1px; source:root.controls; image-fit:fill; }
+            Image { x:-(root.content-left - root.source-left) * root.image-zoom * 1px; y:-(root.content-top - root.source-top) * root.image-zoom * 1px; width:root.frame.width * root.image-zoom * 1px; height:root.frame.height * root.image-zoom * 1px; source:root.frame; image-fit:fill; }
+            if !root.image-cropping: Image { x:-(root.content-left - root.source-left) * root.image-zoom * 1px; y:-(root.content-top - root.source-top) * root.image-zoom * 1px; width:root.frame.width * root.image-zoom * 1px; height:root.frame.height * root.image-zoom * 1px; source:root.controls; image-fit:fill; }
         }
         if root.image-cropping: ImageCropFeedback {
             x:root.image-pan-x; y:root.image-pan-y;
             width:root.frame.width * root.image-zoom * 1px; height:root.frame.height * root.image-zoom * 1px;
             source-width:root.frame.width; source-height:root.frame.height;
-            selection-left:root.crop-left;selection-top:root.crop-top;selection-right:root.crop-right;selection-bottom:root.crop-bottom;
+            selection-left:root.crop-left - root.source-left;selection-top:root.crop-top - root.source-top;selection-right:root.crop-right - root.source-left;selection-bottom:root.crop-bottom - root.source-top;
         }
         image-input := TouchArea {
             mouse-cursor: root.image-cropping ? (root.crop-cursor == AnnotationCursor.moving ? move : root.crop-cursor == AnnotationCursor.horizontal ? ew-resize : root.crop-cursor == AnnotationCursor.vertical ? ns-resize : root.crop-cursor == AnnotationCursor.diagonal-down ? nwse-resize : root.crop-cursor == AnnotationCursor.diagonal-up ? nesw-resize : crosshair) : root.image-browsing ? (root.image-panning ? grabbing : grab)
@@ -135,6 +141,10 @@ export component AnnotationCanvas inherits Window {
                 root.viewport-scroll(self.mouse-x / 1px, self.mouse-y / 1px, event.delta-x / 1px, event.delta-y / 1px,
                     event.modifiers.control || event.modifiers.shift || event.modifiers.alt || event.modifiers.meta);
                 return accept;
+            }
+            if root.history-image: ContextMenuArea {
+                width:parent.width; height:parent.height;
+                Menu { MenuItem { title:@tr("Hide annotations"); enabled:!root.image-cropping && !root.image-output-busy; checkable:true; checked:root.annotations-hidden; activated=>{root.visibility-requested(!root.annotations-hidden);} } }
             }
         }
     }

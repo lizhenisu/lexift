@@ -1,6 +1,8 @@
 //! Independent image editing with a shared physical-pixel viewport and source-resolution output.
 use super::*;
 struct Pending {
+    token: u64,
+    history: Option<(u64, u64)>,
     session: u64,
     operation: u64,
     window: AnnotationCanvas,
@@ -9,8 +11,9 @@ struct Pending {
     area: Rect,
     origin: Option<Option<lexift_core::ports::magnifier::WindowToken>>,
 }
+thread_local! { static NEXT: std::cell::Cell<u64> = const {std::cell::Cell::new(0)}; }
 thread_local! { static PENDING: RefCell<Option<Pending>> = const {RefCell::new(None)}; }
-pub(super) fn clear() {
+pub(in crate::annotation) fn clear() {
     image_navigation::clear();
     PENDING.with(|p| {
         if let Some(p) = p.borrow_mut().take() {
@@ -20,7 +23,26 @@ pub(super) fn clear() {
     });
 }
 pub(super) fn open(session: u64, operation: u64, image: Arc<CapturedRegion>) {
+    open_owned(session, operation, image, None);
+}
+pub(in crate::annotation) fn open_history(window: u64, editor: u64, image: Arc<CapturedRegion>) {
+    open_owned(editor, editor, image, Some((window, editor)));
+}
+fn open_owned(
+    session: u64,
+    operation: u64,
+    image: Arc<CapturedRegion>,
+    history: Option<(u64, u64)>,
+) {
     clear();
+    let token = NEXT.with(|n| {
+        let next = n
+            .get()
+            .checked_add(1)
+            .expect("image editor instance exhausted");
+        n.set(next);
+        next
+    });
     let pending = REGISTRY.with(|s| {
         let s = s.borrow();
         let r = s.as_ref()?;
@@ -31,11 +53,15 @@ pub(super) fn open(session: u64, operation: u64, image: Arc<CapturedRegion>) {
         window.set_frame(slint::Image::from_rgba8_premultiplied(
             slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
                 &image.pixels,
-                image.bounds.right as u32,
-                image.bounds.bottom as u32,
+                (image.bounds.right - image.bounds.left) as u32,
+                (image.bounds.bottom - image.bounds.top) as u32,
             ),
         ));
+        window.set_source_left(image.bounds.left as f32);
+        window.set_source_top(image.bounds.top as f32);
         Some(Pending {
+            token,
+            history,
             session,
             operation,
             window,
@@ -46,30 +72,49 @@ pub(super) fn open(session: u64, operation: u64, image: Arc<CapturedRegion>) {
         })
     });
     let Some(pending) = pending else {
-        long::editor_unavailable(session, operation);
+        unavailable(history, session, operation);
         return;
     };
     PENDING.with(|p| *p.borrow_mut() = Some(pending));
-    prepare(0);
+    prepare(token, 0);
+}
+fn unavailable(owner: Option<(u64, u64)>, session: u64, operation: u64) {
+    if let Some((window, editor)) = owner {
+        history_editor::unavailable(window, editor);
+    } else {
+        long::editor_unavailable(session, operation);
+    }
 }
 fn cancel() {
-    super::cancel();
+    if history_editor::active() {
+        history_editor::close();
+    } else {
+        super::cancel();
+    }
 }
-fn prepare(attempt: u8) {
+fn prepare(token: u64, attempt: u8) {
+    if !PENDING.with(|p| p.borrow().as_ref().is_some_and(|p| p.token == token)) {
+        return;
+    }
     let result = REGISTRY.with(|s| {
         let s = s.borrow();
         let r = s.as_ref()?;
         PENDING.with(|p| {
             let p = p.borrow();
             let p = p.as_ref()?;
-            if !FLOW.with(|f| {
-                let f = f.borrow();
-                f.state.session == p.session
-                    && f.state
-                        .long
-                        .as_ref()
-                        .is_some_and(|l| l.operation == p.operation)
-            }) {
+            if !p.history.map_or_else(
+                || {
+                    FLOW.with(|f| {
+                        let f = f.borrow();
+                        f.state.session == p.session
+                            && f.state
+                                .long
+                                .as_ref()
+                                .is_some_and(|l| l.operation == p.operation)
+                    })
+                },
+                |(window, editor)| history_editor::current(window, editor),
+            ) {
                 return None;
             }
             let a = p.area;
@@ -91,27 +136,34 @@ fn prepare(attempt: u8) {
         })
     });
     match result {
-        Some((PassiveWindowPreparation::Ready, true)) if attempt > 0 => install(),
+        Some((PassiveWindowPreparation::Ready, true)) if attempt > 0 => install(token),
         Some((status, _)) if status != PassiveWindowPreparation::Failed && attempt < 20 => PENDING
             .with(|p| {
                 if let Some(p) = p.borrow().as_ref() {
                     p.timer.start(
                         slint::TimerMode::SingleShot,
                         Duration::from_millis(16),
-                        move || prepare(attempt + 1),
+                        move || prepare(token, attempt + 1),
                     );
                 }
             }),
         _ => {
-            let identity = PENDING.with(|p| p.borrow().as_ref().map(|p| (p.session, p.operation)));
+            let identity = PENDING.with(|p| {
+                p.borrow()
+                    .as_ref()
+                    .map(|p| (p.history, p.session, p.operation))
+            });
             clear();
-            if let Some((session, operation)) = identity {
-                long::editor_unavailable(session, operation);
+            if let Some((owner, session, operation)) = identity {
+                unavailable(owner, session, operation);
             }
         }
     }
 }
-fn install() {
+fn install(token: u64) {
+    if !PENDING.with(|p| p.borrow().as_ref().is_some_and(|p| p.token == token)) {
+        return;
+    }
     let Some(p) = PENDING.with(|p| p.borrow_mut().take()) else {
         return;
     };
@@ -127,6 +179,9 @@ fn install() {
         layer.image_view = true;
         layer.bootstrap = CanvasBootstrap::Ready;
         let revision = layer.revision();
+        w.set_history_image(p.history.is_some());
+        w.set_annotations_hidden(history_editor::hidden());
+        w.on_visibility_requested(history_editor::visibility);
         image_navigation::bind(&w);
         let weak = w.as_weak();
         w.on_crop_action(move |apply| {
@@ -147,7 +202,12 @@ fn install() {
                 && let Some(w) = weak.upgrade()
             {
                 let dpi = w.window().scale_factor();
-                canvas_pointer(0, event, x / dpi, y / dpi);
+                canvas_pointer(
+                    0,
+                    event,
+                    (x - w.get_source_left()) / dpi,
+                    (y - w.get_source_top()) / dpi,
+                );
             }
         });
         w.on_escape_requested(move || {
@@ -292,25 +352,29 @@ fn install() {
         sync_toolbar_owner(r);
         r.canvas_state.pending_displays = vec![];
         r.canvas_state.annotation_ready = true;
-        r.document.session = Session::new();
-        r.document.session.image_source = Some(p.image.bounds);
-        r.document.session.displays = vec![p.image.bounds];
+        if p.history.is_none() {
+            r.document.session = Session::new();
+            r.document.session.image_source = Some(p.image.bounds);
+            r.document.session.displays = vec![p.image.bounds];
+        }
         r.document.mode = InteractionMode::Mouse;
         r.sync_edit_scope();
         let e = r.screenshot.as_mut()?;
-        e.frames = Arc::new(vec![(*p.image).clone()]);
-        e.capture = Arc::new(ScreenCaptureFrame {
-            revision: p.operation,
-            serial: p.operation,
-            regions: vec![(*p.image).clone()],
-        });
-        e.region = RegionEditor::new(p.image.bounds);
-        e.preview = None;
-        e.revision = e.revision.wrapping_add(1);
-        e.presented = 0;
-        FLOW.with(|f| f.borrow_mut().frames = Some(e.frames.clone()));
-        r.lifecycle.annotation_screen_capture =
-            Some(Arc::new(crate::FrozenCapture::new(e.frames.clone())));
+        if p.history.is_none() {
+            e.frames = Arc::new(vec![(*p.image).clone()]);
+            e.capture = Arc::new(ScreenCaptureFrame {
+                revision: p.operation,
+                serial: p.operation,
+                regions: vec![(*p.image).clone()],
+            });
+            e.region = RegionEditor::new(p.image.bounds);
+            e.preview = None;
+            e.revision = e.revision.wrapping_add(1);
+            e.presented = 0;
+            FLOW.with(|f| f.borrow_mut().frames = Some(e.frames.clone()));
+            r.lifecycle.annotation_screen_capture =
+                Some(Arc::new(crate::FrozenCapture::new(e.frames.clone())));
+        }
         let weak = w.as_weak();
         let input = r.canvas_state.canvases[0].input();
         let sink = registry_pointer(
@@ -327,8 +391,8 @@ fn install() {
         if w.show().is_err() || !(r.lifecycle.complete_passive_window_show)(w.window(), sink) {
             return None;
         }
-        w.invoke_fit_image();
         long::set_editor(&w);
+        image_crop::sync(r, true);
         long::editor_origin(p.origin);
         if let Some(main) = r.toolbar_state.main.get() {
             position_toolbar(r, &w);
@@ -352,12 +416,12 @@ fn install() {
                 }
             });
         }
-        long::editor_unavailable(p.session, p.operation);
+        unavailable(p.history, p.session, p.operation);
     }
 }
 
 pub(in crate::annotation) fn outputting() -> bool {
-    FLOW.with(|f| f.borrow().state.phase == ScreenshotPhase::Output)
+    history_editor::busy() || FLOW.with(|f| f.borrow().state.phase == ScreenshotPhase::Output)
 }
 /// Map source pixels to/from physical screen coordinates for native text and cursor overlays.
 pub(in crate::annotation) fn view_point(point: (f32, f32), reverse: bool) -> Option<(f32, f32)> {

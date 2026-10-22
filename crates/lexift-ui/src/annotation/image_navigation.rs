@@ -34,8 +34,8 @@ fn publish(n: &mut Navigation, w: &AnnotationCanvas) {
     let dpi = w.window().scale_factor();
     w.set_image_pixel_scale(dpi);
     w.set_image_zoom(n.view.scale / dpi);
-    w.set_image_pan_x(n.view.offset[0] / dpi);
-    w.set_image_pan_y(n.view.offset[1] / dpi);
+    w.set_image_pan_x((n.view.offset[0] + w.get_source_left() * n.view.scale) / dpi);
+    w.set_image_pan_y((n.view.offset[1] + w.get_source_top() * n.view.scale) / dpi);
     w.set_image_panning(n.view.panning());
     if let Some(cursor) = &n.cursor {
         let active =
@@ -82,6 +82,16 @@ pub(super) fn bind(w: &AnnotationCanvas) {
             cursor_active: false,
             over: false,
         })
+    });
+    NAV.with(|s| {
+        if let Some(n) = s.borrow_mut().as_mut() {
+            n.view.content = [
+                w.get_source_left(),
+                w.get_source_top(),
+                w.get_source_left() + image.width as f32,
+                w.get_source_top() + image.height as f32,
+            ];
+        }
     });
     let weak = w.as_weak();
     w.on_fit_image(move || {
@@ -151,10 +161,13 @@ pub(super) fn content(w: &AnnotationCanvas, bounds: Rect, fit: bool) {
     NAV.with(|s| {
         if let Some(n) = s.borrow_mut().as_mut().filter(|n| matches(n, w)) {
             n.view.content = [
-                (bounds.left as f32).clamp(0., n.view.image[0]),
-                (bounds.top as f32).clamp(0., n.view.image[1]),
-                (bounds.right as f32).clamp(0., n.view.image[0]),
-                (bounds.bottom as f32).clamp(0., n.view.image[1]),
+                (bounds.left as f32)
+                    .clamp(w.get_source_left(), w.get_source_left() + n.view.image[0]),
+                (bounds.top as f32).clamp(w.get_source_top(), w.get_source_top() + n.view.image[1]),
+                (bounds.right as f32)
+                    .clamp(w.get_source_left(), w.get_source_left() + n.view.image[0]),
+                (bounds.bottom as f32)
+                    .clamp(w.get_source_top(), w.get_source_top() + n.view.image[1]),
             ];
             n.view.resize(size(w));
             if fit {
@@ -554,6 +567,45 @@ mod tests {
         w.show().unwrap();
         bind(&w);
         w
+    }
+    #[test]
+    fn negative_source_origin_shares_crop_pan_zoom_and_pointer_coordinates() {
+        let w = window();
+        clear();
+        w.set_source_left(-720.);
+        w.set_source_top(-160.);
+        bind(&w);
+        let full = Rect {
+            left: -720,
+            top: -160,
+            right: -120,
+            bottom: 1840,
+        };
+        content(&w, full, true);
+        let p = [240., 320.];
+        let before = map(&w, p, true).unwrap();
+        assert!(before[0] < 0.);
+        let screen = map(&w, before, false).unwrap();
+        assert!((screen[0] - p[0]).abs() < 0.01 && (screen[1] - p[1]).abs() < 0.01);
+        scroll(&w, p, 0., 60., false);
+        let after = map(&w, p, true).unwrap();
+        assert!((after[0] - before[0]).abs() < 0.01 && (after[1] - before[1]).abs() < 0.01);
+        let scale = w.get_image_zoom();
+        let left = map(&w, [-720., -160.], false).unwrap();
+        assert!((left[0] - w.get_image_pan_x()).abs() < 0.01);
+        assert!((left[1] - w.get_image_pan_y()).abs() < 0.01);
+        content(
+            &w,
+            Rect {
+                left: -600,
+                top: 100,
+                right: -200,
+                bottom: 1000,
+            },
+            true,
+        );
+        assert!(w.get_image_zoom() >= scale);
+        clear();
     }
     #[test]
     fn footer_resize_handle_receives_native_press_after_viewport_routing() {

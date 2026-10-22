@@ -30,3 +30,4 @@ pub mod pinned_image;
 pub mod screenshot;
 
 pub mod image_crop;
+pub mod image_history;

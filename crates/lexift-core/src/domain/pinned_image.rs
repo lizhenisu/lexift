@@ -33,6 +33,11 @@ pub struct Recognition {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    HistoryOpened {
+        id: u64,
+        hidden: bool,
+        key: super::image_history::workflow::OutputKey,
+    },
     Recognize {
         id: u64,
     },
@@ -115,6 +120,10 @@ pub enum Event {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    RetainHistory {
+        id: u64,
+        ticket: super::image_history::Ticket,
+    },
     Recognize {
         id: u64,
         request: Recognition,
@@ -368,7 +377,8 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
             vec![]
         }
         Event::EditRequested { id } => {
-            if state.screenshot.active()
+            if state.image_history.editor.is_some()
+                || state.screenshot.active()
                 || matches!(
                     state.ocr.phase,
                     super::ocr::OcrPhase::Checking | super::ocr::OcrPhase::Capturing
@@ -465,6 +475,25 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
                 }));
             }
             commands
+        }
+        Event::HistoryOpened { id, key, hidden }
+            if id > state.last_pin_id
+                && !state.pinned_images.contains_key(&id)
+                && state.image_history.pin_ticket(key).is_some() =>
+        {
+            let (ticket, _) = state.image_history.ticket(key).unwrap();
+            state.last_pin_id = id;
+            state.pinned_images.insert(
+                id,
+                State {
+                    hidden,
+                    ..Default::default()
+                },
+            );
+            command(Command::RetainHistory { id, ticket })
+        }
+        Event::HistoryOpened { id, .. } if !state.pinned_images.contains_key(&id) => {
+            command(Command::Drop { id })
         }
         Event::Opened { id, source }
             if id > state.last_pin_id

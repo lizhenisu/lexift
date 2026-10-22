@@ -45,6 +45,7 @@ const POPUP_MIN_WIDTH: f32 = 340.0;
 const POPUP_MIN_SOURCE_HEIGHT: f32 = 86.0;
 const NO_WINDOW_MEMORY_TRIM_DELAY: Duration = Duration::from_secs(120);
 mod clipboard_history;
+pub(crate) mod image_history;
 use clipboard_history::HISTORY;
 mod selection_toolbar;
 #[cfg(test)]
@@ -111,6 +112,7 @@ fn has_live_window_instances() -> bool {
         || crate::annotation::screenshot::active()
         || crate::pinned_screenshot::active()
         || crate::tray_menu::is_open()
+        || image_history::active()
         || SELECTION_TOOLBAR_REGISTRY.with(|registry| {
             registry
                 .borrow()
@@ -214,6 +216,7 @@ impl Ui {
         crate::ocr::init(prepare_passive_window, window_lifecycle.clone());
         crate::pinned_screenshot::init(prepare_passive_window, window_lifecycle.clone());
         crate::tray_menu::init(prepare_passive_window, window_lifecycle.clone());
+        image_history::init(prepare_passive_window, window_lifecycle.clone());
         HISTORY.with(|s| {
             *s.borrow_mut() = Some(clipboard_history::Registry::new(
                 prepare_passive_window,
@@ -349,6 +352,7 @@ impl Ui {
     ) {
         let handler: Rc<dyn Fn(AppEvent)> = Rc::new(handler);
         crate::tray_menu::set_handler(Rc::clone(&handler));
+        image_history::set_handler(Rc::clone(&handler));
         crate::ocr::set_handler(handler.clone());
         crate::annotation::set_handler(handler.clone());
         APP_WINDOW_REGISTRY.with(|registry| {
@@ -469,6 +473,42 @@ pub struct UiHandle {
 }
 
 impl UiHandle {
+    pub fn open_history_editor(
+        &self,
+        window: u64,
+        editor: u64,
+        image: lexift_core::domain::image_history::ImageSnapshot,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::annotation::history_editor::open(window, editor, image)
+        });
+    }
+
+    pub fn show_history_pin(
+        &self,
+        key: lexift_core::domain::image_history::workflow::OutputKey,
+        image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        base: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        samples: Arc<lexift_core::ports::screen_capture::ScreenCaptureFrame>,
+        document: lexift_core::domain::annotation_export::ExportRequest,
+        hidden: bool,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::pinned_screenshot::show_history_document(
+                key, image, base, samples, document, hidden,
+            )
+        });
+    }
+    pub fn present_image_history(
+        &self,
+        rows: Vec<(
+            lexift_core::domain::image_history::Entry,
+            Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        )>,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || image_history::present(rows));
+    }
+
     pub fn request_ocr(&self) {
         let _ = slint::invoke_from_event_loop(crate::ocr::request);
     }
@@ -480,6 +520,7 @@ impl UiHandle {
         >,
     ) {
         let _ = slint::invoke_from_event_loop(move || {
+            image_history::close();
             crate::annotation::screenshot::suspend(session);
             ready(crate::annotation::screenshot::suspended_pointer(session));
         });
@@ -619,6 +660,8 @@ impl UiHandle {
                 crate::annotation::refresh_language();
             }
             crate::theme::set_current(theme);
+            image_history::sync(&state);
+            crate::annotation::history_editor::sync(state.image_history.editor.clone());
             apply_window_themes();
             APP_WINDOW_REGISTRY.with(|registry| {
                 if let Some(registry) = registry.borrow_mut().as_mut() {

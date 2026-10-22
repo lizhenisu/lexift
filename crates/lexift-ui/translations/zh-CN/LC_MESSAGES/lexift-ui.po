@@ -1885,3 +1885,21 @@ msgstr "重做"
 
 msgid "Crop image"
 msgstr "裁剪图片"
+
+msgid "Image history"
+msgstr "图片历史"
+
+msgid "No images yet"
+msgstr "暂无图片历史"
+
+msgid "Finish the current image edit first"
+msgstr "请先结束当前图片编辑"
+
+msgid "Operation failed. Try again."
+msgstr "操作失败，请重试。"
+
+msgid "Clear image history?"
+msgstr "清空图片历史？"
+
+msgid "Image exceeds the history limit and was not added"
+msgstr "图片超过历史容量上限，未加入历史"

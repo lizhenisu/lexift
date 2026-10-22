@@ -9,6 +9,7 @@ use crate::ports::credential::{CredentialAccessPurpose, CredentialSecret};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppCommand {
+    ImageHistory(crate::domain::image_history::workflow::Command),
     PinnedImage(crate::domain::pinned_image::Command),
     Screenshot(crate::domain::screenshot::ScreenshotCommand),
     AnnotationExport(crate::domain::annotation_export::ExportCommand),

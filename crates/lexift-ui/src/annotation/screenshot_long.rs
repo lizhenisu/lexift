@@ -117,6 +117,9 @@ fn notification(state: &ScreenshotState) -> Option<(String, bool)> {
     Some((message.into(), error))
 }
 pub(in crate::annotation) fn image_editing() -> bool {
+    if history_editor::active() {
+        return true;
+    }
     FLOW.with(|f| {
         f.borrow().state.active()
             && f.borrow()
@@ -1011,6 +1014,9 @@ pub(in crate::annotation) fn sync() {
     });
 }
 pub(in crate::annotation) fn source_area() -> Option<Rect> {
+    if history_editor::active() {
+        return history_editor::area();
+    }
     VIEW.with(|v| {
         let v = v.borrow();
         (v.operation != 0).then_some(v.area)
@@ -1028,6 +1034,10 @@ pub(in crate::annotation) fn editor() -> Option<AnnotationCanvas> {
 
 /// Retire capture UI only after the replacement renderer has produced the feedback frame.
 pub(in crate::annotation) fn editor_presented(session: u64) {
+    if history_editor::active() {
+        history_editor::presented();
+        return;
+    }
     if !FLOW.with(|f| {
         let f = f.borrow();
         f.state.session == session

@@ -21,6 +21,30 @@ pub(super) struct Editing {
     pub(super) size_input: screenshot::size_input::State,
     pub(super) help: crate::screen_interaction::screenshot_help::State,
 }
+impl Editing {
+    pub(super) fn image(id: u64, bounds: Rect, frames: Arc<Vec<CapturedRegion>>) -> Self {
+        Self {
+            pin: None,
+            id,
+            region: RegionEditor::new(bounds),
+            capture: Arc::new(ScreenCaptureFrame {
+                revision: id,
+                serial: 1,
+                regions: frames.as_ref().clone(),
+            }),
+            frames,
+            preview: None,
+            revision: 0,
+            presented: 0,
+            feedback_placement: None,
+            toolbar_adjustment: 0,
+            keyboard: Default::default(),
+            initial_focus: None,
+            size_input: Default::default(),
+            help: Default::default(),
+        }
+    }
+}
 fn input(r: &Registry, index: usize) -> Option<screenshot_preview::Input> {
     let editing = r.screenshot.as_ref()?;
     let layer = r.canvas_state.canvases.get(index)?;
@@ -28,6 +52,16 @@ fn input(r: &Registry, index: usize) -> Option<screenshot_preview::Input> {
     if screenshot::long::image_editing() {
         snapshot.scale = 1.;
         snapshot.monitors = vec![(layer.bounds, 1.)];
+    }
+    if history_editor::active() {
+        history_editor::source_metadata(&mut snapshot);
+        if history_editor::hidden() {
+            let visible = Arc::get_mut(&mut snapshot.session)?;
+            visible.objects.clear();
+            visible.watermark = None;
+            visible.watermark_erased.clear();
+            visible.spotlight_erased.clear();
+        }
     }
     if let Some((id, _)) = editing.pin {
         pin_editor::source_metadata(id, &mut snapshot);
@@ -231,6 +265,10 @@ pub(super) fn present(
 }
 fn report_failure(id: u64) {
     tracing::debug!(session = id, "Frozen editor presentation failed");
+    if let Some((window, editor)) = history_editor::identity().filter(|(_, editor)| *editor == id) {
+        history_editor::unavailable(window, editor);
+        return;
+    }
     if pin_editor::current().is_some_and(|p| p.1 == id)
         && REGISTRY.with(|s| s.borrow_mut().as_mut().is_some_and(pin_crop::cancel))
     {

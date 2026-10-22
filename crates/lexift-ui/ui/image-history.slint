@@ -1,0 +1,128 @@
+import { Colors } from "design/colors.slint";
+import { Typography } from "design/typography.slint";
+import { Spacing } from "design/spacing.slint";
+import { WindowHeaderButton } from "design/window-header.slint";
+import { ResizeEdges } from "design/resize-edges.slint";
+import { SettingsButton } from "settings-controls.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export struct ImageHistoryRow { identity: string, preview: image, kind: string, dimensions: string, updated: string }
+
+export component ImageHistoryWindow inherits Window {
+    title: @tr("Image history"); no-frame: true; always-on-top: true;
+    background: Colors.surface;
+    preferred-width: 800px; preferred-height: 600px;
+    min-width: min(620px, root.limit-width); min-height: min(400px, root.limit-height);
+    max-width: root.limit-width; max-height: root.limit-height;
+    in property <length> limit-width: 1920px;
+    in property <length> limit-height: 1080px;
+    in property <[ImageHistoryRow]> entries;
+    in property <string> selection;
+    in property <image> preview;
+    in property <bool> blocked;
+    in property <bool> busy;
+    in property <bool> failed;
+    in-out property <bool> confirming: false;
+    callback select(string);
+    callback action(int);
+    callback clear();
+    callback close-requested();
+    callback move-requested();
+    callback resize-requested(int);
+    callback navigate(int);
+    forward-focus: keys;
+    keys := FocusScope {
+        capture-key-pressed(event) => {
+            if event.text == Key.Escape { if root.confirming { root.confirming = false; } else { root.close-requested(); } return accept; }
+            if root.busy { return reject; }
+            if event.text == Key.DownArrow { root.navigate(1); return accept; }
+            if event.text == Key.UpArrow { root.navigate(-1); return accept; }
+            if event.text == Key.Return && !root.blocked && root.selection != "" && !root.confirming { root.action(0); return accept; }
+            reject
+        }
+        VerticalLayout {
+            spacing: 0px;
+            Rectangle {
+                height: 52px;
+                TouchArea { mouse-cursor: move; pointer-event(event) => {
+                    if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.move-requested(); }
+                } }
+                Text {
+                    x: Spacing.large; width: max(0px,parent.width - 220px); height: parent.height;
+                    text: @tr("Image history"); color: Colors.foreground; font-size: Typography.body-size; font-weight: 600; vertical-alignment: center;
+                }
+                HorizontalLayout {
+                    x: max(0px,parent.width - 196px); width: min(184px,parent.width); height: parent.height;
+                    alignment: end; spacing: Spacing.small;
+                    SettingsButton { label: @tr("Clear all"); compact: true; quiet: true; enabled: !root.busy && root.entries.length > 0; clicked => { root.confirming = true; } }
+                    WindowHeaderButton { icon: @image-url("assets/icons/close.svg"); label: @tr("Close"); clicked => { root.close-requested(); } }
+                }
+            }
+            Rectangle { height: 1px; background: Colors.outline; }
+            if root.entries.length == 0: Rectangle {
+                vertical-stretch: 1;
+                Text { text: @tr("No images yet"); color: Colors.secondary-foreground; horizontal-alignment: center; vertical-alignment: center; font-size: Typography.body-size; }
+            }
+            if root.entries.length > 0: HorizontalLayout {
+                spacing: 0px;
+                ScrollView {
+                    width: 236px;
+                    content-width: self.width;
+                    VerticalLayout {
+                        spacing: Spacing.small; padding: Spacing.medium;
+                        for row in root.entries: Rectangle {
+                            height: 112px; border-radius: 8px;
+                            border-width: 1px; border-color: row.identity == root.selection ? Colors.primary : Colors.outline;
+                            background: row.identity == root.selection ? Colors.primary-container : Colors.background;
+                            HorizontalLayout {
+                                padding: Spacing.small; spacing: Spacing.small;
+                                Image { source: row.preview; image-fit: contain; width: 88px; }
+                                VerticalLayout {
+                                    alignment: center; spacing: 4px;
+                                    Text { text: row.kind; color: Colors.foreground; font-size: Typography.menu-size; wrap: word-wrap; }
+                                    Text { text: row.dimensions; color: Colors.secondary-foreground; font-size: 11px; }
+                                    Text { text: row.updated; color: Colors.secondary-foreground; font-size: 11px; wrap: word-wrap; }
+                                }
+                            }
+                            TouchArea {
+                                enabled: !root.busy;
+                                private property <string> pressed-identity;
+                                pointer-event(event) => { if event.kind == PointerEventKind.down { self.pressed-identity = row.identity; } }
+                                clicked => { if self.pressed-identity == row.identity { root.select(row.identity); } }
+                                double-clicked => { if !root.blocked && self.pressed-identity == row.identity && root.selection == row.identity { root.action(0); } }
+                            }
+                        }
+                    }
+                }
+                Rectangle { width: 1px; background: Colors.outline; }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: Colors.background;
+                    Image { x: Spacing.medium; y: Spacing.medium; width: max(0px, parent.width - 2 * Spacing.medium); height: max(0px, parent.height - 2 * Spacing.medium); source: root.preview; image-fit: contain; }
+                }
+            }
+            if root.blocked || root.failed: Text {
+                height: max(32px, self.preferred-height + 12px); wrap: word-wrap;
+                text: root.blocked ? @tr("Finish the current image edit first") : @tr("Operation failed. Try again.");
+                color: root.failed ? Colors.error : Colors.secondary-foreground;
+                horizontal-alignment: center; font-size: Typography.menu-size;
+            }
+            Rectangle { height: 1px; background: Colors.outline; }
+            if root.confirming: HorizontalLayout {
+                padding: Spacing.medium; spacing: Spacing.small;
+                Text { text: @tr("Clear image history?"); color: Colors.foreground; vertical-alignment: center; horizontal-stretch: 1; wrap: word-wrap; }
+                SettingsButton { compact: true; label: @tr("Cancel"); clicked => { root.confirming = false; } }
+                SettingsButton { compact: true; destructive: true; label: @tr("Clear all"); enabled: !root.busy; clicked => { root.confirming = false; root.clear(); } }
+            }
+            if !root.confirming: HorizontalLayout {
+                padding: Spacing.medium; spacing: Spacing.small; alignment: end;
+                SettingsButton { compact: true; label: @tr("Edit"); enabled: !root.blocked && !root.busy && root.selection != ""; clicked => { root.action(0); } }
+                SettingsButton { compact: true; label: @tr("Copy"); enabled: !root.blocked && !root.busy && root.selection != ""; clicked => { root.action(1); } }
+                SettingsButton { compact: true; label: @tr("Save image"); enabled: !root.blocked && !root.busy && root.selection != ""; clicked => { root.action(2); } }
+                SettingsButton { compact: true; label: @tr("Pin screenshot"); enabled: !root.blocked && !root.busy && root.selection != ""; clicked => { root.action(3); } }
+                SettingsButton { compact: true; label: @tr("Delete"); enabled: !root.busy && root.selection != ""; clicked => { root.action(4); } }
+            }
+        }
+    }
+    ResizeEdges { resize-requested(edge) => { root.resize-requested(edge); } }
+}

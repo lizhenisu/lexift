@@ -35,7 +35,24 @@ pub(crate) fn install(
     id: u64,
     base: Arc<CapturedRegion>,
     samples: Arc<ScreenCaptureFrame>,
+    request: ExportRequest,
+) {
+    install_owned(id, base, samples, request, false);
+}
+pub(crate) fn install_history(
+    id: u64,
+    base: Arc<CapturedRegion>,
+    samples: Arc<ScreenCaptureFrame>,
+    request: ExportRequest,
+) {
+    install_owned(id, base, samples, request, true);
+}
+fn install_owned(
+    id: u64,
+    base: Arc<CapturedRegion>,
+    samples: Arc<ScreenCaptureFrame>,
     mut request: ExportRequest,
+    reset_history: bool,
 ) {
     let mut snapshot = (*request.snapshot).clone();
     let x = (base.bounds.left + base.bounds.right) / 2;
@@ -51,7 +68,11 @@ pub(crate) fn install(
     let mut document = REGISTRY
         .with(|s| s.borrow().as_ref().map(|r| r.document.clone()))
         .unwrap_or_default();
-    document.session = document.session.freeze_visible(&request.snapshot.session);
+    document.session = if reset_history {
+        request.snapshot.session.restored_image()
+    } else {
+        document.session.freeze_visible(&request.snapshot.session)
+    };
     document.session.image_source = Some(base.bounds);
     document.mode = InteractionMode::Mouse;
     document.session.set_edit_scope(EditScope::None);

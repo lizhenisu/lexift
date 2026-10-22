@@ -1,6 +1,7 @@
 //! Owns the ephemeral annotation preview windows and per-tool UI values.
 mod editor_document;
 mod frozen_editor;
+pub(crate) mod history_editor;
 pub(crate) mod pin_editor;
 pub(crate) mod screenshot;
 mod screenshot_preview;

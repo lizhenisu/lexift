@@ -31,6 +31,33 @@ use tokio::{runtime::Handle, sync::Notify};
 use crate::runtime::RuntimeManager;
 
 pub(crate) trait ViewPort: Send + Sync {
+    fn open_history_editor(
+        &self,
+        _window: u64,
+        _editor: u64,
+        _image: lexift_core::domain::image_history::ImageSnapshot,
+    ) {
+    }
+
+    fn show_history_pin(
+        &self,
+        _key: lexift_core::domain::image_history::workflow::OutputKey,
+        _image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        _base: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        _samples: Arc<lexift_core::ports::screen_capture::ScreenCaptureFrame>,
+        _document: lexift_core::domain::annotation_export::ExportRequest,
+        _hidden: bool,
+    ) {
+    }
+    fn present_image_history(
+        &self,
+        _rows: Vec<(
+            lexift_core::domain::image_history::Entry,
+            Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        )>,
+    ) {
+    }
+
     fn update(&self, state: AppState);
     fn set_annotation_hotkey_status(&self, _status: String) {}
     fn show_popup(
@@ -122,6 +149,36 @@ pub(crate) trait ViewPort: Send + Sync {
 }
 
 impl ViewPort for lexift_ui::UiHandle {
+    fn open_history_editor(
+        &self,
+        window: u64,
+        editor: u64,
+        image: lexift_core::domain::image_history::ImageSnapshot,
+    ) {
+        self.open_history_editor(window, editor, image);
+    }
+
+    fn show_history_pin(
+        &self,
+        key: lexift_core::domain::image_history::workflow::OutputKey,
+        image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        base: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        samples: Arc<lexift_core::ports::screen_capture::ScreenCaptureFrame>,
+        document: lexift_core::domain::annotation_export::ExportRequest,
+        hidden: bool,
+    ) {
+        self.show_history_pin(key, image, base, samples, document, hidden);
+    }
+    fn present_image_history(
+        &self,
+        rows: Vec<(
+            lexift_core::domain::image_history::Entry,
+            Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        )>,
+    ) {
+        self.present_image_history(rows);
+    }
+
     fn begin_pinned_edit(&self, id: u64, edit: u64) {
         self.begin_pinned_edit(id, edit);
     }
@@ -441,6 +498,7 @@ impl AppController {
                 });
             let snapshot = state.clone();
             if let Some(runtime) = &self.screenshot {
+                runtime.sync_history(&snapshot.image_history);
                 runtime.sync(&snapshot.screenshot, quitting);
                 runtime.sync_pins(&snapshot.pinned_images, quitting);
             }
@@ -456,6 +514,13 @@ impl AppController {
             // Queue snapshots in transition order. A notification arriving on another
             // thread must not render an older session after its successor was closed.
             self.ui.update(snapshot.clone());
+            if snapshot.image_history.window.is_some()
+                && let Some(runtime) = &self.screenshot
+            {
+                self.ui
+                    .present_image_history(runtime.history_previews(&snapshot.image_history));
+            }
+
             #[cfg(not(feature = "m1-demo"))]
             self.selection_toolbar_enabled.store(
                 snapshot.desired_settings.selection_toolbar,
@@ -487,6 +552,11 @@ impl AppController {
 
     fn execute(self: &Arc<Self>, command: AppCommand) {
         match command {
+            AppCommand::ImageHistory(command) => {
+                if let Some(runtime) = &self.screenshot {
+                    runtime.execute_history(self, command);
+                }
+            }
             AppCommand::PinnedImage(command) => {
                 if let Some(runtime) = &self.screenshot {
                     runtime.execute_pin(self, command);
@@ -1430,6 +1500,7 @@ impl AppController {
 
 fn event_name(event: &AppEvent) -> &'static str {
     match event {
+        AppEvent::ImageHistory(_) => "image-history",
         AppEvent::ClipboardHistory(_) => "clipboard_history",
         AppEvent::PinnedImage(_) => "pinned-image",
         AppEvent::Screenshot(_) => "screenshot",

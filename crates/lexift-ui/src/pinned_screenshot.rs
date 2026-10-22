@@ -83,7 +83,66 @@ impl Gesture {
         self.cancel();
     }
 }
+#[derive(Clone, Copy)]
+enum Origin {
+    Screenshot(u64, u64),
+    History(
+        lexift_core::domain::image_history::workflow::OutputKey,
+        bool,
+    ),
+}
+impl Origin {
+    fn current(self) -> bool {
+        match self {
+            Self::Screenshot(session, operation) => {
+                crate::annotation::screenshot::output_current(session, operation)
+            }
+            Self::History(key, _) => crate::bridge::image_history::output_current(key),
+        }
+    }
+    fn complete(self, result: lexift_core::Result<SaveOutcome>) {
+        match self {
+            Self::Screenshot(session, operation) => {
+                crate::annotation::screenshot::emit(ScreenshotEvent::Completed {
+                    session,
+                    operation,
+                    result,
+                })
+            }
+            Self::History(
+                lexift_core::domain::image_history::workflow::OutputKey::History {
+                    window,
+                    operation,
+                },
+                _,
+            ) => crate::bridge::image_history::emit(
+                lexift_core::domain::image_history::workflow::Event::Completed {
+                    window,
+                    operation,
+                    result,
+                },
+            ),
+            Self::History(
+                lexift_core::domain::image_history::workflow::OutputKey::Editor {
+                    window,
+                    editor,
+                    operation,
+                },
+                _,
+            ) => crate::bridge::image_history::emit(
+                lexift_core::domain::image_history::workflow::Event::EditorCompleted {
+                    window,
+                    editor,
+                    operation,
+                    result,
+                },
+            ),
+            _ => {}
+        }
+    }
+}
 struct Pin {
+    origin: Origin,
     window: Slot<PinnedScreenshotWindow>,
     image: Arc<CapturedRegion>,
     visible: lexift_core::domain::geometry::Rect,
@@ -903,9 +962,38 @@ pub(crate) fn show_document(
         lexift_core::domain::annotation_export::ExportRequest,
     )>,
 ) {
-    if !crate::annotation::screenshot::output_current(session, operation) {
+    show_from(Origin::Screenshot(session, operation), image, document);
+}
+pub(crate) fn show_history_document(
+    key: lexift_core::domain::image_history::workflow::OutputKey,
+    image: Arc<CapturedRegion>,
+    base: Arc<CapturedRegion>,
+    samples: Arc<lexift_core::ports::screen_capture::ScreenCaptureFrame>,
+    document: lexift_core::domain::annotation_export::ExportRequest,
+    hidden: bool,
+) {
+    show_from(
+        Origin::History(key, hidden),
+        image,
+        Some((base, samples, document)),
+    );
+}
+fn show_from(
+    origin: Origin,
+    image: Arc<CapturedRegion>,
+    document: Option<(
+        Arc<CapturedRegion>,
+        Arc<lexift_core::ports::screen_capture::ScreenCaptureFrame>,
+        lexift_core::domain::annotation_export::ExportRequest,
+    )>,
+) {
+    if !origin.current() {
         return;
     }
+    let (session, operation) = match origin {
+        Origin::Screenshot(s, o) => (s, o),
+        Origin::History(..) => (0, 0),
+    };
     let result = STATE.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut().ok_or(())?;
@@ -1010,6 +1098,7 @@ pub(crate) fn show_document(
         r.windows.insert(
             id,
             Pin {
+                origin,
                 window: owned,
                 visible: image.bounds,
                 image,
@@ -1035,17 +1124,23 @@ pub(crate) fn show_document(
         Ok(id)
     });
     if let (Ok(id), Some((base, samples, request))) = (&result, document) {
-        crate::annotation::pin_editor::install(*id, base, samples, request);
+        if matches!(
+            origin,
+            Origin::History(
+                lexift_core::domain::image_history::workflow::OutputKey::History { .. },
+                _
+            )
+        ) {
+            crate::annotation::pin_editor::install_history(*id, base, samples, request);
+        } else {
+            crate::annotation::pin_editor::install(*id, base, samples, request);
+        }
     }
     match result {
         Ok(id) => prepare(id, 0),
-        Err(()) => crate::annotation::screenshot::emit(ScreenshotEvent::Completed {
-            session,
-            operation,
-            result: Err(lexift_core::Error::new(crate::i18n::tr(
-                "Screenshot unavailable",
-            ))),
-        }),
+        Err(()) => origin.complete(Err(lexift_core::Error::new(crate::i18n::tr(
+            "Screenshot unavailable",
+        )))),
     }
 }
 /// ReleaseCapture may synchronously deliver Slint cancellation. Enter native dragging
@@ -1105,11 +1200,20 @@ fn prepare(id: u64, attempt: u8) {
             pin.gesture.clone(),
         ))
     });
-    let Some((window, prepare_window, lifecycle, session, operation, input, gesture)) = value
+    let Some((window, prepare_window, lifecycle, _session, _operation, input, gesture)) = value
     else {
         return;
     };
-    if !crate::annotation::screenshot::output_current(session, operation) {
+    let origin = STATE.with(|s| {
+        s.borrow()
+            .as_ref()
+            .and_then(|r| r.windows.get(&id))
+            .map(|p| p.origin)
+    });
+    let Some(origin) = origin else {
+        return;
+    };
+    if !origin.current() {
         close(id);
         return;
     }
@@ -1181,7 +1285,7 @@ fn prepare(id: u64, attempt: u8) {
             });
             let success = (lifecycle.prepare_pinned_image)(window.window())
                 && (lifecycle.complete_passive_window_show)(window.window(), sink)
-                && crate::annotation::screenshot::output_current(session, operation)
+                && origin.current()
                 && apply_policy(id)
                 && window.show().is_ok();
             if !success {
@@ -1195,9 +1299,16 @@ fn prepare(id: u64, attempt: u8) {
                 });
             }
             if success {
-                emit_pin(lexift_core::domain::pinned_image::Event::Opened {
-                    id,
-                    source: (session, operation),
+                emit_pin(match origin {
+                    Origin::Screenshot(session, operation) => {
+                        lexift_core::domain::pinned_image::Event::Opened {
+                            id,
+                            source: (session, operation),
+                        }
+                    }
+                    Origin::History(key, hidden) => {
+                        lexift_core::domain::pinned_image::Event::HistoryOpened { id, key, hidden }
+                    }
                 });
                 let document = STATE.with(|s| {
                     s.borrow()
@@ -1212,16 +1323,12 @@ fn prepare(id: u64, attempt: u8) {
                     });
                 }
             }
-            crate::annotation::screenshot::emit(ScreenshotEvent::Completed {
-                session,
-                operation,
-                result: if success {
-                    Ok(SaveOutcome::Saved)
-                } else {
-                    Err(lexift_core::Error::new(crate::i18n::tr(
-                        "Screenshot unavailable",
-                    )))
-                },
+            origin.complete(if success {
+                Ok(SaveOutcome::Saved)
+            } else {
+                Err(lexift_core::Error::new(crate::i18n::tr(
+                    "Screenshot unavailable",
+                )))
             });
         }
         PassiveWindowPreparation::Pending if attempt < 20 => STATE.with(|s| {
@@ -1232,13 +1339,9 @@ fn prepare(id: u64, attempt: u8) {
         }),
         _ => {
             close(id);
-            crate::annotation::screenshot::emit(ScreenshotEvent::Completed {
-                session,
-                operation,
-                result: Err(lexift_core::Error::new(crate::i18n::tr(
-                    "Screenshot unavailable",
-                ))),
-            });
+            origin.complete(Err(lexift_core::Error::new(crate::i18n::tr(
+                "Screenshot unavailable",
+            ))));
         }
     }
 }

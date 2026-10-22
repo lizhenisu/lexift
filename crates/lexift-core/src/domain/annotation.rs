@@ -1003,6 +1003,86 @@ pub struct Session {
 }
 
 impl Session {
+    /// Allocation charge for an undo-free image snapshot, including variable-size
+    /// object payloads. Call on `restored_image`, whose transaction buffers are empty.
+    pub fn image_snapshot_bytes(&self) -> u64 {
+        use std::mem::size_of;
+        fn erased_bytes(items: &Vec<super::annotation_erase::ErasedCoverage>) -> usize {
+            items.capacity() * size_of::<super::annotation_erase::ErasedCoverage>()
+                + items
+                    .iter()
+                    .map(|item| match &item.region {
+                        super::annotation_erase::EraseRegion::Brush { points, .. } => {
+                            points.capacity() * size_of::<(f32, f32)>()
+                        }
+                        _ => 0,
+                    })
+                    .sum::<usize>()
+        }
+        fn text_bytes(t: &TextAnnotation) -> usize {
+            t.content.capacity() + t.font_family.capacity()
+        }
+        (size_of::<Self>()
+            + self.objects.capacity() * size_of::<Object>()
+            + self.displays.capacity() * size_of::<Rect>()
+            + erased_bytes(&self.watermark_erased)
+            + erased_bytes(&self.spotlight_erased)
+            + self.watermark.as_ref().map_or(0, |w| {
+                w.content.capacity() + w.template.capacity() + w.font_family.capacity()
+            })
+            + self
+                .objects
+                .iter()
+                .map(|o| {
+                    o.points.capacity() * size_of::<(f32, f32)>()
+                        + erased_bytes(&o.erased)
+                        + match &o.extra {
+                            Extra::Text(t) => text_bytes(t),
+                            Extra::Sequence(s) => text_bytes(&s.caption),
+                            _ => 0,
+                        }
+                })
+                .sum::<usize>()) as u64
+    }
+    /// Start a new editable baseline from retained image content. Object identities,
+    /// image coordinates and effect anchors survive; transactions and old history do
+    /// not. Allocate future identities above every restored object, including objects
+    /// outside the confirmed crop.
+    pub fn restored_image(&self) -> Self {
+        let mut restored = Self {
+            image_crop: self.image_crop,
+            image_source: self.image_source,
+            next_sequence: self.next_sequence,
+            objects: self.objects.clone(),
+            spotlight_opacity: self.spotlight_opacity,
+            watermark: self.watermark.clone(),
+            watermark_erased: self.watermark_erased.clone(),
+            spotlight_erased: self.spotlight_erased.clone(),
+            displays: self.displays.clone(),
+            next_object_id: self.next_object_id,
+            edit_scope: EditScope::All,
+            ..Self::default()
+        };
+        // Export snapshots normally contain committed identities. Treat any draft
+        // defensively as a new object without retaining an undo step for insertion.
+        restored.next_object_id = restored
+            .objects
+            .iter()
+            .map(|o| o.id.0)
+            .max()
+            .unwrap_or(0)
+            .max(restored.next_object_id);
+        for object in &mut restored.objects {
+            if object.id == ObjectId::DRAFT {
+                restored.next_object_id = restored
+                    .next_object_id
+                    .checked_add(1)
+                    .expect("annotation object identity exhausted");
+                object.id = ObjectId(restored.next_object_id);
+            }
+        }
+        restored
+    }
     pub fn new() -> Self {
         Self {
             next_sequence: 1,
@@ -1590,6 +1670,44 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn restored_image_keeps_content_and_identity_but_starts_a_fresh_history() {
+        let mut source = Session::new();
+        source.add(text_object());
+        source.add(text_object());
+        source.undo();
+        let image = Rect {
+            left: -200,
+            top: -100,
+            right: 300,
+            bottom: 600,
+        };
+        let crop = Rect {
+            left: -150,
+            top: 0,
+            right: 200,
+            bottom: 400,
+        };
+        source.image_source = Some(image);
+        source.displays = vec![image];
+        assert!(source.set_image_crop(crop, image));
+        source.begin_drag();
+        let mut restored = source.restored_image();
+        assert_eq!(restored.objects, source.objects);
+        assert_eq!(restored.image_crop, Some(crop));
+        assert_eq!(restored.image_source, Some(image));
+        assert_eq!(restored.displays, source.displays);
+        assert_eq!(restored.selected, None);
+        assert!(!restored.can_undo());
+        assert!(!restored.can_redo());
+        assert!(restored.drag_before.is_none());
+        restored.add(text_object());
+        assert!(restored.objects.last().unwrap().id.0 > source.next_object_id);
+        assert!(restored.undo());
+        assert_eq!(restored.objects, source.objects);
+        assert_eq!(restored.image_crop, Some(crop));
+        assert!(source.can_undo());
+    }
     #[test]
     fn frozen_visible_drafts_receive_identity_and_preserve_independent_undo() {
         let mut source = Session::new();

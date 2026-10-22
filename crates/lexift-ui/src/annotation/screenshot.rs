@@ -22,7 +22,7 @@ pub(super) mod handoff;
 pub(super) mod keyboard;
 #[path = "screenshot_long.rs"]
 pub(crate) mod long;
-#[path = "screenshot_long_editor.rs"]
+#[path = "image_editor.rs"]
 pub(in crate::annotation) mod long_editor;
 #[path = "screenshot_size_input.rs"]
 pub(super) mod size_input;
@@ -189,6 +189,17 @@ pub(crate) fn suspend(id: u64) {
         });
     }
 }
+pub(crate) fn retired_history_foreground(
+    old: lexift_core::ports::magnifier::WindowToken,
+    now: Option<lexift_core::ports::magnifier::WindowToken>,
+) {
+    FLOW.with(|flow| {
+        let mut flow = flow.borrow_mut();
+        if flow.state.phase == ScreenshotPhase::Preparing && flow.activation == Some(Some(old)) {
+            flow.activation = Some(now);
+        }
+    });
+}
 pub(crate) fn suspended_pointer(
     id: u64,
 ) -> lexift_core::Result<Option<lexift_core::domain::geometry::Point>> {
@@ -314,6 +325,10 @@ pub(crate) fn show(
     selection_host::show_screenshot_with_candidates(id, frames, origin, windows, reusable);
 }
 pub(crate) fn cancel() {
+    if history_editor::active() {
+        history_editor::close();
+        return;
+    }
     let id = FLOW.with(|s| s.borrow().state.session);
     emit(ScreenshotEvent::Cancelled { session: id });
 }
@@ -432,6 +447,10 @@ pub(super) fn recognize_text() {
     }
 }
 pub(super) fn output(kind: ScreenshotOutput) {
+    if history_editor::active() {
+        history_editor::output(kind);
+        return;
+    }
     if image_crop::active() {
         return;
     }
