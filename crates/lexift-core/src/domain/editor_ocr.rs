@@ -16,6 +16,7 @@ pub struct Request {
     pub id: u64,
     pub owner: Owner,
     pub revision: u64,
+    pub orientation: super::image_transform::Orientation,
     pub source: Rect,
     pub bounds: Rect,
 }
@@ -32,6 +33,7 @@ pub enum Event {
         token: u64,
         owner: Owner,
         revision: u64,
+        orientation: super::image_transform::Orientation,
         source: Rect,
         bounds: Rect,
     },
@@ -76,6 +78,7 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
             token,
             owner,
             revision,
+            orientation,
             source,
             bounds,
         } => {
@@ -115,6 +118,7 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
                 id: state.editor_ocr.next,
                 owner,
                 revision,
+                orientation,
                 source,
                 bounds,
             };
@@ -214,6 +218,7 @@ mod tests {
             token: s.editor_ocr.next + 1,
             owner,
             revision: 91,
+            orientation: Default::default(),
             source,
             bounds: Rect {
                 left: -90,

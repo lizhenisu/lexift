@@ -555,6 +555,7 @@ fn creation_captures_displayed_settings_before_deselecting_all_tools() {
                 r.document.selected[group] = tool;
                 r.set_mode(InteractionMode::Tool(group));
                 let object = Object {
+                    image_basis: Default::default(),
                     erased: Vec::new(),
                     id: Default::default(),
                     kind,
@@ -684,6 +685,7 @@ fn software_capture_excludes_annotation_ui_and_reissues_for_replaced_canvas() {
             .watermark
             .open(AnnotationWatermarkInput::new().unwrap());
         r.document.session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicArea,
@@ -963,6 +965,7 @@ fn native_completion_hands_off_canvas_and_failure_restores_software_pixels() {
             },
         ));
         r.document.session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Rectangle,
@@ -1056,6 +1059,7 @@ fn native_completion_hands_off_canvas_and_failure_restores_software_pixels() {
         r.render_state.mosaic.stage(
             &mut r.document.session,
             Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::MosaicArea,
@@ -1071,6 +1075,7 @@ fn native_completion_hands_off_canvas_and_failure_restores_software_pixels() {
             },
         );
         r.document.session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Magnifier,
@@ -1267,6 +1272,7 @@ fn mosaic_refresh_submits_only_changed_canvas_pixels_and_retries_failure() {
             render_initial_canvas(r, index);
         }
         r.document.session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicArea,
@@ -1413,6 +1419,7 @@ fn mosaic_refresh_submits_only_changed_canvas_pixels_and_retries_failure() {
 #[test]
 fn magnifier_frame_draft_never_creates_a_native_view() {
     let object = Object {
+        image_basis: Default::default(),
         erased: Vec::new(),
         id: Default::default(),
         bounds: Bounds::from_corners((120., 80.), (220., 160.)),
@@ -1433,6 +1440,7 @@ fn magnifier_frame_draft_never_creates_a_native_view() {
     assert!(session.add(object.clone()));
     let output = Bounds::from_corners((260., 80.), (410., 200.));
     let draft = Object {
+        image_basis: Default::default(),
         erased: Vec::new(),
         id: Default::default(),
         bounds: output,

@@ -46,6 +46,7 @@ impl Polyline {
     pub fn new(point: (f32, f32), style: Style, values: &AnnotationValues) -> Self {
         Self {
             object: Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 bounds: Bounds::from_corners(point, point),
@@ -487,6 +488,7 @@ pub(super) fn update_draft(
         };
         let object = draft.get_or_insert_with(|| {
             let mut object = Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 bounds: Bounds::from_corners(start, start),
@@ -503,6 +505,7 @@ pub(super) fn update_draft(
         object.append_point(point, 0.5 * scale);
     } else if kind == Kind::Pencil {
         let object = draft.get_or_insert_with(|| Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners(start, start),
@@ -547,6 +550,7 @@ pub(super) fn update_draft(
             draft_style.rounding = 0.;
         }
         *draft = Some(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             bounds,
@@ -565,6 +569,7 @@ pub(super) fn arrow_draft(
     values: &AnnotationValues,
 ) -> Object {
     Object {
+        image_basis: Default::default(),
         erased: Vec::new(),
         id: Default::default(),
         bounds: Bounds::from_corners(start, end),
@@ -620,6 +625,7 @@ fn display_polyline(
         bounds.bottom = bounds.bottom.max(point.1);
     }
     *draft = Some(Object {
+        image_basis: Default::default(),
         erased: Vec::new(),
         id: polyline.id,
         kind: polyline.kind,
@@ -659,6 +665,7 @@ mod tests {
     ) {
         let extra = mosaic::settings(values, scale);
         let object = draft.get_or_insert_with(|| Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
@@ -814,6 +821,7 @@ mod tests {
             let mut preview = None;
             pending.pointer_moved(&mut preview, (count as f32, 20.), 1.25, None);
             let base = Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::MosaicBrush,

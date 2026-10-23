@@ -321,6 +321,7 @@ mod rectangle_edit_tests {
     fn document() -> Session {
         let mut s = Session::new();
         s.add(Object {
+            image_basis: Default::default(),
             id: ObjectId::DRAFT,
             kind: Kind::Rectangle,
             bounds: Bounds::from_corners((-100., -100.), (200., 200.)),

@@ -44,7 +44,11 @@ pub(super) fn busy() -> bool {
     VIEW.with(|s| s.borrow().as_ref().is_some_and(|v| v.busy))
 }
 pub(super) fn request() {
-    if busy() || image_crop::active() || screenshot::long_editor::outputting() {
+    if image_transform::busy()
+        || busy()
+        || image_crop::active()
+        || screenshot::long_editor::outputting()
+    {
         return;
     }
     let Some(owner) = owner() else {
@@ -95,6 +99,7 @@ pub(super) fn request() {
             token,
             owner,
             revision,
+            orientation: r.document.session.image_orientation,
             source,
             bounds,
         })
@@ -105,11 +110,15 @@ pub(super) fn request() {
 }
 fn apply(r: &mut Registry) {
     if let Some(w) = screenshot::long::editor() {
-        w.set_image_output_busy(busy() || screenshot::long_editor::outputting());
+        w.set_image_output_busy(
+            busy() || image_transform::busy() || screenshot::long_editor::outputting(),
+        );
     }
     if let Some(main) = r.toolbar_state.main.get() {
         main.set_recognition_busy(busy());
-        main.set_output_busy(busy() || screenshot::long_editor::outputting());
+        main.set_output_busy(
+            busy() || image_transform::busy() || screenshot::long_editor::outputting(),
+        );
     }
     r.queue_render();
 }

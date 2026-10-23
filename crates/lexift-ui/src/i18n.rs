@@ -1525,6 +1525,7 @@ mod tests {
         canvas.on_pointer(move |kind, _, _| recorded.borrow_mut().push(kind));
         let mut document = lexift_core::domain::annotation::Session::new();
         document.add(lexift_core::domain::annotation::Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             points: Vec::new(),

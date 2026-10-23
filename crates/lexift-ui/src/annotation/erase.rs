@@ -225,6 +225,7 @@ mod tests {
     };
     pub(super) fn object(kind: Kind, scale: f32) -> Object {
         Object {
+            image_basis: Default::default(),
             id: ObjectId::DRAFT,
             erased: Vec::new(),
             kind,
@@ -594,6 +595,7 @@ mod rectangle_edit_tests {
     fn document() -> Session {
         let mut s = Session::new();
         s.add(Object {
+            image_basis: Default::default(),
             id: ObjectId::DRAFT,
             kind: Kind::Rectangle,
             bounds: Bounds::from_corners((-120., -90.), (120., 90.)),

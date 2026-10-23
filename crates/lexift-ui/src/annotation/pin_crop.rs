@@ -19,6 +19,8 @@ struct Edit {
     window: slint::Weak<crate::PinnedScreenshotWindow>,
     source: Rect,
     before: Rect,
+    original_before: Rect,
+    orientation: lexift_core::domain::image_transform::Orientation,
     position: slint::PhysicalPosition,
     size: slint::PhysicalSize,
     zoom: f32,
@@ -48,6 +50,8 @@ fn saved(r: &Registry) -> Option<Edit> {
         window: w.as_weak(),
         source,
         before,
+        original_before: r.document.session.image_crop.unwrap_or(source),
+        orientation: r.document.session.image_orientation,
         position: w.window().position(),
         size: w.window().size(),
         zoom: (display.right - display.left) as f32 / (before.right - before.left) as f32,
@@ -171,7 +175,13 @@ pub(super) fn preview_ready(r: &Registry, id: u64) -> bool {
     let failed = EDIT.with(|s| {
         if let Some(e) = s.borrow_mut().as_mut().filter(|e| e.id == id && e.entering) {
             if let Some(w) = e.window.upgrade() {
-                if !geometry_with(r, e, &w, e.source, true) {
+                if !geometry_with(
+                    r,
+                    e,
+                    &w,
+                    e.orientation.rect(e.source, e.source).unwrap_or(e.source),
+                    true,
+                ) {
                     return Some((e.id, e.edit));
                 }
                 w.set_cropping(true);
@@ -229,6 +239,10 @@ pub(super) fn pointer(id: u64, event: i32, x: f32, y: f32) -> bool {
                 + f64::from(y * w.window().scale_factor()) * f64::from(b.bottom - b.top)
                     / f64::from(d.bottom - d.top),
         ];
+        let p = e.orientation.inverse().point(
+            p,
+            e.orientation.rect(e.source, e.source).unwrap_or(e.source),
+        );
         match event {
             0 => c.begin(p, 6. / z),
             1 => c.update(p),
@@ -265,13 +279,14 @@ fn feedback(_r: &Registry) {
         if let Some(e) = s.borrow().as_ref()
             && let (Some(w), Some(c)) = (e.window.upgrade(), e.draft.as_ref())
         {
-            let b = c.bounds;
-            w.set_crop_left((b.left - e.source.left) as f32);
-            w.set_crop_top((b.top - e.source.top) as f32);
-            w.set_crop_right((b.right - e.source.left) as f32);
-            w.set_crop_bottom((b.bottom - e.source.top) as f32);
-            w.set_crop_source_width((e.source.right - e.source.left) as f32);
-            w.set_crop_source_height((e.source.bottom - e.source.top) as f32);
+            let b = e.orientation.rect(c.bounds, e.source).unwrap_or(c.bounds);
+            let full = e.orientation.rect(e.source, e.source).unwrap_or(e.source);
+            w.set_crop_left((b.left - full.left) as f32);
+            w.set_crop_top((b.top - full.top) as f32);
+            w.set_crop_right((b.right - full.left) as f32);
+            w.set_crop_bottom((b.bottom - full.top) as f32);
+            w.set_crop_source_width((full.right - full.left) as f32);
+            w.set_crop_source_height((full.bottom - full.top) as f32);
         }
     });
 }
@@ -367,7 +382,7 @@ pub(super) fn cancel(r: &mut Registry) -> bool {
         w.set_decoration(slint::Image::default());
         crate::pinned_screenshot::set_edit_interaction(e.id, !r.document.mode.is_mouse());
     }
-    source(r, e.before);
+    source(r, e.original_before);
     toolbar(r);
     r.queue_render();
     true
@@ -434,7 +449,12 @@ pub(super) fn present(id: u64, revision: u64, image: Arc<CapturedRegion>) -> boo
         let Some(p) = e.pending.take() else {
             return false;
         };
-        if pin_editor::current() != Some((id, e.edit)) || p.request.snapshot.monitor != image.bounds
+        if pin_editor::current() != Some((id, e.edit))
+            || p.session
+                .image_orientation
+                .rect(p.request.snapshot.monitor, e.source)
+                .ok()
+                != Some(image.bounds)
         {
             e.pending = Some(p);
             EDIT.with(|s| *s.borrow_mut() = Some(e));
@@ -455,8 +475,9 @@ pub(super) fn present(id: u64, revision: u64, image: Arc<CapturedRegion>) -> boo
             let _guard = r.pause_native_pointer_inputs();
             crate::pinned_screenshot::set_edit_interaction(id, !r.document.mode.is_mouse());
         }
+        let original = p.request.snapshot.monitor;
         r.document.session = p.session;
-        source(r, image.bounds);
+        source(r, original);
         toolbar(r);
         restore_parameter_projection(r);
         cursor::refresh(r);

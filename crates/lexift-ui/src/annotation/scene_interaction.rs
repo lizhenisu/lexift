@@ -51,6 +51,7 @@ mod tests {
                 linked_arrow_control: None,
             };
             let object = Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: ObjectId::DRAFT,
                 kind: Kind::Text,
@@ -171,6 +172,7 @@ mod tests {
                 linked_arrow_control: None,
             };
             let object = Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: ObjectId::DRAFT,
                 kind: Kind::Text,
@@ -335,6 +337,7 @@ mod tests {
                 linked_arrow_control: None,
             };
             let mut object = Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: ObjectId::DRAFT,
                 kind: Kind::Text,
@@ -436,6 +439,14 @@ mod tests {
 
 impl EditorOverlay {
     pub fn draw(&self, frame: &mut tiny_skia::Pixmap, viewport: Rect, scale: f32) {
+        if self.object.image_basis != Default::default() {
+            let mut local = self.clone();
+            local.object.image_basis = Default::default();
+            annotation_render::glyph_layer(frame, &self.object, viewport, |frame, view| {
+                local.draw(frame, view, scale)
+            });
+            return;
+        }
         let mut bounds = self.object.bounds;
         include_text(&mut bounds, &self.object);
         let padding = 18. * scale + 2.;

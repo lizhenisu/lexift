@@ -100,6 +100,7 @@ mod tests {
             pixels: Arc::from([0u8; 16]),
         };
         let object = Arc::new(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: ObjectId::DRAFT,
             kind: Kind::MosaicArea,

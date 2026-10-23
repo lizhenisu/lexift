@@ -5,7 +5,7 @@ use crate::{AnnotationChoiceWindow, ScreenshotCountdownWindow};
 type Ready = Box<dyn FnOnce(lexift_core::Result<std::time::Instant>) + Send>;
 #[derive(Default)]
 struct Views {
-    import_menu: bool,
+    menu_kind: u8,
     sequence: u64,
     menu: Option<AnnotationChoiceWindow>,
     countdown: Option<ScreenshotCountdownWindow>,
@@ -41,7 +41,8 @@ pub(crate) fn sync(state: &ScreenshotState) {
                     ScreenshotPhase::CountingDown | ScreenshotPhase::Preparing
                 ))
     });
-    let menu_stale = VIEWS.with(|s| s.borrow().menu.is_some()) && state.active();
+    let menu_stale =
+        VIEWS.with(|s| s.borrow().menu.is_some() && s.borrow().menu_kind != 2) && state.active();
     if stale || menu_stale {
         clear();
     }
@@ -70,9 +71,15 @@ fn choose(sequence: u64, index: Option<i32>) {
         if !VIEWS.with(|s| s.borrow().sequence == sequence && s.borrow().menu.is_some()) {
             return;
         }
-        let import_menu = VIEWS.with(|s| s.borrow().import_menu);
+        let kind = VIEWS.with(|s| s.borrow().menu_kind);
         clear();
-        if import_menu {
+        if kind == 2 {
+            if let Some(index) = index {
+                super::super::image_transform::apply(index);
+            }
+            return;
+        }
+        if kind == 1 {
             if let Some(target) = index.and_then(|i| {
                 [
                     lexift_core::domain::image_import::Target::FileEditor,
@@ -91,13 +98,20 @@ fn choose(sequence: u64, index: Option<i32>) {
     });
 }
 pub(crate) fn menu() {
-    menu_kind(false);
+    menu_kind(0);
 }
 pub(crate) fn import_menu() {
-    menu_kind(true);
+    menu_kind(1);
 }
-fn menu_kind(import_menu: bool) {
-    if !(if import_menu {
+pub(in crate::annotation) fn transform_menu() {
+    menu_kind(2);
+}
+fn menu_kind(kind: u8) {
+    if kind == 2 {
+        if !super::super::image_transform::available() {
+            return;
+        }
+    } else if !(if kind == 1 {
         super::super::image_import::available()
     } else {
         available()
@@ -115,7 +129,14 @@ fn menu_kind(import_menu: bool) {
         return;
     };
     crate::theme::apply(&w);
-    let labels: &[&str] = if import_menu {
+    let labels: &[&str] = if kind == 2 {
+        &[
+            "Rotate left 90°",
+            "Rotate right 90°",
+            "Flip horizontally",
+            "Flip vertically",
+        ]
+    } else if kind == 1 {
         &["Open image", "Pin image from clipboard"]
     } else {
         &[
@@ -143,7 +164,7 @@ fn menu_kind(import_menu: bool) {
     let seq = VIEWS.with(|s| {
         let mut s = s.borrow_mut();
         s.sequence += 1;
-        s.import_menu = import_menu;
+        s.menu_kind = kind;
         s.menu = Some(w.clone_strong());
         s.sequence
     });

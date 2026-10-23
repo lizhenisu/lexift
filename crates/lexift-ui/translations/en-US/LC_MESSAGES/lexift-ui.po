@@ -1945,3 +1945,19 @@ msgstr "Could not open image"
 
 msgid "Finish the current editing or operation first"
 msgstr "Finish the current editing or operation first"
+
+
+msgid "Rotate or flip image"
+msgstr "Rotate or flip image"
+
+msgid "Rotate left 90°"
+msgstr "Rotate left 90°"
+
+msgid "Rotate right 90°"
+msgstr "Rotate right 90°"
+
+msgid "Flip horizontally"
+msgstr "Flip horizontally"
+
+msgid "Flip vertically"
+msgstr "Flip vertically"

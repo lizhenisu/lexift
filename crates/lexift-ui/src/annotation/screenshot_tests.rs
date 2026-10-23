@@ -93,6 +93,7 @@ fn rendered_label(r: &Registry) -> crate::screen_interaction::size_label::Feedba
 }
 pub(super) fn object(bounds: Bounds) -> Object {
     Object {
+        image_basis: Default::default(),
         id: ObjectId::DRAFT,
         kind: Kind::Rectangle,
         bounds,

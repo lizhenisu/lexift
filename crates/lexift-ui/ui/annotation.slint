@@ -72,7 +72,7 @@ export component ToolButton inherits Rectangle {
     if (root.kind >= 19 || root.text-style != 0 || root.mosaic-style != 0): Image {
         x: 7px; y: 7px; width: 24px; height: 24px;
         transform-rotation:root.busy ? root.busy-turn : 0deg;
-        source: root.busy ? AppAssets.icon-refresh : root.kind == 31 ? @image-url("assets/icons/open-image.svg") : root.kind == 30 ? @image-url("assets/icons/image-history.svg") : root.kind == 29 ? @image-url("assets/icons/crop.svg") : root.kind == 28 ? @image-url("assets/icons/redo.svg") : root.kind == 27 ? @image-url("assets/icons/long-screenshot.svg") : root.kind == 22 ? @image-url("assets/icons/screenshot.svg")
+        source: root.busy ? AppAssets.icon-refresh : root.kind == 32 ? @image-url("assets/icons/image-transform.svg") : root.kind == 31 ? @image-url("assets/icons/open-image.svg") : root.kind == 30 ? @image-url("assets/icons/image-history.svg") : root.kind == 29 ? @image-url("assets/icons/crop.svg") : root.kind == 28 ? @image-url("assets/icons/redo.svg") : root.kind == 27 ? @image-url("assets/icons/long-screenshot.svg") : root.kind == 22 ? @image-url("assets/icons/screenshot.svg")
             : root.kind == 23 ? @image-url("assets/icons/copy.svg")
             : root.kind == 24 ? @image-url("assets/icons/pin-screenshot.svg")
             : root.kind == 26 ? @image-url("assets/icons/recognize-text.svg")
@@ -105,9 +105,10 @@ export component AnnotationToolbar inherits Window {
     in property <string> crop-dimensions;
     callback crop-action(bool);
     callback crop-requested();
+    callback transform-requested();
     in property <string> feedback;
     private property <int> action-count: root.screenshot-mode && !root.pin-edit-mode ? 9 : 6;
-    out property <length> toolbar-width: root.collapsed ? 80px : 34px + 38px + 7 * 38px + 5 * 18px + 1px + root.action-count * 38px + (9 + root.action-count) * 7px + 51px + (!root.screenshot-mode ? 99px : 0px) + (root.pin-edit-mode ? 45px : 0px) + (root.pin-edit-mode && root.image-cropping ? 230px : 0px);
+    out property <length> toolbar-width: root.collapsed ? 80px : 34px + 38px + 7 * 38px + 5 * 18px + 1px + (root.action-count + (root.image-edit-mode ? 1 : 0)) * 38px + (9 + root.action-count + (root.image-edit-mode ? 1 : 0)) * 7px + 51px + (!root.screenshot-mode ? 99px : 0px) + (root.pin-edit-mode ? 45px : 0px) + (root.pin-edit-mode && root.image-cropping ? 230px : 0px);
     in property <bool> import-available:true;
     callback image-open-requested();
     callback image-import-menu();
@@ -223,6 +224,7 @@ export component AnnotationToolbar inherits Window {
                 ToolButton { kind: 15; label: @tr("Save image"); enabled: root.can-download && !root.output-busy && !root.image-cropping; clicked => { root.download-requested(); } }
             if root.screenshot-mode: ToolButton { kind:23; label:@tr("Copy screenshot"); enabled:!root.output-busy && !root.image-cropping; clicked => { root.copy-screenshot-requested(); } }
             if root.screenshot-mode && !root.pin-edit-mode: ToolButton { kind:26; busy:root.output-busy; label:root.recognition-busy ? @tr("Recognizing text…") : root.output-busy ? @tr("Processing screenshot") : @tr("Recognize text"); enabled:root.recognize-text-available && !root.output-busy && !root.image-cropping; clicked => { root.recognize-text-requested(); } }
+            if root.image-edit-mode: ToolButton { kind:32; label:@tr("Rotate or flip image"); enabled:!root.output-busy && !root.image-cropping; clicked=>{root.transform-requested();} }
             if root.image-edit-mode || root.pin-edit-mode: ToolButton { kind:29; label:@tr("Crop image"); selected:root.image-cropping; enabled:!root.output-busy; clicked=>{root.crop-requested();} }
             if root.screenshot-mode && !root.pin-edit-mode && !root.image-edit-mode: ToolButton { kind:27; label:@tr("Long screenshot"); enabled:root.long-capture-available && !root.output-busy && !root.image-edit-mode; clicked => { root.long-capture-requested(); } }
             if root.screenshot-mode && !root.pin-edit-mode: ToolButton { kind:24; label:@tr("Pin screenshot"); enabled:!root.output-busy && !root.image-cropping; clicked => { root.pin-screenshot-requested(); } }

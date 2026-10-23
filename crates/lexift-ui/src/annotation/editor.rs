@@ -77,6 +77,7 @@ impl ClosedEdit {
                 bounds,
             },
             None => EditChange::New(Box::new(Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 bounds,
@@ -527,13 +528,18 @@ pub(super) fn place(
 ) {
     let viewport = viewport(bounds, displays);
     let map_bounds = |b: Bounds| {
-        let a = super::pin_editor::view_point((b.left, b.top), false);
-        let z = super::pin_editor::view_point((b.right, b.bottom), false);
+        let p = [
+            (b.left, b.top),
+            (b.right, b.top),
+            (b.left, b.bottom),
+            (b.right, b.bottom),
+        ]
+        .map(|p| super::pin_editor::view_point(p, false));
         Bounds {
-            left: a.0,
-            top: a.1,
-            right: z.0,
-            bottom: z.1,
+            left: p.iter().map(|p| p.0).fold(f32::INFINITY, f32::min),
+            top: p.iter().map(|p| p.1).fold(f32::INFINITY, f32::min),
+            right: p.iter().map(|p| p.0).fold(f32::NEG_INFINITY, f32::max),
+            bottom: p.iter().map(|p| p.1).fold(f32::NEG_INFINITY, f32::max),
         }
     };
     let viewport = super::screenshot::long_editor::clip_text(map_bounds(viewport));
@@ -808,6 +814,7 @@ mod tests {
                         object.clone()
                     } else {
                         Object {
+                            image_basis: Default::default(),
                             erased: Vec::new(),
                             id: Default::default(),
                             kind: Kind::Text,

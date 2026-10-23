@@ -110,12 +110,25 @@ pub(super) fn sync(r: &Registry, fit: bool) {
     } else {
         r.document.session.image_crop.unwrap_or(full)
     };
+    image_navigation::orient(&w, full, r.document.session.image_orientation);
+    let oriented_visible = r
+        .document
+        .session
+        .image_orientation
+        .rect(visible, full)
+        .unwrap_or(visible);
     w.set_image_cropping(draft.is_some());
-    w.set_content_left(visible.left as f32);
-    w.set_content_top(visible.top as f32);
-    w.set_content_right(visible.right as f32);
-    w.set_content_bottom(visible.bottom as f32);
+    w.set_content_left(oriented_visible.left as f32);
+    w.set_content_top(oriented_visible.top as f32);
+    w.set_content_right(oriented_visible.right as f32);
+    w.set_content_bottom(oriented_visible.bottom as f32);
     let b = draft.unwrap_or(visible);
+    let b = r
+        .document
+        .session
+        .image_orientation
+        .rect(b, full)
+        .unwrap_or(b);
     w.set_crop_left(b.left as f32);
     w.set_crop_top(b.top as f32);
     w.set_crop_right(b.right as f32);

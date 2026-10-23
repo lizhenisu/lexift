@@ -369,6 +369,15 @@ pub(crate) fn toggle(requested_at: Instant) {
         let input = r.toolbar_state.main.input();
         main.on_crop_requested(move || later_main(&input, generation, revision, image_crop::begin));
         let input = r.toolbar_state.main.input();
+        main.on_transform_requested(move || {
+            later_main(
+                &input,
+                generation,
+                revision,
+                screenshot::delay::transform_menu,
+            )
+        });
+        let input = r.toolbar_state.main.input();
         main.on_crop_action(move |apply| {
             later_main(&input, generation, revision, move || {
                 image_crop::finish(apply)

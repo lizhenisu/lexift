@@ -764,6 +764,18 @@ fn history(forward: bool) {
             finish_text_edit_registry(r, true);
         }
         r.finish_style_edit();
+        if screenshot::long::image_editing() {
+            let mut candidate = r.document.session.clone();
+            let changed = if forward {
+                candidate.redo()
+            } else {
+                candidate.undo()
+            };
+            if changed && candidate.image_orientation != r.document.session.image_orientation {
+                image_transform::submit(r, candidate);
+                return None;
+            }
+        }
         if pin_editor::active() {
             let mut candidate = r.document.session.clone();
             let changed = if forward {
@@ -771,12 +783,16 @@ fn history(forward: bool) {
             } else {
                 candidate.undo()
             };
-            if changed && candidate.image_crop != r.document.session.image_crop {
+            if changed
+                && (candidate.image_crop != r.document.session.image_crop
+                    || candidate.image_orientation != r.document.session.image_orientation)
+            {
                 pin_crop::history(r, candidate);
                 return None;
             }
         }
         let previous_crop = r.document.session.image_crop;
+        let previous_orientation = r.document.session.image_orientation;
         let erased = eraser::has_coverage(&r.document.session);
         let changed = if forward {
             r.document.session.redo()
@@ -798,7 +814,9 @@ fn history(forward: bool) {
                 layer.signature = None;
             }
         }
-        if previous_crop != r.document.session.image_crop {
+        if previous_crop != r.document.session.image_crop
+            || previous_orientation != r.document.session.image_orientation
+        {
             image_crop::sync(r, true);
         }
         restore_parameter_projection(r);

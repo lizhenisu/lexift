@@ -2,6 +2,7 @@ use super::*;
 
 fn object(kind: Kind) -> Object {
     Object {
+        image_basis: Default::default(),
         id: ObjectId::DRAFT,
         kind,
         bounds: Bounds::from_corners((-100., 10.), (100., 100.)),

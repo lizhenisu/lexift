@@ -252,6 +252,7 @@ mod tests {
         };
         for ellipse in [false, true] {
             let object = Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Magnifier,

@@ -512,6 +512,7 @@ mod tests {
         let mut request = (*scene(4, 1)).clone();
         request.layers = vec![RenderLayer::Mosaic(MosaicLayer {
             object: Arc::new(Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::MosaicArea,

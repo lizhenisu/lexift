@@ -1945,3 +1945,19 @@ msgstr "画像を開けませんでした"
 
 msgid "Finish the current editing or operation first"
 msgstr "現在の編集または操作を先に終了してください"
+
+
+msgid "Rotate or flip image"
+msgstr "画像の回転・反転"
+
+msgid "Rotate left 90°"
+msgstr "左に90°回転"
+
+msgid "Rotate right 90°"
+msgstr "右に90°回転"
+
+msgid "Flip horizontally"
+msgstr "左右反転"
+
+msgid "Flip vertically"
+msgstr "上下反転"

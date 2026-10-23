@@ -333,6 +333,7 @@ mod tests {
                 }),
                 RenderLayer::Mosaic(MosaicLayer {
                     object: Arc::new(Object {
+                        image_basis: Default::default(),
                         erased: Vec::new(),
                         id: Default::default(),
                         kind: Kind::MosaicArea,

@@ -1043,6 +1043,7 @@ mod tests {
             regions: vec![source],
         };
         let object = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
@@ -1090,6 +1091,7 @@ mod tests {
         for effect in [MosaicEffect::Pixelate, MosaicEffect::Blur] {
             for scale in [1., 1.25] {
                 let object = Object {
+                    image_basis: Default::default(),
                     erased: Vec::new(),
                     id: Default::default(),
                     kind: Kind::MosaicArea,
@@ -1159,6 +1161,7 @@ mod tests {
             }],
         };
         let mut object = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
@@ -1226,6 +1229,7 @@ mod tests {
         white.set_color_rgba8(255, 255, 255, 255);
         for scale in [1., 1.25] {
             let mut object = Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::MosaicBrush,
@@ -1307,6 +1311,7 @@ mod tests {
             bottom: 6,
         };
         let object = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
@@ -1349,6 +1354,7 @@ mod tests {
         let mut paint = Paint::default();
         paint.set_color_rgba8(255, 255, 255, 255);
         let mut object = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
@@ -1448,6 +1454,7 @@ mod tests {
         let settings = MosaicAnnotation::new(MosaicEffect::Blur, 100, 12., 1.25);
         let padding = settings.sample_padding();
         let mut object = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicArea,

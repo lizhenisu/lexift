@@ -2136,6 +2136,7 @@ fn text_handle_activation_preserves_parameters_and_separates_undo() {
                 r.sync_edit_scope();
                 let text = text_from_values(r, "文字".into());
                 assert!(r.document.session.add(Object {
+                    image_basis: Default::default(),
                     erased: Vec::new(),
                     id: ObjectId::DRAFT,
                     kind: Kind::Text,
@@ -2667,6 +2668,7 @@ fn text_editor_target_survives_index_changes_and_does_not_resurrect_deleted_obje
                     } else {
                         let text = text_from_values(r, format!("Text {i}"));
                         Object {
+                            image_basis: Default::default(),
                             erased: Vec::new(),
                             id: Default::default(),
                             kind: Kind::Text,

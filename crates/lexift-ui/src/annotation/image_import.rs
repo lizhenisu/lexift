@@ -139,6 +139,7 @@ mod tests {
             let r = s.as_mut().unwrap();
             r.document.mode = InteractionMode::Tool(0);
             r.document.session.add(Object {
+                image_basis: Default::default(),
                 id: Default::default(),
                 kind: Kind::Rectangle,
                 bounds: Bounds::from_corners((1., 2.), (10., 20.)),

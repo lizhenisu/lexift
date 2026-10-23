@@ -114,6 +114,7 @@ mod tests {
             ..Default::default()
         };
         let mut object = Object {
+            image_basis: Default::default(),
             id: Default::default(),
             erased: vec![],
             kind,
@@ -291,6 +292,7 @@ mod tests {
         let mut session = Session::new();
         session.add(sticker(Kind::StickerArea, 1., 0));
         let mut lens = Object {
+            image_basis: Default::default(),
             id: Default::default(),
             erased: vec![],
             kind: Kind::Magnifier,

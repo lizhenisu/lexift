@@ -66,6 +66,9 @@ fn input(r: &Registry, index: usize) -> Option<screenshot_preview::Input> {
     if let Some((id, _)) = editing.pin {
         pin_editor::source_metadata(id, &mut snapshot);
     }
+    if let Some(candidate) = image_transform::preview(r) {
+        snapshot.session = Arc::new(candidate);
+    }
     let session = Arc::get_mut(&mut snapshot.session)?;
     session.set_edit_scope(EditScope::All);
     session.selected = r.document.session.selected;
@@ -132,6 +135,7 @@ pub(super) fn render(r: &mut Registry) {
         }
     }
     editing.revision = editing.revision.wrapping_add(1);
+    image_transform::track(r.generation, editing.revision);
     editing
         .preview
         .as_ref()
@@ -182,7 +186,13 @@ pub(super) fn present(
         {
             return;
         }
+        if !image_transform::current(generation, revision) {
+            return;
+        }
         let Some(frames) = frames else {
+            if image_transform::failed(r) {
+                return;
+            }
             failed = true;
             return;
         };
@@ -216,6 +226,7 @@ pub(super) fn present(
                     };
                     window.set_frame(as_image(base));
                     window.set_controls(as_image(controls));
+                    image_transform::ready(r, revision);
                     if let Some(canvas) = r.canvas_state.canvases.first() {
                         let canvas_revision = canvas.revision();
                         slint::Timer::single_shot(std::time::Duration::ZERO, move || {

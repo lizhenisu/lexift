@@ -33,6 +33,7 @@ impl Geometry {
     /// do not change the white mask; exhaustive patterns keep new fields visible.
     pub fn matches(&self, source: &Object) -> bool {
         let Object {
+            image_basis: _,
             erased,
             id,
             kind,

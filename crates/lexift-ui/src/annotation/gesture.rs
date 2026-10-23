@@ -481,6 +481,7 @@ mod tests {
 
     fn rectangle() -> Object {
         Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: ObjectId::DRAFT,
             bounds: Bounds::from_corners((10., 20.), (90., 80.)),

@@ -33,6 +33,7 @@ fn setup() {
 }
 fn rectangle() -> Object {
     Object {
+        image_basis: Default::default(),
         id: Default::default(),
         kind: Kind::Rectangle,
         bounds: Bounds::from_corners((10., 20.), (130., 100.)),

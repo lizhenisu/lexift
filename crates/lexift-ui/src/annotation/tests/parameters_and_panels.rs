@@ -114,6 +114,7 @@ fn unowned_pointer_completion_does_not_finish_or_cancel_parameter_transactions()
                         },
                     ));
                     assert!(r.document.session.add(Object {
+                        image_basis: Default::default(),
                         erased: Vec::new(),
                         id: Default::default(),
                         kind: Kind::Rectangle,
@@ -258,6 +259,7 @@ fn geometry_handoff_retires_parameter_idle_without_merging_undo() {
                         },
                     ));
                     assert!(r.document.session.add(Object {
+                        image_basis: Default::default(),
                         erased: Vec::new(),
                         id: Default::default(),
                         kind: Kind::Rectangle,
@@ -389,6 +391,7 @@ fn delayed_parameters_wait_for_document_gesture_commit_or_cancel() {
                     },
                 ));
                 assert!(r.document.session.add(Object {
+                    image_basis: Default::default(),
                     erased: Vec::new(),
                     id: Default::default(),
                     kind: Kind::Rectangle,
@@ -544,6 +547,7 @@ fn brush_wheel_updates_open_panel_parameters_without_feedback_callbacks() {
                 ));
                 if selected {
                     let mut object = Object {
+                        image_basis: Default::default(),
                         erased: Vec::new(),
                         id: Default::default(),
                         kind: Kind::MosaicBrush,
@@ -720,6 +724,7 @@ fn queued_panel_field_update_preserves_a_later_menu_field() {
         r.toolbar_state.main.open(AnnotationToolbar::new().unwrap());
         r.canvas_state.annotation_ready = true;
         assert!(r.document.session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Rectangle,
@@ -803,6 +808,7 @@ fn queued_object_panel_requires_the_originating_canvas_selection_and_session() {
         bottom: 100,
     };
     let object = Object {
+        image_basis: Default::default(),
         erased: Vec::new(),
         id: Default::default(),
         kind: Kind::Rectangle,
@@ -1152,6 +1158,7 @@ fn undo_same_object_rejects_queued_parameter_and_menu_edits() {
         let r = slot.as_mut().unwrap();
         r.toolbar_state.main.open(AnnotationToolbar::new().unwrap());
         assert!(r.document.session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Rectangle,
@@ -1512,6 +1519,7 @@ fn mosaic_cancellation_and_long_slider_drag_preserve_document_and_panel() {
             });
             // A destroyed panel's queued callback cannot undo a new session.
             let replacement = Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Rectangle,
@@ -1586,6 +1594,7 @@ fn mosaic_panel_updates_effect_without_converting_existing_geometry() {
         r.toolbar_state.main.open(AnnotationToolbar::new().unwrap());
         assert!(r.set_mode(InteractionMode::Tool(5)));
         assert!(r.document.session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicArea,
@@ -1723,6 +1732,7 @@ fn pending_mosaic_cancel_preserves_unrelated_parameter_undo() {
                 r.document.selected[0] = 2;
                 r.sync_edit_scope();
                 assert!(r.document.session.add(Object {
+                    image_basis: Default::default(),
                     erased: Vec::new(),
                     id: ObjectId::DRAFT,
                     kind: Kind::Rectangle,

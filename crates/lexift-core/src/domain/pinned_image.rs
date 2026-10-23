@@ -27,6 +27,7 @@ pub struct State {
 /// Immutable input identity; geometry changes of the pin window do not change it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Recognition {
+    pub orientation: super::image_transform::Orientation,
     pub operation: u64,
     pub revision: u64,
     pub bounds: super::geometry::Rect,
@@ -225,6 +226,10 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
                 .as_ref()
                 .map_or(p.source.unwrap(), |d| d.snapshot.monitor);
             let request = Recognition {
+                orientation: p
+                    .document
+                    .as_ref()
+                    .map_or(Default::default(), |d| d.snapshot.session.image_orientation),
                 operation: p.operation,
                 revision: p.revision,
                 bounds,

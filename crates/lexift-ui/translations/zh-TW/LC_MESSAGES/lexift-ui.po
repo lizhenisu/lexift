@@ -1945,3 +1945,19 @@ msgstr "無法開啟圖片"
 
 msgid "Finish the current editing or operation first"
 msgstr "請先結束目前的編輯或操作"
+
+
+msgid "Rotate or flip image"
+msgstr "旋轉或翻轉圖片"
+
+msgid "Rotate left 90°"
+msgstr "向左旋轉 90°"
+
+msgid "Rotate right 90°"
+msgstr "向右旋轉 90°"
+
+msgid "Flip horizontally"
+msgstr "水平翻轉"
+
+msgid "Flip vertically"
+msgstr "垂直翻轉"

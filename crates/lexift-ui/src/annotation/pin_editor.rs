@@ -247,21 +247,49 @@ pub(super) fn view_point(point: (f32, f32), reverse: bool) -> (f32, f32) {
         return point;
     }
     current()
-        .and_then(|(id, _)| crate::pinned_screenshot::geometry(id))
-        .map_or(point, |(source, display)| {
+        .and_then(|(id, _)| {
+            let (source, display) = crate::pinned_screenshot::geometry(id)?;
+            let (full, mut orientation) = DOCUMENTS.with(|s| {
+                s.borrow()
+                    .get(&id)
+                    .map(|p| (p.base.bounds, p.document.session.image_orientation))
+            })?;
+            REGISTRY.with(|s| {
+                if let Ok(s) = s.try_borrow()
+                    && let Some(r) = s.as_ref()
+                {
+                    orientation = r.document.session.image_orientation;
+                }
+            });
+            let oriented = if reverse {
+                point
+            } else {
+                let p = orientation.point([point.0 as f64, point.1 as f64], full);
+                (p[0] as f32, p[1] as f32)
+            };
             let (from, to) = if reverse {
                 (display, source)
             } else {
                 (source, display)
             };
-            let z = (to.right - to.left) as f32 / (from.right - from.left) as f32;
-            (
-                to.left as f32 + (point.0 - from.left as f32) * z,
+            let p = (
+                to.left as f32
+                    + (oriented.0 - from.left as f32) * (to.right - to.left) as f32
+                        / (from.right - from.left) as f32,
                 to.top as f32
-                    + (point.1 - from.top as f32) * (to.bottom - to.top) as f32
+                    + (oriented.1 - from.top as f32) * (to.bottom - to.top) as f32
                         / (from.bottom - from.top) as f32,
-            )
+            );
+            if reverse {
+                let p = orientation
+                    .inverse()
+                    .point([p.0 as f64, p.1 as f64], orientation.rect(full, full).ok()?);
+                Some((p[0] as f32, p[1] as f32))
+            } else {
+                Some(p)
+            }
         })
+        .unwrap_or(point)
 }
 pub(super) fn view_zoom() -> f32 {
     screenshot::long_editor::view_zoom().unwrap_or_else(|| {

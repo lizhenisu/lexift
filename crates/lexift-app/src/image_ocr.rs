@@ -157,6 +157,17 @@ impl ScreenshotRuntime {
             let started = std::time::Instant::now();
             let outcome =
                 self.recognize_text(task.frames.frames(), task.bounds, &task.cancel, |image| {
+                    let orientation = match task.identity {
+                        Identity::Editor(r) => r.orientation,
+                        Identity::Pin { request, .. } => request.orientation,
+                    };
+                    let image = lexift_core::domain::image_transform::finish(
+                        image,
+                        task.frames.frames()[0].bounds,
+                        orientation,
+                        &task.cancel,
+                    )
+                    .map_err(|_| OcrOutcome::RecognitionFailed)?;
                     c.ocr
                         .as_ref()
                         .ok_or(OcrOutcome::ResourcesUnavailable)?

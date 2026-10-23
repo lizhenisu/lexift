@@ -262,7 +262,7 @@ pub(super) fn presented() {
     });
 }
 pub(super) fn output(kind: lexift_core::domain::screenshot::ScreenshotOutput) {
-    if editor_ocr::busy() || busy() || image_crop::active() {
+    if image_transform::busy() || editor_ocr::busy() || busy() || image_crop::active() {
         return;
     }
     let Some((window, editor)) = identity() else {

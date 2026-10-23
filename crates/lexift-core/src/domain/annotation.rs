@@ -201,6 +201,8 @@ impl ObjectId {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Object {
+    /// Local glyph frame at creation; geometry stays in original image coordinates.
+    pub image_basis: super::image_transform::Orientation,
     pub erased: Vec<super::annotation_erase::ErasedCoverage>,
     pub id: ObjectId,
     pub bounds: Bounds,
@@ -411,6 +413,7 @@ impl Object {
             points.push(control);
         }
         Some(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Arrow,
@@ -543,7 +546,24 @@ impl Object {
         self.points.push(point);
         self.refresh_bounds();
     }
+    /// Glyph-local coordinates keep new text upright without rewriting original image geometry.
+    pub fn image_point(&self, p: (f32, f32)) -> (f32, f32) {
+        self.basis_point(p, self.image_basis)
+    }
+    pub fn local_point(&self, p: (f32, f32)) -> (f32, f32) {
+        self.basis_point(p, self.image_basis.inverse())
+    }
+    fn basis_point(&self, p: (f32, f32), basis: super::image_transform::Orientation) -> (f32, f32) {
+        let [a, b, c, d] = basis.matrix();
+        let x = (self.bounds.left + self.bounds.right) * 0.5;
+        let y = (self.bounds.top + self.bounds.bottom) * 0.5;
+        (
+            x + a as f32 * (p.0 - x) + b as f32 * (p.1 - y),
+            y + c as f32 * (p.0 - x) + d as f32 * (p.1 - y),
+        )
+    }
     pub fn hit_path(&self, point: (f32, f32), scale: f32) -> bool {
+        let point = self.local_point(point);
         let tolerance = if let Some(diameter) = self.round_brush_diameter() {
             diameter / 2. + 6. * scale
         } else {
@@ -566,6 +586,12 @@ impl Object {
                 .any(|p| segment_distance(point, p[0], p[1]) <= tolerance)
     }
     pub fn edit_handles(&self, scale: f32) -> Vec<(f32, f32)> {
+        self.local_edit_handles(scale)
+            .into_iter()
+            .map(|p| self.image_point(p))
+            .collect()
+    }
+    fn local_edit_handles(&self, scale: f32) -> Vec<(f32, f32)> {
         if self.kind == Kind::Sequence {
             return self.sequence_handles(scale);
         }
@@ -731,6 +757,28 @@ impl Object {
         self.bounds = target;
     }
     pub fn edit_handle(&mut self, handle: usize, point: (f32, f32), scale: f32) {
+        let point = self.local_point(point);
+        let basis = self.image_basis;
+        let old = (
+            (self.bounds.left + self.bounds.right) * 0.5,
+            (self.bounds.top + self.bounds.bottom) * 0.5,
+        );
+        self.image_basis = Default::default();
+        self.local_edit_handle(handle, point, scale);
+        let new = (
+            (self.bounds.left + self.bounds.right) * 0.5,
+            (self.bounds.top + self.bounds.bottom) * 0.5,
+        );
+        let [a, b, c, d] = basis.matrix();
+        let x = new.0 - old.0;
+        let y = new.1 - old.1;
+        self.move_by(
+            a as f32 * x + b as f32 * y - x,
+            c as f32 * x + d as f32 * y - y,
+        );
+        self.image_basis = basis;
+    }
+    fn local_edit_handle(&mut self, handle: usize, point: (f32, f32), scale: f32) {
         if self.kind == Kind::Sequence {
             if matches!(handle, 5 | 6)
                 && let Some(mut arrow) = self.text_link_arrow()
@@ -949,6 +997,7 @@ fn segment_distance(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
 
 #[derive(Clone, Debug, PartialEq)]
 struct Snapshot {
+    image_orientation: super::image_transform::Orientation,
     image_crop: Option<Rect>,
     next_sequence: i32,
     objects: Vec<Object>,
@@ -961,7 +1010,8 @@ struct Snapshot {
 
 impl Snapshot {
     fn same_content(&self, other: &Self) -> bool {
-        self.image_crop == other.image_crop
+        self.image_orientation == other.image_orientation
+            && self.image_crop == other.image_crop
             && self.next_sequence == other.next_sequence
             && self.objects == other.objects
             && self.opacity == other.opacity
@@ -980,6 +1030,7 @@ pub enum Hit {
 /// Owns the undoable document; a drag is committed as one undo step on release.
 #[derive(Clone, Default)]
 pub struct Session {
+    pub image_orientation: super::image_transform::Orientation,
     /// Source-pixel visible range for image editors; None means the complete image.
     pub image_crop: Option<Rect>,
     /// Immutable editable image extent; extra effect samples are not editable pixels.
@@ -1050,6 +1101,7 @@ impl Session {
     /// outside the confirmed crop.
     pub fn restored_image(&self) -> Self {
         let mut restored = Self {
+            image_orientation: self.image_orientation,
             image_crop: self.image_crop,
             image_source: self.image_source,
             next_sequence: self.next_sequence,
@@ -1101,6 +1153,7 @@ impl Session {
             .cloned()
             .collect();
         frozen.displays = visible.displays.clone();
+        frozen.image_orientation = visible.image_orientation;
         frozen.image_crop = visible.image_crop;
         frozen.image_source = visible.image_source;
         frozen.watermark = visible.watermark.clone();
@@ -1121,6 +1174,7 @@ impl Session {
     }
     fn snapshot(&self) -> Snapshot {
         Snapshot {
+            image_orientation: self.image_orientation,
             image_crop: self.image_crop,
             next_sequence: self.next_sequence,
             objects: self.objects.clone(),
@@ -1166,6 +1220,17 @@ impl Session {
         }
     }
     /// Commit one non-destructive crop in the same chronology as annotation edits.
+    /// Record one whole-image orientation in the shared annotation chronology.
+    pub fn orient_image(&mut self, orientation: super::image_transform::Orientation) -> bool {
+        if self.image_source.is_none() || self.image_orientation == orientation {
+            return false;
+        }
+        self.finish_drag();
+        let before = self.snapshot();
+        self.image_orientation = orientation;
+        self.commit_snapshot(before);
+        true
+    }
     pub fn set_image_crop(&mut self, bounds: Rect, image: Rect) -> bool {
         if bounds.left < image.left
             || bounds.top < image.top
@@ -1201,7 +1266,18 @@ impl Session {
             .then(|| self.objects.iter().position(|object| object.id == id))
             .flatten()
     }
+    pub fn prepare_image_object(&self, object: &mut Object) {
+        if object.id == ObjectId::DRAFT
+            && matches!(
+                object.kind,
+                Kind::Text | Kind::Sequence | Kind::StickerArea | Kind::StickerBrush
+            )
+        {
+            object.image_basis = self.image_orientation.inverse();
+        }
+    }
     pub fn add(&mut self, mut object: Object) -> bool {
+        self.prepare_image_object(&mut object);
         self.finish_rectangle_erase();
         if object.kind == Kind::Sequence && self.next_sequence == i32::MAX {
             return false;
@@ -1280,6 +1356,7 @@ impl Session {
     }
     fn restore_snapshot(&mut self, before: Snapshot) {
         // Identity allocation belongs to the session lifetime, not undo history.
+        self.image_orientation = before.image_orientation;
         self.image_crop = before.image_crop;
         self.objects = before.objects;
         self.next_sequence = before.next_sequence;
@@ -1591,7 +1668,9 @@ impl Session {
                 {
                     return None;
                 }
+                let local = object.local_point(point);
                 if let Extra::Sequence(s) = &object.extra {
+                    let point = local;
                     return (inside(object.bounds, point, 6. * scale)
                         || (!s.caption.content.is_empty()
                             && inside(s.caption_bounds, point, 6. * scale))
@@ -1610,7 +1689,7 @@ impl Session {
                     {
                         return Some(Hit::Object(index));
                     }
-                    let local = unrotate_text_point(point, object.bounds, text.rotation);
+                    let local = unrotate_text_point(local, object.bounds, text.rotation);
                     return inside(object.bounds, local, 6. * scale).then_some(Hit::Object(index));
                 }
                 if matches!(
@@ -1949,6 +2028,7 @@ mod tests {
 
     fn text_object() -> Object {
         Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((-100., 20.), (20., 70.)),
@@ -2130,6 +2210,7 @@ mod tests {
     }
     fn brush(kind: Kind, points: Vec<(f32, f32)>) -> Object {
         let mut o = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind,
@@ -2214,6 +2295,7 @@ mod tests {
         s.cancel_drag();
         assert_eq!(s.objects[0], line);
         let mut rect = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::HighlightRectangle,
@@ -2232,6 +2314,7 @@ mod tests {
     fn drawing_selection_and_undo() {
         let mut s = Session::new();
         let obj = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((120., 80.), (-30., -20.)),
@@ -2258,6 +2341,7 @@ mod tests {
     fn continuous_style_adjustment_is_one_undo_step() {
         let mut s = Session::new();
         s.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((0., 0.), (100., 100.)),
@@ -2282,6 +2366,7 @@ mod tests {
     fn curved_arrow_uses_its_visible_midpoint_for_hit_and_edit() {
         let mut session = Session::new();
         let mut arrow = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((0., 0.), (100., 0.)),
@@ -2313,6 +2398,7 @@ mod tests {
     #[test]
     fn straight_arrow_midpoint_bends_and_snaps_back_to_straight() {
         let mut arrow = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((-100., -50.), (0., -50.)),
@@ -2339,6 +2425,7 @@ mod tests {
     #[test]
     fn smooth_filled_polyline_hits_interior_and_keeps_editable_nodes() {
         let mut shape = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((0., 0.), (0., 0.)),
@@ -2368,6 +2455,7 @@ mod tests {
         use super::super::annotation_erase::{ErasePart, EraseRegion, EraseTarget};
         let mut session = Session::new();
         session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Magnifier,
@@ -2409,6 +2497,7 @@ mod tests {
         let output = Bounds::from_corners((0., 50.), (150., 125.));
         let mut session = Session::new();
         session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             bounds: source,
@@ -2460,6 +2549,7 @@ mod tests {
         let source = Bounds::from_corners((0., 0.), (100., 60.));
         let output = Bounds::from_corners((200., 10.), (350., 100.));
         let object = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             bounds: source,
@@ -2520,6 +2610,7 @@ mod tests {
         assert_eq!(magnifier_output_for_source(source, 1.), source);
         assert_eq!(magnifier_output_for_source(source, 8.).width(), 1200.);
         let mut object = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             bounds: source,
@@ -2548,6 +2639,7 @@ mod tests {
         let source = Bounds::from_corners((-180., -120.), (-80., -60.));
         let output = Bounds::from_corners((200., 100.), (350., 190.));
         let object = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             bounds: source,

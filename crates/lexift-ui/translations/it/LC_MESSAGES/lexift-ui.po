@@ -1945,3 +1945,19 @@ msgstr "Impossibile aprire l’immagine"
 
 msgid "Finish the current editing or operation first"
 msgstr "Termina prima la modifica o l’operazione corrente"
+
+
+msgid "Rotate or flip image"
+msgstr "Ruota o capovolgi immagine"
+
+msgid "Rotate left 90°"
+msgstr "Ruota di 90° a sinistra"
+
+msgid "Rotate right 90°"
+msgstr "Ruota di 90° a destra"
+
+msgid "Flip horizontally"
+msgstr "Capovolgi orizzontalmente"
+
+msgid "Flip vertically"
+msgstr "Capovolgi verticalmente"

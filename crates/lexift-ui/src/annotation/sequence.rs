@@ -50,6 +50,7 @@ pub(crate) fn badge_text(object: &Object) -> Option<Object> {
         c
     };
     Some(Object {
+        image_basis: Default::default(),
         erased: Vec::new(),
         id: Default::default(),
         kind: Kind::Text,
@@ -190,6 +191,7 @@ pub(crate) mod tests {
 
     pub(crate) fn badge(scale: f32) -> Object {
         Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Sequence,

@@ -39,6 +39,7 @@ fn collapse_preserves_tool_and_document_retires_panel_and_startup_placement() {
         r.sync_mode_display();
         r.edit_values(0).size = 13;
         r.document.session.add(Object {
+            image_basis: Default::default(),
             id: Default::default(),
             kind: Kind::Rectangle,
             bounds: Bounds::from_corners((10., 10.), (90., 80.)),

@@ -71,6 +71,7 @@ mod tests {
 
     fn object(kind: Kind, scale: f32) -> Object {
         let mut o = Object {
+            image_basis: Default::default(),
             erased: vec![],
             id: Default::default(),
             kind,

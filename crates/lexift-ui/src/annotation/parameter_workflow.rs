@@ -232,6 +232,7 @@ pub(super) fn sequence_from_values(r: &Registry, at: (f32, f32), scale: f32) -> 
     caption.italic = false;
     let b = Bounds::from_corners(at, at);
     let mut object = Object {
+        image_basis: Default::default(),
         erased: Vec::new(),
         id: Default::default(),
         kind: Kind::Sequence,

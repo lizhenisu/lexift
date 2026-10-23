@@ -230,7 +230,25 @@ fn geometric_bounds(object: &Object) -> Bounds {
             include(&mut bounds, point);
         }
     }
-    bounds
+    let corners = [
+        (bounds.left, bounds.top),
+        (bounds.right, bounds.top),
+        (bounds.left, bounds.bottom),
+        (bounds.right, bounds.bottom),
+    ]
+    .map(|p| object.image_point(p));
+    Bounds {
+        left: corners.iter().map(|p| p.0).fold(f32::INFINITY, f32::min),
+        top: corners.iter().map(|p| p.1).fold(f32::INFINITY, f32::min),
+        right: corners
+            .iter()
+            .map(|p| p.0)
+            .fold(f32::NEG_INFINITY, f32::max),
+        bottom: corners
+            .iter()
+            .map(|p| p.1)
+            .fold(f32::NEG_INFINITY, f32::max),
+    }
 }
 
 fn clipped_bounds(bounds: Bounds, width: f32, viewport: Rect, scale: f32) -> Option<Rect> {
@@ -1141,6 +1159,7 @@ mod tests {
 
     pub(super) fn object(kind: Kind) -> Object {
         Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: ObjectId::DRAFT,
             kind,

@@ -590,6 +590,7 @@ fn gesture_context_with(
     let replacement = Replacement::new(
         index,
         Content {
+            image_basis: current.image_basis,
             erased: &current.erased,
             kind: current.kind,
             bounds,
@@ -779,6 +780,7 @@ pub(super) fn draw_notice(
         monitor.top as f32 + top + (height - initial.height()) / 2.,
     );
     let object = Object {
+        image_basis: Default::default(),
         erased: Vec::new(),
         id: Default::default(),
         kind: Kind::Text,
@@ -807,6 +809,7 @@ mod tests {
     fn borrowed_effect_signature_matches_owned_job_and_ignores_selection() {
         let mut document = Session::new();
         let object = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
@@ -874,6 +877,7 @@ mod tests {
             bottom: 520,
         };
         let mut brush = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
@@ -910,6 +914,7 @@ mod tests {
     #[test]
     fn draft_preview_adopts_only_its_own_released_identity() {
         let object = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
@@ -1056,6 +1061,7 @@ mod tests {
             1.25,
         )];
         let start = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
@@ -1160,6 +1166,7 @@ mod tests {
             canvas.last_pointer = Some((10., 10.));
             r.canvas_state.canvases.push(canvas);
             let draft = Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::MosaicArea,
@@ -1258,6 +1265,7 @@ mod tests {
             let mut slot = slot.borrow_mut();
             let r = slot.as_mut().unwrap();
             let original = Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::MosaicArea,
@@ -1338,6 +1346,7 @@ mod tests {
         let mut session = Session::new();
         for (x, scale) in [(-100., 1.), (100., 1.25)] {
             let mut object = Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::MosaicBrush,

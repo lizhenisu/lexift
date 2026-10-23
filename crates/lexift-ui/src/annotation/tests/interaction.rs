@@ -49,6 +49,7 @@ fn highlighter_rectangle_mode_survives_deselection_drawing_and_cancellation() {
                     Kind::HighlightRectangle
                 };
                 r.document.session.add(Object {
+                    image_basis: Default::default(),
                     erased: Vec::new(),
                     id: Default::default(),
                     kind,
@@ -428,6 +429,7 @@ fn document_commands_retire_object_gestures_without_extra_undo_records() {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut().unwrap();
                 assert!(r.document.session.add(Object {
+                    image_basis: Default::default(),
                     erased: Vec::new(),
                     id: ObjectId::DRAFT,
                     kind: Kind::Rectangle,
@@ -584,6 +586,7 @@ fn polyline_preview_stays_at_confirmed_node_until_pointer_leaves_it() {
     let endpoint = (50., 0.);
     for curved in [false, true] {
         let mut polyline = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((-80., -80.), endpoint),
@@ -644,6 +647,7 @@ fn geometry_hover_uses_existing_hit_regions_without_selecting_handles() {
         let mut session = Session::new();
         let bounds = Bounds::from_corners((20., 20.), (80., 70.));
         assert!(session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind,
@@ -747,6 +751,7 @@ fn rectangle_eraser_release_immediately_presents_controls_even_on_blank_canvas()
                 r.document.parameter_values.defaults_mut(13).shape = 0;
                 if !blank {
                     r.document.session.add(Object {
+                        image_basis: Default::default(),
                         id: Default::default(),
                         kind: Kind::Rectangle,
                         bounds: Bounds::from_corners((-150., -100.), (150., 100.)),

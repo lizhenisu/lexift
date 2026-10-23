@@ -178,6 +178,10 @@ fn draw_brush(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) {
 }
 
 fn draw_object(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) {
+    if object.image_basis != Default::default() {
+        draw_content_object(pixmap, object, monitor, scale, None);
+        return;
+    }
     if matches!(
         object.kind,
         Kind::Rectangle | Kind::Ellipse | Kind::HighlightRectangle
@@ -284,6 +288,79 @@ fn draw_object_content(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scal
     }
 }
 
+/// Render only the current bounded tile in glyph-local coordinates. This is not a full-image cache.
+pub(crate) fn glyph_layer(
+    frame: &mut Pixmap,
+    object: &Object,
+    viewport: Rect,
+    draw: impl FnOnce(&mut Pixmap, Rect),
+) {
+    if object.image_basis == Default::default() {
+        draw(frame, viewport);
+        return;
+    }
+    let corners = [
+        (viewport.left as f32, viewport.top as f32),
+        (viewport.right as f32, viewport.top as f32),
+        (viewport.left as f32, viewport.bottom as f32),
+        (viewport.right as f32, viewport.bottom as f32),
+    ]
+    .map(|p| object.local_point(p));
+    let local = Rect {
+        left: corners
+            .iter()
+            .map(|p| p.0)
+            .fold(f32::INFINITY, f32::min)
+            .floor() as i32
+            - 1,
+        top: corners
+            .iter()
+            .map(|p| p.1)
+            .fold(f32::INFINITY, f32::min)
+            .floor() as i32
+            - 1,
+        right: corners
+            .iter()
+            .map(|p| p.0)
+            .fold(f32::NEG_INFINITY, f32::max)
+            .ceil() as i32
+            + 1,
+        bottom: corners
+            .iter()
+            .map(|p| p.1)
+            .fold(f32::NEG_INFINITY, f32::max)
+            .ceil() as i32
+            + 1,
+    };
+    let Some(mut tile) = Pixmap::new(
+        (local.right - local.left) as u32,
+        (local.bottom - local.top) as u32,
+    ) else {
+        return;
+    };
+    draw(&mut tile, local);
+    let [a, b, c, d] = object.image_basis.matrix();
+    let at = object.image_point((local.left as f32, local.top as f32));
+    frame.draw_pixmap(
+        0,
+        0,
+        tile.as_ref(),
+        &PixmapPaint {
+            quality: FilterQuality::Nearest,
+            ..Default::default()
+        },
+        Transform::from_row(
+            a as f32,
+            c as f32,
+            b as f32,
+            d as f32,
+            at.0 - viewport.left as f32,
+            at.1 - viewport.top as f32,
+        ),
+        None,
+    );
+}
+
 pub(crate) fn draw_content_object(
     pixmap: &mut Pixmap,
     object: &Object,
@@ -291,6 +368,14 @@ pub(crate) fn draw_content_object(
     scale: f32,
     reference: Option<&str>,
 ) {
+    if object.image_basis != Default::default() {
+        let mut local = object.clone();
+        local.image_basis = Default::default();
+        glyph_layer(pixmap, object, monitor, |frame, view| {
+            draw_content_object(frame, &local, view, scale, reference)
+        });
+        return;
+    }
     if object.kind == Kind::Text && reference.is_some() {
         crate::annotation_text::draw_text_with_reference(pixmap, object, monitor, scale, reference);
         if let Some(arrow) = object.text_link_arrow() {
@@ -1971,6 +2056,7 @@ mod tests {
                 };
                 let mut session = Session::new();
                 session.add(Object {
+                    image_basis: Default::default(),
                     id: Default::default(),
                     kind: Kind::Magnifier,
                     bounds: Bounds::from_corners((-60., -40.), (-20., 0.)),
@@ -2075,6 +2161,7 @@ mod tests {
         };
         let b = crate::annotation_text::text_bounds((60., 100.), &text, dpi);
         let mut object = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Text,
@@ -2141,6 +2228,7 @@ mod tests {
             };
             let mut session = Session::new();
             session.add(Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 bounds: crate::annotation_text::text_bounds((70., 50.), &text, scale),
@@ -2188,6 +2276,7 @@ mod tests {
         for kind in [Kind::Rectangle, Kind::Ellipse] {
             let mut session = Session::new();
             session.add(Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 kind,
@@ -2231,6 +2320,7 @@ mod tests {
         };
         let mut session = Session::new();
         session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::HighlightRectangle,
@@ -2260,6 +2350,7 @@ mod tests {
             bottom: 100,
         };
         let mut object = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Pencil,
@@ -2335,6 +2426,7 @@ mod tests {
                     ] {
                         session.objects.clear();
                         session.add(Object {
+                            image_basis: Default::default(),
                             erased: Vec::new(),
                             id: Default::default(),
                             points: Vec::new(),
@@ -2370,6 +2462,7 @@ mod tests {
         let mut session = Session::new();
         for left in [-80., 20.] {
             session.add(Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 points: Vec::new(),
@@ -2401,6 +2494,7 @@ mod tests {
         };
         let mut session = Session::new();
         session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((-80., -70.), (40., -70.)),
@@ -2419,6 +2513,7 @@ mod tests {
             },
         });
         session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             bounds: Bounds::from_corners((-50., -20.), (50., 60.)),
@@ -2462,6 +2557,7 @@ mod tests {
         ] {
             let mut session = Session::new();
             session.add(Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 bounds: Bounds::from_corners(points[0], points[1]),
@@ -2552,6 +2648,7 @@ mod tests {
         let output = Bounds::from_corners((50., 10.), (90., 50.));
         let mut session = Session::new();
         session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Rectangle,
@@ -2565,6 +2662,7 @@ mod tests {
             extra: Extra::None,
         });
         session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Magnifier,
@@ -2618,6 +2716,7 @@ mod tests {
         for ellipse in [false, true] {
             let mut session = Session::new();
             session.add(Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Magnifier,

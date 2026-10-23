@@ -315,7 +315,26 @@ pub(super) fn paint_frames(
             snapshot.scale,
         );
     }
-    Some(vec![image, controls])
+    let orient = |pixmap: tiny_skia::Pixmap| {
+        let full = snapshot.monitor;
+        let orientation = snapshot.session.image_orientation;
+        if orientation == Default::default() {
+            return Some(pixmap);
+        }
+        let image = lexift_core::ports::screen_capture::CapturedRegion {
+            bounds: full,
+            pixels: pixmap.take(),
+        };
+        let image = orientation.pixels(&image, full, cancelled).ok()?;
+        tiny_skia::Pixmap::from_vec(
+            image.pixels,
+            tiny_skia::IntSize::from_wh(
+                (image.bounds.right - image.bounds.left) as u32,
+                (image.bounds.bottom - image.bounds.top) as u32,
+            )?,
+        )
+    };
+    Some(vec![orient(image)?, orient(controls)?])
 }
 pub(super) struct Job {
     pub generation: u64,

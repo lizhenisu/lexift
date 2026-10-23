@@ -262,6 +262,7 @@ mod tests {
             pixels: vec![255; 4].into(),
         };
         let mut object = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Magnifier,

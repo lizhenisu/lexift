@@ -3677,6 +3677,7 @@ mod tests {
                     editor: e.id,
                 },
                 revision: 99,
+                orientation: Default::default(),
                 source: fixture().bounds,
                 bounds: Rect {
                     left: 0,

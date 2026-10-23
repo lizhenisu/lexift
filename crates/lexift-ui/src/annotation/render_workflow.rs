@@ -29,6 +29,7 @@ pub(super) fn editing_text_object(r: &Registry) -> Option<Object> {
         .and_then(|index| r.document.session.objects.get(index))
         .cloned()
         .unwrap_or_else(|| Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             bounds: edit.bounds,
@@ -43,6 +44,7 @@ pub(super) fn editing_text_object(r: &Registry) -> Option<Object> {
     }
     object.kind = Kind::Text;
     object.extra = Extra::Text(visible);
+    r.document.session.prepare_image_object(&mut object);
     Some(object)
 }
 
@@ -764,6 +766,7 @@ pub(super) fn magnifier_from_source(
     }
     let output = magnifier_output_for_source(source, zoom);
     Some(Object {
+        image_basis: Default::default(),
         erased: Vec::new(),
         id: Default::default(),
         bounds: source,

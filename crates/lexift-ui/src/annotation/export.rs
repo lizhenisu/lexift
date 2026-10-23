@@ -70,6 +70,7 @@ pub(super) fn snapshot_at(r: &Registry, monitor: Rect, scale: f32) -> Option<Sna
     // Copy visible state, not the undo stack or parameter bindings.
     let mut session = Session::new();
     session.image_crop = r.document.session.image_crop;
+    session.image_orientation = r.document.session.image_orientation;
     session.image_source = r.document.session.image_source;
     session.objects = r.document.session.objects.clone();
     session.displays = r.document.session.displays.clone();
@@ -97,11 +98,14 @@ pub(super) fn snapshot_at(r: &Registry, monitor: Rect, scale: f32) -> Option<Sna
         if let Some(index) = index {
             session.objects[index] = object;
         } else {
+            session.prepare_image_object(&mut object);
             session.objects.push(object);
         }
     }
     if let Some(draft) = super::gestures::display_draft(&r.gesture, &r.pending_drawing) {
-        session.objects.push(draft.clone());
+        let mut draft = draft.clone();
+        session.prepare_image_object(&mut draft);
+        session.objects.push(draft);
     }
     identify_draft_effects(&mut session)?;
     Some(Snapshot {
@@ -303,6 +307,7 @@ mod tests {
     }
     fn rectangle(a: (f32, f32), b: (f32, f32), color: [u8; 3]) -> Object {
         Object {
+            image_basis: Default::default(),
             id: Default::default(),
             erased: Vec::new(),
             kind: Kind::Rectangle,

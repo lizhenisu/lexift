@@ -1033,6 +1033,7 @@ mod tests {
         use lexift_core::domain::annotation::{Bounds, MosaicAnnotation, MosaicEffect, Session};
         let mut session = Session::new();
         session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,
@@ -1079,6 +1080,7 @@ mod tests {
         let mut session = Session::new();
         for color in [[1, 2, 3], [4, 5, 6]] {
             session.add(Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Rectangle,
@@ -1162,6 +1164,7 @@ mod tests {
             linked_arrow_control: None,
         };
         let mut object = Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Text,

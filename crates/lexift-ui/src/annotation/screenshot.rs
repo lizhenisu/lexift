@@ -407,7 +407,8 @@ pub(super) fn editor_ocr_owner() -> Option<lexift_core::domain::editor_ocr::Owne
     })
 }
 pub(super) fn recognizing() -> bool {
-    editor_ocr::busy()
+    image_transform::busy()
+        || editor_ocr::busy()
         || long::busy()
         || FLOW.with(|s| s.borrow().state.phase == ScreenshotPhase::Recognizing)
 }
@@ -483,7 +484,7 @@ pub(super) fn recognize_text() {
     }
 }
 pub(super) fn output(kind: ScreenshotOutput) {
-    if editor_ocr::busy() {
+    if image_transform::busy() || editor_ocr::busy() {
         return;
     }
     if history_editor::active() {

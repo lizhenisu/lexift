@@ -12,6 +12,7 @@ use std::{
 #[derive(Clone, Copy)]
 pub(crate) struct Content<'a> {
     pub kind: Kind,
+    pub image_basis: lexift_core::domain::image_transform::Orientation,
     pub bounds: Bounds,
     pub points: &'a [(f32, f32)],
     pub style: &'a Style,
@@ -21,6 +22,7 @@ pub(crate) struct Content<'a> {
 impl<'a> From<&'a Object> for Content<'a> {
     fn from(object: &'a Object) -> Self {
         let Object {
+            image_basis,
             erased,
             id: _,
             kind,
@@ -31,6 +33,7 @@ impl<'a> From<&'a Object> for Content<'a> {
         } = object;
         Self {
             kind: *kind,
+            image_basis: *image_basis,
             bounds: *bounds,
             points,
             style,
@@ -44,6 +47,7 @@ impl Content<'_> {
         let mut hash = std::collections::hash_map::DefaultHasher::new();
         hash_erased(self.erased, &mut hash);
         self.kind.hash(&mut hash);
+        self.image_basis.hash(&mut hash);
         for value in [
             self.bounds.left,
             self.bounds.top,
@@ -256,6 +260,7 @@ mod tests {
     fn document() -> Session {
         let mut session = Session::new();
         session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,

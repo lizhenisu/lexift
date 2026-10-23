@@ -121,6 +121,7 @@ impl Object {
             return None;
         };
         Some(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Text,
@@ -140,6 +141,7 @@ impl Object {
         let mut text = s.caption.clone();
         text.rotation = 0.;
         Some(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Text,
@@ -169,6 +171,7 @@ mod tests {
     use super::*;
     fn object(scale: f32) -> Object {
         Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::Sequence,

@@ -399,6 +399,7 @@ mod tests {
             for rotation in [0., 0.6] {
                 let bounds = Bounds::from_corners((-240., -100.), (-208., -72.));
                 let object = Object {
+                    image_basis: Default::default(),
                     erased: Vec::new(),
                     id: Default::default(),
                     kind: Kind::Text,
@@ -478,6 +479,7 @@ mod tests {
         for scale in [1., 1.25] {
             let mut session = Session::new();
             session.add(Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Rectangle,
@@ -517,6 +519,7 @@ mod tests {
                 Vec::new()
             };
             session.add(Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 kind,
@@ -633,6 +636,7 @@ mod tests {
             let mut session = Session::new();
             let curved = points.len() == 3;
             let mut arrow = Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 bounds: Bounds::from_corners(points[0], points[1]),
@@ -698,6 +702,7 @@ mod tests {
                     screen_point(display, (300., 200.), scale),
                 );
                 session.add(Object {
+                    image_basis: Default::default(),
                     erased: Vec::new(),
                     id: Default::default(),
                     points: Vec::new(),

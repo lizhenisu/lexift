@@ -17,6 +17,7 @@ fn long_trajectory_signature_and_cache_costs() {
         let mut session = Session::new();
         assert!(
             session.add(Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Pencil,
@@ -115,6 +116,7 @@ fn long_mosaic_native_preparation_costs() {
     for points in [1_000, 20_000, 100_000] {
         let mut session = Session::new();
         session.add(Object {
+            image_basis: Default::default(),
             erased: Vec::new(),
             id: Default::default(),
             kind: Kind::MosaicBrush,

@@ -3100,6 +3100,7 @@ mod tests {
             r.toolbar_state.panel.get().unwrap().set_values(defaults(0));
             use lexift_core::domain::annotation::{Bounds, Extra, Kind, Object, Style};
             assert!(r.document.session.add(Object {
+                image_basis: Default::default(),
                 erased: Vec::new(),
                 id: Default::default(),
                 kind: Kind::Rectangle,

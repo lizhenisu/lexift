@@ -1945,3 +1945,19 @@ msgstr "이미지를 열 수 없습니다"
 
 msgid "Finish the current editing or operation first"
 msgstr "현재 편집 또는 작업을 먼저 완료하세요"
+
+
+msgid "Rotate or flip image"
+msgstr "이미지 회전 또는 뒤집기"
+
+msgid "Rotate left 90°"
+msgstr "왼쪽으로 90° 회전"
+
+msgid "Rotate right 90°"
+msgstr "오른쪽으로 90° 회전"
+
+msgid "Flip horizontally"
+msgstr "좌우 뒤집기"
+
+msgid "Flip vertically"
+msgstr "상하 뒤집기"

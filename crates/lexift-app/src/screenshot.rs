@@ -410,8 +410,15 @@ impl ScreenshotRuntime {
         let visible = document.map_or(base.bounds, |d| {
             d.snapshot.session.image_crop.unwrap_or(base.bounds)
         });
+        let orientation =
+            document.map_or(Default::default(), |d| d.snapshot.session.image_orientation);
         let Some(document) = document.filter(|_| !hidden) else {
-            return crop_frames(&[(**base).clone()], visible);
+            return lexift_core::domain::image_transform::finish(
+                crop_frames(std::slice::from_ref(base.as_ref()), visible)?,
+                base.bounds,
+                orientation,
+                cancel,
+            );
         };
         let mut snapshot = (*document.snapshot).clone();
         snapshot.monitor = base.bounds;
@@ -433,7 +440,12 @@ impl ScreenshotRuntime {
             snapshot.scale = scale;
             rendered.push(self.render.compose(&snapshot, capture.clone(), cancel)?);
         }
-        crop_frames(&rendered, visible)
+        lexift_core::domain::image_transform::finish(
+            crop_frames(&rendered, visible)?,
+            base.bounds,
+            orientation,
+            cancel,
+        )
     }
 
     fn output_pin_image(
@@ -951,7 +963,16 @@ impl ScreenshotRuntime {
             snapshot.scale = *scale;
             rendered.push(self.render.compose(&snapshot, capture.clone(), cancelled)?);
         }
-        crop_frames(&rendered, request.snapshot.monitor)
+        lexift_core::domain::image_transform::finish(
+            crop_frames(&rendered, request.snapshot.monitor)?,
+            request
+                .snapshot
+                .session
+                .image_source
+                .unwrap_or(request.snapshot.monitor),
+            request.snapshot.session.image_orientation,
+            cancelled,
+        )
     }
 }
 impl Drop for ScreenshotRuntime {
@@ -1273,6 +1294,7 @@ mod tests {
             let mut mosaic = MosaicAnnotation::new(effect, 60, 12., 1.);
             mosaic.id = 1;
             doc.add(Object {
+                image_basis: Default::default(),
                 id: Default::default(),
                 kind: Kind::MosaicArea,
                 bounds: Bounds::from_corners((50., 50.), (140., 190.)),
@@ -1282,6 +1304,7 @@ mod tests {
                 extra: Extra::Mosaic(mosaic),
             });
             doc.add(Object {
+                image_basis: Default::default(),
                 id: Default::default(),
                 kind: Kind::Magnifier,
                 bounds: Bounds::from_corners((50., 50.), (70., 70.)),
@@ -1599,6 +1622,7 @@ mod tests {
         });
         let mut session = Session::new();
         session.add(Object {
+            image_basis: Default::default(),
             id: ObjectId::DRAFT,
             kind: Kind::Magnifier,
             bounds: Bounds::from_corners((30., 0.), (40., 10.)),

@@ -5,6 +5,8 @@ type PanCursor = Rc<dyn Fn(&slint::Window, Option<bool>) -> bool>;
 
 struct Navigation {
     window: slint::Weak<AnnotationCanvas>,
+    source: Rect,
+    orientation: lexift_core::domain::image_transform::Orientation,
     view: Viewport,
     route: u8, // idle, drawing, window chrome, panning, cancelled pan awaiting release
     space: bool,
@@ -72,6 +74,13 @@ pub(super) fn bind(w: &AnnotationCanvas) {
     NAV.with(|s| {
         *s.borrow_mut() = Some(Navigation {
             window: w.as_weak(),
+            source: Rect {
+                left: w.get_source_left() as i32,
+                top: w.get_source_top() as i32,
+                right: w.get_source_left() as i32 + image.width as i32,
+                bottom: w.get_source_top() as i32 + image.height as i32,
+            },
+            orientation: Default::default(),
             view: Viewport::new([image.width as f32, image.height as f32], size(w)),
             route: 0,
             space: false,
@@ -157,9 +166,35 @@ pub(super) fn refresh_geometry() {
         resize(&w);
     }
 }
+fn original(n: &Navigation, p: [f32; 2]) -> [f32; 2] {
+    let full = n.orientation.rect(n.source, n.source).unwrap_or(n.source);
+    n.orientation
+        .inverse()
+        .point(p.map(f64::from), full)
+        .map(|v| v as f32)
+}
+pub(super) fn orient(
+    w: &AnnotationCanvas,
+    source: Rect,
+    orientation: lexift_core::domain::image_transform::Orientation,
+) {
+    NAV.with(|s| {
+        if let Some(n) = s.borrow_mut().as_mut().filter(|n| matches(n, w)) {
+            n.source = source;
+            n.orientation = orientation;
+            if let Ok(full) = orientation.rect(source, source) {
+                n.view.image = [
+                    (full.right - full.left) as f32,
+                    (full.bottom - full.top) as f32,
+                ];
+            }
+        }
+    });
+}
 pub(super) fn content(w: &AnnotationCanvas, bounds: Rect, fit: bool) {
     NAV.with(|s| {
         if let Some(n) = s.borrow_mut().as_mut().filter(|n| matches(n, w)) {
+            let bounds = n.orientation.rect(bounds, n.source).unwrap_or(bounds);
             n.view.content = [
                 (bounds.left as f32)
                     .clamp(w.get_source_left(), w.get_source_left() + n.view.image[0]),
@@ -236,7 +271,7 @@ pub(super) fn pointer(w: &AnnotationCanvas, kind: i32, point: [f32; 2]) -> bool 
                     n.route = 3;
                 } else if n.view.contains(point) {
                     n.route = 1;
-                    drawing = Some((0, n.view.source(point)));
+                    drawing = Some((0, original(n, n.view.source(point))));
                 }
             }
             1 => {
@@ -245,12 +280,12 @@ pub(super) fn pointer(w: &AnnotationCanvas, kind: i32, point: [f32; 2]) -> bool 
                 } else if n.route == 1
                     || (n.route == 0 && !w.get_image_browsing() && n.view.contains(point))
                 {
-                    drawing = Some((1, n.view.source(point)));
+                    drawing = Some((1, original(n, n.view.source(point))));
                 }
             }
             2 | 3 => {
                 if n.route == 1 {
-                    drawing = Some((kind, n.view.source(point)));
+                    drawing = Some((kind, original(n, n.view.source(point))));
                 }
                 n.view.finish_pan();
                 n.route = 0;
@@ -434,9 +469,13 @@ pub(super) fn map(w: &AnnotationCanvas, point: [f32; 2], reverse: bool) -> Optio
     NAV.with(|s| {
         s.borrow().as_ref().filter(|n| matches(n, w)).map(|n| {
             if reverse {
-                n.view.source(point)
+                original(n, n.view.source(point))
             } else {
-                n.view.screen(point)
+                n.view.screen(
+                    n.orientation
+                        .point(point.map(f64::from), n.source)
+                        .map(|v| v as f32),
+                )
             }
         })
     })
@@ -569,6 +608,41 @@ mod tests {
         w.show().unwrap();
         bind(&w);
         w
+    }
+    #[test]
+    fn oriented_crop_roundtrip_and_pointer_anchor_cover_all_eight_states() {
+        let w = window();
+        clear();
+        w.set_source_left(-720.);
+        w.set_source_top(-160.);
+        bind(&w);
+        let full = Rect {
+            left: -720,
+            top: -160,
+            right: -120,
+            bottom: 1840,
+        };
+        let crop = Rect {
+            left: -650,
+            top: -100,
+            right: -210,
+            bottom: 1300,
+        };
+        for direction in lexift_core::domain::image_transform::Orientation::ALL {
+            orient(&w, full, direction);
+            content(&w, crop, true);
+            for point in [[-650., -100.], [-210., 1300.], [-410., 500.]] {
+                let screen = map(&w, point, false).unwrap();
+                let back = map(&w, screen, true).unwrap();
+                assert!((back[0] - point[0]).abs() < 0.01 && (back[1] - point[1]).abs() < 0.01);
+            }
+            let cursor = [270., 320.];
+            let before = map(&w, cursor, true).unwrap();
+            scroll(&w, cursor, 0., 60., false);
+            let after = map(&w, cursor, true).unwrap();
+            assert!((after[0] - before[0]).abs() < 0.02 && (after[1] - before[1]).abs() < 0.02);
+        }
+        clear();
     }
     #[test]
     fn negative_source_origin_shares_crop_pan_zoom_and_pointer_coordinates() {
