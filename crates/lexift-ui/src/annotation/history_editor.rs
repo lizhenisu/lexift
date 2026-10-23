@@ -30,6 +30,13 @@ fn emit(event: Event) {
 pub(crate) fn active() -> bool {
     ACTIVE.with(|s| s.borrow().is_some())
 }
+pub(super) fn imported() -> bool {
+    CORE.with(|s| {
+        s.borrow()
+            .as_ref()
+            .is_some_and(|e| e.import_anchor.is_some())
+    })
+}
 pub(super) fn identity() -> Option<(u64, u64)> {
     ACTIVE.with(|s| s.borrow().as_ref().map(|s| (s.window, s.editor)))
 }
@@ -115,12 +122,30 @@ pub(crate) fn open(window: u64, editor: u64, image: ImageSnapshot) {
             .get()
             .is_some_and(|w| w.get_collapsed());
         let area = (r.lifecycle.popup_work_area)(
-            crate::bridge::image_history::anchor().unwrap_or(Point {
-                x: position.x,
-                y: position.y,
-            }),
+            CORE.with(|s| s.borrow().as_ref().and_then(|e| e.import_anchor))
+                .or_else(crate::bridge::image_history::anchor)
+                .unwrap_or(Point {
+                    x: position.x,
+                    y: position.y,
+                }),
         )?;
-        let origin = r.lifecycle.annotation_foreground.as_ref().map(|q| q());
+        let mut origin = r.lifecycle.annotation_foreground.as_ref().map(|q| q());
+        // A slow decode must not turn an unrelated external foreground into a
+        // fresh activation authorization when the editor finally opens.
+        if CORE.with(|s| {
+            s.borrow()
+                .as_ref()
+                .is_some_and(|e| e.import_anchor.is_some())
+        }) {
+            let owner = r
+                .toolbar_state
+                .main
+                .get()
+                .and_then(|w| (r.lifecycle.annotation_window_token)(w.window()));
+            if owner.is_none() || origin != Some(owner) {
+                origin = Some(None);
+            }
+        }
         let document = std::mem::take(&mut r.document);
         let lifecycle = r.lifecycle.clone();
         r.close();
@@ -162,7 +187,7 @@ pub(crate) fn open(window: u64, editor: u64, image: ImageSnapshot) {
     let base = recovery.image.base.clone();
     ACTIVE.with(|s| *s.borrow_mut() = Some(recovery));
     toggle(Instant::now());
-    screenshot::long_editor::open_history(window, editor, base);
+    screenshot::long_editor::open_document(window, editor, base);
 }
 pub(super) fn unavailable(window: u64, editor: u64) {
     emit(Event::Completed {

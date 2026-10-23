@@ -474,7 +474,7 @@ pub struct UiHandle {
 }
 
 impl UiHandle {
-    pub fn open_history_editor(
+    pub fn open_image_editor(
         &self,
         window: u64,
         editor: u64,
@@ -495,6 +495,18 @@ impl UiHandle {
         hidden: bool,
     ) {
         let _ = slint::invoke_from_event_loop(move || {
+            if let lexift_core::domain::image_history::workflow::OutputKey::Import { operation } =
+                key
+                && !crate::annotation::image_import::prepare_pin(operation)
+            {
+                crate::annotation::image_import::emit(
+                    lexift_core::domain::image_import::Event::Completed {
+                        id: operation,
+                        result: Err(lexift_core::Error::new("Imported pin input unavailable")),
+                    },
+                );
+                return;
+            }
             crate::pinned_screenshot::show_history_document(
                 key, image, base, samples, document, hidden,
             )
@@ -666,6 +678,7 @@ impl UiHandle {
             crate::annotation::sync_export(&state.annotation_export);
             crate::annotation::screenshot::sync(&state.screenshot);
             crate::annotation::screenshot::delay::availability(&state);
+            crate::annotation::image_import::sync(&state);
             crate::pinned_screenshot::sync_outputs(&state.pinned_images);
             let view_state = mapper::view_state(&state);
             let popup_states = mapper::popup_states(&state);

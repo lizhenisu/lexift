@@ -102,6 +102,15 @@ impl Origin {
     }
     fn complete(self, result: lexift_core::Result<SaveOutcome>) {
         match self {
+            Self::History(
+                lexift_core::domain::image_history::workflow::OutputKey::Import { operation },
+                _,
+            ) => crate::annotation::image_import::emit(
+                lexift_core::domain::image_import::Event::Completed {
+                    id: operation,
+                    result,
+                },
+            ),
             Self::Screenshot(session, operation) => {
                 crate::annotation::screenshot::emit(ScreenshotEvent::Completed {
                     session,
@@ -1078,17 +1087,27 @@ fn show_from(
             }
         });
         window.on_zoom_requested(move |delta, x, y| zoom(id, delta, x, y));
-        window.window().set_position(slint::PhysicalPosition::new(
-            image.bounds.left,
-            image.bounds.top,
-        ));
+        let initial = match origin {
+            Origin::History(
+                lexift_core::domain::image_history::workflow::OutputKey::Import { operation },
+                _,
+            ) => crate::annotation::image_import::anchor(operation),
+            _ => None,
+        }
+        .unwrap_or(lexift_core::domain::geometry::Point {
+            x: image.bounds.left,
+            y: image.bounds.top,
+        });
+        window
+            .window()
+            .set_position(slint::PhysicalPosition::new(initial.x, initial.y));
         window
             .window()
             .set_size(slint::PhysicalSize::new(w as u32, h as u32));
         let inset = (window.get_frame_inset() * window.window().scale_factor()).round() as i32;
         window.window().set_position(slint::PhysicalPosition::new(
-            image.bounds.left - inset,
-            image.bounds.top - inset,
+            initial.x - inset,
+            initial.y - inset,
         ));
         window.window().set_size(slint::PhysicalSize::new(
             (w + 2 * inset) as u32,

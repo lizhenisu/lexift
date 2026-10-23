@@ -8,7 +8,7 @@ use lexift_core::{
     },
     ports::{
         annotation_export::AnnotationExportRenderPort,
-        annotation_save::{AnnotationSavePort, ImageSaveRequest, SaveOutcome},
+        annotation_save::{ImageFilePort, ImageSaveRequest, SaveOutcome},
         magnifier::WindowToken,
         screen_capture::{ScreenCaptureFrame, ScreenCapturePort, ScreenCaptureRequest},
     },
@@ -21,14 +21,14 @@ use std::time::{Duration, Instant};
 type CaptureFactory = fn() -> Option<Arc<dyn ScreenCapturePort>>;
 pub(crate) struct ExportRuntime {
     capture: CaptureFactory,
-    save: Arc<dyn AnnotationSavePort>,
+    save: Arc<dyn ImageFilePort>,
     render: Arc<dyn AnnotationExportRenderPort>,
     job: Mutex<Option<(u64, u64, Arc<AtomicBool>)>>,
 }
 impl ExportRuntime {
     pub(crate) fn new(
         capture: CaptureFactory,
-        save: Arc<dyn AnnotationSavePort>,
+        save: Arc<dyn ImageFilePort>,
         render: Arc<dyn AnnotationExportRenderPort>,
     ) -> Self {
         Self {
@@ -548,7 +548,7 @@ mod tests {
     #[test]
     fn cancelled_export_never_opens_save_dialog() {
         struct Save;
-        impl AnnotationSavePort for Save {
+        impl ImageFilePort for Save {
             fn is_available(&self) -> bool {
                 true
             }
@@ -701,7 +701,7 @@ mod tests {
         calls: Arc<std::sync::atomic::AtomicUsize>,
         fail: bool,
     }
-    impl AnnotationSavePort for CountingSave {
+    impl ImageFilePort for CountingSave {
         fn is_available(&self) -> bool {
             true
         }

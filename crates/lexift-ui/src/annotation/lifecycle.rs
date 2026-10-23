@@ -301,6 +301,23 @@ pub(crate) fn toggle(requested_at: Instant) {
             })
         });
         let input = r.toolbar_state.main.input();
+        main.set_import_available(super::image_import::available());
+        main.set_recognize_text_available(!history_editor::active());
+        let import_input = input.clone();
+        main.on_image_open_requested(move || {
+            later_main(&import_input, generation, revision, || {
+                super::image_import::request(lexift_core::domain::image_import::Target::FileEditor)
+            });
+        });
+        let import_input = input.clone();
+        main.on_image_import_menu(move || {
+            later_main(
+                &import_input,
+                generation,
+                revision,
+                screenshot::delay::import_menu,
+            );
+        });
         main.on_image_history_requested(move || {
             slint::Timer::single_shot(Duration::ZERO, || {
                 let request = REGISTRY.with(|slot| {

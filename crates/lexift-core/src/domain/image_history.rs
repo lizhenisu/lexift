@@ -32,6 +32,7 @@ pub struct Resource {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
+    Imported,
     Screenshot,
     LongImage,
 }

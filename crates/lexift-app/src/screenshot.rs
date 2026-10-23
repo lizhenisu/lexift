@@ -12,7 +12,7 @@ use lexift_core::{
     },
     ports::{
         annotation_export::AnnotationExportRenderPort,
-        annotation_save::{AnnotationSavePort, ImageSaveRequest, SaveOutcome},
+        annotation_save::{ImageFilePort, ImageSaveRequest, SaveOutcome},
         clipboard::ClipboardPort,
         screen_capture::{CapturedRegion, ScreenCaptureFrame, ScreenCapturePort},
     },
@@ -24,6 +24,8 @@ use std::sync::{
 };
 #[path = "screenshot_history.rs"]
 mod history;
+#[path = "image_import.rs"]
+mod import;
 #[path = "screenshot_long.rs"]
 mod long;
 type CaptureFactory = fn() -> Option<Arc<dyn ScreenCapturePort>>;
@@ -67,11 +69,12 @@ struct PinOcrQueue {
     pending: Option<PinOcrTask>,
 }
 pub(crate) struct ScreenshotRuntime {
+    imports: Mutex<BTreeMap<u64, import::Job>>,
     delay: Mutex<Option<(u64, tokio::task::JoinHandle<()>)>>,
     history: Mutex<history::Cache>,
     long: Mutex<Option<long::Job>>,
     capture: CaptureFactory,
-    save: Arc<dyn AnnotationSavePort>,
+    save: Arc<dyn ImageFilePort>,
     render: Arc<dyn AnnotationExportRenderPort>,
     clipboard: Arc<dyn ClipboardPort>,
     session: Mutex<Option<Session>>,
@@ -88,11 +91,12 @@ pub(crate) struct ScreenshotRuntime {
 impl ScreenshotRuntime {
     pub fn new(
         capture: CaptureFactory,
-        save: Arc<dyn AnnotationSavePort>,
+        save: Arc<dyn ImageFilePort>,
         render: Arc<dyn AnnotationExportRenderPort>,
         clipboard: Arc<dyn ClipboardPort>,
     ) -> Self {
         Self {
+            imports: Default::default(),
             delay: Default::default(),
             history: Default::default(),
             long: Default::default(),
@@ -1227,7 +1231,7 @@ mod tests {
                 );
             });
     }
-    impl AnnotationSavePort for Save {
+    impl ImageFilePort for Save {
         fn is_available(&self) -> bool {
             true
         }
@@ -1509,7 +1513,7 @@ mod tests {
                 Ok(())
             }
         }
-        impl AnnotationSavePort for Outputs {
+        impl ImageFilePort for Outputs {
             fn is_available(&self) -> bool {
                 true
             }

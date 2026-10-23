@@ -1,3 +1,4 @@
+mod image;
 use std::{mem, ptr};
 
 use lexift_core::{Error, Result, ports::clipboard::ClipboardPort};
@@ -15,6 +16,10 @@ use super::clipboard_selection::{open_clipboard_with_retry, read_unicode_text};
 pub(crate) struct WindowsClipboardPort;
 
 impl ClipboardPort for WindowsClipboardPort {
+    fn read_image(&self) -> Result<Option<lexift_core::ports::screen_capture::CapturedRegion>> {
+        image::read()
+    }
+
     fn write_image(
         &self,
         image: &lexift_core::ports::screen_capture::CapturedRegion,

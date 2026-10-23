@@ -1924,3 +1924,24 @@ msgstr "Screenshot in {} seconds"
 
 msgid "The file extension does not match the selected image type. Correct the file name or change the file type."
 msgstr "The file extension does not match the selected image type. Correct the file name or change the file type."
+
+msgid "Open image"
+msgstr "Open image"
+
+msgid "Pin image from clipboard"
+msgstr "Pin image from clipboard"
+
+msgid "Image import options"
+msgstr "Image import options"
+
+msgid "Imported image"
+msgstr "Imported image"
+
+msgid "No image in the clipboard"
+msgstr "No image in the clipboard"
+
+msgid "Could not open image"
+msgstr "Could not open image"
+
+msgid "Finish the current editing or operation first"
+msgstr "Finish the current editing or operation first"

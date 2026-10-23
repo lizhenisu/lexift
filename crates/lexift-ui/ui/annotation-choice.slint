@@ -61,6 +61,9 @@ export component AnnotationChoiceWindow inherits Window {
     callback color-dragging(bool);
     in-out property <bool> parameter-input-active: false;
     in property <float> content-width: 320;
+    in property <string> option-measurement;
+    option-metrics := Text {visible:false;text:root.option-measurement;font-size:13px;}
+    out property <float> options-width: (option-metrics.preferred-width + 32px) / 1px;
     callback parameter-input-finished();
     in-out property <int> selected;
     out property <length> menu-height: root.text-style-mode == 3 ? 104px : root.text-style-mode == 1 ? 90px : root.text-style-mode == 2 ? 176px : root.color-mode ? 300px : root.font-mode ? 320px : root.options.length * MenuMetrics.row-height + 8px;

@@ -44,6 +44,7 @@ pub struct PopupSessionState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppState {
+    pub image_import: crate::domain::image_import::State,
     pub image_history: crate::domain::image_history::workflow::Workflow,
     pub last_pin_id: u64,
     pub pinned_images: crate::domain::pinned_image::States,
@@ -92,6 +93,7 @@ impl Default for AppState {
 impl AppState {
     pub fn new(settings: Settings) -> Self {
         Self {
+            image_import: Default::default(),
             image_history: Default::default(),
             last_pin_id: 0,
             pinned_images: Default::default(),
@@ -142,13 +144,31 @@ impl AppState {
     pub fn reduce(&mut self, event: AppEvent) -> Vec<AppCommand> {
         let success = crate::domain::image_history::workflow::successful_output(self, &event);
         let quitting = matches!(event, AppEvent::ExitRequested);
-        let commands = self.reduce_inner(event);
+        let saved = event.clone();
+        let mut commands = self.reduce_inner(event);
+        commands.extend(crate::domain::image_import::after(self, &saved));
         crate::domain::image_history::workflow::after(self, quitting, &commands, success);
         commands
     }
 
     fn reduce_inner(&mut self, event: AppEvent) -> Vec<AppCommand> {
-        if self.image_history.editor.is_some()
+        if self.image_import.request.is_some()
+            && matches!(
+                event,
+                AppEvent::AnnotationExport(
+                    crate::domain::annotation_export::ExportEvent::Requested(_)
+                ) | AppEvent::PinnedImage(
+                    crate::domain::pinned_image::Event::EditRequested { .. }
+                        | crate::domain::pinned_image::Event::Requested { .. }
+                        | crate::domain::pinned_image::Event::Recognize { .. }
+                ) | AppEvent::ImageHistory(
+                    crate::domain::image_history::workflow::Event::Open { .. }
+                )
+            )
+        {
+            return vec![];
+        }
+        if (self.image_history.editor.is_some() || self.image_import.request.is_some())
             && matches!(
                 event,
                 AppEvent::Screenshot(
@@ -172,6 +192,7 @@ impl AppState {
         }
         crate::domain::pinned_image::before_event(&mut self.pinned_images, &event);
         match event {
+            AppEvent::ImageImport(event) => crate::domain::image_import::reduce(self, event),
             AppEvent::ImageHistory(event) => {
                 crate::domain::image_history::workflow::reduce(self, event)
             }

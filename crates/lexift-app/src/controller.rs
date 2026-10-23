@@ -31,7 +31,7 @@ use tokio::{runtime::Handle, sync::Notify};
 use crate::runtime::RuntimeManager;
 
 pub(crate) trait ViewPort: Send + Sync {
-    fn open_history_editor(
+    fn open_image_editor(
         &self,
         _window: u64,
         _editor: u64,
@@ -157,13 +157,13 @@ pub(crate) trait ViewPort: Send + Sync {
 }
 
 impl ViewPort for lexift_ui::UiHandle {
-    fn open_history_editor(
+    fn open_image_editor(
         &self,
         window: u64,
         editor: u64,
         image: lexift_core::domain::image_history::ImageSnapshot,
     ) {
-        self.open_history_editor(window, editor, image);
+        self.open_image_editor(window, editor, image);
     }
 
     fn show_history_pin(
@@ -568,6 +568,19 @@ impl AppController {
 
     fn execute(self: &Arc<Self>, command: AppCommand) {
         match command {
+            AppCommand::ImageImport(command) => {
+                if let Some(runtime) = &self.screenshot {
+                    runtime.execute_import(self, command);
+                } else if let lexift_core::domain::image_import::Command::Read { id, .. } = command
+                {
+                    self.dispatch(AppEvent::ImageImport(
+                        lexift_core::domain::image_import::Event::Completed {
+                            id,
+                            result: Err(lexift_core::Error::new("Image import unavailable")),
+                        },
+                    ));
+                }
+            }
             AppCommand::ImageHistory(command) => {
                 if let Some(runtime) = &self.screenshot {
                     runtime.execute_history(self, command);
@@ -1520,6 +1533,7 @@ impl AppController {
 
 fn event_name(event: &AppEvent) -> &'static str {
     match event {
+        AppEvent::ImageImport(_) => "image-import",
         AppEvent::ImageHistory(_) => "image-history",
         AppEvent::ClipboardHistory(_) => "clipboard_history",
         AppEvent::PinnedImage(_) => "pinned-image",
@@ -1916,7 +1930,7 @@ mod tests {
                 pinned_image as pin,
             },
             ports::{
-                annotation_save::{AnnotationSavePort, ImageSaveRequest, SaveOutcome},
+                annotation_save::{ImageFilePort, ImageSaveRequest, SaveOutcome},
                 ocr::{DownloadProgress, OcrPort, OcrResourceStatus, OcrResources},
                 screen_capture::{
                     CapturedRegion, ScreenCaptureFrame, ScreenCapturePort, ScreenCaptureRequest,
@@ -1937,7 +1951,7 @@ mod tests {
             fn clear(&self) {}
         }
         struct Save;
-        impl AnnotationSavePort for Save {
+        impl ImageFilePort for Save {
             fn is_available(&self) -> bool {
                 true
             }
@@ -3426,5 +3440,186 @@ mod tests {
             vec![SettingsFeedback::CredentialOperationFailed]
         );
         assert!(view.presented_secret.lock().unwrap().is_none());
+    }
+    #[test]
+    fn imported_file_uses_background_pixels_and_records_only_successful_output() {
+        use lexift_core::{
+            domain::{
+                annotation::Session,
+                annotation_export::{ExportRequest, ExportSnapshot},
+                image_history::workflow::Event as HistoryEvent,
+                image_import::{Event as ImportEvent, Target},
+                screenshot::ScreenshotOutput,
+            },
+            ports::{
+                annotation_save::{ImageFilePort, ImageOpenRequest, ImageSaveRequest, SaveOutcome},
+                screen_capture::CapturedRegion,
+            },
+        };
+        struct Files;
+        fn fixture() -> CapturedRegion {
+            CapturedRegion {
+                bounds: Rect {
+                    left: 0,
+                    top: 0,
+                    right: 2,
+                    bottom: 3,
+                },
+                pixels: [10, 20, 30, 255].repeat(6),
+            }
+        }
+        impl ImageFilePort for Files {
+            fn is_available(&self) -> bool {
+                true
+            }
+            fn open_image(
+                &self,
+                _: ImageOpenRequest,
+                _: Arc<AtomicBool>,
+            ) -> lexift_core::Result<Option<CapturedRegion>> {
+                Ok(Some(fixture()))
+            }
+            fn save_image(
+                &self,
+                _: ImageSaveRequest,
+                _: Arc<AtomicBool>,
+            ) -> lexift_core::Result<SaveOutcome> {
+                panic!("copy does not save")
+            }
+        }
+        #[derive(Default)]
+        struct Clipboard(Mutex<Vec<CapturedRegion>>);
+        impl ClipboardPort for Clipboard {
+            fn read_text(&self) -> lexift_core::Result<Option<String>> {
+                Ok(None)
+            }
+            fn write_text(&self, _: &str) -> lexift_core::Result<()> {
+                panic!("pixels only")
+            }
+            fn write_image(&self, image: &CapturedRegion) -> lexift_core::Result<()> {
+                self.0.lock().unwrap().push(image.clone());
+                Ok(())
+            }
+        }
+        #[derive(Default)]
+        struct View(AtomicBool);
+        impl ViewPort for View {
+            fn open_image_editor(
+                &self,
+                _: u64,
+                _: u64,
+                image: lexift_core::domain::image_history::ImageSnapshot,
+            ) {
+                assert_eq!(image.base.pixels, fixture().pixels);
+                assert!(image.document.snapshot.session.objects.is_empty());
+                self.0.store(true, Ordering::Release);
+            }
+            fn update(&self, _: AppState) {}
+            fn show_popup(&self, _: PopupSessionId, _: Option<Point>, _: Option<Rect>) {}
+            fn hide_popup(&self, _: PopupSessionId) {}
+            fn show_main_window(&self) {}
+            fn show_settings_window(&self, _: Settings) {}
+            fn hide_settings_window(&self) {}
+            fn show_settings_feedback(&self, _: SettingsFeedback) {}
+            fn clear_credential_draft(&self) {}
+            fn present_credential_secret(
+                &self,
+                _: CredentialAccessPurpose,
+                _: u64,
+                _: CredentialSecret,
+            ) {
+            }
+            fn quit(&self) {}
+        }
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let state = Arc::new(Mutex::new(AppState::default()));
+        let clipboard = Arc::new(Clipboard::default());
+        let view = Arc::new(View::default());
+        let controller = Arc::new(
+            AppController::new(
+                runtime.handle().clone(),
+                state.clone(),
+                None,
+                None,
+                Arc::new(ReorderingTranslator),
+                Arc::new(RecordingSettingsStore::default()),
+                view.clone(),
+            )
+            .with_screenshot(Some(Arc::new(
+                crate::screenshot::ScreenshotRuntime::new(
+                    || None,
+                    Arc::new(Files),
+                    Arc::new(lexift_ui::SoftwareExportRenderer),
+                    clipboard.clone(),
+                ),
+            ))),
+        );
+        controller.dispatch(AppEvent::ImageImport(ImportEvent::Requested {
+            target: Target::FileEditor,
+            anchor: Point::default(),
+            owner: None,
+            title: String::new(),
+        }));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !view.0.load(Ordering::Acquire) {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        let e = state.lock().unwrap().image_history.editor.clone().unwrap();
+        assert!(
+            state
+                .lock()
+                .unwrap()
+                .image_history
+                .cache
+                .entries()
+                .is_empty()
+        );
+        assert!(clipboard.0.lock().unwrap().is_empty());
+        controller.dispatch(AppEvent::ImageHistory(HistoryEvent::Completed {
+            window: e.window,
+            operation: e.id,
+            result: Ok(SaveOutcome::Cancelled),
+        }));
+        let mut session = Session::new();
+        session.image_source = Some(fixture().bounds);
+        let request = ExportRequest {
+            session: e.id,
+            request: 1,
+            snapshot: Arc::new(ExportSnapshot {
+                session: Arc::new(session),
+                monitor: fixture().bounds,
+                scale: 1.,
+                monitors: vec![],
+                excluded: vec![],
+                owner: None,
+                name: String::new(),
+                title: String::new(),
+            }),
+        };
+        controller.dispatch(AppEvent::ImageHistory(HistoryEvent::EditorOutput {
+            window: e.window,
+            editor: e.id,
+            operation: 1,
+            kind: ScreenshotOutput::Copy,
+            document: request,
+        }));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while state
+            .lock()
+            .unwrap()
+            .image_history
+            .cache
+            .entries()
+            .is_empty()
+        {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(clipboard.0.lock().unwrap()[0].pixels, fixture().pixels);
     }
 }

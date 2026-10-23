@@ -11,6 +11,9 @@ mod tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OutputKey {
+    Import {
+        operation: u64,
+    },
     Editor {
         window: u64,
         editor: u64,
@@ -32,6 +35,7 @@ pub enum OutputKey {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Source {
+    Import(u64),
     Screenshot(u64),
     LongImage(u64, u64),
     Pin(u64),
@@ -64,7 +68,8 @@ pub struct Editor {
     pub hidden: bool,
     pub window: u64,
     pub id: u64,
-    pub ticket: Ticket,
+    pub origin: Origin,
+    pub import_anchor: Option<super::super::geometry::Point>,
     pub kind: Kind,
     pub operation: u64,
     pub busy: bool,
@@ -171,6 +176,22 @@ pub enum Event {
 }
 
 impl Workflow {
+    pub(crate) fn editor_owner(&mut self) -> u64 {
+        self.next_window = self
+            .next_window
+            .checked_add(1)
+            .expect("image owner exhausted");
+        self.next_window
+    }
+    pub(crate) fn start_import(&mut self, operation: u64) {
+        self.start(
+            OutputKey::Import { operation },
+            Source::Import(operation),
+            Kind::Imported,
+            true,
+        );
+    }
+
     pub fn pin_ticket(&self, key: OutputKey) -> Option<Ticket> {
         self.pending.get(&key).filter(|p| p.pin).map(|p| p.ticket)
     }
@@ -333,7 +354,7 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
             e.busy = true;
             let next = h
                 .cache
-                .begin(e.ticket.origin)
+                .begin(e.origin)
                 .expect("history output identity exhausted");
             h.pending.insert(
                 OutputKey::Editor {
@@ -435,7 +456,8 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
                         hidden: h.cache.entry(ticket.origin).unwrap().hidden,
                         window,
                         id: w.operation,
-                        ticket,
+                        origin: ticket.origin,
+                        import_anchor: None,
                         kind: h.cache.entry(ticket.origin).unwrap().kind,
                         operation: 0,
                         busy: false,
@@ -588,6 +610,11 @@ pub(crate) fn after(
     h.pending.retain(|key, pending| {
         let keep = pending.success
             || match *key {
+                OutputKey::Import { operation } => {
+                    state.image_import.request.as_ref().is_some_and(|r| {
+                        r.id == operation && r.phase == super::super::image_import::Phase::Preparing
+                    })
+                }
                 OutputKey::Editor {
                     window,
                     editor,
@@ -619,6 +646,11 @@ pub(crate) fn after(
             *session == state.screenshot.session
         }
         Source::Pin(id) => state.pinned_images.contains_key(id),
+        Source::Import(id) => state
+            .image_import
+            .request
+            .as_ref()
+            .is_some_and(|r| r.id == *id),
     });
     if let Some(w) = h.window.as_mut()
         && w.selected
@@ -633,6 +665,15 @@ pub(crate) fn after(
 
 pub(crate) fn successful_output(state: &AppState, event: &AppEvent) -> Option<OutputKey> {
     match event {
+        AppEvent::ImageImport(super::super::image_import::Event::Completed {
+            id,
+            result: Ok(SaveOutcome::Saved),
+        }) if state.image_import.request.as_ref().is_some_and(|r| {
+            r.id == *id && r.target == super::super::image_import::Target::ClipboardPin
+        }) =>
+        {
+            Some(OutputKey::Import { operation: *id })
+        }
         AppEvent::ImageHistory(Event::EditorCompleted {
             window,
             editor,

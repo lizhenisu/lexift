@@ -5,6 +5,7 @@ import { MenuMetrics } from "design/menu.slint";
 component TrayMenuRow inherits Rectangle {
     in property <string> label;
     in property <bool> selected;
+    in property <bool> enabled:true;
     out property <length> label-width: text.preferred-width;
     callback hovered();
     callback activated();
@@ -14,7 +15,7 @@ component TrayMenuRow inherits Rectangle {
     accessible-role: list-item;
     accessible-item-selected: root.selected;
     accessible-label: root.label;
-    accessible-action-default => { root.activated(); }
+    accessible-action-default => { if root.enabled {root.activated();} }
     text := Text {
         x: MenuMetrics.text-inset;
         width: parent.width - 2 * MenuMetrics.text-inset;
@@ -22,10 +23,11 @@ component TrayMenuRow inherits Rectangle {
         text: root.label;
         font-size: Typography.menu-size;
         font-weight: 400;
-        color: Colors.foreground;
+        color: root.enabled ? Colors.foreground : Colors.outline;
         vertical-alignment: center;
     }
     touch := TouchArea {
+        enabled:root.enabled;
         changed has-hover => { if self.has-hover { root.hovered(); } }
         clicked => { root.activated(); }
     }
@@ -37,14 +39,15 @@ export component TrayMenuWindow inherits Window {
     always-on-top: true;
     background: transparent;
     default-font-family: "Segoe UI";
-    out property <length> menu-width: max(MenuMetrics.minimum-width, max(open.label-width, max(history.label-width, max(settings.label-width, quit.label-width))) + 2 * (MenuMetrics.text-inset + MenuMetrics.padding)) + 2 * MenuMetrics.shadow-inset;
-    out property <length> menu-height: 4 * MenuMetrics.row-height + 2 * (MenuMetrics.padding + MenuMetrics.shadow-inset) + MenuMetrics.separator-height;
+    out property <length> menu-width: max(MenuMetrics.minimum-width, max(open.label-width, max(max(import-file.label-width,import-clipboard.label-width),max(history.label-width, max(settings.label-width, quit.label-width)))) + 2 * (MenuMetrics.text-inset + MenuMetrics.padding)) + 2 * MenuMetrics.shadow-inset;
+    out property <length> menu-height: 6 * MenuMetrics.row-height + 2 * (MenuMetrics.padding + MenuMetrics.shadow-inset) + MenuMetrics.separator-height;
     preferred-width: root.menu-width;
     preferred-height: root.menu-height;
     in property <string> open-label: "Open Lexift";
     in property <string> settings-label: "Settings";
     in property <string> history-label: @tr("Image history");
     in property <string> quit-label: "Quit";
+    in property <bool> import-available:true;
     in-out property <int> selected: -1;
     callback action(int);
     callback cancel();
@@ -53,10 +56,10 @@ export component TrayMenuWindow inherits Window {
     keys := FocusScope {
         key-pressed(event) => {
             if event.text == Key.Escape { root.cancel(); }
-            else if event.text == Key.DownArrow { root.selected = mod(root.selected + 1, 4); }
-            else if event.text == Key.UpArrow { root.selected = root.selected <= 0 ? 3 : root.selected - 1; }
+            else if event.text == Key.DownArrow { root.selected = mod(root.selected + 1, 6); }
+            else if event.text == Key.UpArrow { root.selected = root.selected <= 0 ? 5 : root.selected - 1; }
             else if event.text == Key.Home { root.selected = 0; }
-            else if event.text == Key.End { root.selected = 3; }
+            else if event.text == Key.End { root.selected = 5; }
             else if event.text == Key.Return || event.text == " " { if root.selected >= 0 { root.action(root.selected); } }
             else { root.character(event.text); }
             accept
@@ -94,15 +97,17 @@ export component TrayMenuWindow inherits Window {
             hovered => { root.selected = 2; }
             activated => { root.action(2); }
         }
+        import-file := TrayMenuRow {x:open.x;y:history.y+history.height;width:open.width;label:@tr("Open image");selected:root.selected==3;enabled:root.import-available;hovered=>{root.selected=3;}activated=>{root.action(3);} }
+        import-clipboard := TrayMenuRow {x:open.x;y:import-file.y+import-file.height;width:open.width;label:@tr("Pin image from clipboard");selected:root.selected==4;enabled:root.import-available;hovered=>{root.selected=4;}activated=>{root.action(4);} }
         Rectangle {
-            x: open.x; y: history.y + history.height + 4px;
+            x: open.x; y: import-clipboard.y + history.height + 4px;
             width: open.width; height: 1px; background: Colors.outline;
         }
         quit := TrayMenuRow {
-            x: open.x; y: history.y + history.height + MenuMetrics.separator-height; width: open.width;
-            label: root.quit-label; selected: root.selected == 3;
-            hovered => { root.selected = 3; }
-            activated => { root.action(3); }
+            x: open.x; y: import-clipboard.y + import-clipboard.height + MenuMetrics.separator-height; width: open.width;
+            label: root.quit-label; selected: root.selected == 5;
+            hovered => { root.selected = 5; }
+            activated => { root.action(5); }
         }
     }
 }

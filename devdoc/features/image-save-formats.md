@@ -13,7 +13,7 @@
 
 历史恢复编辑器的保存按钮显式走独立图片输出流程，不依赖桌面截图处于活跃状态。
 
-Core 的 `ImageFormat`、`ImageSaveOptions`、`ImageSaveRequest` 定义允许格式、默认格式、固定 JPEG 质量和本地化校验说明；继续使用 `AnnotationSavePort::save_image`。App 冻结最终合成结果并在后台调用 Port。UI 只提供翻译与事件，不编码图片。
+Core 的 `ImageFormat`、`ImageSaveOptions`、`ImageSaveRequest` 定义允许格式、默认格式、固定 JPEG 质量和本地化校验说明；继续使用 `ImageFilePort::save_image`。App 冻结最终合成结果并在后台调用 Port。UI 只提供翻译与事件，不编码图片。
 
 Windows 复用 STA 原生保存对话框与 WIC。JPEG 将预乘 RGBA 直接合成白底后转换为 BGR，避免先还原 Alpha 引入边缘舍入；PNG 继续还原为直通 Alpha。原图、标注、采样数据、裁剪和历史均不改写。沿用 4000 万像素上限、取消机制、同目录临时写入及原子替换，关闭时释放 COM 和对话框事件订阅。
 

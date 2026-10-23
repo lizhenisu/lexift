@@ -31,3 +31,5 @@ pub mod screenshot;
 
 pub mod image_crop;
 pub mod image_history;
+
+pub mod image_import;

@@ -109,9 +109,13 @@ pub(crate) fn show(request: TrayMenuRequest) {
         window.set_open_label(labels.open.clone().into());
         window.set_settings_label(labels.settings.clone().into());
         window.set_quit_label(labels.quit.clone().into());
+        window.set_import_available(crate::annotation::image_import::available());
         window.set_selected(if request.keyboard { 0 } else { -1 });
         let generation = r.generation;
         window.on_action(move |index| {
+            if matches!(index, 3 | 4) && !crate::annotation::image_import::available() {
+                return;
+            }
             if let Some(event) = action_for_index(index, request.anchor) {
                 finish_later(generation, Some(event), false);
             }
@@ -125,6 +129,8 @@ pub(crate) fn show(request: TrayMenuRequest) {
                     &labels.open,
                     &labels.settings,
                     &crate::i18n::tr("Image history"),
+                    &crate::i18n::tr("Open image"),
+                    &crate::i18n::tr("Pin image from clipboard"),
                     &labels.quit,
                 ],
                 &text,
@@ -253,7 +259,17 @@ fn action_for_index(index: i32, anchor: lexift_core::domain::geometry::Point) ->
         2 => AppEvent::ImageHistory(lexift_core::domain::image_history::workflow::Event::Open {
             anchor,
         }),
-        3 => AppEvent::ExitRequested,
+        3 | 4 => AppEvent::ImageImport(lexift_core::domain::image_import::Event::Requested {
+            target: if index == 3 {
+                lexift_core::domain::image_import::Target::FileEditor
+            } else {
+                lexift_core::domain::image_import::Target::ClipboardPin
+            },
+            anchor,
+            owner: None,
+            title: crate::i18n::tr("Open image"),
+        }),
+        5 => AppEvent::ExitRequested,
         _ => return None,
     })
 }
@@ -366,10 +382,28 @@ mod tests {
             Some(AppEvent::SettingsWindowRequested)
         );
         assert_eq!(
-            action_for_index(3, Default::default()),
+            action_for_index(5, Default::default()),
             Some(AppEvent::ExitRequested)
         );
         assert_eq!(action_for_index(-1, Default::default()), None);
-        assert_eq!(action_for_index(4, Default::default()), None);
+        assert!(matches!(
+            action_for_index(3, Default::default()),
+            Some(AppEvent::ImageImport(
+                lexift_core::domain::image_import::Event::Requested {
+                    target: lexift_core::domain::image_import::Target::FileEditor,
+                    ..
+                }
+            ))
+        ));
+        assert!(matches!(
+            action_for_index(4, Default::default()),
+            Some(AppEvent::ImageImport(
+                lexift_core::domain::image_import::Event::Requested {
+                    target: lexift_core::domain::image_import::Target::ClipboardPin,
+                    ..
+                }
+            ))
+        ));
+        assert_eq!(action_for_index(6, Default::default()), None);
     }
 }

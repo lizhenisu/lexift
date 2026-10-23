@@ -1,6 +1,11 @@
 use crate::Result;
 
 pub trait ClipboardPort: Send + Sync {
+    /// Copy a native image into owned premultiplied pixels without modifying the clipboard.
+    fn read_image(&self) -> Result<Option<super::screen_capture::CapturedRegion>> {
+        Err(crate::Error::new("Image clipboard is unavailable"))
+    }
+
     /// Write a validated, premultiplied RGBA image without producing text history.
     fn write_image(&self, _image: &super::screen_capture::CapturedRegion) -> Result<()> {
         Err(crate::Error::new("Image clipboard is unavailable"))

@@ -1,9 +1,10 @@
 //! A job-owned STA dialog and WIC encoder. No COM interface leaves its apartment.
 mod dialog;
+pub(super) mod import;
 
 use lexift_core::{
     Error, Result,
-    ports::annotation_save::{AnnotationSavePort, ImageFormat, ImageSaveRequest, SaveOutcome},
+    ports::annotation_save::{ImageFilePort, ImageFormat, ImageSaveRequest, SaveOutcome},
 };
 use std::{
     io::Write,
@@ -43,7 +44,7 @@ use windows::{
     core::{BOOL, PCWSTR, w},
 };
 
-pub(crate) struct WindowsAnnotationSavePort;
+pub(crate) struct WindowsImageFilePort;
 
 struct Apartment;
 impl Apartment {
@@ -65,7 +66,15 @@ fn wide(value: &std::ffi::OsStr) -> Vec<u16> {
     value.encode_wide().chain(Some(0)).collect()
 }
 
-impl AnnotationSavePort for WindowsAnnotationSavePort {
+impl ImageFilePort for WindowsImageFilePort {
+    fn open_image(
+        &self,
+        request: lexift_core::ports::annotation_save::ImageOpenRequest,
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<Option<lexift_core::ports::screen_capture::CapturedRegion>> {
+        import::open(request, cancelled)
+    }
+
     fn is_available(&self) -> bool {
         true
     }
@@ -515,7 +524,7 @@ mod tests {
     #[test]
     fn cancelled_save_does_not_create_dialog_or_file() {
         assert_eq!(
-            WindowsAnnotationSavePort
+            WindowsImageFilePort
                 .save_image(request(), Arc::new(AtomicBool::new(true)))
                 .unwrap(),
             SaveOutcome::Cancelled
@@ -538,7 +547,7 @@ mod tests {
             request.title = "Lexift image save format regression".into();
             request.default_name = directory.join("fixture.png").to_string_lossy().into_owned();
             assert_eq!(
-                WindowsAnnotationSavePort
+                WindowsImageFilePort
                     .save_image(request, Arc::new(AtomicBool::new(false)))
                     .unwrap(),
                 SaveOutcome::Saved
@@ -560,7 +569,7 @@ mod tests {
         let worker = std::thread::spawn(move || {
             let mut request = request();
             request.title = "Lexift PNG cancellation regression".into();
-            let _ = tx.send(WindowsAnnotationSavePort.save_image(request, cancel));
+            let _ = tx.send(WindowsImageFilePort.save_image(request, cancel));
         });
         // The cancellation observer also covers dialog construction, so this
         // verifies closure whether Show has already created its native window.

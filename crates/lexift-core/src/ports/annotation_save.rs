@@ -87,7 +87,22 @@ pub enum SaveOutcome {
     Cancelled,
 }
 
-pub trait AnnotationSavePort: Send + Sync {
+/// Native file dialogs and image codecs; each call owns its cancellation scope.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImageOpenRequest {
+    pub owner: Option<WindowToken>,
+    pub title: String,
+}
+
+pub trait ImageFilePort: Send + Sync {
+    fn open_image(
+        &self,
+        _request: ImageOpenRequest,
+        _cancelled: Arc<AtomicBool>,
+    ) -> Result<Option<CapturedRegion>> {
+        Err(Error::new("Opening image files is unavailable"))
+    }
+
     fn is_available(&self) -> bool;
     /// Blocking on a dedicated worker, never on the UI thread. Cancellation must
     /// close the dialog and release its native resources without touching new jobs.

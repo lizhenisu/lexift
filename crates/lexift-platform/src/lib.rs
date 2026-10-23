@@ -496,11 +496,11 @@ pub fn annotation_screen_capture_port()
 
 /// Native PNG save dialog and encoding, invoked on a job-owned worker.
 pub fn annotation_save_port()
--> Option<std::sync::Arc<dyn lexift_core::ports::annotation_save::AnnotationSavePort>> {
+-> Option<std::sync::Arc<dyn lexift_core::ports::annotation_save::ImageFilePort>> {
     #[cfg(target_os = "windows")]
     {
         Some(std::sync::Arc::new(
-            windows::annotation_save::WindowsAnnotationSavePort,
+            windows::annotation_save::WindowsImageFilePort,
         ))
     }
     #[cfg(not(target_os = "windows"))]

@@ -25,6 +25,7 @@ struct Registry {
     toast: crate::screen_interaction::window::Slot<crate::ScreenshotToastWindow>,
     toast_timer: slint::Timer,
     notice: Option<Ticket>,
+    import_notice: Option<u64>,
     workflow: lexift_core::domain::image_history::workflow::Workflow,
     lifecycle: WindowLifecycleCallbacks,
     prepare: fn(&slint::Window) -> PassiveWindowPreparation,
@@ -47,6 +48,7 @@ pub(super) fn init(
             toast: Default::default(),
             toast_timer: Default::default(),
             notice: None,
+            import_notice: None,
             workflow: Default::default(),
             lifecycle,
             prepare,
@@ -244,44 +246,57 @@ fn notification(state: &AppState) {
             r.toast_timer.stop();
             r.toast.clear();
         }
-        if ticket == r.notice {
+        let import = state.image_import.notice;
+        let import_changed = import.map(|n| n.0) != r.import_notice;
+        if ticket == r.notice && !import_changed {
             return None;
         }
         r.notice = ticket;
+        r.import_notice = import.map(|n| n.0);
         r.toast_timer.stop();
         r.toast.clear();
-        let ticket = ticket?;
-        let point = (r.lifecycle.toolbar_cursor_position)().unwrap_or_default();
+        let imported = import.filter(|_| import_changed);
+        if ticket.is_none() && imported.is_none() {
+            return None;
+        }
+        let point = imported
+            .map(|n| n.1)
+            .unwrap_or_else(|| (r.lifecycle.toolbar_cursor_position)().unwrap_or_default());
         let area = (r.lifecycle.popup_work_area)(point)?;
         let w = crate::screen_interaction::create(&r.lifecycle, crate::ScreenshotToastWindow::new)
             .ok()?;
         crate::theme::apply(&w);
         w.set_passive(true);
-        w.set_error(false);
-        w.set_message(crate::i18n::tr("Image exceeds the history limit and was not added").into());
+        w.set_error(imported.is_some());
+        let message = imported.map_or(
+            "Image exceeds the history limit and was not added",
+            |(_, _, feedback)| match feedback {
+                lexift_core::domain::image_import::Feedback::Failed => "Could not open image",
+                lexift_core::domain::image_import::Feedback::NoImage => "No image in the clipboard",
+                lexift_core::domain::image_import::Feedback::Conflict => {
+                    "Finish the current editing or operation first"
+                }
+            },
+        );
+        w.set_message(crate::i18n::tr(message).into());
         w.window()
             .set_position(slint::PhysicalPosition::new(area.left, area.top));
         let revision = r.toast.open(w);
-        Some((ticket, revision, area))
+        Some((revision, area))
     });
-    if let Some((ticket, revision, area)) = display {
+    if let Some((revision, area)) = display {
         cancel_idle_memory_trim();
-        prepare_toast(ticket, revision, area, 0);
+        prepare_toast(revision, area, 0);
     }
 }
-fn prepare_toast(
-    ticket: Ticket,
-    revision: u64,
-    area: lexift_core::domain::geometry::Rect,
-    attempt: u8,
-) {
+fn prepare_toast(revision: u64, area: lexift_core::domain::geometry::Rect, attempt: u8) {
     slint::Timer::single_shot(
         Duration::from_millis(if attempt == 0 { 0 } else { 16 }),
         move || {
             let result = REGISTRY.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 let r = slot.as_mut()?;
-                if r.notice != Some(ticket) || r.toast.revision() != revision {
+                if r.toast.revision() != revision {
                     return None;
                 }
                 let w = r.toast.get()?;
@@ -323,7 +338,7 @@ fn prepare_toast(
                         Some(true)
                     }
                     PassiveWindowPreparation::Pending if attempt < 20 => {
-                        prepare_toast(ticket, revision, area, attempt + 1);
+                        prepare_toast(revision, area, attempt + 1);
                         None
                     }
                     _ => Some(false),
@@ -541,6 +556,7 @@ fn render(r: &Registry) {
             kind: crate::i18n::tr(match e.kind {
                 Kind::Screenshot => "Screenshot",
                 Kind::LongImage => "Long screenshot",
+                Kind::Imported => "Imported image",
             })
             .into(),
             dimensions: format!(

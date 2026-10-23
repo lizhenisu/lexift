@@ -1924,3 +1924,24 @@ msgstr "{} 秒后截图"
 
 msgid "The file extension does not match the selected image type. Correct the file name or change the file type."
 msgstr "文件扩展名与所选图片类型不符，请修改文件名或更改文件类型。"
+
+msgid "Open image"
+msgstr "打开图片"
+
+msgid "Pin image from clipboard"
+msgstr "从剪贴板贴图"
+
+msgid "Image import options"
+msgstr "图片导入选项"
+
+msgid "Imported image"
+msgstr "导入图片"
+
+msgid "No image in the clipboard"
+msgstr "剪贴板中没有图片"
+
+msgid "Could not open image"
+msgstr "无法打开图片"
+
+msgid "Finish the current editing or operation first"
+msgstr "请先结束当前编辑或操作"

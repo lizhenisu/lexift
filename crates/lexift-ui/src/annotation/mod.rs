@@ -2,6 +2,7 @@
 mod editor_document;
 mod frozen_editor;
 pub(crate) mod history_editor;
+pub(crate) mod image_import;
 pub(crate) mod pin_editor;
 pub(crate) mod screenshot;
 mod screenshot_preview;

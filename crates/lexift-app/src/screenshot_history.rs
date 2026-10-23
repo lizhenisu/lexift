@@ -51,6 +51,9 @@ fn identity<T>(
 }
 
 impl Cache {
+    pub(super) fn install_editor(&mut self, window: u64, id: u64, image: history::ImageSnapshot) {
+        self.editor = Some((window, id, image));
+    }
     pub fn sync(&mut self, workflow: &Workflow) {
         if self.revision != workflow.cache.revision() {
             self.revision = workflow.cache.revision();
@@ -307,7 +310,7 @@ impl ScreenshotRuntime {
                         hidden: asset.hidden,
                     };
                     self.history.lock().unwrap().editor = Some((window, operation, image.clone()));
-                    controller.ui.open_history_editor(window, operation, image);
+                    controller.ui.open_image_editor(window, operation, image);
                     return;
                 }
                 let cancel = Arc::new(AtomicBool::new(false));
@@ -594,7 +597,8 @@ mod tests {
             hidden: true,
             window: 1,
             id: 2,
-            ticket,
+            origin: ticket.origin,
+            import_anchor: None,
             kind: Kind::LongImage,
             operation: 0,
             busy: false,

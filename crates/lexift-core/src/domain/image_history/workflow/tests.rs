@@ -72,6 +72,12 @@ fn prepared(state: &mut AppState, key: OutputKey) -> Ticket {
 }
 fn finish(state: &mut AppState, key: OutputKey, result: crate::Result<SaveOutcome>) {
     let event = match key {
+        OutputKey::Import { operation } => {
+            AppEvent::ImageImport(crate::domain::image_import::Event::Completed {
+                id: operation,
+                result: Ok(SaveOutcome::Saved),
+            })
+        }
         OutputKey::Screenshot { session, operation } => {
             AppEvent::Screenshot(ScreenshotEvent::Completed {
                 session,
@@ -265,7 +271,10 @@ fn editor_owns_its_source_after_delete_and_only_new_output_updates_history() {
         Ok(SaveOutcome::Cancelled),
     );
     s.reduce(AppEvent::ImageHistory(Event::Delete { ticket }));
-    assert_eq!(s.image_history.editor.as_ref().unwrap().ticket, ticket);
+    assert_eq!(
+        s.image_history.editor.as_ref().unwrap().origin,
+        ticket.origin
+    );
     assert!(
         !s.image_history.retains(ticket),
         "deleted history releases its finished output, while the editor owns its source"

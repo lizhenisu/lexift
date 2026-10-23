@@ -1924,3 +1924,24 @@ msgstr "Captura en {} segundos"
 
 msgid "The file extension does not match the selected image type. Correct the file name or change the file type."
 msgstr "La extensión no coincide con el tipo de imagen seleccionado. Corrige el nombre o cambia el tipo de archivo."
+
+msgid "Open image"
+msgstr "Abrir imagen"
+
+msgid "Pin image from clipboard"
+msgstr "Fijar imagen del portapapeles"
+
+msgid "Image import options"
+msgstr "Opciones de importación de imágenes"
+
+msgid "Imported image"
+msgstr "Imagen importada"
+
+msgid "No image in the clipboard"
+msgstr "No hay imagen en el portapapeles"
+
+msgid "Could not open image"
+msgstr "No se pudo abrir la imagen"
+
+msgid "Finish the current editing or operation first"
+msgstr "Finaliza primero la edición u operación actual"

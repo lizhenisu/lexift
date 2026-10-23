@@ -5,6 +5,7 @@ use crate::{AnnotationChoiceWindow, ScreenshotCountdownWindow};
 type Ready = Box<dyn FnOnce(lexift_core::Result<std::time::Instant>) + Send>;
 #[derive(Default)]
 struct Views {
+    import_menu: bool,
     sequence: u64,
     menu: Option<AnnotationChoiceWindow>,
     countdown: Option<ScreenshotCountdownWindow>,
@@ -69,15 +70,38 @@ fn choose(sequence: u64, index: Option<i32>) {
         if !VIEWS.with(|s| s.borrow().sequence == sequence && s.borrow().menu.is_some()) {
             return;
         }
+        let import_menu = VIEWS.with(|s| s.borrow().import_menu);
         clear();
+        if import_menu {
+            if let Some(target) = index.and_then(|i| {
+                [
+                    lexift_core::domain::image_import::Target::FileEditor,
+                    lexift_core::domain::image_import::Target::ClipboardPin,
+                ]
+                .get(i as usize)
+                .copied()
+            }) {
+                super::super::image_import::request(target);
+            }
+            return;
+        }
         if let Some(seconds) = index.and_then(|i| [0, 3, 5, 10].get(i as usize).copied()) {
             super::request_after(seconds);
         }
     });
 }
 pub(crate) fn menu() {
-    if !available()
-        || super::active()
+    menu_kind(false);
+}
+pub(crate) fn import_menu() {
+    menu_kind(true);
+}
+fn menu_kind(import_menu: bool) {
+    if !(if import_menu {
+        super::super::image_import::available()
+    } else {
+        available()
+    }) || super::active()
         || crate::ocr::screen_busy()
         || super::history_editor::active()
         || pin_editor::active()
@@ -91,19 +115,35 @@ pub(crate) fn menu() {
         return;
     };
     crate::theme::apply(&w);
-    let labels = [
-        "Screenshot now",
-        "Screenshot after 3 seconds",
-        "Screenshot after 5 seconds",
-        "Screenshot after 10 seconds",
-    ];
+    let labels: &[&str] = if import_menu {
+        &["Open image", "Pin image from clipboard"]
+    } else {
+        &[
+            "Screenshot now",
+            "Screenshot after 3 seconds",
+            "Screenshot after 5 seconds",
+            "Screenshot after 10 seconds",
+        ]
+    };
     w.set_options(slint::ModelRc::new(slint::VecModel::from(
-        labels.map(|s| crate::i18n::tr(s).into()).to_vec(),
+        labels
+            .iter()
+            .map(|s| crate::i18n::tr(s).into())
+            .collect::<Vec<_>>(),
     )));
     w.set_selected(0);
+    w.set_option_measurement(
+        labels
+            .iter()
+            .map(|s| crate::i18n::tr(s))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into(),
+    );
     let seq = VIEWS.with(|s| {
         let mut s = s.borrow_mut();
         s.sequence += 1;
+        s.import_menu = import_menu;
         s.menu = Some(w.clone_strong());
         s.sequence
     });
@@ -142,7 +182,8 @@ fn prepare_menu(seq: u64, attempt: u8) {
                 return;
             };
             let dpi = w.window().scale_factor();
-            let width = (240. * dpi).min((area.right - area.left) as f32) as u32;
+            let width =
+                (w.get_options_width().max(240.) * dpi).min((area.right - area.left) as f32) as u32;
             let height = (w.get_menu_height() * dpi) as u32;
             w.set_content_width(width as f32 / dpi);
             w.window().set_size(slint::PhysicalSize::new(width, height));

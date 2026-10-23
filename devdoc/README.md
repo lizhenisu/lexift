@@ -141,3 +141,5 @@
 
 - [图片保存格式 PNG／JPEG](features/image-save-formats.md)
 - [图片保存格式验证](releases/image-save-formats.md)
+- [从文件／剪贴板打开图片](features/image-import.md)
+- [图片导入验证](releases/image-import.md)

@@ -2,7 +2,7 @@
 use super::*;
 struct Pending {
     token: u64,
-    history: Option<(u64, u64)>,
+    document_owner: Option<(u64, u64)>,
     session: u64,
     operation: u64,
     window: AnnotationCanvas,
@@ -25,14 +25,14 @@ pub(in crate::annotation) fn clear() {
 pub(super) fn open(session: u64, operation: u64, image: Arc<CapturedRegion>) {
     open_owned(session, operation, image, None);
 }
-pub(in crate::annotation) fn open_history(window: u64, editor: u64, image: Arc<CapturedRegion>) {
+pub(in crate::annotation) fn open_document(window: u64, editor: u64, image: Arc<CapturedRegion>) {
     open_owned(editor, editor, image, Some((window, editor)));
 }
 fn open_owned(
     session: u64,
     operation: u64,
     image: Arc<CapturedRegion>,
-    history: Option<(u64, u64)>,
+    document_owner: Option<(u64, u64)>,
 ) {
     clear();
     let token = NEXT.with(|n| {
@@ -61,7 +61,7 @@ fn open_owned(
         window.set_source_top(image.bounds.top as f32);
         Some(Pending {
             token,
-            history,
+            document_owner,
             session,
             operation,
             window,
@@ -72,7 +72,7 @@ fn open_owned(
         })
     });
     let Some(pending) = pending else {
-        unavailable(history, session, operation);
+        unavailable(document_owner, session, operation);
         return;
     };
     PENDING.with(|p| *p.borrow_mut() = Some(pending));
@@ -102,7 +102,7 @@ fn prepare(token: u64, attempt: u8) {
         PENDING.with(|p| {
             let p = p.borrow();
             let p = p.as_ref()?;
-            if !p.history.map_or_else(
+            if !p.document_owner.map_or_else(
                 || {
                     FLOW.with(|f| {
                         let f = f.borrow();
@@ -151,7 +151,7 @@ fn prepare(token: u64, attempt: u8) {
             let identity = PENDING.with(|p| {
                 p.borrow()
                     .as_ref()
-                    .map(|p| (p.history, p.session, p.operation))
+                    .map(|p| (p.document_owner, p.session, p.operation))
             });
             clear();
             if let Some((owner, session, operation)) = identity {
@@ -179,7 +179,8 @@ fn install(token: u64) {
         layer.image_view = true;
         layer.bootstrap = CanvasBootstrap::Ready;
         let revision = layer.revision();
-        w.set_history_image(p.history.is_some());
+        w.set_history_image(p.document_owner.is_some());
+        w.set_imported_image(history_editor::imported());
         w.set_annotations_hidden(history_editor::hidden());
         w.on_visibility_requested(history_editor::visibility);
         image_navigation::bind(&w);
@@ -352,7 +353,7 @@ fn install(token: u64) {
         sync_toolbar_owner(r);
         r.canvas_state.pending_displays = vec![];
         r.canvas_state.annotation_ready = true;
-        if p.history.is_none() {
+        if p.document_owner.is_none() {
             r.document.session = Session::new();
             r.document.session.image_source = Some(p.image.bounds);
             r.document.session.displays = vec![p.image.bounds];
@@ -360,7 +361,7 @@ fn install(token: u64) {
         r.document.mode = InteractionMode::Mouse;
         r.sync_edit_scope();
         let e = r.screenshot.as_mut()?;
-        if p.history.is_none() {
+        if p.document_owner.is_none() {
             e.frames = Arc::new(vec![(*p.image).clone()]);
             e.capture = Arc::new(ScreenCaptureFrame {
                 revision: p.operation,
@@ -416,7 +417,7 @@ fn install(token: u64) {
                 }
             });
         }
-        unavailable(p.history, p.session, p.operation);
+        unavailable(p.document_owner, p.session, p.operation);
     }
 }
 

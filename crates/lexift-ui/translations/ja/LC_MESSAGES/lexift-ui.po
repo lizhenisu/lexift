@@ -1924,3 +1924,24 @@ msgstr "{} 秒後に撮影"
 
 msgid "The file extension does not match the selected image type. Correct the file name or change the file type."
 msgstr "拡張子が選択した画像形式と一致しません。ファイル名またはファイル形式を変更してください。"
+
+msgid "Open image"
+msgstr "画像を開く"
+
+msgid "Pin image from clipboard"
+msgstr "クリップボードの画像をピン留め"
+
+msgid "Image import options"
+msgstr "画像の読み込みオプション"
+
+msgid "Imported image"
+msgstr "読み込んだ画像"
+
+msgid "No image in the clipboard"
+msgstr "クリップボードに画像がありません"
+
+msgid "Could not open image"
+msgstr "画像を開けませんでした"
+
+msgid "Finish the current editing or operation first"
+msgstr "現在の編集または操作を先に終了してください"

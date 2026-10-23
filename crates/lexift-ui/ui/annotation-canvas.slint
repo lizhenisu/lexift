@@ -8,7 +8,9 @@ export enum AnnotationCursor { idle, drawing, text, moving, horizontal, vertical
 
 // A transparent, live-desktop overlay. Pixel content is produced from Core objects in Rust.
 export component AnnotationCanvas inherits Window {
-    title: root.image-view ? (root.history-image ? @tr("Image history") : @tr("Long screenshot")) : "Lexift Annotation Canvas";
+    title: root.image-view ? root.image-title : "Lexift Annotation Canvas";
+    in property <bool> imported-image:false;
+    private property <string> image-title: root.imported-image ? @tr("Imported image") : root.history-image ? @tr("Image history") : @tr("Long screenshot");
     no-frame: true;
     always-on-top: true;
     min-width: root.image-view ? 640px : 0px;
@@ -70,8 +72,8 @@ export component AnnotationCanvas inherits Window {
     if root.image-view: Rectangle { width: 100%; height: 100%; background: Colors.background; }
     if root.image-view: Rectangle {
         x: 0px; y: 0px; width: 100%; height: 32px; background: Colors.surface;
-        accessible-role: window-title-bar; accessible-label: root.history-image ? @tr("Image history") : @tr("Long screenshot");
-        Text { x: 12px; width: parent.width - 52px; height: 100%; text: root.history-image ? @tr("Image history") : @tr("Long screenshot"); color: Colors.foreground; vertical-alignment: center; }
+        accessible-role: window-title-bar; accessible-label: root.image-title;
+        Text { x: 12px; width: parent.width - 52px; height: 100%; text: root.image-title; color: Colors.foreground; vertical-alignment: center; }
         TouchArea { width: parent.width - 36px; height: 100%; mouse-cursor: move;
             pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.header-drag-requested(); } }
         }
