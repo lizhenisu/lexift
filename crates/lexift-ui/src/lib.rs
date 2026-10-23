@@ -55,3 +55,10 @@ pub type NativePinProbe = std::rc::Rc<dyn Fn(&slint::Window, &str, bool) -> bool
 pub fn start_native_pin_repro(probe: NativePinProbe) -> std::rc::Rc<std::cell::Cell<bool>> {
     annotation::native_repro::start(probe)
 }
+
+/// Localized save-dialog data without Slint or thread-local view access.
+pub fn image_save_options(
+    language: lexift_core::domain::ui_language::UiLanguage,
+) -> lexift_core::ports::annotation_save::ImageSaveOptions {
+    i18n::image_save_options(language)
+}

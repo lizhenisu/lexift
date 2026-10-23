@@ -138,3 +138,6 @@
 
 - [延迟截图](features/screenshot-delay.md)
 - [延迟截图验证](releases/screenshot-delay.md)
+
+- [图片保存格式 PNG／JPEG](features/image-save-formats.md)
+- [图片保存格式验证](releases/image-save-formats.md)

@@ -8,7 +8,7 @@ use lexift_core::{
     },
     ports::{
         annotation_export::AnnotationExportRenderPort,
-        annotation_save::{AnnotationSavePort, PngSaveRequest, SaveOutcome},
+        annotation_save::{AnnotationSavePort, ImageSaveRequest, SaveOutcome},
         magnifier::WindowToken,
         screen_capture::{ScreenCaptureFrame, ScreenCapturePort, ScreenCaptureRequest},
     },
@@ -70,6 +70,7 @@ impl ExportRuntime {
                 old.store(true, Ordering::Release);
             }
         }
+        let options = save_options(controller);
         let runtime = self.clone();
         let controller = controller.clone();
         let session = request.session;
@@ -79,7 +80,7 @@ impl ExportRuntime {
         let spawned = std::thread::Builder::new()
             .name("annotation-export".into())
             .spawn(move || {
-                let _ = tx.send(runtime.run(&request, cancelled));
+                let _ = tx.send(runtime.run(&request, cancelled, options));
             });
         if let Err(error) = spawned {
             controller.dispatch(AppEvent::AnnotationExport(ExportEvent::Completed {
@@ -104,7 +105,12 @@ impl ExportRuntime {
             }));
         });
     }
-    fn run(&self, request: &ExportRequest, cancelled: Arc<AtomicBool>) -> Result<SaveOutcome> {
+    fn run(
+        &self,
+        request: &ExportRequest,
+        cancelled: Arc<AtomicBool>,
+        options: lexift_core::ports::annotation_save::ImageSaveOptions,
+    ) -> Result<SaveOutcome> {
         if cancelled.load(Ordering::Acquire) {
             return Ok(SaveOutcome::Cancelled);
         }
@@ -125,12 +131,13 @@ impl ExportRuntime {
         if cancelled.load(Ordering::Acquire) {
             return Ok(SaveOutcome::Cancelled);
         }
-        self.save.save_png(
-            PngSaveRequest {
+        self.save.save_image(
+            ImageSaveRequest {
                 image,
                 owner: snapshot.owner,
                 default_name: snapshot.name.clone(),
                 title: snapshot.title.clone(),
+                options,
             },
             cancelled,
         )
@@ -296,6 +303,23 @@ fn capture_port(
     };
     port.clear();
     result
+}
+
+/// Freeze presentation labels using the selected language, never worker thread-local UI state.
+pub(crate) fn save_options(
+    controller: &AppController,
+) -> lexift_core::ports::annotation_save::ImageSaveOptions {
+    let language = controller
+        .state
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .settings
+        .ui_language;
+    lexift_ui::image_save_options(language)
+}
+#[cfg(test)]
+pub(crate) fn test_save_options() -> lexift_core::ports::annotation_save::ImageSaveOptions {
+    lexift_ui::image_save_options(lexift_core::domain::ui_language::UiLanguage::EnglishUs)
 }
 
 #[cfg(test)]
@@ -528,7 +552,7 @@ mod tests {
             fn is_available(&self) -> bool {
                 true
             }
-            fn save_png(&self, _: PngSaveRequest, _: Arc<AtomicBool>) -> Result<SaveOutcome> {
+            fn save_image(&self, _: ImageSaveRequest, _: Arc<AtomicBool>) -> Result<SaveOutcome> {
                 panic!("cancelled job opened dialog")
             }
         }
@@ -555,6 +579,7 @@ mod tests {
                     snapshot: Arc::new(fixture()),
                 },
                 Arc::new(AtomicBool::new(true)),
+                test_save_options(),
             )
             .unwrap();
         assert_eq!(result, SaveOutcome::Cancelled);
@@ -680,9 +705,20 @@ mod tests {
         fn is_available(&self) -> bool {
             true
         }
-        fn save_png(&self, request: PngSaveRequest, _: Arc<AtomicBool>) -> Result<SaveOutcome> {
+        fn save_image(&self, request: ImageSaveRequest, _: Arc<AtomicBool>) -> Result<SaveOutcome> {
             request.validate()?;
             assert_eq!(request.default_name, "test.png");
+            assert_eq!(
+                request.options.default_format,
+                lexift_core::ports::annotation_save::ImageFormat::Png
+            );
+            assert_eq!(
+                request.options.formats,
+                [
+                    lexift_core::ports::annotation_save::ImageFormat::Png,
+                    lexift_core::ports::annotation_save::ImageFormat::Jpeg
+                ]
+            );
             self.calls.fetch_add(1, Ordering::Relaxed);
             if self.fail {
                 Err(Error::new("save failed"))
@@ -718,6 +754,7 @@ mod tests {
                     snapshot: Arc::new(fixture()),
                 },
                 Arc::new(AtomicBool::new(false)),
+                test_save_options(),
             );
             assert_eq!(calls.load(Ordering::Relaxed), count);
             if compose_fail || save_fail {

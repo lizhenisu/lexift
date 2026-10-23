@@ -115,7 +115,7 @@ pub(super) fn snapshot_at(r: &Registry, monitor: Rect, scale: f32) -> Option<Sna
             "Lexift-{}.png",
             chrono::Local::now().format("%Y%m%d-%H%M%S")
         ),
-        title: crate::i18n::tr("Save annotation screenshot"),
+        title: crate::i18n::tr("Save image"),
     })
 }
 

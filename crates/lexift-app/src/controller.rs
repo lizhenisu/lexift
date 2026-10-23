@@ -1916,7 +1916,7 @@ mod tests {
                 pinned_image as pin,
             },
             ports::{
-                annotation_save::{AnnotationSavePort, PngSaveRequest, SaveOutcome},
+                annotation_save::{AnnotationSavePort, ImageSaveRequest, SaveOutcome},
                 ocr::{DownloadProgress, OcrPort, OcrResourceStatus, OcrResources},
                 screen_capture::{
                     CapturedRegion, ScreenCaptureFrame, ScreenCapturePort, ScreenCaptureRequest,
@@ -1941,9 +1941,9 @@ mod tests {
             fn is_available(&self) -> bool {
                 true
             }
-            fn save_png(
+            fn save_image(
                 &self,
-                _: PngSaveRequest,
+                _: ImageSaveRequest,
                 _: Arc<AtomicBool>,
             ) -> lexift_core::Result<SaveOutcome> {
                 panic!("OCR never saves pixels")

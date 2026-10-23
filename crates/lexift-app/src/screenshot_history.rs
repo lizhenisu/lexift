@@ -232,6 +232,7 @@ impl ScreenshotRuntime {
                                 document.snapshot.owner,
                                 document.snapshot.title.clone(),
                                 &cancel,
+                                crate::annotation_export::save_options(&c),
                             ),
                             ScreenshotOutput::Save => this.output_pin_image(
                                 &output,
@@ -239,6 +240,7 @@ impl ScreenshotRuntime {
                                 document.snapshot.owner,
                                 document.snapshot.title.clone(),
                                 &cancel,
+                                crate::annotation_export::save_options(&c),
                             ),
                             ScreenshotOutput::Pin => Ok(SaveOutcome::Saved),
                         };
@@ -348,12 +350,13 @@ impl ScreenshotRuntime {
                                 this.write_image(&asset.output, &cancel)?;
                                 Ok(SaveOutcome::Saved)
                             }
-                            Action::Save => this.save.save_png(
-                                PngSaveRequest {
+                            Action::Save => this.save.save_image(
+                                ImageSaveRequest {
                                     image: (*asset.output).clone(),
                                     owner,
                                     default_name: "Lexift.png".into(),
                                     title,
+                                    options: crate::annotation_export::save_options(&c),
                                 },
                                 cancel.clone(),
                             ),

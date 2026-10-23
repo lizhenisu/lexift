@@ -2,9 +2,9 @@
 
 2026-10-20 长截图专项补充：已新增[长截图链路与交互研究](pixpin-long-screenshot-research.md)，包含本机采集范围框、局部预览增长、完成编辑器、直接复制及拼接函数的 IDA 证据。下文早期“长截图未实测／匹配方法未恢复”只代表原研究轮次，专项记录更新了这部分覆盖；不扩大其他未实测项。
 
-研究日期：2026-10-16。Lexift 实现状态更新：2026-10-21。状态：已完成功能研究、局部静态调用链、Lexift 逐项实现拆解及原生自动化主流程取证；竞品硬件组合与高级功能的未实测范围见第 5 节，Lexift 新增能力的验证边界见下表。
+研究日期：2026-10-16。Lexift 实现状态更新：2026-10-23。状态：已完成功能研究、局部静态调用链、Lexift 逐项实现拆解及原生自动化主流程取证；竞品硬件组合与高级功能的未实测范围见第 5 节，Lexift 新增能力的验证边界见下表。
 
-主要结论：Lexift 已具备静态截图和可编辑贴图的基础，不应重新实现一套编辑器。选区键盘微调、手动宽高输入及左下角操作提示已完成；比例锁定已接入本次截图的鼠标、键盘和尺寸草稿；冻结帧取色、像素放大镜及顶层窗口候选已接入；截图选区 OCR 复制已接入；内部元素按点异步识别与滚轮层级切换已接入，支持范围受 UIA 提供者和有界预算限制。本次运行内复用最后成功图片输出的选区已接入，首次框选按 R 使用新底图；不保存图片或多条历史。长截图和录制需要独立的连续采集与处理生命周期。本机 PixPin 的截图→标注→贴图→拖动→PNG／复制已自动跑通，复制与 PNG 像素一致。
+主要结论：Lexift 已具备静态截图和可编辑贴图的基础，不应重新实现一套编辑器。选区键盘微调、手动宽高输入及左下角操作提示已完成；比例锁定已接入本次截图的鼠标、键盘和尺寸草稿；冻结帧取色、像素放大镜及顶层窗口候选已接入；截图选区 OCR 复制已接入；内部元素按点异步识别与滚轮层级切换已接入，支持范围受 UIA 提供者和有界预算限制。本次运行内复用最后成功图片输出的选区已接入，首次框选按 R 使用新底图；图片历史另以进程内 20 条／512MiB 保留可编辑资源，退出清空。长截图和录制需要独立的连续采集与处理生命周期。本机 PixPin 的截图→标注→贴图→拖动→PNG／复制已自动跑通，复制与 PNG 像素一致。
 
 ### Lexift 后续实施进度
 
@@ -27,7 +27,9 @@
 | 手动纵向长截图 | 已实现首版并完成本机验证 | 单屏实时采集、持续范围反馈、尾部局部预览、暂停／继续、直接输出及独立图片编辑；不自动滚动或裁剪固定栏，见[重做验证](../releases/screenshot-long-redesign.md) |
 | 长图结果编辑器裁剪 | 已接入，验收范围见记录 | 非破坏矩形裁剪，与标注共用撤销／重做，保持原图坐标和效果采样；复制／保存／贴图使用确认范围，见[裁剪验证](../releases/long-image-crop.md) |
 | 贴图编辑裁剪 | 已接入，验证见记录 | 完整可编辑底图与显示范围分离，非破坏裁剪和共享历史；裁剪长图贴图可扩大恢复完整长图，见[贴图裁剪验证](../releases/pin-image-crop.md) |
-| 图片历史与录制 | 待实现 | 后文保留方案与能力边界；竞品菜单或静态字符串不代表 Lexift 已具备这些能力 |
+| 图片历史 | 已实现 | 本进程 20 条／512MiB，保留可编辑底图与确认范围，同源成功输出更新；见[图片历史验证](../releases/screenshot-image-history.md) |
+| 屏幕录制 | 待实现 | 与截图独立的时钟、连续采集及编码生命周期，竞品菜单或静态字符串不代表 Lexift 已具备这些能力 |
+| PNG／JPEG 保存 | 已接入 | 全部图片保存入口统一支持，PNG 默认，JPEG 95% 质量及白底；见[保存格式验证](../releases/image-save-formats.md) |
 
 ## 1. 阅读边界与证据
 
@@ -221,8 +223,8 @@ flowchart LR
 | 样式与文字 | [parameter_transaction.rs](../../crates/lexift-ui/src/annotation/parameter_transaction.rs)、[font_service.rs](../../crates/lexift-ui/src/annotation/font_service.rs)、[text_workflow.rs](../../crates/lexift-ui/src/annotation/text_workflow.rs) | 复用事务和后台字体；已接入共用撤销／重做及本地快捷键，见[功能说明](../annotation/annotation-history.md) |
 | 效果 | [mosaic.rs](../../crates/lexift-core/src/domain/annotation/mosaic.rs) 的 `MosaicEffect`、`sample_padding` | Pixelate 和 Blur 已有；图像修复/自动重复目标遮挡尚未发现 |
 | 贴图生命周期与编辑 | [pinned_image.rs](../../crates/lexift-core/src/domain/pinned_image.rs) 的 State/Event/Command；[pin_editor.rs](../../crates/lexift-ui/src/annotation/pin_editor.rs)、[pinned_screenshot.rs](../../crates/lexift-ui/src/pinned_screenshot.rs) | 每实例 document/revision/editing/hidden/busy；无分组、标题、持久恢复业务证据 |
-| 图片输出 | [clipboard.rs](../../crates/lexift-platform/src/windows/clipboard.rs) 的 `CF_DIBV5`；[annotation_save.rs](../../crates/lexift-platform/src/windows/annotation_save.rs) 的 WIC PNG/STA 对话框 | 当前只确认 PNG 文件输出；图片不进入纯文本历史 |
-| OCR | [ocr.rs](../../crates/lexift-core/src/ports/ocr.rs) 的 `recognize`；[Core OCR](../../crates/lexift-core/src/domain/ocr.rs) 的 Recognized；[App OCR](../../crates/lexift-app/src/ocr.rs) | 返回 String；现有框选→识别→翻译弹窗，没有词框结果供贴图划词命中。贴图菜单没有 OCR 接线 |
+| 图片输出 | [clipboard.rs](../../crates/lexift-platform/src/windows/clipboard.rs) 的 `CF_DIBV5`；[annotation_save.rs](../../crates/lexift-platform/src/windows/annotation_save.rs) 的 WIC PNG／JPEG 与 STA 对话框 | PNG／JPEG 共用 WIC 保存；图片不进入纯文本历史 |
+| OCR | [ocr.rs](../../crates/lexift-core/src/ports/ocr.rs) 的 `recognize`；[Core OCR](../../crates/lexift-core/src/domain/ocr.rs) 的 Recognized；[App OCR](../../crates/lexift-app/src/ocr.rs) | 返回 String；现有框选→识别→翻译弹窗，没有词框结果供贴图划词命中。贴图菜单已接入 OCR 识别复制，详见专项验证 |
 | 平台采集 | [ScreenCapturePort](../../crates/lexift-core/src/ports/screen_capture.rs)、[Windows 实现](../../crates/lexift-platform/src/windows/screen_capture.rs) | 有冻结桌面和效果取样；WGC/D3D 路径存在不等于已实现录制帧时钟/编码 |
 
 检索边界为当前工作树的 Rust/Slint 源码；已加入冻结帧像素采样及取色，本轮新增单屏手动纵向长截图配准和图片编辑视口；未发现视频时间轴/编码或实时屏幕取色；进程内图片历史已接入；普通顶层窗口与内部元素按点识别、滚轮层级切换已接入。剪贴板业务中的 recording 是文本历史记录开关，不是录屏。

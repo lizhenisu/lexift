@@ -2118,3 +2118,34 @@ mod tests {
         }
     }
 }
+
+pub(crate) fn image_save_options(
+    language: UiLanguage,
+) -> lexift_core::ports::annotation_save::ImageSaveOptions {
+    const MESSAGE: &str = "The file extension does not match the selected image type. Correct the file name or change the file type.";
+    lexift_core::ports::annotation_save::ImageSaveOptions::png_and_jpeg(
+        lookup(language.code(), MESSAGE).unwrap_or(MESSAGE).into(),
+    )
+}
+
+#[cfg(test)]
+mod image_save_tests {
+    use super::*;
+    #[test]
+    fn save_dialog_feedback_is_localized_without_thread_local_state() {
+        for language in UiLanguage::ALL {
+            let options = image_save_options(language);
+            assert!(!options.extension_mismatch_message.is_empty());
+            assert_eq!(
+                options.default_format,
+                lexift_core::ports::annotation_save::ImageFormat::Png
+            );
+            if !matches!(language, UiLanguage::EnglishUs | UiLanguage::EnglishUk) {
+                assert_ne!(
+                    options.extension_mismatch_message,
+                    image_save_options(UiLanguage::EnglishUs).extension_mismatch_message
+                );
+            }
+        }
+    }
+}

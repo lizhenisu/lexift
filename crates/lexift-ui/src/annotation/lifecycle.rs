@@ -293,7 +293,7 @@ pub(crate) fn toggle(requested_at: Instant) {
             later_main(&input, generation, revision, || {
                 if pin_editor::active() {
                     pin_editor::output(lexift_core::domain::pinned_image::Output::Save);
-                } else if screenshot::active() {
+                } else if screenshot::active() || history_editor::active() {
                     screenshot::output(lexift_core::domain::screenshot::ScreenshotOutput::Save);
                 } else {
                     export::start();

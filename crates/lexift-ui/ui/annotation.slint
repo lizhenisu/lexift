@@ -208,7 +208,7 @@ export component AnnotationToolbar inherits Window {
             }
             ToolButton { kind: 14; enabled: root.can-undo && !root.output-busy && !root.image-cropping; clicked => { root.undo-requested(); } }
             ToolButton { kind:28; enabled:root.can-redo && !root.output-busy && !root.image-cropping; clicked=>{root.redo-requested();} }
-                ToolButton { kind: 15; label: root.screenshot-mode ? @tr("Save screenshot") : @tr("Save annotation screenshot"); enabled: root.can-download && !root.output-busy && !root.image-cropping; clicked => { root.download-requested(); } }
+                ToolButton { kind: 15; label: @tr("Save image"); enabled: root.can-download && !root.output-busy && !root.image-cropping; clicked => { root.download-requested(); } }
             if root.screenshot-mode: ToolButton { kind:23; label:@tr("Copy screenshot"); enabled:!root.output-busy && !root.image-cropping; clicked => { root.copy-screenshot-requested(); } }
             if root.screenshot-mode && !root.pin-edit-mode: ToolButton { kind:26; busy:root.output-busy; label:root.output-busy ? @tr("Processing screenshot") : @tr("Recognize text"); enabled:!root.output-busy && !root.image-cropping; clicked => { root.recognize-text-requested(); } }
             if root.image-edit-mode || root.pin-edit-mode: ToolButton { kind:29; label:@tr("Crop image"); selected:root.image-cropping; enabled:!root.output-busy; clicked=>{root.crop-requested();} }

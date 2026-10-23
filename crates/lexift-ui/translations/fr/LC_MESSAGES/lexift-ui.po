@@ -1921,3 +1921,6 @@ msgstr "Capturer dans 10 secondes"
 
 msgid "Screenshot in {} seconds"
 msgstr "Capture dans {} secondes"
+
+msgid "The file extension does not match the selected image type. Correct the file name or change the file type."
+msgstr "L’extension ne correspond pas au type d’image sélectionné. Corrigez le nom ou changez le type de fichier."

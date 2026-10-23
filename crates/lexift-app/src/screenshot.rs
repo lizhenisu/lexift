@@ -12,7 +12,7 @@ use lexift_core::{
     },
     ports::{
         annotation_export::AnnotationExportRenderPort,
-        annotation_save::{AnnotationSavePort, PngSaveRequest, SaveOutcome},
+        annotation_save::{AnnotationSavePort, ImageSaveRequest, SaveOutcome},
         clipboard::ClipboardPort,
         screen_capture::{CapturedRegion, ScreenCaptureFrame, ScreenCapturePort},
     },
@@ -410,7 +410,7 @@ impl ScreenshotRuntime {
                         let result = this
                             .compose_pin(&image, samples.clone(), document.as_ref(), hidden, &cancel)
                             .and_then(|output| {
-                                let result = this.output_pin_image(&output, kind, owner, title, &cancel);
+                                let result = this.output_pin_image(&output, kind, owner, title, &cancel, crate::annotation_export::save_options(&c));
                                 if matches!(result, Ok(SaveOutcome::Saved)) {
                                     this.retain_history(&c,
                                         lexift_core::domain::image_history::workflow::OutputKey::Pin { id, operation },
@@ -536,18 +536,20 @@ impl ScreenshotRuntime {
         owner: Option<lexift_core::ports::magnifier::WindowToken>,
         title: String,
         cancel: &Arc<AtomicBool>,
+        options: lexift_core::ports::annotation_save::ImageSaveOptions,
     ) -> Result<SaveOutcome> {
         if cancel.load(Ordering::Acquire) {
             return Ok(SaveOutcome::Cancelled);
         }
         match kind {
             PinOutput::Copy => self.write_image(image, cancel).map(|_| SaveOutcome::Saved),
-            PinOutput::Save => self.save.save_png(
-                PngSaveRequest {
+            PinOutput::Save => self.save.save_image(
+                ImageSaveRequest {
                     image: image.clone(),
                     owner,
                     default_name: "Lexift.png".into(),
                     title,
+                    options,
                 },
                 cancel.clone(),
             ),
@@ -856,12 +858,13 @@ impl ScreenshotRuntime {
                                         this.write_image(&image, &cancelled)?;
                                         Ok(SaveOutcome::Saved)
                                     }
-                                    ScreenshotOutput::Save => this.save.save_png(
-                                        PngSaveRequest {
+                                    ScreenshotOutput::Save => this.save.save_image(
+                                        ImageSaveRequest {
                                             image: (*image).clone(),
                                             owner: request.snapshot.owner,
                                             default_name: request.snapshot.name.clone(),
                                             title: request.snapshot.title.clone(),
+                                            options: crate::annotation_export::save_options(&worker_controller),
                                         },
                                         cancelled.clone(),
                                     ),
@@ -1070,7 +1073,7 @@ mod tests {
     use super::*;
     use lexift_core::{
         domain::{annotation::Session, annotation_export::ExportSnapshot, geometry::Rect},
-        ports::annotation_save::PngSaveRequest,
+        ports::annotation_save::ImageSaveRequest,
     };
     struct Save;
     #[test]
@@ -1228,7 +1231,7 @@ mod tests {
         fn is_available(&self) -> bool {
             true
         }
-        fn save_png(&self, _: PngSaveRequest, _: Arc<AtomicBool>) -> Result<SaveOutcome> {
+        fn save_image(&self, _: ImageSaveRequest, _: Arc<AtomicBool>) -> Result<SaveOutcome> {
             panic!("composition must not save")
         }
     }
@@ -1510,7 +1513,11 @@ mod tests {
             fn is_available(&self) -> bool {
                 true
             }
-            fn save_png(&self, request: PngSaveRequest, _: Arc<AtomicBool>) -> Result<SaveOutcome> {
+            fn save_image(
+                &self,
+                request: ImageSaveRequest,
+                _: Arc<AtomicBool>,
+            ) -> Result<SaveOutcome> {
                 assert_eq!(
                     request.owner,
                     Some(lexift_core::ports::magnifier::WindowToken(42))
@@ -1534,7 +1541,14 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         assert_eq!(
             runtime
-                .output_pin_image(&image, PinOutput::Copy, None, String::new(), &cancel)
+                .output_pin_image(
+                    &image,
+                    PinOutput::Copy,
+                    None,
+                    String::new(),
+                    &cancel,
+                    crate::annotation_export::test_save_options()
+                )
                 .unwrap(),
             SaveOutcome::Saved
         );
@@ -1545,7 +1559,8 @@ mod tests {
                     PinOutput::Save,
                     Some(lexift_core::ports::magnifier::WindowToken(42)),
                     String::new(),
-                    &cancel
+                    &cancel,
+                    crate::annotation_export::test_save_options(),
                 )
                 .unwrap(),
             SaveOutcome::Cancelled
@@ -1558,7 +1573,14 @@ mod tests {
         for kind in [PinOutput::Copy, PinOutput::Save] {
             assert_eq!(
                 runtime
-                    .output_pin_image(&image, kind, None, String::new(), &cancel)
+                    .output_pin_image(
+                        &image,
+                        kind,
+                        None,
+                        String::new(),
+                        &cancel,
+                        crate::annotation_export::test_save_options()
+                    )
                     .unwrap(),
                 SaveOutcome::Cancelled
             );

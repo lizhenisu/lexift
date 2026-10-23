@@ -1921,3 +1921,6 @@ msgstr "10 秒後截圖"
 
 msgid "Screenshot in {} seconds"
 msgstr "{} 秒後截圖"
+
+msgid "The file extension does not match the selected image type. Correct the file name or change the file type."
+msgstr "副檔名與所選圖片類型不符，請修改檔名或變更檔案類型。"

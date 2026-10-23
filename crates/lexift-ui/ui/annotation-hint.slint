@@ -50,7 +50,7 @@ export global AnnotationPresentation {
             : kind == 9 ? @tr("Watermark") : kind == 10 ? @tr("Sequence") : kind == 11 ? @tr("Mosaic")
             : kind == 12 ? @tr("Mosaic sticker") : kind == 13 ? @tr("Eraser") : kind == 14 ? @tr("Undo") + " (Ctrl+Z)"
             : kind == 28 ? @tr("Redo") + " (Ctrl+Y / Ctrl+Shift+Z)"
-            : kind == 15 ? @tr("Save annotation screenshot") : kind == 16 ? @tr("Finish annotation")
+            : kind == 15 ? @tr("Save image") : kind == 16 ? @tr("Finish annotation")
             : kind == 17 ? @tr("Mouse mode") : kind == 18 ? @tr("Straight line") : @tr("Curved line");
     }
     public pure function group(group: int) -> string {
