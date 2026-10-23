@@ -196,7 +196,11 @@ pub(super) fn sync(state: &AppState) {
         }
     });
     let Some(view) = &state.image_history.window else {
-        if state.screenshot.phase == lexift_core::domain::screenshot::ScreenshotPhase::Preparing {
+        if matches!(
+            state.screenshot.phase,
+            lexift_core::domain::screenshot::ScreenshotPhase::CountingDown
+                | lexift_core::domain::screenshot::ScreenshotPhase::Preparing
+        ) {
             suspend();
         } else {
             close();
@@ -232,7 +236,11 @@ fn notification(state: &AppState) {
     let display = REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut()?;
-        if state.screenshot.phase == lexift_core::domain::screenshot::ScreenshotPhase::Preparing {
+        if matches!(
+            state.screenshot.phase,
+            lexift_core::domain::screenshot::ScreenshotPhase::CountingDown
+                | lexift_core::domain::screenshot::ScreenshotPhase::Preparing
+        ) {
             r.toast_timer.stop();
             r.toast.clear();
         }

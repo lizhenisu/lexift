@@ -861,3 +861,18 @@ pub fn clear_screenshot_surface_pixels(session: u64) {
     #[cfg(not(target_os = "windows"))]
     let _ = session;
 }
+
+/// Interactive passive countdown input; native implementation owns activation policy.
+pub fn configure_countdown_window(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::popup::configure_countdown_input(window)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+        Err(lexift_core::Error::new("Countdown controls unavailable"))
+    }
+}

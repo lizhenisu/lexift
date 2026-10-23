@@ -20,6 +20,7 @@ pub struct ColorResult {
 pub enum ScreenshotPhase {
     #[default]
     Idle,
+    CountingDown,
     Preparing,
     Selecting,
     Editing,
@@ -86,6 +87,14 @@ impl ScreenshotState {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotEvent {
+    Delayed {
+        request: ExportRequest,
+        seconds: u8,
+    },
+    DelayElapsed {
+        session: u64,
+        request: ExportRequest,
+    },
     Long(super::long_capture::workflow::Event),
     ReuseRegion {
         session: u64,
@@ -147,6 +156,11 @@ pub enum ScreenshotEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotCommand {
+    Countdown {
+        session: u64,
+        seconds: u8,
+        request: ExportRequest,
+    },
     Long(super::long_capture::workflow::Command),
     ReuseRegion {
         session: u64,
@@ -186,10 +200,66 @@ pub enum ScreenshotCommand {
         session: u64,
     },
 }
+/// Shared eligibility for the domain request and its local menu affordance.
+pub fn delay_available(state: &AppState) -> bool {
+    !state.screenshot.active()
+        && state.image_history.window.as_ref().is_none_or(|w| !w.busy)
+        && state.image_history.editor.is_none()
+        && state.annotation_export.request.is_none()
+        && !state
+            .pinned_images
+            .values()
+            .any(|p| p.editing.is_some() || p.busy)
+        && !matches!(
+            state.ocr.phase,
+            super::ocr::OcrPhase::Checking
+                | super::ocr::OcrPhase::Capturing
+                | super::ocr::OcrPhase::Recognizing
+                | super::ocr::OcrPhase::Translating
+        )
+}
 pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCommand> {
     let command = |command| vec![AppCommand::Screenshot(command)];
+    let delay_allowed = delay_available(state);
     let s = &mut state.screenshot;
     match event {
+        ScreenshotEvent::Delayed { request, seconds }
+            if matches!(seconds, 3 | 5 | 10)
+                && delay_allowed
+                && state.annotation_export.session == Some(request.session) =>
+        {
+            s.session = s
+                .session
+                .checked_add(1)
+                .expect("screenshot identity exhausted");
+            s.source_session = request.session;
+            s.phase = ScreenshotPhase::CountingDown;
+            s.reuse_sequence = 0;
+            s.element_sequence = 0;
+            s.error = None;
+            s.ocr_result = None;
+            s.bounds = None;
+            s.layout.clear();
+            s.long = None;
+            s.element_pending = None;
+            s.color_pending = None;
+            s.color_result = None;
+            s.operation = 0;
+            state.toolbar_selection = None;
+            command(ScreenshotCommand::Countdown {
+                session: s.session,
+                seconds,
+                request,
+            })
+        }
+        ScreenshotEvent::DelayElapsed { session, request }
+            if s.session == session
+                && s.phase == ScreenshotPhase::CountingDown
+                && s.source_session == request.session =>
+        {
+            s.phase = ScreenshotPhase::Preparing;
+            command(ScreenshotCommand::Prepare { session, request })
+        }
         ScreenshotEvent::Long(event) => super::long_capture::workflow::reduce(s, event)
             .into_iter()
             .map(AppCommand::Screenshot)
@@ -511,6 +581,143 @@ mod tests {
             AppCommand::Screenshot(ScreenshotCommand::Prepare { session: 1, .. })
         ));
         s
+    }
+    #[test]
+    fn delay_starts_without_capture_and_only_current_deadline_can_prepare() {
+        for seconds in [3, 5, 10] {
+            let mut s = begin();
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::Cancelled {
+                session: 1,
+            }));
+            let r = request(42, 1, bounds());
+            let commands = s.reduce(AppEvent::Screenshot(ScreenshotEvent::Delayed {
+                request: r.clone(),
+                seconds,
+            }));
+            assert!(
+                matches!(&commands[..],[AppCommand::Screenshot(ScreenshotCommand::Countdown { session:2, seconds:n,.. })] if *n==seconds)
+            );
+            assert!(
+                s.reduce(AppEvent::Screenshot(ScreenshotEvent::Requested(r.clone())))
+                    .is_empty()
+            );
+            assert!(
+                s.reduce(AppEvent::Screenshot(ScreenshotEvent::Delayed {
+                    request: r.clone(),
+                    seconds: 5
+                }))
+                .is_empty()
+            );
+            assert!(
+                s.reduce(AppEvent::Screenshot(ScreenshotEvent::DelayElapsed {
+                    session: 1,
+                    request: r.clone()
+                }))
+                .is_empty()
+            );
+            assert_eq!(s.screenshot.phase, ScreenshotPhase::CountingDown);
+            let commands = s.reduce(AppEvent::Screenshot(ScreenshotEvent::DelayElapsed {
+                session: 2,
+                request: r.clone(),
+            }));
+            assert!(matches!(
+                &commands[..],
+                [AppCommand::Screenshot(ScreenshotCommand::Prepare {
+                    session: 2,
+                    ..
+                })]
+            ));
+            assert!(
+                s.reduce(AppEvent::Screenshot(ScreenshotEvent::DelayElapsed {
+                    session: 2,
+                    request: r
+                }))
+                .is_empty()
+            );
+        }
+    }
+    #[test]
+    fn cancelled_delay_rejects_late_deadline_and_preserves_region_and_image_history() {
+        let mut s = begin();
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::Cancelled {
+            session: 1,
+        }));
+        s.screenshot.last_region = Some(LastRegion {
+            bounds: bounds(),
+            layout: vec![bounds()],
+        });
+        let before = s.image_history.clone();
+        let last = s.screenshot.last_region.clone();
+        let r = request(42, 1, bounds());
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::Delayed {
+            request: r.clone(),
+            seconds: 3,
+        }));
+        assert!(matches!(
+            &s.reduce(AppEvent::Screenshot(ScreenshotEvent::Cancelled {
+                session: 2
+            }))[..],
+            [AppCommand::Screenshot(ScreenshotCommand::Restore {
+                session: 2
+            })]
+        ));
+        assert!(
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::DelayElapsed {
+                session: 2,
+                request: r
+            }))
+            .is_empty()
+        );
+        assert_eq!(s.image_history, before);
+        assert_eq!(s.screenshot.last_region, last);
+    }
+    #[test]
+    fn delay_rejects_invalid_durations_and_busy_workflows() {
+        let mut s = begin();
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::Cancelled {
+            session: 1,
+        }));
+        for seconds in [0, 1, 2, 4, 255] {
+            assert!(
+                s.reduce(AppEvent::Screenshot(ScreenshotEvent::Delayed {
+                    request: request(42, 1, bounds()),
+                    seconds
+                }))
+                .is_empty()
+            );
+        }
+        s.image_history.window = Some(super::super::image_history::workflow::Window {
+            id: 1,
+            anchor: super::super::geometry::Point { x: 0, y: 0 },
+            selected: None,
+            operation: 1,
+            busy: true,
+            error: false,
+        });
+        assert!(
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::Delayed {
+                request: request(42, 1, bounds()),
+                seconds: 3
+            }))
+            .is_empty()
+        );
+        s.image_history.window = None;
+        s.ocr.phase = super::super::ocr::OcrPhase::Recognizing;
+        assert!(
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::Delayed {
+                request: request(42, 1, bounds()),
+                seconds: 3
+            }))
+            .is_empty()
+        );
+        s.ocr.phase = super::super::ocr::OcrPhase::Error;
+        assert!(
+            !s.reduce(AppEvent::Screenshot(ScreenshotEvent::Delayed {
+                request: request(42, 1, bounds()),
+                seconds: 3
+            }))
+            .is_empty()
+        );
     }
     #[test]
     fn cropped_long_output_requires_valid_image_metadata_and_ignores_stale_results() {

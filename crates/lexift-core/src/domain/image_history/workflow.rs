@@ -274,7 +274,8 @@ fn unavailable(state: &AppState) -> bool {
     use crate::domain::{ocr::OcrPhase, screenshot::ScreenshotPhase};
     matches!(
         state.screenshot.phase,
-        ScreenshotPhase::Preparing
+        ScreenshotPhase::CountingDown
+            | ScreenshotPhase::Preparing
             | ScreenshotPhase::Selecting
             | ScreenshotPhase::Recognizing
             | ScreenshotPhase::Output

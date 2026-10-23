@@ -157,6 +157,7 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) attach_tool_window: AttachToolWindow,
     pub(crate) annotation_displays: AnnotationDisplays,
     pub(crate) configure_capture_feedback: Rc<dyn Fn(&slint::Window) -> bool>,
+    pub(crate) configure_countdown_window: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) configure_hint_window: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) annotation_click_through: AnnotationClickThrough,
     pub(crate) annotation_corner_cursor: AnnotationCornerCursor,
@@ -230,6 +231,7 @@ impl WindowLifecycleCallbacks {
             attach_tool_window: Rc::new(attach_tool_window),
             annotation_displays: Rc::new(Vec::new),
             configure_capture_feedback: Rc::new(|_| false),
+            configure_countdown_window: Rc::new(|_| false),
             configure_hint_window: Rc::new(|_| false),
             annotation_click_through: Rc::new(|_, _| false),
             annotation_corner_cursor: Rc::new(|_, _| false),
@@ -348,6 +350,13 @@ impl WindowLifecycleCallbacks {
     }
 
     /// Supplies passive hint input policy independently of annotation canvas ordering.
+    pub fn with_countdown_window(
+        mut self,
+        callback: impl Fn(&slint::Window) -> bool + 'static,
+    ) -> Self {
+        self.configure_countdown_window = Rc::new(callback);
+        self
+    }
     pub fn with_hint_window(mut self, callback: impl Fn(&slint::Window) -> bool + 'static) -> Self {
         self.configure_hint_window = Rc::new(callback);
         self

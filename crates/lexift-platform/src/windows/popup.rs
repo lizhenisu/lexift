@@ -1720,6 +1720,30 @@ pub(crate) fn configure_hint_input(
     }
     Ok(())
 }
+/// Countdown controls accept clicks without activating the owning application.
+pub(crate) fn configure_countdown_input(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    use windows::Win32::UI::{Input::KeyboardAndMouse::EnableWindow, Shell::SetWindowSubclass};
+    let hwnd = required_hwnd(window)?;
+    shell_policy::install(hwnd, Some(shell_policy::Activation::Passive))?;
+    if !unsafe { SetWindowSubclass(hwnd, Some(hint_input_proc), HINT_INPUT_SUBCLASS, 2) }.as_bool()
+    {
+        return Err(lexift_core::Error::new("Could not protect countdown input"));
+    }
+    configure_hwnd_extended_style(hwnd, passive_extended_style)?;
+    unsafe {
+        windows::Win32::UI::WindowsAndMessaging::SetWindowDisplayAffinity(
+            hwnd,
+            windows::Win32::UI::WindowsAndMessaging::WDA_EXCLUDEFROMCAPTURE,
+        )
+    }
+    .map_err(|e| lexift_core::Error::new(e.to_string()))?;
+    unsafe {
+        let _ = EnableWindow(hwnd, true);
+    }
+    Ok(())
+}
 /// Live capture feedback uses the existing native RGBA presenter, so layered cross-process
 /// hit-test transparency must survive Winit's show and geometry style rewrites.
 pub(crate) fn configure_capture_feedback(
@@ -1766,14 +1790,14 @@ unsafe extern "system" fn hint_input_proc(
                         (WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW).0;
                 }
             }
-            WM_STYLECHANGING if wparam.0 as i32 == GWL_STYLE.0 => {
+            WM_STYLECHANGING if _data != 2 && wparam.0 as i32 == GWL_STYLE.0 => {
                 let styles = lparam.0 as *mut STYLESTRUCT;
                 if !styles.is_null() {
                     (*styles).styleNew |= WS_DISABLED.0;
                 }
             }
             WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
-            WM_NCHITTEST => return LRESULT(HTTRANSPARENT as isize),
+            WM_NCHITTEST if _data != 2 => return LRESULT(HTTRANSPARENT as isize),
             WM_NCDESTROY => {
                 let _ = RemoveWindowSubclass(hwnd, Some(hint_input_proc), HINT_INPUT_SUBCLASS);
             }
@@ -2535,6 +2559,53 @@ mod passive_style_regression {
         assert_eq!(unsafe { GetForegroundWindow() }, foreground);
     }
 
+    #[test]
+    fn countdown_accepts_input_without_activation_through_style_rewrites() {
+        use windows::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled;
+        let foreground = unsafe { GetForegroundWindow() };
+        let window = OwnedWindow(
+            unsafe {
+                CreateWindowExW(
+                    WINDOW_EX_STYLE(0),
+                    w!("STATIC"),
+                    w!("Lexift countdown regression"),
+                    WS_POPUP,
+                    0,
+                    0,
+                    200,
+                    48,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            }
+            .unwrap(),
+        );
+        configure_passive(&window).unwrap();
+        configure_countdown_input(&window).unwrap();
+        for style in [WS_POPUP.0, WS_POPUP.0 | WS_VISIBLE.0] {
+            unsafe { SetWindowLongPtrW(window.0, GWL_STYLE, style as isize) };
+            assert!(unsafe { IsWindowEnabled(window.0) }.as_bool());
+            assert_ne!(
+                unsafe { GetWindowLongPtrW(window.0, GWL_EXSTYLE) } & WS_EX_NOACTIVATE.0 as isize,
+                0
+            );
+        }
+        assert_eq!(
+            unsafe {
+                SendMessageW(
+                    window.0,
+                    WM_MOUSEACTIVATE,
+                    Some(windows::Win32::Foundation::WPARAM(0)),
+                    Some(windows::Win32::Foundation::LPARAM(0)),
+                )
+            }
+            .0,
+            MA_NOACTIVATE as isize
+        );
+        assert_eq!(unsafe { GetForegroundWindow() }, foreground);
+    }
     #[test]
     fn backend_style_rewrites_preserve_passive_policy_until_explicit_interactive_transition() {
         let foreground = unsafe { GetForegroundWindow() };

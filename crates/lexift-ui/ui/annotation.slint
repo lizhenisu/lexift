@@ -107,9 +107,11 @@ export component AnnotationToolbar inherits Window {
     callback crop-requested();
     in property <string> feedback;
     private property <int> action-count: root.screenshot-mode && !root.pin-edit-mode ? 9 : 6;
-    out property <length> toolbar-width: root.collapsed ? 80px : 34px + 38px + 7 * 38px + 5 * 18px + 1px + root.action-count * 38px + (9 + root.action-count) * 7px + 51px + (root.pin-edit-mode ? 45px : 0px) + (root.pin-edit-mode && root.image-cropping ? 230px : 0px);
+    out property <length> toolbar-width: root.collapsed ? 80px : 34px + 38px + 7 * 38px + 5 * 18px + 1px + root.action-count * 38px + (9 + root.action-count) * 7px + 51px + (!root.screenshot-mode ? 27px : 0px) + (root.pin-edit-mode ? 45px : 0px) + (root.pin-edit-mode && root.image-cropping ? 230px : 0px);
     callback image-history-requested();
     callback screenshot-requested();
+    callback screenshot-delay-menu();
+    in property <bool> delay-available:true;
     callback recognize-text-requested();
     callback long-capture-requested();
     callback copy-screenshot-requested();
@@ -192,6 +194,12 @@ export component AnnotationToolbar inherits Window {
             Rectangle { width: 1px; background: Colors.outline; }
             ToolButton { kind:30; label:@tr("Image history"); enabled:!root.output-busy; clicked=>{root.image-history-requested();} }
             if !root.screenshot-mode: ToolButton { kind: 22; label:@tr("Screenshot"); clicked => { root.screenshot-requested(); } }
+            if !root.screenshot-mode: Rectangle { width:20px; height:38px; border-radius:6px; background:delay-touch.has-hover ? Colors.icon-button-hover : transparent;
+                Image { x:3px;y:12px;width:14px;height:14px;source:@image-url("assets/icons/chevron-down.svg");colorize:Colors.foreground; }
+                accessible-role:button;accessible-label:@tr("Delayed screenshot");accessible-enabled:root.delay-available;
+                AnnotationHintTarget { text:@tr("Delayed screenshot");hovered:delay-touch.has-hover;pressed:delay-touch.pressed; }
+                delay-touch := TouchArea { enabled:root.delay-available; clicked=>{root.screenshot-delay-menu();} }
+            }
             if root.pin-edit-mode && root.image-cropping: HorizontalLayout {
                 spacing:7px;
                 Text {width:140px;height:38px;vertical-alignment:center;color:Colors.secondary-foreground;font-size:12px;text:root.crop-dimensions;}

@@ -1903,3 +1903,21 @@ msgstr "Bildverlauf leeren?"
 
 msgid "Image exceeds the history limit and was not added"
 msgstr "Das Bild überschreitet das Verlaufslimit und wurde nicht hinzugefügt"
+
+msgid "Delayed screenshot"
+msgstr "Verzögerter Screenshot"
+
+msgid "Screenshot now"
+msgstr "Jetzt aufnehmen"
+
+msgid "Screenshot after 3 seconds"
+msgstr "Aufnahme nach 3 Sekunden"
+
+msgid "Screenshot after 5 seconds"
+msgstr "Aufnahme nach 5 Sekunden"
+
+msgid "Screenshot after 10 seconds"
+msgstr "Aufnahme nach 10 Sekunden"
+
+msgid "Screenshot in {} seconds"
+msgstr "Screenshot in {} Sekunden"

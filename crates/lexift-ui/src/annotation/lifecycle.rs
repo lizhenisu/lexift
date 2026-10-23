@@ -325,6 +325,10 @@ pub(crate) fn toggle(requested_at: Instant) {
                 }
             });
         });
+        let delay_input = input.clone();
+        main.on_screenshot_delay_menu(move || {
+            later_main(&delay_input, generation, revision, screenshot::delay::menu);
+        });
         main.on_screenshot_requested(move || {
             later_main(&input, generation, revision, screenshot::request)
         });
@@ -460,6 +464,7 @@ impl Registry {
     }
 
     pub(super) fn close(&mut self) {
+        screenshot::delay::retire_menu(&self.lifecycle);
         screenshot::size_input::close(self);
         screenshot::keyboard::invalidate(self);
         let _pointer_guards = self.pause_native_pointer_inputs();

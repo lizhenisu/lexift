@@ -1903,3 +1903,21 @@ msgstr "Cancellare la cronologia immagini?"
 
 msgid "Image exceeds the history limit and was not added"
 msgstr "L’immagine supera il limite della cronologia e non è stata aggiunta"
+
+msgid "Delayed screenshot"
+msgstr "Cattura ritardata"
+
+msgid "Screenshot now"
+msgstr "Cattura ora"
+
+msgid "Screenshot after 3 seconds"
+msgstr "Cattura tra 3 secondi"
+
+msgid "Screenshot after 5 seconds"
+msgstr "Cattura tra 5 secondi"
+
+msgid "Screenshot after 10 seconds"
+msgstr "Cattura tra 10 secondi"
+
+msgid "Screenshot in {} seconds"
+msgstr "Cattura tra {} secondi"

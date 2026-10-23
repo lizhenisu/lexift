@@ -151,8 +151,10 @@ impl AppState {
         if self.image_history.editor.is_some()
             && matches!(
                 event,
-                AppEvent::Screenshot(crate::domain::screenshot::ScreenshotEvent::Requested(_))
-                    | AppEvent::Ocr(crate::domain::ocr::OcrEvent::Requested { .. })
+                AppEvent::Screenshot(
+                    crate::domain::screenshot::ScreenshotEvent::Requested(_)
+                        | crate::domain::screenshot::ScreenshotEvent::Delayed { .. }
+                ) | AppEvent::Ocr(crate::domain::ocr::OcrEvent::Requested { .. })
             )
         {
             return vec![];

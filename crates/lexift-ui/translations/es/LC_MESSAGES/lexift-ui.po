@@ -1903,3 +1903,21 @@ msgstr "¿Borrar el historial de imágenes?"
 
 msgid "Image exceeds the history limit and was not added"
 msgstr "La imagen supera el límite del historial y no se ha añadido"
+
+msgid "Delayed screenshot"
+msgstr "Captura con retraso"
+
+msgid "Screenshot now"
+msgstr "Capturar ahora"
+
+msgid "Screenshot after 3 seconds"
+msgstr "Capturar en 3 segundos"
+
+msgid "Screenshot after 5 seconds"
+msgstr "Capturar en 5 segundos"
+
+msgid "Screenshot after 10 seconds"
+msgstr "Capturar en 10 segundos"
+
+msgid "Screenshot in {} seconds"
+msgstr "Captura en {} segundos"

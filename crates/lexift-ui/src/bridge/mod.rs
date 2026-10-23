@@ -112,6 +112,7 @@ fn has_live_window_instances() -> bool {
         || crate::annotation::screenshot::active()
         || crate::pinned_screenshot::active()
         || crate::tray_menu::is_open()
+        || crate::annotation::screenshot::delay::active()
         || image_history::active()
         || SELECTION_TOOLBAR_REGISTRY.with(|registry| {
             registry
@@ -512,6 +513,18 @@ impl UiHandle {
     pub fn request_ocr(&self) {
         let _ = slint::invoke_from_event_loop(crate::ocr::request);
     }
+    pub fn begin_screenshot_delay(
+        &self,
+        session: u64,
+        seconds: u8,
+        ready: Box<dyn FnOnce(lexift_core::Result<std::time::Instant>) + Send>,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            image_history::close();
+            crate::annotation::screenshot::suspend(session);
+            crate::annotation::screenshot::delay::begin(session, seconds, ready);
+        });
+    }
     pub fn suspend_for_screenshot(
         &self,
         session: u64,
@@ -521,6 +534,7 @@ impl UiHandle {
     ) {
         let _ = slint::invoke_from_event_loop(move || {
             image_history::close();
+            crate::annotation::screenshot::delay::finish(session);
             crate::annotation::screenshot::suspend(session);
             ready(crate::annotation::screenshot::suspended_pointer(session));
         });
@@ -651,6 +665,7 @@ impl UiHandle {
             crate::ocr::sync(state.ocr.generation, state.ocr.phase);
             crate::annotation::sync_export(&state.annotation_export);
             crate::annotation::screenshot::sync(&state.screenshot);
+            crate::annotation::screenshot::delay::availability(&state);
             crate::pinned_screenshot::sync_outputs(&state.pinned_images);
             let view_state = mapper::view_state(&state);
             let popup_states = mapper::popup_states(&state);

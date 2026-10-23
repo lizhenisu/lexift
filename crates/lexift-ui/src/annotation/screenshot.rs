@@ -27,6 +27,9 @@ pub(in crate::annotation) mod long_editor;
 #[path = "screenshot_size_input.rs"]
 pub(super) mod size_input;
 
+#[path = "screenshot_delay.rs"]
+pub(crate) mod delay;
+
 struct Recovery {
     document: editor_document::EditorDocument,
     position: slint::PhysicalPosition,
@@ -64,6 +67,7 @@ pub(crate) fn emit(event: ScreenshotEvent) {
     }
 }
 pub(crate) fn sync(state: &ScreenshotState) {
+    delay::sync(state);
     crate::screen_interaction::pixel_picker::sync(state);
     let feedback = FLOW.with(|slot| {
         let mut slot = slot.borrow_mut();
@@ -118,6 +122,12 @@ pub(crate) fn sync(state: &ScreenshotState) {
     long::sync();
 }
 pub(super) fn request() {
+    request_after(0);
+}
+pub(super) fn request_after(seconds: u8) {
+    if seconds > 0 && !delay::available() {
+        return;
+    }
     pin_editor::finish_now();
     if active() || crate::ocr::screen_busy() {
         return;
@@ -152,13 +162,22 @@ pub(super) fn request() {
         })
     });
     if let Some(request) = request {
-        emit(ScreenshotEvent::Requested(request));
+        if seconds == 0 {
+            emit(ScreenshotEvent::Requested(request));
+        } else {
+            emit(ScreenshotEvent::Delayed { request, seconds });
+        }
     }
 }
 pub(crate) fn suspend(id: u64) {
     if !FLOW.with(|s| {
         let s = s.borrow();
-        s.state.session == id && s.state.phase == ScreenshotPhase::Preparing && s.recovery.is_none()
+        s.state.session == id
+            && matches!(
+                s.state.phase,
+                ScreenshotPhase::Preparing | ScreenshotPhase::CountingDown
+            )
+            && s.recovery.is_none()
     }) {
         return;
     }
@@ -333,6 +352,7 @@ pub(crate) fn cancel() {
     emit(ScreenshotEvent::Cancelled { session: id });
 }
 pub(crate) fn restore(id: u64) {
+    delay::clear();
     long::clear();
     let recovery = FLOW.with(|s| {
         let mut s = s.borrow_mut();
@@ -363,6 +383,7 @@ pub(crate) fn restore(id: u64) {
     show_ocr_feedback(id);
 }
 pub(crate) fn shutdown() {
+    delay::clear();
     long::clear();
     crate::screen_interaction::pixel_picker::clear();
     crate::screen_interaction::size_label::clear();

@@ -1,0 +1,13 @@
+import { Colors } from "design/colors.slint";
+import { SettingsButton } from "settings-controls.slint";
+export component ScreenshotCountdownWindow inherits Window {
+ title:@tr("Delayed screenshot"); no-frame:true;always-on-top:true;background:Colors.surface;
+ in property <int> seconds: 3;
+ out property <length> content-width:max(250px, content.preferred-width);
+ preferred-width:content-width;preferred-height:48px;
+ callback cancel();
+ content := HorizontalLayout { padding:8px;spacing:12px;
+ message := Text { text:@tr("Screenshot in {} seconds",root.seconds);color:Colors.foreground;vertical-alignment:center;font-size:13px; }
+ SettingsButton { label:@tr("Cancel");compact:true;height:30px;clicked=>{root.cancel();} }
+ }
+}

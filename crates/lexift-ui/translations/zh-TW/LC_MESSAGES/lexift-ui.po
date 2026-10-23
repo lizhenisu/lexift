@@ -1903,3 +1903,21 @@ msgstr "清空圖片歷史？"
 
 msgid "Image exceeds the history limit and was not added"
 msgstr "圖片超過歷史容量上限，未加入歷史"
+
+msgid "Delayed screenshot"
+msgstr "延遲截圖"
+
+msgid "Screenshot now"
+msgstr "立即截圖"
+
+msgid "Screenshot after 3 seconds"
+msgstr "3 秒後截圖"
+
+msgid "Screenshot after 5 seconds"
+msgstr "5 秒後截圖"
+
+msgid "Screenshot after 10 seconds"
+msgstr "10 秒後截圖"
+
+msgid "Screenshot in {} seconds"
+msgstr "{} 秒後截圖"

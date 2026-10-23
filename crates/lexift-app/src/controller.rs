@@ -67,6 +67,14 @@ pub(crate) trait ViewPort: Send + Sync {
         work_area: Option<Rect>,
     );
     fn hide_popup(&self, session_id: PopupSessionId);
+    fn begin_screenshot_delay(
+        &self,
+        _session: u64,
+        _seconds: u8,
+        ready: Box<dyn FnOnce(lexift_core::Result<std::time::Instant>) + Send>,
+    ) {
+        ready(Err(lexift_core::Error::new("Countdown unavailable")));
+    }
     fn suspend_for_screenshot(
         &self,
         _session: u64,
@@ -203,6 +211,14 @@ impl ViewPort for lexift_ui::UiHandle {
         document: lexift_core::domain::annotation_export::ExportRequest,
     ) {
         self.show_editable_pinned_screenshot(session, operation, image, base, samples, document);
+    }
+    fn begin_screenshot_delay(
+        &self,
+        session: u64,
+        seconds: u8,
+        ready: Box<dyn FnOnce(lexift_core::Result<std::time::Instant>) + Send>,
+    ) {
+        self.begin_screenshot_delay(session, seconds, ready);
     }
     fn suspend_for_screenshot(
         &self,
@@ -579,6 +595,10 @@ impl AppController {
                 if let Some(runtime) = &self.screenshot {
                     runtime.execute(self, command);
                 } else if let lexift_core::domain::screenshot::ScreenshotCommand::Prepare {
+                    session,
+                    ..
+                }
+                | lexift_core::domain::screenshot::ScreenshotCommand::Countdown {
                     session,
                     ..
                 } = command

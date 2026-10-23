@@ -1903,3 +1903,21 @@ msgstr "画像履歴を消去しますか？"
 
 msgid "Image exceeds the history limit and was not added"
 msgstr "画像が履歴の上限を超えたため追加されませんでした"
+
+msgid "Delayed screenshot"
+msgstr "遅延スクリーンショット"
+
+msgid "Screenshot now"
+msgstr "今すぐ撮影"
+
+msgid "Screenshot after 3 seconds"
+msgstr "3 秒後に撮影"
+
+msgid "Screenshot after 5 seconds"
+msgstr "5 秒後に撮影"
+
+msgid "Screenshot after 10 seconds"
+msgstr "10 秒後に撮影"
+
+msgid "Screenshot in {} seconds"
+msgstr "{} 秒後に撮影"

@@ -1903,3 +1903,21 @@ msgstr "Effacer l’historique des images ?"
 
 msgid "Image exceeds the history limit and was not added"
 msgstr "L’image dépasse la limite de l’historique et n’a pas été ajoutée"
+
+msgid "Delayed screenshot"
+msgstr "Capture différée"
+
+msgid "Screenshot now"
+msgstr "Capturer maintenant"
+
+msgid "Screenshot after 3 seconds"
+msgstr "Capturer dans 3 secondes"
+
+msgid "Screenshot after 5 seconds"
+msgstr "Capturer dans 5 secondes"
+
+msgid "Screenshot after 10 seconds"
+msgstr "Capturer dans 10 secondes"
+
+msgid "Screenshot in {} seconds"
+msgstr "Capture dans {} secondes"

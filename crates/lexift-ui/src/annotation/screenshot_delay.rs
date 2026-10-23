@@ -1,0 +1,388 @@
+//! Session-owned countdown and the screenshot button's transient duration menu.
+use super::*;
+use crate::bridge::{PopupPointerInput, dispatch_pointer_input};
+use crate::{AnnotationChoiceWindow, ScreenshotCountdownWindow};
+type Ready = Box<dyn FnOnce(lexift_core::Result<std::time::Instant>) + Send>;
+#[derive(Default)]
+struct Views {
+    sequence: u64,
+    menu: Option<AnnotationChoiceWindow>,
+    countdown: Option<ScreenshotCountdownWindow>,
+    session: u64,
+    deadline: Option<Instant>,
+    timer: slint::Timer,
+    ready: Option<Ready>,
+}
+thread_local! { static VIEWS: RefCell<Views> = RefCell::new(Views::default()); }
+type Services = (
+    WindowLifecycleCallbacks,
+    fn(&slint::Window) -> PassiveWindowPreparation,
+);
+fn services() -> Option<Services> {
+    REGISTRY.with(|r| {
+        r.borrow()
+            .as_ref()
+            .map(|r| (r.lifecycle.clone(), r.prepare))
+    })
+}
+fn current(id: u64) -> bool {
+    FLOW.with(|s| {
+        let s = s.borrow();
+        s.state.session == id && s.state.phase == ScreenshotPhase::CountingDown
+    })
+}
+pub(crate) fn sync(state: &ScreenshotState) {
+    let stale = VIEWS.with(|s| {
+        s.borrow().countdown.is_some()
+            && (s.borrow().session != state.session
+                || !matches!(
+                    state.phase,
+                    ScreenshotPhase::CountingDown | ScreenshotPhase::Preparing
+                ))
+    });
+    let menu_stale = VIEWS.with(|s| s.borrow().menu.is_some()) && state.active();
+    if stale || menu_stale {
+        clear();
+    }
+}
+pub(crate) fn clear() {
+    let old = VIEWS.with(|slot| {
+        let mut s = slot.borrow_mut();
+        s.sequence = s.sequence.wrapping_add(1);
+        s.timer.stop();
+        s.deadline = None;
+        s.ready.take();
+        (s.menu.take(), s.countdown.take())
+    });
+    if let Some((l, _)) = services()
+        && let Some(w) = old.0
+    {
+        (l.set_popup_dismissal)(w.window(), false);
+        let _ = w.hide();
+    }
+    if let Some(w) = old.1 {
+        let _ = w.hide();
+    }
+}
+fn choose(sequence: u64, index: Option<i32>) {
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        if !VIEWS.with(|s| s.borrow().sequence == sequence && s.borrow().menu.is_some()) {
+            return;
+        }
+        clear();
+        if let Some(seconds) = index.and_then(|i| [0, 3, 5, 10].get(i as usize).copied()) {
+            super::request_after(seconds);
+        }
+    });
+}
+pub(crate) fn menu() {
+    if !available()
+        || super::active()
+        || crate::ocr::screen_busy()
+        || super::history_editor::active()
+        || pin_editor::active()
+    {
+        return;
+    }
+    clear();
+    crate::bridge::cancel_idle_memory_trim();
+    let Some((l, _)) = services() else { return };
+    let Ok(w) = crate::screen_interaction::create(&l, AnnotationChoiceWindow::new) else {
+        return;
+    };
+    crate::theme::apply(&w);
+    let labels = [
+        "Screenshot now",
+        "Screenshot after 3 seconds",
+        "Screenshot after 5 seconds",
+        "Screenshot after 10 seconds",
+    ];
+    w.set_options(slint::ModelRc::new(slint::VecModel::from(
+        labels.map(|s| crate::i18n::tr(s).into()).to_vec(),
+    )));
+    w.set_selected(0);
+    let seq = VIEWS.with(|s| {
+        let mut s = s.borrow_mut();
+        s.sequence += 1;
+        s.menu = Some(w.clone_strong());
+        s.sequence
+    });
+    w.on_chosen(move |i| choose(seq, Some(i)));
+    w.on_cancel(move || choose(seq, None));
+    prepare_menu(seq, 0);
+}
+fn prepare_menu(seq: u64, attempt: u8) {
+    slint::Timer::single_shot(
+        Duration::from_millis(if attempt == 0 { 0 } else { 16 }),
+        move || {
+            let Some((l, prepare)) = services() else {
+                return;
+            };
+            let window = VIEWS.with(|s| {
+                let s = s.borrow();
+                (s.sequence == seq)
+                    .then(|| s.menu.as_ref().map(ComponentHandle::clone_strong))
+                    .flatten()
+            });
+            let Some(w) = window else { return };
+            match prepare(w.window()) {
+                PassiveWindowPreparation::Pending if attempt < 20 => {
+                    prepare_menu(seq, attempt + 1);
+                    return;
+                }
+                PassiveWindowPreparation::Ready => {}
+                _ => {
+                    choose(seq, None);
+                    return;
+                }
+            }
+            let anchor = (l.toolbar_cursor_position)().unwrap_or_default();
+            let Some(area) = (l.popup_work_area)(anchor) else {
+                choose(seq, None);
+                return;
+            };
+            let dpi = w.window().scale_factor();
+            let width = (240. * dpi).min((area.right - area.left) as f32) as u32;
+            let height = (w.get_menu_height() * dpi) as u32;
+            w.set_content_width(width as f32 / dpi);
+            w.window().set_size(slint::PhysicalSize::new(width, height));
+            w.window().set_position(slint::PhysicalPosition::new(
+                anchor
+                    .x
+                    .clamp(area.left, (area.right - width as i32).max(area.left)),
+                (anchor.y + 12).clamp(area.top, (area.bottom - height as i32).max(area.top)),
+            ));
+            let weak = w.as_weak();
+            let sink = Rc::new(move |e| {
+                if matches!(e, PopupPointerInput::DismissRequested { .. }) {
+                    choose(seq, None)
+                } else if let Some(w) = weak.upgrade() {
+                    dispatch_pointer_input(w.window(), e);
+                }
+            });
+            if !(l.configure_menu_window)(w.window())
+                || w.show().is_err()
+                || !(l.complete_passive_window_show)(w.window(), sink)
+                || !(l.set_popup_dismissal)(w.window(), true)
+            {
+                choose(seq, None);
+                return;
+            }
+            (l.activate_user_requested_window)(w.window());
+        },
+    );
+}
+pub(crate) fn begin(id: u64, seconds: u8, ready: Ready) {
+    clear();
+    crate::bridge::cancel_idle_memory_trim();
+    if !current(id) || !FLOW.with(|s| s.borrow().recovery.is_some()) {
+        ready(Err(lexift_core::Error::new(
+            "Screenshot suspension expired",
+        )));
+        return;
+    }
+    let Some((l, _)) = services() else {
+        ready(Err(lexift_core::Error::new("Countdown unavailable")));
+        return;
+    };
+    let Ok(w) = crate::screen_interaction::create(&l, ScreenshotCountdownWindow::new) else {
+        ready(Err(lexift_core::Error::new("Countdown unavailable")));
+        return;
+    };
+    crate::theme::apply(&w);
+    w.set_seconds(i32::from(seconds));
+    let anchor = (l.toolbar_cursor_position)().unwrap_or_default();
+    let Some(area) = (l.popup_work_area)(anchor) else {
+        ready(Err(lexift_core::Error::new(
+            "Countdown work area unavailable",
+        )));
+        return;
+    };
+    w.window()
+        .set_position(slint::PhysicalPosition::new(area.left, area.top));
+    VIEWS.with(|s| {
+        let mut s = s.borrow_mut();
+        s.session = id;
+        s.countdown = Some(w.clone_strong());
+        s.ready = Some(ready);
+    });
+    w.on_cancel(move || {
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            if current(id) {
+                emit(ScreenshotEvent::Cancelled { session: id });
+            }
+        });
+    });
+    prepare_countdown(id, seconds, area, 0);
+}
+fn prepare_countdown(id: u64, seconds: u8, area: Rect, attempt: u8) {
+    slint::Timer::single_shot(
+        Duration::from_millis(if attempt == 0 { 0 } else { 16 }),
+        move || {
+            if !current(id) {
+                return;
+            }
+            let Some((l, prepare)) = services() else {
+                return;
+            };
+            let Some(w) = VIEWS.with(|s| {
+                s.borrow()
+                    .countdown
+                    .as_ref()
+                    .map(ComponentHandle::clone_strong)
+            }) else {
+                return;
+            };
+            match prepare(w.window()) {
+                PassiveWindowPreparation::Pending if attempt < 20 => {
+                    prepare_countdown(id, seconds, area, attempt + 1);
+                    return;
+                }
+                PassiveWindowPreparation::Ready => {}
+                _ => {
+                    fail(id);
+                    return;
+                }
+            }
+            let dpi = w.window().scale_factor();
+            for _ in 0..2 {
+                w.window().set_size(slint::LogicalSize::new(
+                    w.get_content_width()
+                        .min((area.right - area.left) as f32 / dpi),
+                    48.,
+                ));
+                let _ = w.window().take_snapshot();
+            }
+            let size = slint::PhysicalSize::new(
+                (w.get_content_width()
+                    .min((area.right - area.left) as f32 / dpi)
+                    * dpi)
+                    .ceil() as u32,
+                (48. * dpi).ceil() as u32,
+            );
+            w.window().set_size(size);
+            w.window().set_position(slint::PhysicalPosition::new(
+                area.left + (area.right - area.left - size.width as i32) / 2,
+                (area.bottom - size.height as i32 - (16. * dpi) as i32).max(area.top),
+            ));
+            let weak = w.as_weak();
+            let sink = Rc::new(move |e| {
+                if let Some(w) = weak.upgrade() {
+                    dispatch_pointer_input(w.window(), e);
+                }
+            });
+            if !(l.configure_countdown_window)(w.window())
+                || w.show().is_err()
+                || !(l.complete_passive_window_show)(w.window(), sink)
+                || !(l.configure_countdown_window)(w.window())
+            {
+                fail(id);
+                return;
+            }
+            let deadline = Instant::now() + Duration::from_secs(u64::from(seconds));
+            tracing::debug!(
+                session = id,
+                seconds,
+                "Screenshot countdown started after suspension"
+            );
+            let ready = VIEWS.with(|s| {
+                let mut s = s.borrow_mut();
+                s.deadline = Some(deadline);
+                s.timer.start(
+                    slint::TimerMode::Repeated,
+                    Duration::from_millis(50),
+                    move || tick(id),
+                );
+                s.ready.take()
+            });
+            if let Some(ready) = ready {
+                ready(Ok(deadline));
+            }
+        },
+    );
+}
+fn tick(id: u64) {
+    if !current(id) {
+        let handing_off = FLOW.with(|s| {
+            let s = s.borrow();
+            s.state.session == id && s.state.phase == ScreenshotPhase::Preparing
+        });
+        if handing_off {
+            VIEWS.with(|s| s.borrow().timer.stop());
+        } else {
+            clear();
+        }
+        return;
+    }
+    VIEWS.with(|s| {
+        let s = s.borrow();
+        if let (Some(w), Some(end)) = (&s.countdown, s.deadline) {
+            w.set_seconds(remaining_seconds(end, Instant::now()));
+        }
+    });
+}
+fn fail(id: u64) {
+    clear();
+    emit(ScreenshotEvent::Failed {
+        session: id,
+        error: crate::i18n::tr("Screenshot unavailable"),
+    });
+}
+/// Rebase activation only at the explicit capture deadline, then retire feedback.
+pub(crate) fn finish(id: u64) {
+    let owned = VIEWS.with(|s| s.borrow().session == id && s.borrow().countdown.is_some());
+    clear();
+    if owned {
+        tracing::debug!(session = id, "Screenshot countdown retired before capture");
+        if let Some((l, _)) = services() {
+            FLOW.with(|s| {
+                s.borrow_mut().activation = l.annotation_foreground.as_ref().map(|q| q())
+            });
+        }
+    }
+}
+
+/// Project a monotonic deadline; delayed UI ticks never extend the capture wait.
+fn remaining_seconds(deadline: Instant, now: Instant) -> i32 {
+    deadline.saturating_duration_since(now).as_secs_f64().ceil() as i32
+}
+#[cfg(test)]
+#[path = "screenshot_delay_tests.rs"]
+mod tests;
+
+pub(crate) fn active() -> bool {
+    VIEWS.with(|s| {
+        let s = s.borrow();
+        s.menu.is_some() || s.countdown.is_some()
+    })
+}
+/// Called under the annotation registry borrow; never reenter Registry here.
+pub(crate) fn retire_menu(l: &WindowLifecycleCallbacks) {
+    let menu = VIEWS.with(|s| {
+        let mut s = s.borrow_mut();
+        s.sequence += 1;
+        s.menu.take()
+    });
+    if let Some(w) = menu {
+        (l.set_popup_dismissal)(w.window(), false);
+        let _ = w.hide();
+    }
+}
+thread_local! { static AVAILABLE: std::cell::Cell<bool> = const {std::cell::Cell::new(true)}; }
+pub(super) fn available() -> bool {
+    AVAILABLE.with(|v| v.get())
+}
+pub(crate) fn availability(state: &lexift_core::AppState) {
+    let allowed = lexift_core::domain::screenshot::delay_available(state);
+    AVAILABLE.with(|v| v.set(allowed));
+    REGISTRY.with(|r| {
+        if let Some(r) = r.borrow().as_ref()
+            && let Some(w) = r.toolbar_state.main.get()
+        {
+            w.set_delay_available(allowed);
+        }
+    });
+    if !allowed && VIEWS.with(|s| s.borrow().menu.is_some()) {
+        clear();
+    }
+}

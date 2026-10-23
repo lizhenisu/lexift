@@ -67,6 +67,7 @@ struct PinOcrQueue {
     pending: Option<PinOcrTask>,
 }
 pub(crate) struct ScreenshotRuntime {
+    delay: Mutex<Option<(u64, tokio::task::JoinHandle<()>)>>,
     history: Mutex<history::Cache>,
     long: Mutex<Option<long::Job>>,
     capture: CaptureFactory,
@@ -92,6 +93,7 @@ impl ScreenshotRuntime {
         clipboard: Arc<dyn ClipboardPort>,
     ) -> Self {
         Self {
+            delay: Default::default(),
             history: Default::default(),
             long: Default::default(),
             capture,
@@ -150,6 +152,17 @@ impl ScreenshotRuntime {
         (!cancel.load(Ordering::Acquire)).then_some(outcome)
     }
     pub fn sync(&self, state: &lexift_core::domain::screenshot::ScreenshotState, quitting: bool) {
+        {
+            let mut delay = self.delay.lock().unwrap();
+            if delay.as_ref().is_some_and(|(id, _)| {
+                quitting
+                    || *id != state.session
+                    || state.phase != lexift_core::domain::screenshot::ScreenshotPhase::CountingDown
+            }) && let Some((_, task)) = delay.take()
+            {
+                task.abort();
+            }
+        }
         long::sync(self, state, quitting);
         let mut color = self.color_job.lock().unwrap_or_else(|p| p.into_inner());
         if color.as_ref().is_some_and(|(s, id, _)| {
@@ -690,6 +703,31 @@ impl ScreenshotRuntime {
                         .ui
                         .show_screenshot_capture(session, frames, capture, windows);
                 }
+            }
+            ScreenshotCommand::Countdown {
+                session,
+                seconds,
+                request,
+            } => {
+                let this = self.clone();
+                let c = controller.clone();
+                controller.ui.begin_screenshot_delay(session, seconds, Box::new(move |result| {
+                    match result {
+                        Err(error) => c.dispatch(AppEvent::Screenshot(ScreenshotEvent::Failed { session, error: error.to_string() })),
+                        Ok(deadline) => {
+                            let c2 = c.clone();
+                            let state = c.state.lock().unwrap();
+                            if state.screenshot.session != session || state.screenshot.phase != lexift_core::domain::screenshot::ScreenshotPhase::CountingDown { return; }
+                            let mut slot = this.delay.lock().unwrap();
+                            let task = c.runtime.spawn(async move {
+                                tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+                                tracing::debug!(session, lateness_ms=deadline.elapsed().as_secs_f64()*1000., "Screenshot countdown deadline reached");
+                                c2.dispatch(AppEvent::Screenshot(ScreenshotEvent::DelayElapsed { session, request }));
+                            });
+                            *slot = Some((session, task));
+                        }
+                    }
+                }));
             }
             ScreenshotCommand::Prepare { session, request } => {
                 let cancelled = Arc::new(AtomicBool::new(false));
