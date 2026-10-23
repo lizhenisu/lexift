@@ -517,6 +517,7 @@ impl AppController {
                 runtime.sync_history(&snapshot.image_history);
                 runtime.sync(&snapshot.screenshot, quitting);
                 runtime.sync_pins(&snapshot.pinned_images, quitting);
+                runtime.sync_image_ocr(&snapshot, quitting);
             }
             if let Some(export) = &self.annotation_export {
                 export.sync(&snapshot.annotation_export, quitting);
@@ -577,6 +578,18 @@ impl AppController {
                         lexift_core::domain::image_import::Event::Completed {
                             id,
                             result: Err(lexift_core::Error::new("Image import unavailable")),
+                        },
+                    ));
+                }
+            }
+            AppCommand::EditorOcr(command) => {
+                if let Some(runtime) = &self.screenshot {
+                    runtime.execute_editor_ocr(self, command);
+                } else {
+                    self.dispatch(AppEvent::EditorOcr(
+                        lexift_core::domain::editor_ocr::Event::Completed {
+                            request: command.request,
+                            outcome: lexift_core::domain::ocr::OcrOutcome::ResourcesUnavailable,
                         },
                     ));
                 }
@@ -1534,6 +1547,7 @@ impl AppController {
 fn event_name(event: &AppEvent) -> &'static str {
     match event {
         AppEvent::ImageImport(_) => "image-import",
+        AppEvent::EditorOcr(_) => "editor-ocr",
         AppEvent::ImageHistory(_) => "image-history",
         AppEvent::ClipboardHistory(_) => "clipboard_history",
         AppEvent::PinnedImage(_) => "pinned-image",
@@ -3488,13 +3502,14 @@ mod tests {
             }
         }
         #[derive(Default)]
-        struct Clipboard(Mutex<Vec<CapturedRegion>>);
+        struct Clipboard(Mutex<Vec<CapturedRegion>>, Mutex<Option<String>>);
         impl ClipboardPort for Clipboard {
             fn read_text(&self) -> lexift_core::Result<Option<String>> {
                 Ok(None)
             }
-            fn write_text(&self, _: &str) -> lexift_core::Result<()> {
-                panic!("pixels only")
+            fn write_text(&self, text: &str) -> lexift_core::Result<()> {
+                *self.1.lock().unwrap() = Some(text.to_owned());
+                Ok(())
             }
             fn write_image(&self, image: &CapturedRegion) -> lexift_core::Result<()> {
                 self.0.lock().unwrap().push(image.clone());
@@ -3531,6 +3546,71 @@ mod tests {
             }
             fn quit(&self) {}
         }
+        struct Ocr;
+        impl lexift_core::ports::ocr::OcrPort for Ocr {
+            fn resources(&self) -> lexift_core::Result<lexift_core::ports::ocr::OcrResources> {
+                Ok(lexift_core::ports::ocr::OcrResources {
+                    ready: true,
+                    status: lexift_core::ports::ocr::OcrResourceStatus::Ready,
+                    download_bytes: 0,
+                    version: String::new(),
+                    installed_bytes: 0,
+                    entries: vec![],
+                    korean: None,
+                })
+            }
+            fn remove_resources(
+                &self,
+            ) -> lexift_core::Result<lexift_core::ports::ocr::OcrResources> {
+                panic!()
+            }
+            fn download(
+                &self,
+                _: &AtomicBool,
+                _: lexift_core::ports::ocr::DownloadProgress,
+            ) -> lexift_core::Result<()> {
+                panic!()
+            }
+            fn release(&self) {}
+            fn recognize(
+                &self,
+                image: CapturedRegion,
+                _: &lexift_core::domain::ocr::OcrRecognitionStrategy,
+                _: &AtomicBool,
+            ) -> lexift_core::Result<String> {
+                assert_eq!(
+                    image.bounds,
+                    Rect {
+                        left: 0,
+                        top: 1,
+                        right: 1,
+                        bottom: 3
+                    }
+                );
+                assert_eq!(image.pixels, [10, 20, 30, 255].repeat(2));
+                Ok("EDITOR OCR".into())
+            }
+        }
+        struct Capture;
+        impl lexift_core::ports::screen_capture::ScreenCapturePort for Capture {
+            fn is_available(&self) -> bool {
+                false
+            }
+            fn request(
+                &self,
+                _: lexift_core::ports::screen_capture::ScreenCaptureRequest,
+            ) -> lexift_core::Result<()> {
+                panic!("OCR uses imported pixels")
+            }
+            fn latest(
+                &self,
+            ) -> lexift_core::Result<
+                Option<Arc<lexift_core::ports::screen_capture::ScreenCaptureFrame>>,
+            > {
+                panic!()
+            }
+            fn clear(&self) {}
+        }
         let runtime = Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -3549,6 +3629,10 @@ mod tests {
                 Arc::new(RecordingSettingsStore::default()),
                 view.clone(),
             )
+            .with_ocr(Some(Arc::new(crate::ocr::OcrRuntime::new(
+                Arc::new(Ocr),
+                Arc::new(Capture),
+            ))))
             .with_screenshot(Some(Arc::new(
                 crate::screenshot::ScreenshotRuntime::new(
                     || None,
@@ -3585,6 +3669,51 @@ mod tests {
             operation: e.id,
             result: Ok(SaveOutcome::Cancelled),
         }));
+        controller.dispatch(AppEvent::EditorOcr(
+            lexift_core::domain::editor_ocr::Event::Requested {
+                token: 99,
+                owner: lexift_core::domain::editor_ocr::Owner::Document {
+                    window: e.window,
+                    editor: e.id,
+                },
+                revision: 99,
+                source: fixture().bounds,
+                bounds: Rect {
+                    left: 0,
+                    top: 1,
+                    right: 1,
+                    bottom: 3,
+                },
+            },
+        ));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while state.lock().unwrap().editor_ocr.result.is_none() {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(clipboard.1.lock().unwrap().as_deref(), Some("EDITOR OCR"));
+        assert_eq!(
+            state.lock().unwrap().editor_ocr.result.unwrap().1,
+            lexift_core::domain::ocr::OcrOutcome::Copied
+        );
+        assert!(
+            state
+                .lock()
+                .unwrap()
+                .image_history
+                .cache
+                .entries()
+                .is_empty()
+        );
+        assert!(
+            state
+                .lock()
+                .unwrap()
+                .image_history
+                .editor
+                .as_ref()
+                .is_some_and(|editor| editor.id == e.id && editor.ready)
+        );
         let mut session = Session::new();
         session.image_source = Some(fixture().bounds);
         let request = ExportRequest {

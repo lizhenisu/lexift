@@ -26,6 +26,7 @@ struct Registry {
     toast_timer: slint::Timer,
     notice: Option<Ticket>,
     import_notice: Option<u64>,
+    editor_feedback: bool,
     workflow: lexift_core::domain::image_history::workflow::Workflow,
     lifecycle: WindowLifecycleCallbacks,
     prepare: fn(&slint::Window) -> PassiveWindowPreparation,
@@ -49,6 +50,7 @@ pub(super) fn init(
             toast_timer: Default::default(),
             notice: None,
             import_notice: None,
+            editor_feedback: false,
             workflow: Default::default(),
             lifecycle,
             prepare,
@@ -288,6 +290,41 @@ fn notification(state: &AppState) {
         cancel_idle_memory_trim();
         prepare_toast(revision, area, 0);
     }
+}
+/// Reuse the passive, revision-guarded toast lifecycle for the live image editor.
+pub(crate) fn show_editor_feedback(point: Point, outcome: lexift_core::domain::ocr::OcrOutcome) {
+    let display = REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let r = slot.as_mut()?;
+        r.toast_timer.stop();
+        r.toast.clear();
+        let area = (r.lifecycle.popup_work_area)(point)?;
+        let w = crate::screen_interaction::create(&r.lifecycle, crate::ScreenshotToastWindow::new)
+            .ok()?;
+        crate::theme::apply(&w);
+        w.set_passive(true);
+        w.set_error(outcome != lexift_core::domain::ocr::OcrOutcome::Copied);
+        w.set_message(crate::i18n::tr(outcome.message()).into());
+        w.window()
+            .set_position(slint::PhysicalPosition::new(area.left, area.top));
+        r.editor_feedback = true;
+        Some((r.toast.open(w), area))
+    });
+    if let Some((revision, area)) = display {
+        cancel_idle_memory_trim();
+        prepare_toast(revision, area, 0);
+    }
+}
+pub(crate) fn clear_editor_feedback() {
+    REGISTRY.with(|slot| {
+        if let Some(r) = slot.borrow_mut().as_mut()
+            && r.editor_feedback
+        {
+            r.editor_feedback = false;
+            r.toast_timer.stop();
+            r.toast.clear();
+        }
+    });
 }
 fn prepare_toast(revision: u64, area: lexift_core::domain::geometry::Rect, attempt: u8) {
     slint::Timer::single_shot(

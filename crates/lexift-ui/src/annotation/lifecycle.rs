@@ -43,6 +43,9 @@ pub(super) fn escape() {
 }
 
 pub(super) fn escape_from(origin: focus::Origin) {
+    if editor_ocr::cancel() {
+        return;
+    }
     if pin_editor::current().is_some_and(|(id, _)| crate::pinned_screenshot::cancel_recognition(id))
     {
         return;
@@ -302,7 +305,7 @@ pub(crate) fn toggle(requested_at: Instant) {
         });
         let input = r.toolbar_state.main.input();
         main.set_import_available(super::image_import::available());
-        main.set_recognize_text_available(!history_editor::active());
+        main.set_recognize_text_available(true);
         let import_input = input.clone();
         main.on_image_open_requested(move || {
             later_main(&import_input, generation, revision, || {

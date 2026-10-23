@@ -40,6 +40,7 @@
 - [长译文布局](features/translation-result-layout.md)
 - [Settings 使用体验](features/settings-ergonomics.md)
 - [本地 OCR 框选翻译](features/ocr-translation.md)
+- [图片编辑器 OCR 识别复制](features/image-editor-ocr.md)
 - [屏幕区域选择基础](features/region-selection.md)
 - [共用屏幕交互宿主](features/screen-interaction.md)
 - [截图模式与临时贴图](features/screenshot-mode.md)

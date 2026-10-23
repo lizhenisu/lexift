@@ -187,7 +187,7 @@ fn blocked() -> bool {
                 || r.toolbar_state.watermark.get().is_some()
                 || r.toolbar_state.menus.current.is_some()
                 || r.toolbar_state.toolbar_drag.is_some()
-                || screenshot::recognizing()
+                || (screenshot::recognizing() && !editor_ocr::busy())
                 || screenshot::long_editor::outputting()
         })
     })
@@ -267,6 +267,7 @@ pub(super) fn pointer(w: &AnnotationCanvas, kind: i32, point: [f32; 2]) -> bool 
     if let Some((kind, q)) = drawing {
         w.invoke_image_pointer(kind, q[0], q[1]);
     }
+    editor_ocr::resume();
     handled
 }
 pub(super) fn scroll(w: &AnnotationCanvas, point: [f32; 2], dx: f32, dy: f32, modified: bool) {
@@ -357,6 +358,7 @@ pub(super) fn lost_focus() {
     if let Some(w) = drawing {
         w.invoke_image_pointer(3, 0., 0.);
     }
+    editor_ocr::resume();
 }
 pub(super) fn modifiers(value: bool) {
     NAV.with(|s| {
@@ -372,7 +374,7 @@ pub(super) fn key(text: &str, down: bool, control: bool, shift: bool, repeat: bo
     if !space && !fit {
         return false;
     }
-    if image_crop::active() {
+    if image_crop::active() || (space && editor_ocr::busy()) {
         return true;
     }
     if blocked() {

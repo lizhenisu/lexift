@@ -690,6 +690,7 @@ impl UiHandle {
             crate::theme::set_current(theme);
             image_history::sync(&state);
             crate::annotation::history_editor::sync(state.image_history.editor.clone());
+            crate::annotation::editor_ocr::sync(&state);
             apply_window_themes();
             APP_WINDOW_REGISTRY.with(|registry| {
                 if let Some(registry) = registry.borrow_mut().as_mut() {

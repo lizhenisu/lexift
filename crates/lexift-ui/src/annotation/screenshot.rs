@@ -397,11 +397,26 @@ pub(crate) fn shutdown() {
     });
     FLOW.with(|s| *s.borrow_mut() = Flow::default());
 }
+pub(super) fn editor_ocr_owner() -> Option<lexift_core::domain::editor_ocr::Owner> {
+    FLOW.with(|s| {
+        let s = s.borrow();
+        Some(lexift_core::domain::editor_ocr::Owner::Long {
+            session: s.state.session,
+            operation: s.state.long.as_ref()?.operation,
+        })
+    })
+}
 pub(super) fn recognizing() -> bool {
-    long::busy() || FLOW.with(|s| s.borrow().state.phase == ScreenshotPhase::Recognizing)
+    editor_ocr::busy()
+        || long::busy()
+        || FLOW.with(|s| s.borrow().state.phase == ScreenshotPhase::Recognizing)
 }
 /// Freeze only crop identity here; OCR pixels are owned by the App capture session.
 pub(super) fn recognize_text() {
+    if long::image_editing() {
+        editor_ocr::request();
+        return;
+    }
     if image_crop::active() {
         return;
     }
@@ -468,6 +483,9 @@ pub(super) fn recognize_text() {
     }
 }
 pub(super) fn output(kind: ScreenshotOutput) {
+    if editor_ocr::busy() {
+        return;
+    }
     if history_editor::active() {
         history_editor::output(kind);
         return;

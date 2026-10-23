@@ -113,6 +113,7 @@ export component AnnotationToolbar inherits Window {
     callback image-import-menu();
     callback image-history-requested();
     in property <bool> recognize-text-available:true;
+    in property <bool> recognition-busy:false;
     callback screenshot-requested();
     callback screenshot-delay-menu();
     in property <bool> delay-available:true;
@@ -221,7 +222,7 @@ export component AnnotationToolbar inherits Window {
             ToolButton { kind:28; enabled:root.can-redo && !root.output-busy && !root.image-cropping; clicked=>{root.redo-requested();} }
                 ToolButton { kind: 15; label: @tr("Save image"); enabled: root.can-download && !root.output-busy && !root.image-cropping; clicked => { root.download-requested(); } }
             if root.screenshot-mode: ToolButton { kind:23; label:@tr("Copy screenshot"); enabled:!root.output-busy && !root.image-cropping; clicked => { root.copy-screenshot-requested(); } }
-            if root.screenshot-mode && !root.pin-edit-mode: ToolButton { kind:26; busy:root.output-busy; label:root.output-busy ? @tr("Processing screenshot") : @tr("Recognize text"); enabled:root.recognize-text-available && !root.output-busy && !root.image-cropping; clicked => { root.recognize-text-requested(); } }
+            if root.screenshot-mode && !root.pin-edit-mode: ToolButton { kind:26; busy:root.output-busy; label:root.recognition-busy ? @tr("Recognizing text…") : root.output-busy ? @tr("Processing screenshot") : @tr("Recognize text"); enabled:root.recognize-text-available && !root.output-busy && !root.image-cropping; clicked => { root.recognize-text-requested(); } }
             if root.image-edit-mode || root.pin-edit-mode: ToolButton { kind:29; label:@tr("Crop image"); selected:root.image-cropping; enabled:!root.output-busy; clicked=>{root.crop-requested();} }
             if root.screenshot-mode && !root.pin-edit-mode && !root.image-edit-mode: ToolButton { kind:27; label:@tr("Long screenshot"); enabled:root.long-capture-available && !root.output-busy && !root.image-edit-mode; clicked => { root.long-capture-requested(); } }
             if root.screenshot-mode && !root.pin-edit-mode: ToolButton { kind:24; label:@tr("Pin screenshot"); enabled:!root.output-busy && !root.image-cropping; clicked => { root.pin-screenshot-requested(); } }

@@ -14,6 +14,7 @@ struct Pending {
 thread_local! { static NEXT: std::cell::Cell<u64> = const {std::cell::Cell::new(0)}; }
 thread_local! { static PENDING: RefCell<Option<Pending>> = const {RefCell::new(None)}; }
 pub(in crate::annotation) fn clear() {
+    editor_ocr::clear();
     image_navigation::clear();
     PENDING.with(|p| {
         if let Some(p) = p.borrow_mut().take() {

@@ -32,4 +32,5 @@ pub mod screenshot;
 pub mod image_crop;
 pub mod image_history;
 
+pub mod editor_ocr;
 pub mod image_import;

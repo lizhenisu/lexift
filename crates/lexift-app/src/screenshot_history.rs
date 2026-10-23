@@ -21,7 +21,7 @@ pub(super) struct Asset {
 #[derive(Default)]
 pub(super) struct Cache {
     revision: u64,
-    editor: Option<(u64, u64, history::ImageSnapshot)>,
+    pub(super) editor: Option<(u64, u64, history::ImageSnapshot)>,
     next_resource: u64,
     pixels: Vec<(Weak<CapturedRegion>, ResourceId)>,
     samples: Vec<(Weak<ScreenCaptureFrame>, ResourceId)>,

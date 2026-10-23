@@ -47,3 +47,7 @@
 见 [图片历史专项验证](../releases/screenshot-image-history.md)。
 
 保存 JPEG 时，历史仍保留压缩前成品及完整可编辑资源，不使用有损解码图片替换底图。见[图片保存格式](image-save-formats.md)。
+
+## 独立图片编辑器 OCR
+
+长图结果和历史恢复编辑器支持直接识别底图并复制文字，识别后保留编辑器及视口。详见[图片编辑器 OCR](image-editor-ocr.md)。

@@ -44,6 +44,7 @@ pub struct PopupSessionState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppState {
+    pub editor_ocr: crate::domain::editor_ocr::State,
     pub image_import: crate::domain::image_import::State,
     pub image_history: crate::domain::image_history::workflow::Workflow,
     pub last_pin_id: u64,
@@ -93,6 +94,7 @@ impl Default for AppState {
 impl AppState {
     pub fn new(settings: Settings) -> Self {
         Self {
+            editor_ocr: Default::default(),
             image_import: Default::default(),
             image_history: Default::default(),
             last_pin_id: 0,
@@ -147,6 +149,7 @@ impl AppState {
         let saved = event.clone();
         let mut commands = self.reduce_inner(event);
         commands.extend(crate::domain::image_import::after(self, &saved));
+        crate::domain::editor_ocr::after(self, &saved);
         crate::domain::image_history::workflow::after(self, quitting, &commands, success);
         commands
     }
@@ -190,8 +193,20 @@ impl AppState {
         {
             return vec![];
         }
+        if self.editor_ocr.request.is_some()
+            && matches!(
+                event,
+                AppEvent::ImageHistory(
+                    crate::domain::image_history::workflow::Event::EditorOutput { .. }
+                        | crate::domain::image_history::workflow::Event::EditorVisibility { .. }
+                ) | AppEvent::Screenshot(crate::domain::screenshot::ScreenshotEvent::Output { .. })
+            )
+        {
+            return vec![];
+        }
         crate::domain::pinned_image::before_event(&mut self.pinned_images, &event);
         match event {
+            AppEvent::EditorOcr(event) => crate::domain::editor_ocr::reduce(self, event),
             AppEvent::ImageImport(event) => crate::domain::image_import::reduce(self, event),
             AppEvent::ImageHistory(event) => {
                 crate::domain::image_history::workflow::reduce(self, event)

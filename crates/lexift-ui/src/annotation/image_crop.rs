@@ -22,7 +22,8 @@ pub(super) fn begin() {
             pin_crop::begin(r);
             return;
         }
-        if active()
+        if editor_ocr::busy()
+            || active()
             || !screenshot::long::image_editing()
             || screenshot::long_editor::outputting()
             || r.gesture().is_some()
