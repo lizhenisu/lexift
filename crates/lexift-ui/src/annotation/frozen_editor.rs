@@ -135,7 +135,7 @@ pub(super) fn render(r: &mut Registry) {
         }
     }
     editing.revision = editing.revision.wrapping_add(1);
-    image_transform::track(r.generation, editing.revision);
+    image_transform::track(r.generation, editing.id, editing.revision);
     editing
         .preview
         .as_ref()
@@ -186,11 +186,11 @@ pub(super) fn present(
         {
             return;
         }
-        if !image_transform::current(generation, revision) {
+        if !image_transform::current(generation, id, revision) {
             return;
         }
         let Some(frames) = frames else {
-            if image_transform::failed(r) {
+            if image_transform::failed(r, revision) {
                 return;
             }
             failed = true;
@@ -209,6 +209,7 @@ pub(super) fn present(
             if !pin_crop::preview_ready(r, pin) {
                 return;
             }
+            pin_editor::presented(pin, &r.document.session);
             crate::pinned_screenshot::present_edit(pin, image, controls);
             return;
         }

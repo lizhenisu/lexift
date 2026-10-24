@@ -38,12 +38,27 @@ pub(super) fn editing_text_object(r: &Registry) -> Option<Object> {
             points: Vec::new(),
             extra: Extra::None,
         });
-    object.bounds = edit.bounds;
+    let caption_shift = if object.kind == Kind::Sequence {
+        let center = (
+            (edit.bounds.left + edit.bounds.right) * 0.5,
+            (edit.bounds.top + edit.bounds.bottom) * 0.5,
+        );
+        let p = object.image_point(center);
+        (p.0 - center.0, p.1 - center.1)
+    } else {
+        (0., 0.)
+    };
+    if object.kind == Kind::Text && object.id != ObjectId::DRAFT {
+        object.set_text_layout(edit.bounds);
+    } else {
+        object.bounds = edit.bounds;
+    }
     if let Extra::Sequence(s) = &object.extra {
         object.style.color = s.caption_color;
     }
     object.kind = Kind::Text;
     object.extra = Extra::Text(visible);
+    object.move_by(caption_shift.0, caption_shift.1);
     r.document.session.prepare_image_object(&mut object);
     Some(object)
 }

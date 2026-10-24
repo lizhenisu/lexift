@@ -1364,6 +1364,29 @@ mod tests {
             let expected = crop_frames(&[original], crop).unwrap();
             assert_eq!(actual.pixels, expected.pixels);
             assert_eq!(actual.bounds, crop);
+            for direction in lexift_core::domain::image_transform::Orientation::ALL {
+                let mut turned = snapshot.clone();
+                Arc::make_mut(&mut turned.session).image_orientation = direction;
+                let output = runtime
+                    .output_image(
+                        &ExportRequest {
+                            session: 1,
+                            request: 3,
+                            snapshot: Arc::new(turned),
+                        },
+                        frames.clone(),
+                        &AtomicBool::new(false),
+                    )
+                    .unwrap();
+                let reference = direction
+                    .pixels(&expected, full, &AtomicBool::new(false))
+                    .unwrap();
+                assert_eq!(
+                    output, reference,
+                    "compose effects before crop and direction: {direction:?}"
+                );
+            }
+
             let base = Arc::new(crop_frames(&frames, full).unwrap());
             let samples = Arc::new(ScreenCaptureFrame {
                 revision: 1,

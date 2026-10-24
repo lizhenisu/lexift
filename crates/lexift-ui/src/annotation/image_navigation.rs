@@ -465,6 +465,17 @@ pub(super) fn key(text: &str, down: bool, control: bool, shift: bool, repeat: bo
     }
     accepted
 }
+/// Content properties already use oriented-image coordinates; do not rotate them a second time.
+pub(super) fn visible_screen_bounds(w: &AnnotationCanvas) -> Option<([f32; 2], [f32; 2])> {
+    NAV.with(|s| {
+        s.borrow().as_ref().filter(|n| matches(n, w)).map(|n| {
+            (
+                n.view.screen([n.view.content[0], n.view.content[1]]),
+                n.view.screen([n.view.content[2], n.view.content[3]]),
+            )
+        })
+    })
+}
 pub(super) fn map(w: &AnnotationCanvas, point: [f32; 2], reverse: bool) -> Option<[f32; 2]> {
     NAV.with(|s| {
         s.borrow().as_ref().filter(|n| matches(n, w)).map(|n| {
@@ -631,6 +642,27 @@ mod tests {
         for direction in lexift_core::domain::image_transform::Orientation::ALL {
             orient(&w, full, direction);
             content(&w, crop, true);
+            let (a, b) = visible_screen_bounds(&w).unwrap();
+            assert!(a[0] < b[0] && a[1] < b[1]);
+            let corners = [
+                (crop.left, crop.top),
+                (crop.right, crop.top),
+                (crop.left, crop.bottom),
+                (crop.right, crop.bottom),
+            ]
+            .map(|p| map(&w, [p.0 as f32, p.1 as f32], false).unwrap());
+            assert!(
+                (a[0] - corners.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min)).abs() < 0.01
+            );
+            assert!(
+                (b[1]
+                    - corners
+                        .iter()
+                        .map(|p| p[1])
+                        .fold(f32::NEG_INFINITY, f32::max))
+                .abs()
+                    < 0.01
+            );
             for point in [[-650., -100.], [-210., 1300.], [-410., 500.]] {
                 let screen = map(&w, point, false).unwrap();
                 let back = map(&w, screen, true).unwrap();

@@ -456,11 +456,8 @@ pub(in crate::annotation) fn clip_text(mut bounds: Bounds) -> Bounds {
         let right = left + s.width as f32;
         let bottom = p.y as f32 + s.height as f32 - w.get_image_footer_height() * dpi;
         let (left, top, right, bottom) = if !w.get_image_cropping() {
-            let a = image_navigation::map(&w, [w.get_content_left(), w.get_content_top()], false)
-                .unwrap_or([0., 0.]);
-            let b =
-                image_navigation::map(&w, [w.get_content_right(), w.get_content_bottom()], false)
-                    .unwrap_or([s.width as f32, s.height as f32]);
+            let (a, b) = image_navigation::visible_screen_bounds(&w)
+                .unwrap_or(([0., 0.], [s.width as f32, s.height as f32]));
             let crop_left = (p.x as f32 + a[0]).clamp(left, right - 1.);
             let crop_top = (top + a[1]).clamp(top, bottom - 1.);
             (

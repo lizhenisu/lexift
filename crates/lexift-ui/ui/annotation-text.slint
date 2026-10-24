@@ -6,6 +6,13 @@ export component AnnotationTextInput inherits Window {
     // The one-step alpha keeps the native editor hittable without painting a box.
     background: #00000001; preferred-width: 40px; preferred-height: 32px;
     in-out property <string> value;
+    in property <bool> image-anchor: false;
+    in property <float> image-anchor-x;
+    in property <float> image-anchor-y;
+    in property <int> image-basis: 0;
+    in property <bool> image-basis-fixed: false;
+    in property <float> image-basis-x;
+    in property <float> image-basis-y;
     in property <float> text-size: 22;
     in property <string> font-name;
     in property <bool> bold;

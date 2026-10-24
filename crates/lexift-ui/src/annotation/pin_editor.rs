@@ -11,6 +11,7 @@ use lexift_core::{
 use std::{collections::BTreeMap, sync::Arc};
 
 struct Stored {
+    presented_orientation: lexift_core::domain::image_transform::Orientation,
     document: editor_document::EditorDocument,
     base: Arc<CapturedRegion>,
     request: ExportRequest,
@@ -80,6 +81,7 @@ fn install_owned(
         s.borrow_mut().insert(
             id,
             Stored {
+                presented_orientation: document.session.image_orientation,
                 initial_watermark: request.snapshot.session.watermark.clone(),
                 original_displays: request.snapshot.session.displays.clone(),
                 document,
@@ -249,45 +251,12 @@ pub(super) fn view_point(point: (f32, f32), reverse: bool) -> (f32, f32) {
     current()
         .and_then(|(id, _)| {
             let (source, display) = crate::pinned_screenshot::geometry(id)?;
-            let (full, mut orientation) = DOCUMENTS.with(|s| {
+            let (full, orientation) = DOCUMENTS.with(|s| {
                 s.borrow()
                     .get(&id)
-                    .map(|p| (p.base.bounds, p.document.session.image_orientation))
+                    .map(|p| (p.base.bounds, p.presented_orientation))
             })?;
-            REGISTRY.with(|s| {
-                if let Ok(s) = s.try_borrow()
-                    && let Some(r) = s.as_ref()
-                {
-                    orientation = r.document.session.image_orientation;
-                }
-            });
-            let oriented = if reverse {
-                point
-            } else {
-                let p = orientation.point([point.0 as f64, point.1 as f64], full);
-                (p[0] as f32, p[1] as f32)
-            };
-            let (from, to) = if reverse {
-                (display, source)
-            } else {
-                (source, display)
-            };
-            let p = (
-                to.left as f32
-                    + (oriented.0 - from.left as f32) * (to.right - to.left) as f32
-                        / (from.right - from.left) as f32,
-                to.top as f32
-                    + (oriented.1 - from.top as f32) * (to.bottom - to.top) as f32
-                        / (from.bottom - from.top) as f32,
-            );
-            if reverse {
-                let p = orientation
-                    .inverse()
-                    .point([p.0 as f64, p.1 as f64], orientation.rect(full, full).ok()?);
-                Some((p[0] as f32, p[1] as f32))
-            } else {
-                Some(p)
-            }
+            mapped_point(point, reverse, full, source, display, orientation)
         })
         .unwrap_or(point)
 }
@@ -571,4 +540,87 @@ pub(crate) fn shutdown() {
     pin_crop::clear();
     ACTIVE.with(|s| s.borrow_mut().take());
     DOCUMENTS.with(|s| s.borrow_mut().clear());
+}
+
+/// Publish input geometry only with the pixels belonging to this document.
+pub(super) fn presented(id: u64, session: &Session) {
+    DOCUMENTS.with(|s| {
+        if let Some(p) = s.borrow_mut().get_mut(&id) {
+            p.presented_orientation = session.image_orientation;
+        }
+    });
+}
+
+/// Pin input uses the same immutable orientation and visible source as the presented pixels.
+fn mapped_point(
+    point: (f32, f32),
+    reverse: bool,
+    full: Rect,
+    source: Rect,
+    display: Rect,
+    orientation: lexift_core::domain::image_transform::Orientation,
+) -> Option<(f32, f32)> {
+    let oriented = if reverse {
+        point
+    } else {
+        let p = orientation.point([point.0 as f64, point.1 as f64], full);
+        (p[0] as f32, p[1] as f32)
+    };
+    let (from, to) = if reverse {
+        (display, source)
+    } else {
+        (source, display)
+    };
+    let p = (
+        to.left as f32
+            + (oriented.0 - from.left as f32) * (to.right - to.left) as f32
+                / (from.right - from.left) as f32,
+        to.top as f32
+            + (oriented.1 - from.top as f32) * (to.bottom - to.top) as f32
+                / (from.bottom - from.top) as f32,
+    );
+    if reverse {
+        let p = orientation
+            .inverse()
+            .point([p.0 as f64, p.1 as f64], orientation.rect(full, full).ok()?);
+        Some((p[0] as f32, p[1] as f32))
+    } else {
+        Some(p)
+    }
+}
+#[cfg(test)]
+mod orientation_tests {
+    use super::*;
+    #[test]
+    fn presented_pin_mapping_roundtrips_crop_negative_origin_and_dpi() {
+        let full = Rect {
+            left: -300,
+            top: -50,
+            right: 300,
+            bottom: 1150,
+        };
+        let crop = Rect {
+            left: -230,
+            top: 30,
+            right: 140,
+            bottom: 950,
+        };
+        for direction in lexift_core::domain::image_transform::Orientation::ALL {
+            let source = direction.rect(crop, full).unwrap();
+            for scale in [0.4, 1., 1.25] {
+                let display = Rect {
+                    left: 2700,
+                    top: 30,
+                    right: 2700 + ((source.right - source.left) as f32 * scale) as i32,
+                    bottom: 30 + ((source.bottom - source.top) as f32 * scale) as i32,
+                };
+                for p in [(-230., 30.), (140., 950.), (-70., 420.)] {
+                    let screen = mapped_point(p, false, full, source, display, direction).unwrap();
+                    let back =
+                        mapped_point(screen, true, full, source, display, direction).unwrap();
+                    assert!((p.0 - back.0).abs() < 0.01 && (p.1 - back.1).abs() < 0.01);
+                }
+            }
+        }
+    }
 }

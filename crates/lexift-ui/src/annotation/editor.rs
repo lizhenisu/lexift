@@ -526,15 +526,45 @@ pub(super) fn place(
     text: &TextAnnotation,
     displays: &[Rect],
 ) {
-    let viewport = viewport(bounds, displays);
-    let map_bounds = |b: Bounds| {
+    let basis = lexift_core::domain::image_transform::Orientation::ALL
+        [editor.get_image_basis().clamp(0, 7) as usize];
+    let center = if editor.get_image_basis_fixed() {
+        (editor.get_image_basis_x(), editor.get_image_basis_y())
+    } else {
+        (
+            (bounds.left + bounds.right) * 0.5,
+            (bounds.top + bounds.bottom) * 0.5,
+        )
+    };
+    let [a, b, c, d] = basis.matrix();
+    let origin = (
+        center.0 + a as f32 * (bounds.left - center.0) + b as f32 * (bounds.top - center.1),
+        center.1 + c as f32 * (bounds.left - center.0) + d as f32 * (bounds.top - center.1),
+    );
+    let correction = if editor.get_image_anchor() {
+        (
+            editor.get_image_anchor_x() - origin.0,
+            editor.get_image_anchor_y() - origin.1,
+        )
+    } else {
+        (0., 0.)
+    };
+    let glyph_point = |p: (f32, f32)| {
+        let [a, b, c, d] = basis.matrix();
+        let p = lexift_core::domain::annotation::rotate_text_point(p, bounds, text.rotation);
+        (
+            center.0 + a as f32 * (p.0 - center.0) + b as f32 * (p.1 - center.1) + correction.0,
+            center.1 + c as f32 * (p.0 - center.0) + d as f32 * (p.1 - center.1) + correction.1,
+        )
+    };
+    let mapped_bounds = |b: Bounds, map: &dyn Fn((f32, f32)) -> (f32, f32)| {
         let p = [
             (b.left, b.top),
             (b.right, b.top),
             (b.left, b.bottom),
             (b.right, b.bottom),
         ]
-        .map(|p| super::pin_editor::view_point(p, false));
+        .map(map);
         Bounds {
             left: p.iter().map(|p| p.0).fold(f32::INFINITY, f32::min),
             top: p.iter().map(|p| p.1).fold(f32::INFINITY, f32::min),
@@ -542,8 +572,11 @@ pub(super) fn place(
             bottom: p.iter().map(|p| p.1).fold(f32::NEG_INFINITY, f32::max),
         }
     };
-    let viewport = super::screenshot::long_editor::clip_text(map_bounds(viewport));
-    let bounds = map_bounds(bounds);
+    let glyph_bounds = mapped_bounds(bounds, &glyph_point);
+    let map = |p| super::pin_editor::view_point(p, false);
+    let bounds = mapped_bounds(glyph_bounds, &map);
+    // Desktop limits apply after projection: image coordinates may have a negative origin.
+    let viewport = super::screenshot::long_editor::clip_text(viewport(bounds, displays));
     let scale = scale * super::pin_editor::view_zoom();
     editor.window().set_position(slint::PhysicalPosition::new(
         viewport.left.floor() as i32,

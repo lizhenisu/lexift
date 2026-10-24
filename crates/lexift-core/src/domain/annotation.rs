@@ -554,6 +554,9 @@ impl Object {
         self.basis_point(p, self.image_basis.inverse())
     }
     fn basis_point(&self, p: (f32, f32), basis: super::image_transform::Orientation) -> (f32, f32) {
+        if !matches!(self.kind, Kind::Text | Kind::Sequence) {
+            return p;
+        }
         let [a, b, c, d] = basis.matrix();
         let x = (self.bounds.left + self.bounds.right) * 0.5;
         let y = (self.bounds.top + self.bounds.bottom) * 0.5;
@@ -561,6 +564,13 @@ impl Object {
             x + a as f32 * (p.0 - x) + b as f32 * (p.1 - y),
             y + c as f32 * (p.0 - x) + d as f32 * (p.1 - y),
         )
+    }
+    /// Text reflow preserves its source-space glyph anchor, including mirrored image frames.
+    pub fn set_text_layout(&mut self, bounds: Bounds) {
+        let anchor = self.image_point((self.bounds.left, self.bounds.top));
+        self.bounds = bounds;
+        let next = self.image_point((bounds.left, bounds.top));
+        self.move_by(anchor.0 - next.0, anchor.1 - next.1);
     }
     pub fn hit_path(&self, point: (f32, f32), scale: f32) -> bool {
         let point = self.local_point(point);
@@ -1273,7 +1283,15 @@ impl Session {
                 Kind::Text | Kind::Sequence | Kind::StickerArea | Kind::StickerBrush
             )
         {
-            object.image_basis = self.image_orientation.inverse();
+            let basis = self.image_orientation.inverse();
+            if object.image_basis != basis {
+                object.image_basis = basis;
+                if object.kind == Kind::Text {
+                    let anchor = (object.bounds.left, object.bounds.top);
+                    let next = object.image_point(anchor);
+                    object.move_by(anchor.0 - next.0, anchor.1 - next.1);
+                }
+            }
         }
     }
     pub fn add(&mut self, mut object: Object) -> bool {
@@ -1685,7 +1703,7 @@ impl Session {
                 if let Extra::Text(text) = &object.extra {
                     if object
                         .text_link_arrow()
-                        .is_some_and(|arrow| arrow.hit_path(point, scale))
+                        .is_some_and(|arrow| arrow.hit_path(local, scale))
                     {
                         return Some(Hit::Object(index));
                     }
@@ -2051,6 +2069,66 @@ mod tests {
         }
     }
 
+    #[test]
+    fn new_image_text_and_reflow_preserve_clicked_glyph_anchor_without_double_preparing() {
+        for orientation in super::super::image_transform::Orientation::ALL {
+            let mut session = Session::new();
+            session.image_orientation = orientation;
+            let mut object = text_object();
+            object.bounds = Bounds::from_corners((145., 500.), (345., 530.));
+            let anchor = (object.bounds.left, object.bounds.top);
+            session.prepare_image_object(&mut object);
+            assert_eq!(
+                object.image_point((object.bounds.left, object.bounds.top)),
+                anchor
+            );
+            let prepared = object.clone();
+            session.prepare_image_object(&mut object);
+            assert_eq!(object, prepared);
+            let next = Bounds::from_corners(
+                (object.bounds.left, object.bounds.top),
+                (object.bounds.right + 120., object.bounds.bottom + 30.),
+            );
+            object.set_text_layout(next);
+            assert_eq!(
+                object.image_point((object.bounds.left, object.bounds.top)),
+                anchor
+            );
+        }
+    }
+    #[test]
+    fn oriented_text_arrow_hit_and_sticker_geometry_use_distinct_local_frames() {
+        for orientation in super::super::image_transform::Orientation::ALL {
+            let mut session = Session::new();
+            session.image_source = Some(Rect {
+                left: -500,
+                top: -500,
+                right: 500,
+                bottom: 500,
+            });
+            session.image_orientation = orientation;
+            let mut object = text_object();
+            if let Extra::Text(text) = &mut object.extra {
+                text.linked_arrow = Some((180., 210.));
+            }
+            session.add(object);
+            session.set_edit_scope(EditScope::Text);
+            session.selected = None;
+            let object = &session.objects[0];
+            let tip = object.image_point((180., 210.));
+            assert_eq!(
+                session.hit(tip, 1.),
+                Some(Hit::Object(0)),
+                "{orientation:?}"
+            );
+            let mut sticker = object.clone();
+            sticker.kind = Kind::StickerBrush;
+            sticker.points = vec![(-90., 30.), (10., 60.)];
+            let p = (-80., 40.);
+            assert_eq!(sticker.image_point(p), p);
+            assert_eq!(sticker.local_point(p), p);
+        }
+    }
     #[test]
     fn short_text_body_is_not_covered_by_corner_controls() {
         let mut session = Session::new();

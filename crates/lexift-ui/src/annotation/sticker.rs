@@ -65,6 +65,7 @@ pub(crate) fn draw(target: &mut Pixmap, object: &Object, monitor: Rect) {
         }
         let tile = &cache[&key];
         let unit = sticker.texture_size / 8.;
+        let [a, b, c, d] = object.image_basis.matrix();
         let paint = Paint {
             shader: Pattern::new(
                 tile.as_ref(),
@@ -76,10 +77,10 @@ pub(crate) fn draw(target: &mut Pixmap, object: &Object, monitor: Rect) {
                 },
                 sticker.opacity as f32 / 100.,
                 Transform::from_row(
-                    unit * sticker.stretch.0,
-                    0.,
-                    0.,
-                    unit * sticker.stretch.1,
+                    a as f32 * unit * sticker.stretch.0,
+                    c as f32 * unit * sticker.stretch.0,
+                    b as f32 * unit * sticker.stretch.1,
+                    d as f32 * unit * sticker.stretch.1,
                     sticker.origin.0 - monitor.left as f32,
                     sticker.origin.1 - monitor.top as f32,
                 ),
@@ -133,6 +134,41 @@ mod tests {
         object
     }
 
+    #[test]
+    fn image_orientation_does_not_rotate_sticker_brush_coverage_or_area_bounds() {
+        let view = Rect {
+            left: -120,
+            top: -120,
+            right: 120,
+            bottom: 120,
+        };
+        for kind in [Kind::StickerArea, Kind::StickerBrush] {
+            let mut object = sticker(kind, 1., 0);
+            let mut original = Pixmap::new(240, 240).unwrap();
+            draw(&mut original, &object, view);
+            for basis in lexift_core::domain::image_transform::Orientation::ALL {
+                object.image_basis = basis;
+                let mut actual = Pixmap::new(240, 240).unwrap();
+                crate::annotation_render::draw_content_object(&mut actual, &object, view, 1., None);
+                assert_eq!(
+                    actual
+                        .data()
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|p| p[3])
+                        .collect::<Vec<_>>(),
+                    original
+                        .data()
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|p| p[3])
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+    }
     #[test]
     fn sticker_pixels_are_cached_stable_clipped_and_match_native_raster_scene() {
         for scale in [1., 1.25] {

@@ -22,7 +22,13 @@ thread_local! {
     static TEXT_CONTROL_ICONS: RefCell<HashMap<(usize, u32), Pixmap>> = RefCell::new(HashMap::new());
 }
 
-fn draw_text_control_icon(pixmap: &mut Pixmap, handle: usize, center: (f32, f32), scale: f32) {
+fn draw_text_control_icon(
+    pixmap: &mut Pixmap,
+    handle: usize,
+    center: (f32, f32),
+    scale: f32,
+    orientation: lexift_core::domain::image_transform::Orientation,
+) {
     let svg = match handle {
         0 => include_str!("../../ui/icons/text-rotate.svg"),
         2 => include_str!("../../ui/icons/text-link-arrow.svg"),
@@ -59,12 +65,21 @@ fn draw_text_control_icon(pixmap: &mut Pixmap, handle: usize, center: (f32, f32)
         let Some(icon) = cache.get(&(handle, size)) else {
             return;
         };
+        let [a, b, c, d] = orientation.inverse().matrix();
+        let half = size as f32 / 2.;
         pixmap.draw_pixmap(
-            (center.0 - size as f32 / 2.).round() as i32,
-            (center.1 - size as f32 / 2.).round() as i32,
+            0,
+            0,
             icon.as_ref(),
             &PixmapPaint::default(),
-            Transform::identity(),
+            Transform::from_row(
+                a as f32,
+                c as f32,
+                b as f32,
+                d as f32,
+                center.0 - (a + b) as f32 * half,
+                center.1 - (c + d) as f32 * half,
+            ),
             None,
         );
     });
@@ -110,8 +125,14 @@ fn color_paint(color: [u8; 3]) -> Paint<'static> {
     p
 }
 
-fn draw_sequence_control_icon(pixmap: &mut Pixmap, handle: usize, center: (f32, f32), scale: f32) {
-    draw_text_control_icon(pixmap, handle + 8, center, scale);
+fn draw_sequence_control_icon(
+    pixmap: &mut Pixmap,
+    handle: usize,
+    center: (f32, f32),
+    scale: f32,
+    orientation: lexift_core::domain::image_transform::Orientation,
+) {
+    draw_text_control_icon(pixmap, handle + 8, center, scale, orientation);
 }
 fn draw_brush(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) {
     let Some(&(x, y)) = object.points.first() else {
@@ -178,7 +199,9 @@ fn draw_brush(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) {
 }
 
 fn draw_object(pixmap: &mut Pixmap, object: &Object, monitor: Rect, scale: f32) {
-    if object.image_basis != Default::default() {
+    if object.image_basis != Default::default()
+        && matches!(object.kind, Kind::Text | Kind::Sequence)
+    {
         draw_content_object(pixmap, object, monitor, scale, None);
         return;
     }
@@ -368,7 +391,9 @@ pub(crate) fn draw_content_object(
     scale: f32,
     reference: Option<&str>,
 ) {
-    if object.image_basis != Default::default() {
+    if object.image_basis != Default::default()
+        && matches!(object.kind, Kind::Text | Kind::Sequence)
+    {
         let mut local = object.clone();
         local.image_basis = Default::default();
         glyph_layer(pixmap, object, monitor, |frame, view| {
@@ -1563,7 +1588,14 @@ fn draw_document_interaction(
         bottom: (bounds.bottom + padding).ceil() as i32,
     };
     crate::annotation_path::draw_cells(pixmap, monitor, geometry, |frame, origin| {
-        draw_interaction_content(frame, selected, hovered, origin, scale)
+        draw_interaction_content(
+            frame,
+            selected,
+            hovered,
+            origin,
+            scale,
+            document.session.image_orientation,
+        )
     });
 }
 
@@ -1573,6 +1605,7 @@ fn draw_interaction_content(
     hovered: Option<&Object>,
     monitor: Rect,
     scale: f32,
+    orientation: lexift_core::domain::image_transform::Orientation,
 ) {
     // Hover feedback belongs to the object boundary, while edit handles belong only
     // to the selected object. Keep the outline above the translucent fill.
@@ -1677,7 +1710,7 @@ fn draw_interaction_content(
                         None,
                     );
                 }
-                draw_sequence_control_icon(pixmap, handle, center, scale);
+                draw_sequence_control_icon(pixmap, handle, center, scale, orientation);
                 continue;
             }
             if (selected.kind == Kind::Sequence && handle == 6)
@@ -1750,7 +1783,7 @@ fn draw_interaction_content(
                     let cy = y - monitor.top as f32;
                     let s = scale;
                     if handle == 0 || handle == 2 || handle == 3 {
-                        draw_text_control_icon(pixmap, handle, (cx, cy), scale);
+                        draw_text_control_icon(pixmap, handle, (cx, cy), scale, orientation);
                         continue;
                     }
                     let mut symbol = PathBuilder::new();

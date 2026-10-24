@@ -476,6 +476,7 @@ pub(super) fn present(id: u64, revision: u64, image: Arc<CapturedRegion>) -> boo
             crate::pinned_screenshot::set_edit_interaction(id, !r.document.mode.is_mouse());
         }
         let original = p.request.snapshot.monitor;
+        pin_editor::presented(id, &p.session);
         r.document.session = p.session;
         source(r, original);
         toolbar(r);

@@ -14,6 +14,8 @@ component PinGlow inherits Image {
     image-rendering:smooth;
 }
 export component PinnedScreenshotWindow inherits Window {
+    in property <bool> context-input: true;
+    out property <bool> context-available: root.context-input && (root.interactive || root.editing) && !root.cropping;
     title:@tr("Pinned screenshot"); no-frame:true; always-on-top:root.topmost; background:transparent;
     in property <image> picture;
     in property <image> decoration;
@@ -67,9 +69,10 @@ export component PinnedScreenshotWindow inherits Window {
             changed has-hover=>{if root.editing && !root.browsing && !self.has-hover {root.edit-pointer(4,self.mouse-x/1px,self.mouse-y/1px);}}
             mouse-cursor: root.editing && !root.browsing ? (root.cursor==AnnotationCursor.moving ? move : root.cursor==AnnotationCursor.text ? text : root.cursor==AnnotationCursor.horizontal ? ew-resize : root.cursor==AnnotationCursor.vertical ? ns-resize : root.cursor==AnnotationCursor.diagonal-down ? nwse-resize : root.cursor==AnnotationCursor.diagonal-up ? nesw-resize : root.cursor==AnnotationCursor.drawing ? crosshair : default) : default;
             scroll-event(event)=>{if root.editing && !root.browsing {root.edit-scroll(event.delta-y/1px);return accept;}root.zoom-requested(event.delta-y/1px,self.mouse-x/1px+root.frame-inset,self.mouse-y/1px+root.frame-inset);return accept;}
-            // The context area gets right clicks before the draggable parent's grab.
+        }
+            // Context input remains available while browsing an edited pin; drawing is separate.
             context := ContextMenuArea {
-                width:parent.width; height:parent.height; enabled:root.interactive;
+                width:parent.width; height:parent.height; enabled:root.context-available;
             Menu {
                 MenuItem { title:@tr("Copy image"); enabled:!root.output-busy && !root.cropping; activated=>{root.output-requested(0);} }
                 MenuItem { title:@tr("Save image"); enabled:!root.output-busy && !root.cropping; activated=>{root.output-requested(1);} }
@@ -92,7 +95,6 @@ export component PinnedScreenshotWindow inherits Window {
                         if AnnotationHistory.action(event.text,event.modifiers.control,event.modifiers.shift,event.modifiers.alt,event.modifiers.meta)==1 {root.edit-key(0);return accept;}
                     }return reject;} }
             }
-        }
     }
 }
 export component ScreenshotToastWindow inherits Window {

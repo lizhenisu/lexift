@@ -217,7 +217,8 @@ fn apply_policy(id: u64) -> bool {
         (l.configure_pinned_image)(
             w.window(),
             w.get_topmost(),
-            w.get_interactive(),
+            // Mouse mode disables drawing, but an edited pin still owns its menu input.
+            w.get_interactive() || w.get_context_available(),
             (w.get_frame_inset() * native_scale(w.window())).round() as i32,
         )
     })
@@ -322,6 +323,7 @@ pub(crate) fn set_annotation_interaction(allowed: bool) {
         w.invoke_close_menu();
         (l.cancel_window_interaction)(w.window());
         w.set_interactive(allowed);
+        w.set_context_input(allowed);
         apply_policy(id);
     }
 }
@@ -1114,6 +1116,7 @@ fn show_from(
             (h + 2 * inset) as u32,
         ));
         window.set_interactive(r.interactive);
+        window.set_context_input(r.interactive);
         r.windows.insert(
             id,
             Pin {
@@ -1265,7 +1268,7 @@ fn prepare(id: u64, attempt: u8) {
                         }
                         if let Some(w) = weak
                             .upgrade()
-                            .filter(|w| w.get_interactive() && w.window().is_visible())
+                            .filter(|w| w.get_context_available() && w.window().is_visible())
                         {
                             crate::bridge::dispatch_pointer_input(w.window(), event);
                         }
@@ -1544,6 +1547,28 @@ mod tests {
         true
     }
     #[test]
+    fn edited_pin_keeps_context_input_independent_of_drawing_and_global_suspend() {
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        let w = PinnedScreenshotWindow::new().unwrap();
+        w.set_editing(true);
+        w.set_browsing(true);
+        w.set_interactive(false);
+        assert!(w.get_context_available());
+        w.set_cropping(true);
+        assert!(!w.get_context_available());
+        w.set_cropping(false);
+        w.set_context_input(false);
+        assert!(!w.get_context_available());
+        w.set_context_input(true);
+        assert!(w.get_context_available());
+        w.set_browsing(false);
+        assert!(w.get_context_available());
+        w.set_editing(false);
+        assert!(!w.get_context_available());
+        w.set_interactive(true);
+        assert!(w.get_context_available());
+    }
+    #[test]
     fn image_press_defers_native_drag_and_retirement_cancels_queued_work() {
         use slint::platform::{PointerEventButton, WindowEvent};
         slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
@@ -1640,6 +1665,8 @@ mod tests {
         let received = sinks.clone();
         let retired = Rc::new(Cell::new(0));
         let cleaned = retired.clone();
+        let native_input = Rc::new(Cell::new(false));
+        let policy_input = native_input.clone();
         let lifecycle = WindowLifecycleCallbacks::new(
             move |_, sink| {
                 received.borrow_mut().push(sink);
@@ -1652,6 +1679,10 @@ mod tests {
             |_, _| true,
             || true,
         )
+        .with_pinned_image_policy(move |_, _, input, _| {
+            policy_input.set(input);
+            true
+        })
         .with_window_interaction_cancellation(move |_| {
             STATE.with(|s| {
                 let _guard = s.borrow_mut();
@@ -1689,6 +1720,10 @@ mod tests {
         edit_window(1, true).unwrap();
         assert!(set_edit_interaction(1, false));
         assert!(!first.get_interactive());
+        assert!(
+            native_input.get(),
+            "edited mouse mode must still receive right clicks"
+        );
         STATE.with(|s| {
             let slot = s.borrow();
             let r = slot.as_ref().unwrap();
@@ -1708,6 +1743,10 @@ mod tests {
             assert!(r.windows[&2].shadow && r.windows[&2].topmost);
         });
         set_annotation_interaction(false);
+        assert!(
+            !native_input.get(),
+            "suspension must disable native menu input too"
+        );
         let old_size = first.window().size();
         zoom(1, 120., 50., 50.);
         assert_eq!(first.window().size(), old_size);

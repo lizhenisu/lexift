@@ -3479,7 +3479,7 @@ mod tests {
                     right: 2,
                     bottom: 3,
                 },
-                pixels: [10, 20, 30, 255].repeat(6),
+                pixels: (0..6).flat_map(|n| [10 + n, 20, 30, 255]).collect(),
             }
         }
         impl ImageFilePort for Files {
@@ -3546,7 +3546,7 @@ mod tests {
             }
             fn quit(&self) {}
         }
-        struct Ocr;
+        struct Ocr(std::sync::atomic::AtomicUsize);
         impl lexift_core::ports::ocr::OcrPort for Ocr {
             fn resources(&self) -> lexift_core::Result<lexift_core::ports::ocr::OcrResources> {
                 Ok(lexift_core::ports::ocr::OcrResources {
@@ -3578,16 +3578,31 @@ mod tests {
                 _: &lexift_core::domain::ocr::OcrRecognitionStrategy,
                 _: &AtomicBool,
             ) -> lexift_core::Result<String> {
-                assert_eq!(
-                    image.bounds,
-                    Rect {
-                        left: 0,
-                        top: 1,
-                        right: 1,
-                        bottom: 3
-                    }
-                );
-                assert_eq!(image.pixels, [10, 20, 30, 255].repeat(2));
+                let turn = self.0.fetch_add(1, Ordering::AcqRel);
+                if turn == 0 {
+                    assert_eq!(
+                        image.bounds,
+                        Rect {
+                            left: 0,
+                            top: 1,
+                            right: 1,
+                            bottom: 3
+                        }
+                    );
+                    assert_eq!(image.pixels, [12, 20, 30, 255, 14, 20, 30, 255]);
+                } else {
+                    assert_eq!(turn, 1);
+                    assert_eq!(
+                        image.bounds,
+                        Rect {
+                            left: 0,
+                            top: 0,
+                            right: 2,
+                            bottom: 1
+                        }
+                    );
+                    assert_eq!(image.pixels, [14, 20, 30, 255, 12, 20, 30, 255]);
+                }
                 Ok("EDITOR OCR".into())
             }
         }
@@ -3630,7 +3645,7 @@ mod tests {
                 view.clone(),
             )
             .with_ocr(Some(Arc::new(crate::ocr::OcrRuntime::new(
-                Arc::new(Ocr),
+                Arc::new(Ocr(std::sync::atomic::AtomicUsize::new(0))),
                 Arc::new(Capture),
             ))))
             .with_screenshot(Some(Arc::new(
@@ -3669,52 +3684,61 @@ mod tests {
             operation: e.id,
             result: Ok(SaveOutcome::Cancelled),
         }));
-        controller.dispatch(AppEvent::EditorOcr(
-            lexift_core::domain::editor_ocr::Event::Requested {
-                token: 99,
-                owner: lexift_core::domain::editor_ocr::Owner::Document {
-                    window: e.window,
-                    editor: e.id,
+        for (turn, orientation) in [
+            lexift_core::domain::image_transform::Orientation::identity(),
+            lexift_core::domain::image_transform::Orientation::identity()
+                .action(lexift_core::domain::image_transform::Action::Right),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            controller.dispatch(AppEvent::EditorOcr(
+                lexift_core::domain::editor_ocr::Event::Requested {
+                    token: 99 + turn as u64,
+                    owner: lexift_core::domain::editor_ocr::Owner::Document {
+                        window: e.window,
+                        editor: e.id,
+                    },
+                    revision: 99,
+                    orientation,
+                    source: fixture().bounds,
+                    bounds: Rect {
+                        left: 0,
+                        top: 1,
+                        right: 1,
+                        bottom: 3,
+                    },
                 },
-                revision: 99,
-                orientation: Default::default(),
-                source: fixture().bounds,
-                bounds: Rect {
-                    left: 0,
-                    top: 1,
-                    right: 1,
-                    bottom: 3,
-                },
-            },
-        ));
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while state.lock().unwrap().editor_ocr.result.is_none() {
-            assert!(Instant::now() < deadline);
-            thread::sleep(Duration::from_millis(2));
+            ));
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while state.lock().unwrap().editor_ocr.result.is_none() {
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(2));
+            }
+            assert_eq!(clipboard.1.lock().unwrap().as_deref(), Some("EDITOR OCR"));
+            assert_eq!(
+                state.lock().unwrap().editor_ocr.result.unwrap().1,
+                lexift_core::domain::ocr::OcrOutcome::Copied
+            );
+            assert!(
+                state
+                    .lock()
+                    .unwrap()
+                    .image_history
+                    .cache
+                    .entries()
+                    .is_empty()
+            );
+            assert!(
+                state
+                    .lock()
+                    .unwrap()
+                    .image_history
+                    .editor
+                    .as_ref()
+                    .is_some_and(|editor| editor.id == e.id && editor.ready)
+            );
         }
-        assert_eq!(clipboard.1.lock().unwrap().as_deref(), Some("EDITOR OCR"));
-        assert_eq!(
-            state.lock().unwrap().editor_ocr.result.unwrap().1,
-            lexift_core::domain::ocr::OcrOutcome::Copied
-        );
-        assert!(
-            state
-                .lock()
-                .unwrap()
-                .image_history
-                .cache
-                .entries()
-                .is_empty()
-        );
-        assert!(
-            state
-                .lock()
-                .unwrap()
-                .image_history
-                .editor
-                .as_ref()
-                .is_some_and(|editor| editor.id == e.id && editor.ready)
-        );
         let mut session = Session::new();
         session.image_source = Some(fixture().bounds);
         let request = ExportRequest {

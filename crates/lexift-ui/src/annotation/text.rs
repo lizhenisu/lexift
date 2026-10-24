@@ -1443,6 +1443,37 @@ mod tests {
     }
 
     #[test]
+    fn multiline_caret_combines_local_text_rotation_with_all_image_glyph_frames() {
+        for dpi in [1., 1.25] {
+            for basis in lexift_core::domain::image_transform::Orientation::ALL {
+                let mut object = layout_test_object("实例 gj\n文字 A", 32., dpi);
+                object.image_basis = basis;
+                if let Extra::Text(text) = &mut object.extra {
+                    text.rotation = 0.65;
+                }
+                let Extra::Text(text) = &object.extra else {
+                    unreachable!()
+                };
+                let layout = text_layout(text, dpi);
+                for (row, positions) in layout.lines.iter().enumerate() {
+                    for &(offset, x) in positions {
+                        let p = lexift_core::domain::annotation::rotate_text_point(
+                            (
+                                object.bounds.left + x,
+                                object.bounds.top
+                                    + layout.baseline
+                                    + row as f32 * layout.line_height,
+                            ),
+                            object.bounds,
+                            text.rotation,
+                        );
+                        assert_eq!(caret_at(&object, object.image_point(p)), offset);
+                    }
+                }
+            }
+        }
+    }
+    #[test]
     fn empty_caption_caret_renders_at_both_dpis_and_large_sizes() {
         let monitor = Rect {
             left: -400,

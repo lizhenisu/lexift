@@ -104,7 +104,7 @@ pub(super) fn finish_text_edit_registry(r: &mut Registry, commit: bool) {
             }
             r.document.session.selected = Some(index);
             r.document.session.update_selected(|object| {
-                object.bounds = bounds;
+                object.set_text_layout(bounds);
                 object.extra = Extra::Text(text);
             });
         }
@@ -370,6 +370,22 @@ pub(super) fn open_text_editor_with_settings(
                 }
             });
         editor::configure(&editor, &original, color);
+        let parent = index.and_then(|i| r.document.session.objects.get(i));
+        let basis = parent.map_or(r.document.session.image_orientation.inverse(), |o| {
+            o.image_basis
+        });
+        editor.set_image_basis(i32::from(basis.code()));
+        if parent.is_none_or(|o| o.kind == Kind::Text) {
+            let anchor = parent.map_or(at, |o| o.image_point((o.bounds.left, o.bounds.top)));
+            editor.set_image_anchor(true);
+            editor.set_image_anchor_x(anchor.0);
+            editor.set_image_anchor_y(anchor.1);
+        }
+        if let Some(object) = parent.filter(|o| o.kind == Kind::Sequence) {
+            editor.set_image_basis_fixed(true);
+            editor.set_image_basis_x((object.bounds.left + object.bounds.right) * 0.5);
+            editor.set_image_basis_y((object.bounds.top + object.bounds.bottom) * 0.5);
+        }
         editor.on_pointer(move |event, x, y| editor_pointer(generation, id, event, x, y));
         let b = crate::annotation_text::text_bounds(at, &original, scale);
         place_text_editor(
@@ -382,9 +398,14 @@ pub(super) fn open_text_editor_with_settings(
         );
         if let Some(object) = index.and_then(|i| r.document.session.objects.get(i)) {
             let caption = object.sequence_caption();
-            let offset =
-                crate::annotation_text::caret_at(caption.as_ref().unwrap_or(object), clicked)
-                    as i32;
+            let offset = crate::annotation_text::caret_at(
+                caption.as_ref().unwrap_or(object),
+                if caption.is_some() {
+                    object.local_point(clicked)
+                } else {
+                    clicked
+                },
+            ) as i32;
             editor.invoke_place_selection(offset, offset);
         }
         let edit = TextEdit::new(
