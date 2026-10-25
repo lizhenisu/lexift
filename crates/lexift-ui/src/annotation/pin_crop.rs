@@ -331,7 +331,9 @@ fn propose(r: &Registry, session: Session) {
             full.and_then(|f| s.image_orientation.rect(s.image_crop.unwrap_or(f), f).ok())
                 .map(|b| (b.right - b.left, b.bottom - b.top))
         };
-        if size(&session) != size(&r.document.session) {
+        if size(&session) != size(&r.document.session)
+            || session.image_orientation != r.document.session.image_orientation
+        {
             return;
         }
     }
@@ -474,7 +476,12 @@ pub(super) fn present(id: u64, revision: u64, image: Arc<CapturedRegion>) -> boo
             return false;
         }
         if let Some(w) = e.window.upgrade() {
-            if !geometry_with(r, &e, &w, image.bounds, true) {
+            let positioned = if e.orientation != p.session.image_orientation {
+                crate::pinned_screenshot::transform::geometry(id, image.bounds)
+            } else {
+                geometry_with(r, &e, &w, image.bounds, true)
+            };
+            if !positioned {
                 e.pending = Some(p);
                 EDIT.with(|s| *s.borrow_mut() = Some(e));
                 emit_pin_later(Event::PreviewFailed {

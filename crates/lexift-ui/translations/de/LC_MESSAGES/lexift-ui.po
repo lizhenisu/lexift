@@ -1986,3 +1986,6 @@ msgstr "Ausgeblendete Pins wiederherstellen"
 
 msgid "Some pins could not be hidden or restored. Try again."
 msgstr "Einige Pins konnten nicht ausgeblendet oder wiederhergestellt werden. Versuchen Sie es erneut."
+
+msgid "Rotate / flip"
+msgstr "Drehen / spiegeln"

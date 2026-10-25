@@ -1986,3 +1986,6 @@ msgstr "Restaurar imagens fixadas ocultas"
 
 msgid "Some pins could not be hidden or restored. Try again."
 msgstr "Não foi possível ocultar ou restaurar algumas imagens fixadas. Tente novamente."
+
+msgid "Rotate / flip"
+msgstr "Girar / inverter"

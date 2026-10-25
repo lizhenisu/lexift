@@ -4,6 +4,7 @@ use crate::ports::{annotation_save::SaveOutcome, magnifier::WindowToken};
 use crate::{AppCommand, AppState, Result};
 use std::collections::BTreeMap;
 pub mod interaction;
+pub mod transform;
 pub mod visibility;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Output {
@@ -27,6 +28,7 @@ pub struct State {
     pub source: Option<super::geometry::Rect>,
     pub proposed: Option<ExportRequest>,
     pub proposal_ready: bool,
+    pub transforming: bool,
 }
 /// Immutable input identity; geometry changes of the pin window do not change it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +40,15 @@ pub struct Recognition {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    TransformRequested {
+        id: u64,
+        action: super::image_transform::Action,
+    },
+    TransformAccepted {
+        id: u64,
+        revision: u64,
+        request: u64,
+    },
     WindowVisibility(visibility::Event),
     InteractionRequested {
         id: u64,
@@ -200,7 +211,12 @@ pub(crate) fn before_event(pins: &mut States, event: &crate::AppEvent) {
     match event {
         AppEvent::ExitRequested
         | AppEvent::Screenshot(super::screenshot::ScreenshotEvent::Requested(_))
-        | AppEvent::Ocr(super::ocr::OcrEvent::Requested { .. }) => cancel_recognition(pins),
+        | AppEvent::Ocr(super::ocr::OcrEvent::Requested { .. }) => {
+            cancel_recognition(pins);
+            for pin in pins.values_mut() {
+                transform::cancel(pin);
+            }
+        }
         AppEvent::PinnedImage(Event::EditRequested { id } | Event::Requested { id, .. })
             if pins
                 .get(id)
@@ -216,6 +232,15 @@ pub(crate) fn before_event(pins: &mut States, event: &crate::AppEvent) {
         ) => {
             if let Some(p) = pins.get_mut(id) {
                 cancel_one(p);
+                let belongs = match event {
+                    AppEvent::PinnedImage(
+                        Event::EditFinished { edit, .. } | Event::EditFailed { edit, .. },
+                    ) => p.editing == Some(*edit),
+                    _ => true,
+                };
+                if belongs {
+                    transform::cancel(p);
+                }
             }
         }
         _ => {}
@@ -224,6 +249,7 @@ pub(crate) fn before_event(pins: &mut States, event: &crate::AppEvent) {
 pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
     let input_id = match &event {
         Event::Recognize { id }
+        | Event::TransformRequested { id, .. }
         | Event::Requested { id, .. }
         | Event::EditRequested { id }
         | Event::VisibilityChanged { id, .. }
@@ -240,6 +266,17 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
     }
     let command = |c| vec![AppCommand::PinnedImage(c)];
     match event {
+        Event::TransformRequested { id, action } => transform::request(state, id, action),
+        Event::TransformAccepted {
+            id,
+            revision,
+            request,
+        } => {
+            if let Some(p) = state.pinned_images.get_mut(&id) {
+                transform::accept(p, revision, request);
+            }
+            vec![]
+        }
         Event::WindowVisibility(event) => visibility::reduce(state, event),
         Event::InteractionRequested { id, policy } => interaction::request(state, id, policy),
         Event::RestoreMouseInput => interaction::restore(state),
@@ -332,6 +369,8 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
             if p.interaction.applied.locked
                 && p.document.as_ref().is_some_and(|old| {
                     interaction::display_size(old) != interaction::display_size(&document)
+                        || old.snapshot.session.image_orientation
+                            != document.snapshot.session.image_orientation
                 })
             {
                 return vec![];
@@ -433,6 +472,10 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
                 p.error = Some(error);
                 p.proposed = None;
                 p.proposal_ready = false;
+                if p.transforming {
+                    p.busy = false;
+                }
+                p.transforming = false;
             }
             vec![]
         }
@@ -452,6 +495,7 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
             }
             let mut commands = Vec::new();
             for (&other, pin) in &mut state.pinned_images {
+                transform::cancel(pin);
                 if let Some(edit) = pin.editing.take() {
                     if pin.proposed.take().is_some() {
                         pin.revision += 1;

@@ -91,6 +91,7 @@ pub(crate) fn blocks_event(s: &AppState, e: &AppEvent) -> bool {
             ))
             | AppEvent::PinnedImage(
                 PinEvent::EditRequested { .. }
+                    | PinEvent::TransformRequested { .. }
                     | PinEvent::Requested { .. }
                     | PinEvent::Recognize { .. }
                     | PinEvent::InteractionRequested { .. }

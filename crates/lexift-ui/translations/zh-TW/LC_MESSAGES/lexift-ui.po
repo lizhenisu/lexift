@@ -1986,3 +1986,6 @@ msgstr "恢復隱藏貼圖"
 
 msgid "Some pins could not be hidden or restored. Try again."
 msgstr "部分貼圖無法隱藏或恢復，請重試。"
+
+msgid "Rotate / flip"
+msgstr "旋轉／翻轉"

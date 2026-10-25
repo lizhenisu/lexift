@@ -147,3 +147,4 @@
 - [图片导入验证](releases/image-import.md)
 - [贴图透明度验证](releases/pin-opacity.md)
 - [贴图统一隐藏／恢复验证](releases/pin-visibility.md)
+- [贴图旋转／翻转验证](releases/pin-image-transform.md)

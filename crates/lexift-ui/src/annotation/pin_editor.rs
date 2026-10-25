@@ -77,6 +77,10 @@ fn install_owned(
     document.session.image_source = Some(base.bounds);
     document.mode = InteractionMode::Mouse;
     document.session.set_edit_scope(EditScope::None);
+    let mut snapshot = (*request.snapshot).clone();
+    snapshot.session = Arc::new(document.session.clone());
+    request.snapshot = Arc::new(snapshot);
+    request.session = 0;
     DOCUMENTS.with(|s| {
         s.borrow_mut().insert(
             id,
@@ -91,6 +95,10 @@ fn install_owned(
             },
         )
     });
+}
+/// Initial Core retention must use the same editable baseline as this pin surface.
+pub(crate) fn retained_document(id: u64) -> Option<ExportRequest> {
+    DOCUMENTS.with(|s| s.borrow().get(&id).map(|p| p.request.clone()))
 }
 pub(super) fn recognition_busy() -> bool {
     current().is_some_and(|(id, _)| crate::pinned_screenshot::recognition_input_paused(id))
@@ -114,11 +122,14 @@ pub(super) fn history_allowed(r: &Registry, forward: bool) -> bool {
     let Some((id, _)) = current().filter(|p| crate::pinned_screenshot::policy::locked(p.0)) else {
         return true;
     };
-    source(id).is_some_and(|full| {
-        !r.document
-            .session
-            .history_changes_image_extent(forward, full)
-    })
+    !r.document
+        .session
+        .history_changes_image_orientation(forward)
+        && source(id).is_some_and(|full| {
+            !r.document
+                .session
+                .history_changes_image_extent(forward, full)
+        })
 }
 pub(crate) fn sync_outputs(states: &lexift_core::domain::pinned_image::States) {
     let Some((id, _)) = current() else {
@@ -454,6 +465,9 @@ pub(crate) fn publish(id: u64) {
             editing.region.bounds()?,
             r.canvas_state.canvases.first()?.scale(),
         )?;
+        // A pin proposal is an editable document baseline, not an output-only
+        // snapshot. Direction changes must retain the preceding shared history.
+        snapshot.session = Arc::new(r.document.session.freeze_visible(&snapshot.session));
         DOCUMENTS.with(|docs| {
             if let Some(p) = docs.borrow().get(&id) {
                 snapshot.scale = p.request.snapshot.scale;
@@ -603,6 +617,37 @@ pub(super) fn presented(id: u64, session: &Session) {
     });
 }
 
+/// Install the same committed snapshot for inactive storage and the borrowed edit surface.
+pub(crate) fn install_direction(id: u64, document: &ExportRequest) {
+    let session = DOCUMENTS
+        .with(|s| {
+            if let Some(p) = s.borrow_mut().get_mut(&id) {
+                p.presented_orientation = document.snapshot.session.image_orientation;
+                p.document.session = (*document.snapshot.session).clone();
+                p.document.session.image_source = Some(p.base.bounds);
+                p.request = document.clone();
+                return Some(p.document.session.clone());
+            }
+            None
+        })
+        .unwrap_or_else(|| (*document.snapshot.session).clone());
+    if current().is_some_and(|p| p.0 == id) {
+        REGISTRY.with(|s| {
+            if let Some(r) = s.borrow_mut().as_mut() {
+                r.document.session = session;
+                r.sync_edit_scope();
+                restore_parameter_projection(r);
+                cursor::refresh(r);
+                if let Some(e) = r.screenshot.as_mut() {
+                    e.revision = e.revision.wrapping_add(1);
+                }
+                sync_history_controls(r);
+                r.queue_render();
+            }
+        });
+    }
+}
+
 /// Pin input uses the same immutable orientation and visible source as the presented pixels.
 fn mapped_point(
     point: (f32, f32),
@@ -643,6 +688,80 @@ fn mapped_point(
 #[cfg(test)]
 mod orientation_tests {
     use super::*;
+    #[test]
+    fn initial_core_retention_uses_editable_history_but_history_restore_starts_empty() {
+        init(
+            |_| PassiveWindowPreparation::Ready,
+            WindowLifecycleCallbacks::new(
+                |_, _| true,
+                |_| true,
+                |_| false,
+                |_, _, _| false,
+                |_, _| true,
+                |_, _| true,
+                || false,
+            ),
+        );
+        let full = Rect {
+            left: 0,
+            top: 0,
+            right: 10,
+            bottom: 20,
+        };
+        let crop = Rect {
+            left: 1,
+            top: 2,
+            right: 9,
+            bottom: 18,
+        };
+        let mut session = Session::new();
+        session.image_source = Some(full);
+        session.set_image_crop(crop, full);
+        session.orient_image(
+            session
+                .image_orientation
+                .action(lexift_core::domain::image_transform::Action::Right),
+        );
+        REGISTRY.with(|s| s.borrow_mut().as_mut().unwrap().document.session = session.clone());
+        let base = Arc::new(CapturedRegion {
+            bounds: full,
+            pixels: [10, 20, 30, 255].repeat(200),
+        });
+        let samples = Arc::new(ScreenCaptureFrame {
+            revision: 1,
+            serial: 1,
+            regions: vec![],
+        });
+        let request = ExportRequest {
+            session: 42,
+            request: 3,
+            snapshot: Arc::new(lexift_core::domain::annotation_export::ExportSnapshot {
+                session: Arc::new(session.restored_image()),
+                monitor: crop,
+                scale: 1.,
+                monitors: vec![],
+                excluded: vec![],
+                owner: None,
+                name: String::new(),
+                title: String::new(),
+            }),
+        };
+        install(91, base.clone(), samples.clone(), request.clone());
+        let document = retained_document(91).unwrap();
+        assert_eq!(document.session, 0);
+        let mut restored = (*document.snapshot.session).clone();
+        assert!(restored.undo());
+        assert_eq!(restored.image_crop, Some(crop));
+        assert!(restored.undo());
+        assert_eq!(restored.image_crop, None);
+        install_history(92, base, samples, request);
+        let restored = retained_document(92).unwrap();
+        assert!(!restored.snapshot.session.can_undo());
+        assert_eq!(restored.snapshot.session.image_crop, Some(crop));
+        forget(91);
+        forget(92);
+        REGISTRY.with(|s| s.borrow_mut().take());
+    }
     #[test]
     fn presented_pin_mapping_roundtrips_crop_negative_origin_and_dpi() {
         let full = Rect {

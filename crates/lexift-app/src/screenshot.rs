@@ -70,7 +70,7 @@ pub(crate) struct ScreenshotRuntime {
     pin_jobs: Mutex<BTreeMap<u64, Arc<AtomicBool>>>,
     pin_pending_samples: Mutex<BTreeMap<(u64, u64), Arc<ScreenCaptureFrame>>>,
     pin_samples: Mutex<BTreeMap<u64, Arc<ScreenCaptureFrame>>>,
-    pin_previews: Mutex<BTreeMap<u64, Arc<AtomicBool>>>,
+    pin_previews: Mutex<BTreeMap<u64, (u64, Arc<AtomicBool>)>>,
     image_ocr: Mutex<image_ocr::Queue>,
 }
 impl ScreenshotRuntime {
@@ -201,13 +201,16 @@ impl ScreenshotRuntime {
         }
     }
     pub fn sync_pins(&self, pins: &PinStates, quitting: bool) {
-        self.pin_previews.lock().unwrap().retain(|id, cancel| {
-            let keep = !quitting && pins.contains_key(id);
-            if !keep {
-                cancel.store(true, Ordering::Release);
-            }
-            keep
-        });
+        self.pin_previews
+            .lock()
+            .unwrap()
+            .retain(|id, (revision, cancel)| {
+                let keep = !quitting && pins.get(id).is_some_and(|p| p.revision == *revision);
+                if !keep {
+                    cancel.store(true, Ordering::Release);
+                }
+                keep
+            });
         self.pin_samples
             .lock()
             .unwrap()
@@ -302,11 +305,21 @@ impl ScreenshotRuntime {
                 hidden,
             } => {
                 let Some(base) = self.pin_images.lock().unwrap().get(&id).cloned() else {
+                    controller.dispatch(AppEvent::PinnedImage(PinEvent::PreviewFailed {
+                        id,
+                        revision,
+                        error: "Screenshot unavailable".into(),
+                    }));
                     return;
                 };
                 let samples = self.pin_samples.lock().unwrap().get(&id).cloned();
                 let cancel = Arc::new(AtomicBool::new(false));
-                if let Some(old) = self.pin_previews.lock().unwrap().insert(id, cancel.clone()) {
+                if let Some((_, old)) = self
+                    .pin_previews
+                    .lock()
+                    .unwrap()
+                    .insert(id, (revision, cancel.clone()))
+                {
                     old.store(true, Ordering::Release);
                 }
                 let this = self.clone();
@@ -1569,6 +1582,26 @@ mod tests {
         runtime.sync_pins(&PinStates::new(), false);
         assert!(weak.upgrade().is_none());
         assert!(runtime.pin_jobs.lock().unwrap().is_empty());
+        let preview = Arc::new(AtomicBool::new(false));
+        runtime
+            .pin_previews
+            .lock()
+            .unwrap()
+            .insert(5, (7, preview.clone()));
+        let mut pins = PinStates::new();
+        pins.insert(
+            5,
+            lexift_core::domain::pinned_image::State {
+                revision: 7,
+                ..Default::default()
+            },
+        );
+        runtime.sync_pins(&pins, false);
+        assert!(!preview.load(Ordering::Acquire));
+        pins.get_mut(&5).unwrap().revision = 8;
+        runtime.sync_pins(&pins, false);
+        assert!(preview.load(Ordering::Acquire));
+        assert!(runtime.pin_previews.lock().unwrap().is_empty());
     }
     #[test]
     fn pin_composition_preserves_source_dpi_and_hidden_output_is_exact_base() {

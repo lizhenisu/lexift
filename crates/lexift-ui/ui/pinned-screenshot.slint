@@ -17,6 +17,9 @@ component PinGlow inherits Image {
 }
 export component PinnedScreenshotWindow inherits Window {
     in property <bool> window-suppressed: false;
+    in property <bool> transform-enabled: false;
+    in property <bool> transform-busy: false;
+    callback transform-requested(int);
     in property <bool> locked: false;
     in property <int> content-opacity-percent: 100;
     callback opacity-requested(int);
@@ -25,7 +28,7 @@ export component PinnedScreenshotWindow inherits Window {
     in property <bool> policy-idle: true;
     callback policy-requested(bool, bool);
     in property <bool> context-input: true;
-    out property <bool> context-available: !root.window-suppressed && root.context-input && !root.mouse-passthrough && !root.policy-busy && (root.interactive || root.editing) && !root.cropping;
+    out property <bool> context-available: !root.transform-busy && !root.window-suppressed && root.context-input && !root.mouse-passthrough && !root.policy-busy && (root.interactive || root.editing) && !root.cropping;
     title:@tr("Pinned screenshot"); no-frame:true; always-on-top:root.topmost; background:transparent;
     in property <image> picture;
     in property <image> decoration;
@@ -71,7 +74,7 @@ export component PinnedScreenshotWindow inherits Window {
             selection-left:root.crop-left;selection-top:root.crop-top;selection-right:root.crop-right;selection-bottom:root.crop-bottom;
         }
         area := TouchArea {
-            width:parent.width; height:parent.height; enabled:!root.window-suppressed && root.interactive && !root.mouse-passthrough && !root.policy-busy;
+            width:parent.width; height:parent.height; enabled:!root.transform-busy && !root.window-suppressed && root.interactive && !root.mouse-passthrough && !root.policy-busy;
             pointer-event(event)=>{
                 if !root.locked && (!root.editing || root.browsing) && event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.press-changed(true);root.drag-requested();}
                 if event.kind==PointerEventKind.up || event.kind==PointerEventKind.cancel {root.press-changed(false);}
@@ -108,6 +111,14 @@ export component PinnedScreenshotWindow inherits Window {
                         title: @tr("{}%", value); checkable:true; checked:root.content-opacity-percent == value;
                         activated=>{root.opacity-requested(value);}
                     }
+                }
+                Menu {
+                    title:@tr("Rotate / flip");
+                    enabled:root.transform-enabled && root.policy-idle && !root.locked && !root.output-busy && !root.recognizing && !root.cropping;
+                    MenuItem { title:@tr("Rotate left 90°"); activated=>{root.transform-requested(0);} }
+                    MenuItem { title:@tr("Rotate right 90°"); activated=>{root.transform-requested(1);} }
+                    MenuItem { title:@tr("Flip horizontally"); activated=>{root.transform-requested(2);} }
+                    MenuItem { title:@tr("Flip vertically"); activated=>{root.transform-requested(3);} }
                 }
                 MenuSeparator {}
                 MenuItem { title:@tr("Close"); activated=>{root.close-requested();} }

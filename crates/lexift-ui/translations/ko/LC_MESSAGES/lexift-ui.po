@@ -1986,3 +1986,6 @@ msgstr "숨긴 고정 이미지 복원"
 
 msgid "Some pins could not be hidden or restored. Try again."
 msgstr "일부 고정 이미지를 숨기거나 복원하지 못했습니다. 다시 시도하세요."
+
+msgid "Rotate / flip"
+msgstr "회전 / 뒤집기"

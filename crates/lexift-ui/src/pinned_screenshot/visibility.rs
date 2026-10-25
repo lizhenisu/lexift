@@ -45,7 +45,9 @@ pub(super) fn operable(id: u64) -> bool {
                     p.phase == Phase::Visible
                         && !p.user_hidden
                         && p.visibility_pending.is_none()
-                        && p.window.get().is_some_and(|w| !w.get_window_suppressed())
+                        && p.window
+                            .get()
+                            .is_some_and(|w| !w.get_window_suppressed() && !w.get_transform_busy())
                 })
         })
     })
@@ -116,6 +118,7 @@ pub(crate) fn sync(state: &lexift_core::AppState) {
         );
     }
     crate::tray_menu::refresh_pin_recovery();
+    super::transform::project(state);
 }
 fn update_input() {
     let busy = VIEW.with(|v| v.borrow().batch_active);
@@ -471,6 +474,212 @@ mod tests {
             hidden,
             anchor: Default::default(),
         }));
+    }
+    #[test]
+    fn direction_pixels_and_document_commit_together_and_reject_stale_or_invalid_frames() {
+        use lexift_core::domain::{
+            annotation::Session,
+            annotation_export::{ExportRequest, ExportSnapshot},
+            image_transform::Action,
+        };
+        slint::platform::set_platform(Box::new(Backend)).unwrap();
+        let native_ok = Rc::new(Cell::new(true));
+        let native = native_ok.clone();
+        let mut l = WindowLifecycleCallbacks::new(
+            |_, _| true,
+            |_| true,
+            |_| true,
+            |_, _, _| true,
+            |_, _| true,
+            |_, _| true,
+            || true,
+        )
+        .with_pinned_image_preparation(|_| true);
+        l.popup_work_area = Rc::new(|_| {
+            Some(Rect {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 1080,
+            })
+        });
+        l.complete_passive_window_show = Rc::new(|_, _| true);
+        l.configure_pinned_image = Rc::new(move |_, _, _, _| native.get());
+        l.activate_user_requested_window = activate;
+        init(|_| PassiveWindowPreparation::Ready, l);
+        let (id, w) = create(35);
+        let full = Rect {
+            left: 50,
+            top: 70,
+            right: 250,
+            bottom: 170,
+        };
+        let mut session = Session::new();
+        session.image_source = Some(full);
+        let request = ExportRequest {
+            session: 0,
+            request: 1,
+            snapshot: Arc::new(ExportSnapshot {
+                session: Arc::new(session),
+                monitor: full,
+                scale: 1.,
+                monitors: vec![],
+                excluded: vec![],
+                owner: None,
+                name: String::new(),
+                title: String::new(),
+            }),
+        };
+        let mut core = AppState::default();
+        core.pinned_images.insert(
+            id,
+            pin::State {
+                source: Some(full),
+                document: Some(request.clone()),
+                ..Default::default()
+            },
+        );
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let sent = events.clone();
+        crate::annotation::set_handler(Rc::new(move |e| sent.borrow_mut().push(e)));
+        core.reduce(AppEvent::PinnedImage(pin::Event::TransformRequested {
+            id,
+            action: Action::Right,
+        }));
+        super::super::sync_outputs(&core.pinned_images);
+        let old = core.pinned_images[&id].revision;
+        assert!(w.get_transform_busy());
+        assert!(!operable(id));
+        let before = (w.window().position(), w.window().size());
+        super::super::present(
+            id,
+            old,
+            Arc::new(CapturedRegion {
+                bounds: Rect {
+                    left: 0,
+                    top: 0,
+                    right: 1,
+                    bottom: 1,
+                },
+                pixels: vec![0, 0, 0, 255],
+            }),
+        );
+        for e in events.borrow_mut().drain(..) {
+            core.reduce(e);
+        }
+        super::super::sync_outputs(&core.pinned_images);
+        assert_eq!(core.pinned_images[&id].document.as_ref(), Some(&request));
+        assert_eq!((w.window().position(), w.window().size()), before);
+        assert!(!w.get_transform_busy());
+        let late = lexift_core::domain::image_transform::Orientation::identity()
+            .action(Action::Right)
+            .rect(full, full)
+            .unwrap();
+        super::super::present(
+            id,
+            old,
+            Arc::new(CapturedRegion {
+                bounds: late,
+                pixels: [30, 60, 90, 255].repeat(200 * 100),
+            }),
+        );
+        assert_eq!(
+            (w.window().position(), w.window().size()),
+            before,
+            "failed candidate must reject a late success of the same version"
+        );
+        let stale = core.pinned_images.clone();
+        core.reduce(AppEvent::PinnedImage(pin::Event::TransformRequested {
+            id,
+            action: Action::Left,
+        }));
+        let revision = core.pinned_images[&id].revision;
+        super::super::sync_outputs(&core.pinned_images);
+        let proposed = core.pinned_images[&id].proposed.clone().unwrap();
+        super::super::sync_outputs(&stale);
+        assert!(
+            w.get_transform_busy(),
+            "stale projection must not clear a newer candidate"
+        );
+        let bounds = proposed
+            .snapshot
+            .session
+            .image_orientation
+            .rect(full, full)
+            .unwrap();
+        let pixels = Arc::new(CapturedRegion {
+            bounds,
+            pixels: [30, 60, 90, 255].repeat(200 * 100),
+        });
+        super::super::present(id, old, pixels.clone());
+        assert_eq!((w.window().position(), w.window().size()), before);
+        core.reduce(AppEvent::PinnedImage(pin::Event::Rendered { id, revision }));
+        super::super::sync_outputs(&core.pinned_images);
+        super::super::present(id, revision, pixels);
+        slint::platform::update_timers_and_animations();
+        for e in events.borrow_mut().drain(..) {
+            core.reduce(e);
+        }
+        super::super::sync_outputs(&core.pinned_images);
+        assert_eq!(core.pinned_images[&id].document.as_ref(), Some(&proposed));
+        assert!(!w.get_transform_busy());
+        assert!(!w.get_editing());
+        assert!(operable(id));
+        assert_eq!(super::super::geometry(id).unwrap().0, bounds);
+        assert_eq!(ACTIVATIONS.with(Cell::get), 0);
+        native_ok.set(false);
+        core.reduce(AppEvent::PinnedImage(pin::Event::TransformRequested {
+            id,
+            action: Action::Right,
+        }));
+        let revision = core.pinned_images[&id].revision;
+        super::super::sync_outputs(&core.pinned_images);
+        super::super::present(
+            id,
+            revision,
+            Arc::new(CapturedRegion {
+                bounds: full,
+                pixels: [30, 60, 90, 255].repeat(200 * 100),
+            }),
+        );
+        for e in events.borrow_mut().drain(..) {
+            core.reduce(e);
+        }
+        super::super::sync_outputs(&core.pinned_images);
+        assert_eq!(core.pinned_images[&id].document.as_ref(), Some(&proposed));
+        assert!(!w.get_transform_busy());
+        native_ok.set(true);
+        let before_ack = (w.window().position(), w.window().size());
+        core.reduce(AppEvent::PinnedImage(pin::Event::TransformRequested {
+            id,
+            action: Action::Right,
+        }));
+        let revision = core.pinned_images[&id].revision;
+        super::super::sync_outputs(&core.pinned_images);
+        core.reduce(AppEvent::PinnedImage(pin::Event::Rendered { id, revision }));
+        super::super::sync_outputs(&core.pinned_images);
+        super::super::present(
+            id,
+            revision,
+            Arc::new(CapturedRegion {
+                bounds: full,
+                pixels: [30, 60, 90, 255].repeat(200 * 100),
+            }),
+        );
+        core.reduce(AppEvent::PinnedImage(pin::Event::PreviewFailed {
+            id,
+            revision,
+            error: "cancel before UI acknowledgement".into(),
+        }));
+        super::super::sync_outputs(&core.pinned_images);
+        assert_eq!((w.window().position(), w.window().size()), before_ack);
+        assert_eq!(super::super::geometry(id).unwrap().0, bounds);
+        slint::platform::update_timers_and_animations();
+        for e in events.borrow_mut().drain(..) {
+            core.reduce(e);
+        }
+        assert_eq!(core.pinned_images[&id].document.as_ref(), Some(&proposed));
+        close_all();
     }
     #[test]
     fn visibility_preserves_state_handles_failure_and_never_reveals_user_hidden_pins() {

@@ -1259,6 +1259,15 @@ impl Session {
         self.image_crop = next;
         true
     }
+    /// Inspect the next whole-image direction without consuming its history entry.
+    pub fn history_changes_image_orientation(&self, forward: bool) -> bool {
+        (if forward {
+            self.redo.last()
+        } else {
+            self.undo.last()
+        })
+        .is_some_and(|n| n.image_orientation != self.image_orientation)
+    }
     /// Inspect the next history extent without cloning objects or consuming the entry.
     pub fn history_changes_image_extent(&self, forward: bool, full: Rect) -> bool {
         let next = if forward {

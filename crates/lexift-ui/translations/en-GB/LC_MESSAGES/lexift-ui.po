@@ -1986,3 +1986,6 @@ msgstr "Restore hidden pins"
 
 msgid "Some pins could not be hidden or restored. Try again."
 msgstr "Some pins could not be hidden or restored. Try again."
+
+msgid "Rotate / flip"
+msgstr "Rotate / flip"

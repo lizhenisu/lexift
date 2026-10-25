@@ -1986,3 +1986,6 @@ msgstr "非表示のピン留め画像を再表示"
 
 msgid "Some pins could not be hidden or restored. Try again."
 msgstr "一部のピン留め画像を非表示または再表示できませんでした。もう一度お試しください。"
+
+msgid "Rotate / flip"
+msgstr "回転／反転"

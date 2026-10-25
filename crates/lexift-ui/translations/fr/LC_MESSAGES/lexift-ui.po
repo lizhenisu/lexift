@@ -1986,3 +1986,6 @@ msgstr "Rétablir les images épinglées masquées"
 
 msgid "Some pins could not be hidden or restored. Try again."
 msgstr "Certaines images épinglées n’ont pas pu être masquées ou rétablies. Réessayez."
+
+msgid "Rotate / flip"
+msgstr "Rotation / retournement"

@@ -17,6 +17,7 @@ use std::{
     time::Duration,
 };
 pub(crate) mod policy;
+pub(crate) mod transform;
 pub(crate) mod visibility;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
@@ -523,6 +524,9 @@ pub(crate) fn sync_outputs(states: &lexift_core::domain::pinned_image::States) {
         let mut errors = vec![];
         for (id, p) in &mut r.windows {
             if let Some(state) = states.get(id) {
+                if state.revision < p.revision {
+                    continue;
+                }
                 if let Some(w) = p.window.get() {
                     let recognizing = state.recognition.is_some();
                     if recognizing && !w.get_recognizing() && w.get_editing() {
@@ -557,6 +561,7 @@ pub(crate) fn sync_outputs(states: &lexift_core::domain::pinned_image::States) {
             restore_recognition_input(id);
         }
     }
+    transform::sync(states);
     crate::annotation::pin_editor::sync_outputs(states);
     for (id, message, outcome) in errors {
         clear_feedback(id, None);
@@ -819,7 +824,7 @@ pub(crate) fn close_all() {
         }
         for (id, pin) in windows {
             emit_pin(lexift_core::domain::pinned_image::Event::Closed { id });
-            destroy(pin, &lifecycle);
+            destroy(id, pin, &lifecycle);
         }
     }
 }
@@ -853,11 +858,12 @@ fn close(id: u64) {
     });
     emit_pin(lexift_core::domain::pinned_image::Event::Closed { id });
     if let Some((pin, lifecycle)) = retired {
-        destroy(pin, &lifecycle);
+        destroy(id, pin, &lifecycle);
     }
     crate::bridge::schedule_idle_memory_trim();
 }
-fn destroy(mut pin: Pin, lifecycle: &WindowLifecycleCallbacks) {
+fn destroy(id: u64, mut pin: Pin, lifecycle: &WindowLifecycleCallbacks) {
+    transform::forget(id);
     pin.gesture.retire();
     pin.window.retire_input();
     pin.close_task.stop();
@@ -925,7 +931,12 @@ pub(crate) fn present(id: u64, revision: u64, image: Arc<CapturedRegion>) {
     if !current {
         return;
     }
-    let candidate = crate::annotation::pin_editor::candidate_present(id, revision, image.clone());
+    let transformed = transform::present(id, revision, &image);
+    if transformed == Some(false) {
+        return;
+    }
+    let candidate = transformed == Some(true)
+        || crate::annotation::pin_editor::candidate_present(id, revision, image.clone());
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         let Some(p) = s
@@ -1212,6 +1223,7 @@ fn show_from(
             policy::request(id, locked, passthrough)
         });
         window.on_opacity_requested(move |percent| policy::request_opacity(id, percent));
+        window.on_transform_requested(move |index| transform::request(id, index));
         window.on_zoom_requested(move |delta, x, y| zoom(id, delta, x, y));
         let initial = match origin {
             Origin::History(
@@ -1287,6 +1299,13 @@ fn show_from(
             crate::annotation::pin_editor::install_history(*id, base, samples, request);
         } else {
             crate::annotation::pin_editor::install(*id, base, samples, request);
+        }
+        if let Some(document) = crate::annotation::pin_editor::retained_document(*id) {
+            STATE.with(|s| {
+                if let Some(p) = s.borrow_mut().as_mut().and_then(|r| r.windows.get_mut(id)) {
+                    p.document = Some(document);
+                }
+            });
         }
     }
     match result {
