@@ -606,6 +606,15 @@ impl UiHandle {
         })
         .is_ok()
     }
+    pub fn apply_pinned_visibility(
+        &self,
+        request: lexift_core::domain::pinned_image::visibility::Request,
+    ) -> bool {
+        slint::invoke_from_event_loop(move || {
+            crate::pinned_screenshot::visibility::apply(request, 0)
+        })
+        .is_ok()
+    }
     pub fn begin_pinned_edit(&self, id: u64, edit: u64) {
         let _ =
             slint::invoke_from_event_loop(move || crate::annotation::pin_editor::begin(id, edit));
@@ -691,6 +700,7 @@ impl UiHandle {
             crate::annotation::screenshot::delay::availability(&state);
             crate::annotation::image_import::sync(&state);
             crate::pinned_screenshot::sync_outputs(&state.pinned_images);
+            crate::pinned_screenshot::visibility::sync(&state);
             let view_state = mapper::view_state(&state);
             let popup_states = mapper::popup_states(&state);
             if language_changed {

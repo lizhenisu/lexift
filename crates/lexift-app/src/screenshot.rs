@@ -230,6 +230,16 @@ impl ScreenshotRuntime {
     }
     pub fn execute_pin(self: &Arc<Self>, controller: &Arc<AppController>, command: PinCommand) {
         match command {
+            PinCommand::ApplyVisibility(request) => {
+                if !controller.ui.apply_pinned_visibility(request) {
+                    controller.dispatch(AppEvent::PinnedImage(PinEvent::WindowVisibility(
+                        lexift_core::domain::pinned_image::visibility::Event::Applied {
+                            request,
+                            result: Err(lexift_core::Error::new("Window unavailable")),
+                        },
+                    )));
+                }
+            }
             PinCommand::ApplyInteraction {
                 id,
                 request,

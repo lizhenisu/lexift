@@ -283,7 +283,8 @@ impl Workflow {
 }
 
 pub fn blocked(state: &AppState) -> bool {
-    state.image_history.editor.is_some()
+    state.pin_visibility.pending.is_some()
+        || state.image_history.editor.is_some()
         || state.screenshot.active()
         || state
             .pinned_images

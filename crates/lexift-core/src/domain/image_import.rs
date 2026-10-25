@@ -74,7 +74,8 @@ pub enum Command {
     },
 }
 pub fn available(s: &AppState) -> bool {
-    s.image_import.request.is_none()
+    s.pin_visibility.pending.is_none()
+        && s.image_import.request.is_none()
         && !super::image_history::workflow::blocked(s)
         && s.annotation_export.request.is_none()
         && !matches!(

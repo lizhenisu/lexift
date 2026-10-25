@@ -80,7 +80,8 @@ pub(super) fn request(state: &mut AppState, id: u64, policy: Policy) -> Vec<AppC
         return vec![];
     }
     let Some(pin) = state.pinned_images.get_mut(&id).filter(|p| {
-        !p.busy
+        !p.user_hidden
+            && !p.busy
             && p.proposed.is_none()
             && p.interaction.pending.is_none()
             && (!policy.passthrough || p.editing.is_none())

@@ -1977,3 +1977,12 @@ msgstr "A passagem do rato está ativada. Restaure o controlo pelo menu da área
 
 msgid "{}%"
 msgstr "{}%"
+
+msgid "Hide all pins"
+msgstr "Ocultar todas as imagens afixadas"
+
+msgid "Restore hidden pins"
+msgstr "Restaurar imagens afixadas ocultas"
+
+msgid "Some pins could not be hidden or restored. Try again."
+msgstr "Não foi possível ocultar ou restaurar algumas imagens afixadas. Tente novamente."

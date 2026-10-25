@@ -1977,3 +1977,12 @@ msgstr "Mouse passthrough is on. Restore mouse input from the tray menu."
 
 msgid "{}%"
 msgstr "{}%"
+
+msgid "Hide all pins"
+msgstr "Hide all pins"
+
+msgid "Restore hidden pins"
+msgstr "Restore hidden pins"
+
+msgid "Some pins could not be hidden or restored. Try again."
+msgstr "Some pins could not be hidden or restored. Try again."

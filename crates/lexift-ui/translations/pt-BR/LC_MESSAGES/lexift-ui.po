@@ -1977,3 +1977,12 @@ msgstr "A passagem do mouse está ativada. Restaure o controle pelo menu da band
 
 msgid "{}%"
 msgstr "{}%"
+
+msgid "Hide all pins"
+msgstr "Ocultar todas as imagens fixadas"
+
+msgid "Restore hidden pins"
+msgstr "Restaurar imagens fixadas ocultas"
+
+msgid "Some pins could not be hidden or restored. Try again."
+msgstr "Não foi possível ocultar ou restaurar algumas imagens fixadas. Tente novamente."

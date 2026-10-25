@@ -49,6 +49,7 @@ pub struct AppState {
     pub image_history: crate::domain::image_history::workflow::Workflow,
     pub last_pin_id: u64,
     pub pinned_images: crate::domain::pinned_image::States,
+    pub pin_visibility: crate::domain::pinned_image::visibility::State,
     pub screenshot: crate::domain::screenshot::ScreenshotState,
     pub annotation_export: crate::domain::annotation_export::ExportState,
     pub ocr: crate::domain::ocr::OcrState,
@@ -99,6 +100,7 @@ impl AppState {
             image_history: Default::default(),
             last_pin_id: 0,
             pinned_images: Default::default(),
+            pin_visibility: Default::default(),
             screenshot: Default::default(),
             annotation_export: Default::default(),
             ocr: Default::default(),
@@ -155,6 +157,9 @@ impl AppState {
     }
 
     fn reduce_inner(&mut self, event: AppEvent) -> Vec<AppCommand> {
+        if crate::domain::pinned_image::visibility::blocks_event(self, &event) {
+            return vec![];
+        }
         if self.image_import.request.is_some()
             && matches!(
                 event,
@@ -1040,6 +1045,13 @@ impl AppState {
                 commands
             }
             AppEvent::ExitRequested => {
+                self.pin_visibility.pending = None;
+                self.pin_visibility.notice = None;
+                self.pin_visibility.serial = self
+                    .pin_visibility
+                    .serial
+                    .checked_add(1)
+                    .expect("pin visibility exhausted");
                 self.pinned_images.clear();
                 self.screenshot.phase = crate::domain::screenshot::ScreenshotPhase::Idle;
                 let mut commands =

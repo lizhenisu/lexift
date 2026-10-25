@@ -115,6 +115,12 @@ pub(crate) trait ViewPort: Send + Sync {
     ) -> bool {
         false
     }
+    fn apply_pinned_visibility(
+        &self,
+        _request: lexift_core::domain::pinned_image::visibility::Request,
+    ) -> bool {
+        false
+    }
     fn end_pinned_edit(&self, _id: u64, _edit: u64) {}
     fn present_pinned_image(
         &self,
@@ -205,6 +211,12 @@ impl ViewPort for lexift_ui::UiHandle {
         policy: lexift_core::domain::pinned_image::interaction::Policy,
     ) -> bool {
         self.apply_pinned_interaction(id, request, policy)
+    }
+    fn apply_pinned_visibility(
+        &self,
+        request: lexift_core::domain::pinned_image::visibility::Request,
+    ) -> bool {
+        self.apply_pinned_visibility(request)
     }
     fn end_pinned_edit(&self, id: u64, edit: u64) {
         self.end_pinned_edit(id, edit);
@@ -621,6 +633,14 @@ impl AppController {
                 } else {
                     use lexift_core::domain::pinned_image::{Command, Event};
                     match command {
+                        Command::ApplyVisibility(request) => {
+                            self.dispatch(AppEvent::PinnedImage(Event::WindowVisibility(
+                                lexift_core::domain::pinned_image::visibility::Event::Applied {
+                                    request,
+                                    result: Err(lexift_core::Error::new("Window unavailable")),
+                                },
+                            )))
+                        }
                         Command::Output { id, operation, .. } => {
                             self.dispatch(AppEvent::PinnedImage(Event::Completed {
                                 id,
@@ -1992,6 +2012,17 @@ mod tests {
         assert!(s.pinned_images[&1].interaction.pending.is_none());
         assert!(s.pinned_images[&1].interaction.failed.is_some());
         assert!(!view.states.lock().unwrap().is_empty());
+        drop(s);
+        controller.dispatch(AppEvent::PinnedImage(PinEvent::WindowVisibility(
+            lexift_core::domain::pinned_image::visibility::Event::Requested {
+                hidden: true,
+                anchor: Default::default(),
+            },
+        )));
+        let s = state.lock().unwrap();
+        assert!(s.pin_visibility.pending.is_none());
+        assert_eq!(s.pin_visibility.notice.unwrap().failed, 1);
+        assert!(!s.pinned_images[&1].user_hidden);
     }
     #[test]
     fn pin_ocr_serializes_latest_request_and_crops_confirmed_base_without_rendering() {

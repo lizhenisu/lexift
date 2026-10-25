@@ -1977,3 +1977,12 @@ msgstr "마우스 통과가 켜졌습니다. 트레이 메뉴에서 마우스 �
 
 msgid "{}%"
 msgstr "{}%"
+
+msgid "Hide all pins"
+msgstr "고정 이미지 모두 숨기기"
+
+msgid "Restore hidden pins"
+msgstr "숨긴 고정 이미지 복원"
+
+msgid "Some pins could not be hidden or restored. Try again."
+msgstr "일부 고정 이미지를 숨기거나 복원하지 못했습니다. 다시 시도하세요."

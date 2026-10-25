@@ -53,6 +53,8 @@ pub(crate) fn refresh_pin_recovery() {
     REGISTRY.with(|s| {
         if let Some(w) = s.borrow().as_ref().and_then(|r| r.window.as_ref()) {
             w.set_pin_recovery_available(crate::pinned_screenshot::policy::recoverable());
+            w.set_pin_hide_available(crate::pinned_screenshot::visibility::available(true));
+            w.set_pin_restore_available(crate::pinned_screenshot::visibility::available(false));
         }
     });
 }
@@ -117,11 +119,18 @@ pub(crate) fn show(request: TrayMenuRequest) {
         window.set_settings_label(labels.settings.clone().into());
         window.set_quit_label(labels.quit.clone().into());
         window.set_pin_recovery_available(crate::pinned_screenshot::policy::recoverable());
+        window.set_pin_hide_available(crate::pinned_screenshot::visibility::available(true));
+        window.set_pin_restore_available(crate::pinned_screenshot::visibility::available(false));
         window.set_import_available(crate::annotation::image_import::available());
         window.set_selected(if request.keyboard { 0 } else { -1 });
         let generation = r.generation;
         window.on_action(move |index| {
             if index == 5 && !crate::pinned_screenshot::policy::recoverable() {
+                return;
+            }
+            if matches!(index, 6 | 7)
+                && !crate::pinned_screenshot::visibility::available(index == 6)
+            {
                 return;
             }
             if matches!(index, 3 | 4) && !crate::annotation::image_import::available() {
@@ -143,11 +152,19 @@ pub(crate) fn show(request: TrayMenuRequest) {
                     &crate::i18n::tr("Open image"),
                     &crate::i18n::tr("Pin image from clipboard"),
                     &crate::i18n::tr("Turn off mouse passthrough for all pins"),
+                    &crate::i18n::tr("Hide all pins"),
+                    &crate::i18n::tr("Restore hidden pins"),
                     &labels.quit,
                 ],
                 &text,
             );
             if matches == [5] && !crate::pinned_screenshot::policy::recoverable() {
+                return;
+            }
+            if matches.len() == 1
+                && matches!(matches[0], 6 | 7)
+                && !crate::pinned_screenshot::visibility::available(matches[0] == 6)
+            {
                 return;
             }
             if matches.len() == 1 {
@@ -285,7 +302,13 @@ fn action_for_index(index: i32, anchor: lexift_core::domain::geometry::Point) ->
             title: crate::i18n::tr("Open image"),
         }),
         5 => AppEvent::PinnedImage(lexift_core::domain::pinned_image::Event::RestoreMouseInput),
-        6 => AppEvent::ExitRequested,
+        6 | 7 => AppEvent::PinnedImage(lexift_core::domain::pinned_image::Event::WindowVisibility(
+            lexift_core::domain::pinned_image::visibility::Event::Requested {
+                hidden: index == 6,
+                anchor,
+            },
+        )),
+        8 => AppEvent::ExitRequested,
         _ => return None,
     })
 }
@@ -344,9 +367,18 @@ mod tests {
                 for dpi in [1., 1.25] {
                     w.window()
                         .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
-                    for enabled in [false, true] {
+                    for flags in 0..4 {
+                        let enabled = flags & 1 != 0;
                         w.set_pin_recovery_available(enabled);
-                        w.set_selected(5);
+                        w.set_pin_hide_available(enabled);
+                        w.set_pin_restore_available(flags & 2 != 0);
+                        w.set_selected(if flags == 0 {
+                            -1
+                        } else if enabled {
+                            6
+                        } else {
+                            7
+                        });
                         let width = (w.get_menu_width() * dpi).ceil() as u32;
                         let height = (w.get_menu_height() * dpi).ceil() as u32;
                         adapter.set_size(slint::PhysicalSize::new(width, height));
@@ -361,7 +393,7 @@ mod tests {
                         if let Ok(dir) = std::env::var("LEXIFT_PIN_POLICY_RENDER_DIR") {
                             crate::i18n::write_test_bitmap(
                                 &dir,
-                                &format!("tray-{}-{dark}-{dpi}-{enabled}", language.code()),
+                                &format!("tray-{}-{dark}-{dpi}-{flags}", language.code()),
                                 width,
                                 height,
                                 pixels.iter().map(|p| [p.r, p.g, p.b, 255]),
@@ -455,7 +487,7 @@ mod tests {
             Some(AppEvent::SettingsWindowRequested)
         );
         assert_eq!(
-            action_for_index(6, Default::default()),
+            action_for_index(8, Default::default()),
             Some(AppEvent::ExitRequested)
         );
         assert_eq!(action_for_index(-1, Default::default()), None);
@@ -483,6 +515,19 @@ mod tests {
                 lexift_core::domain::pinned_image::Event::RestoreMouseInput
             ))
         );
-        assert_eq!(action_for_index(7, Default::default()), None);
+        for (index, hidden) in [(6, true), (7, false)] {
+            assert_eq!(
+                action_for_index(index, Default::default()),
+                Some(AppEvent::PinnedImage(
+                    lexift_core::domain::pinned_image::Event::WindowVisibility(
+                        lexift_core::domain::pinned_image::visibility::Event::Requested {
+                            hidden,
+                            anchor: Default::default()
+                        }
+                    )
+                ))
+            );
+        }
+        assert_eq!(action_for_index(9, Default::default()), None);
     }
 }

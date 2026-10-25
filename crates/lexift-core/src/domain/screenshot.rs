@@ -202,7 +202,8 @@ pub enum ScreenshotCommand {
 }
 /// Shared eligibility for the domain request and its local menu affordance.
 pub fn delay_available(state: &AppState) -> bool {
-    !state.screenshot.active()
+    state.pin_visibility.pending.is_none()
+        && !state.screenshot.active()
         && state.image_import.request.is_none()
         && state.image_history.window.as_ref().is_none_or(|w| !w.busy)
         && state.image_history.editor.is_none()

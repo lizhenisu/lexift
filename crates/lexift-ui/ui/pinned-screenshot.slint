@@ -16,6 +16,7 @@ component PinGlow inherits Image {
     image-rendering:smooth;
 }
 export component PinnedScreenshotWindow inherits Window {
+    in property <bool> window-suppressed: false;
     in property <bool> locked: false;
     in property <int> content-opacity-percent: 100;
     callback opacity-requested(int);
@@ -24,7 +25,7 @@ export component PinnedScreenshotWindow inherits Window {
     in property <bool> policy-idle: true;
     callback policy-requested(bool, bool);
     in property <bool> context-input: true;
-    out property <bool> context-available: root.context-input && !root.mouse-passthrough && !root.policy-busy && (root.interactive || root.editing) && !root.cropping;
+    out property <bool> context-available: !root.window-suppressed && root.context-input && !root.mouse-passthrough && !root.policy-busy && (root.interactive || root.editing) && !root.cropping;
     title:@tr("Pinned screenshot"); no-frame:true; always-on-top:root.topmost; background:transparent;
     in property <image> picture;
     in property <image> decoration;
@@ -70,7 +71,7 @@ export component PinnedScreenshotWindow inherits Window {
             selection-left:root.crop-left;selection-top:root.crop-top;selection-right:root.crop-right;selection-bottom:root.crop-bottom;
         }
         area := TouchArea {
-            width:parent.width; height:parent.height; enabled:root.interactive && !root.mouse-passthrough && !root.policy-busy;
+            width:parent.width; height:parent.height; enabled:!root.window-suppressed && root.interactive && !root.mouse-passthrough && !root.policy-busy;
             pointer-event(event)=>{
                 if !root.locked && (!root.editing || root.browsing) && event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.press-changed(true);root.drag-requested();}
                 if event.kind==PointerEventKind.up || event.kind==PointerEventKind.cancel {root.press-changed(false);}
@@ -111,7 +112,7 @@ export component PinnedScreenshotWindow inherits Window {
                 MenuSeparator {}
                 MenuItem { title:@tr("Close"); activated=>{root.close-requested();} }
             }
-                keys := FocusScope { key-pressed(event)=>{if root.mouse-passthrough || root.policy-busy {return reject;}if root.interactive && event.text==Key.Escape {root.escape-requested();return accept;}
+                keys := FocusScope { key-pressed(event)=>{if root.window-suppressed || root.mouse-passthrough || root.policy-busy {return reject;}if root.interactive && event.text==Key.Escape {root.escape-requested();return accept;}
                     if root.editing && !root.browsing {
                         if event.text==Key.Delete {root.edit-key(1);return accept;}
                         if event.text==Key.Return {root.edit-key(2);return accept;}

@@ -293,6 +293,19 @@ fn notification(state: &AppState) {
 }
 /// Reuse the passive, revision-guarded toast lifecycle for the live image editor.
 pub(crate) fn show_editor_feedback(point: Point, outcome: lexift_core::domain::ocr::OcrOutcome) {
+    show_passive_feedback(
+        point,
+        outcome.message(),
+        outcome != lexift_core::domain::ocr::OcrOutcome::Copied,
+    );
+    REGISTRY.with(|s| {
+        if let Some(r) = s.borrow_mut().as_mut() {
+            r.editor_feedback = true;
+        }
+    });
+}
+/// Shared passive notice ownership for image operations without a surviving canvas.
+pub(crate) fn show_passive_feedback(point: Point, message: &str, error: bool) {
     let display = REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut()?;
@@ -303,11 +316,11 @@ pub(crate) fn show_editor_feedback(point: Point, outcome: lexift_core::domain::o
             .ok()?;
         crate::theme::apply(&w);
         w.set_passive(true);
-        w.set_error(outcome != lexift_core::domain::ocr::OcrOutcome::Copied);
-        w.set_message(crate::i18n::tr(outcome.message()).into());
+        w.set_error(error);
+        w.set_message(crate::i18n::tr(message).into());
         w.window()
             .set_position(slint::PhysicalPosition::new(area.left, area.top));
-        r.editor_feedback = true;
+        r.editor_feedback = false;
         Some((r.toast.open(w), area))
     });
     if let Some((revision, area)) = display {

@@ -103,6 +103,9 @@ pub(super) fn request_opacity(id: u64, percent: i32) {
     }
 }
 fn request_policy(id: u64, policy: Policy) {
+    if !super::visibility::operable(id) {
+        return;
+    }
     let allowed = STATE.with(|s| {
         let s = s.borrow();
         s.as_ref().is_some_and(|r| {
@@ -138,7 +141,11 @@ fn request_policy(id: u64, policy: Policy) {
         emit_pin(Event::InteractionRequested { id, policy });
     }
 }
-fn frame(w: &PinnedScreenshotWindow, lifecycle: &WindowLifecycleCallbacks, enabled: bool) -> bool {
+pub(super) fn frame(
+    w: &PinnedScreenshotWindow,
+    lifecycle: &WindowLifecycleCallbacks,
+    enabled: bool,
+) -> bool {
     if enabled {
         let Ok(pixels) = crate::screen_interaction::window::premultiplied_snapshot(w.window())
         else {

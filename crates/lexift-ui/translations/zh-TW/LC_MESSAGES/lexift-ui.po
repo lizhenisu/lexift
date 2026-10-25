@@ -1977,3 +1977,12 @@ msgstr "已開啟滑鼠穿透，可從系統匣選單恢復滑鼠操作。"
 
 msgid "{}%"
 msgstr "{}%"
+
+msgid "Hide all pins"
+msgstr "隱藏所有貼圖"
+
+msgid "Restore hidden pins"
+msgstr "恢復隱藏貼圖"
+
+msgid "Some pins could not be hidden or restored. Try again."
+msgstr "部分貼圖無法隱藏或恢復，請重試。"

@@ -1977,3 +1977,12 @@ msgstr "已开启鼠标穿透，可从托盘菜单恢复鼠标操作。"
 
 msgid "{}%"
 msgstr "{}%"
+
+msgid "Hide all pins"
+msgstr "隐藏所有贴图"
+
+msgid "Restore hidden pins"
+msgstr "恢复隐藏贴图"
+
+msgid "Some pins could not be hidden or restored. Try again."
+msgstr "部分贴图无法隐藏或恢复，请重试。"

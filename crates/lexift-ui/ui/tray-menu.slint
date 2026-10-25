@@ -39,8 +39,8 @@ export component TrayMenuWindow inherits Window {
     always-on-top: true;
     background: transparent;
     default-font-family: "Segoe UI";
-    out property <length> menu-width: max(max(MenuMetrics.minimum-width, max(open.label-width, max(max(import-file.label-width,import-clipboard.label-width),max(history.label-width, max(settings.label-width, quit.label-width)))) + 2 * (MenuMetrics.text-inset + MenuMetrics.padding)) + 2 * MenuMetrics.shadow-inset, recover.label-width + 2 * (MenuMetrics.text-inset + MenuMetrics.padding + MenuMetrics.shadow-inset));
-    out property <length> menu-height: 7 * MenuMetrics.row-height + 2 * (MenuMetrics.padding + MenuMetrics.shadow-inset) + MenuMetrics.separator-height;
+    out property <length> menu-width: max(max(MenuMetrics.minimum-width, max(open.label-width, max(max(import-file.label-width,import-clipboard.label-width),max(history.label-width, max(settings.label-width, quit.label-width)))) + 2 * (MenuMetrics.text-inset + MenuMetrics.padding)) + 2 * MenuMetrics.shadow-inset, max(recover.label-width,max(hide-pins.label-width,restore-pins.label-width)) + 2 * (MenuMetrics.text-inset + MenuMetrics.padding + MenuMetrics.shadow-inset));
+    out property <length> menu-height: 9 * MenuMetrics.row-height + 2 * (MenuMetrics.padding + MenuMetrics.shadow-inset) + MenuMetrics.separator-height;
     preferred-width: root.menu-width;
     preferred-height: root.menu-height;
     in property <string> open-label: "Open Lexift";
@@ -49,6 +49,8 @@ export component TrayMenuWindow inherits Window {
     in property <string> quit-label: "Quit";
     in property <bool> import-available:true;
     in property <bool> pin-recovery-available:false;
+    in property <bool> pin-hide-available:false;
+    in property <bool> pin-restore-available:false;
     in-out property <int> selected: -1;
     callback action(int);
     callback cancel();
@@ -57,10 +59,10 @@ export component TrayMenuWindow inherits Window {
     keys := FocusScope {
         key-pressed(event) => {
             if event.text == Key.Escape { root.cancel(); }
-            else if event.text == Key.DownArrow { root.selected = mod(root.selected + 1, 7); }
-            else if event.text == Key.UpArrow { root.selected = root.selected <= 0 ? 6 : root.selected - 1; }
+            else if event.text == Key.DownArrow { root.selected = mod(root.selected + 1, 9); }
+            else if event.text == Key.UpArrow { root.selected = root.selected <= 0 ? 8 : root.selected - 1; }
             else if event.text == Key.Home { root.selected = 0; }
-            else if event.text == Key.End { root.selected = 6; }
+            else if event.text == Key.End { root.selected = 8; }
             else if event.text == Key.Return || event.text == " " { if root.selected >= 0 { root.action(root.selected); } }
             else { root.character(event.text); }
             accept
@@ -101,15 +103,17 @@ export component TrayMenuWindow inherits Window {
         import-file := TrayMenuRow {x:open.x;y:history.y+history.height;width:open.width;label:@tr("Open image");selected:root.selected==3;enabled:root.import-available;hovered=>{root.selected=3;}activated=>{root.action(3);} }
         import-clipboard := TrayMenuRow {x:open.x;y:import-file.y+import-file.height;width:open.width;label:@tr("Pin image from clipboard");selected:root.selected==4;enabled:root.import-available;hovered=>{root.selected=4;}activated=>{root.action(4);} }
         recover := TrayMenuRow {x:open.x;y:import-clipboard.y+import-clipboard.height;width:open.width;label:@tr("Turn off mouse passthrough for all pins");selected:root.selected==5;enabled:root.pin-recovery-available;hovered=>{root.selected=5;}activated=>{root.action(5);} }
+        hide-pins := TrayMenuRow {x:open.x;y:recover.y+recover.height;width:open.width;label:@tr("Hide all pins");selected:root.selected==6;enabled:root.pin-hide-available;hovered=>{root.selected=6;}activated=>{root.action(6);} }
+        restore-pins := TrayMenuRow {x:open.x;y:hide-pins.y+hide-pins.height;width:open.width;label:@tr("Restore hidden pins");selected:root.selected==7;enabled:root.pin-restore-available;hovered=>{root.selected=7;}activated=>{root.action(7);} }
         Rectangle {
-            x: open.x; y: recover.y + recover.height + 4px;
+            x: open.x; y: restore-pins.y + restore-pins.height + 4px;
             width: open.width; height: 1px; background: Colors.outline;
         }
         quit := TrayMenuRow {
-            x: open.x; y: recover.y + recover.height + MenuMetrics.separator-height; width: open.width;
-            label: root.quit-label; selected: root.selected == 6;
-            hovered => { root.selected = 6; }
-            activated => { root.action(6); }
+            x: open.x; y: restore-pins.y + restore-pins.height + MenuMetrics.separator-height; width: open.width;
+            label: root.quit-label; selected: root.selected == 8;
+            hovered => { root.selected = 8; }
+            activated => { root.action(8); }
         }
     }
 }

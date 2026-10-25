@@ -1977,3 +1977,12 @@ msgstr "Il passaggio del mouse è attivo. Ripristina i comandi dal menu nell’a
 
 msgid "{}%"
 msgstr "{}%"
+
+msgid "Hide all pins"
+msgstr "Nascondi tutte le immagini fissate"
+
+msgid "Restore hidden pins"
+msgstr "Ripristina le immagini fissate nascoste"
+
+msgid "Some pins could not be hidden or restored. Try again."
+msgstr "Impossibile nascondere o ripristinare alcune immagini fissate. Riprova."

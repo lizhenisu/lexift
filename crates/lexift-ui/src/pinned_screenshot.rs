@@ -17,6 +17,7 @@ use std::{
     time::Duration,
 };
 pub(crate) mod policy;
+pub(crate) mod visibility;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
     Preparing,
@@ -152,6 +153,11 @@ impl Origin {
     }
 }
 struct Pin {
+    pointer_sink: Option<crate::bridge::PopupPointerSink>,
+    user_hidden: bool,
+    visibility_pending: Option<lexift_core::domain::pinned_image::visibility::Request>,
+    visibility_epoch: u64,
+    hidden_work_area: Option<lexift_core::domain::geometry::Rect>,
     frame_queued: bool,
     interaction: lexift_core::domain::pinned_image::interaction::State,
     origin: Origin,
@@ -177,6 +183,7 @@ struct Pin {
     feedback_measurement: Option<(u64, slint::PhysicalSize)>,
 }
 struct Registry {
+    frozen: bool,
     prepare: fn(&slint::Window) -> PassiveWindowPreparation,
     lifecycle: WindowLifecycleCallbacks,
     next: u64,
@@ -190,12 +197,14 @@ pub(crate) fn init(
 ) {
     let next = STATE.with(|s| s.borrow().as_ref().map_or(0, |r| r.next));
     close_all();
+    visibility::reset();
     STATE.with(|s| {
         *s.borrow_mut() = Some(Registry {
             prepare,
             lifecycle,
             next,
             interactive: true,
+            frozen: false,
             windows: BTreeMap::new(),
         })
     });
@@ -227,6 +236,7 @@ fn apply_policy(id: u64) -> bool {
             // Pending work is gated by Slint, not HWND disablement: temporarily
             // disabling an edited pin would discard the user's keyboard focus.
             allowed
+                && !w.get_window_suppressed()
                 && !w.get_mouse_passthrough()
                 && (w.get_interactive()
                     || (w.get_context_input() && w.get_editing() && !w.get_cropping())),
@@ -235,6 +245,9 @@ fn apply_policy(id: u64) -> bool {
     })
 }
 fn change_option(id: u64, kind: i32, value: bool) {
+    if !visibility::operable(id) {
+        return;
+    }
     let context = STATE.with(|s| {
         let s = s.borrow();
         let r = s.as_ref()?;
@@ -417,6 +430,9 @@ pub(crate) fn cancel_recognition(id: u64) -> bool {
     true
 }
 fn request_recognition(id: u64) {
+    if !visibility::operable(id) {
+        return;
+    }
     let allowed = STATE.with(|s| {
         s.borrow().as_ref().is_some_and(|r| {
             r.interactive
@@ -458,6 +474,9 @@ fn restore_recognition_input(id: u64) {
     }
 }
 pub(crate) fn request_output(id: u64, kind: i32) {
+    if !visibility::operable(id) {
+        return;
+    }
     if !matches!(kind, 0 | 1) || crate::annotation::pin_editor::cropping(id) {
         return;
     }
@@ -768,36 +787,7 @@ fn show_feedback_details(
 /// The frozen screenshot already contains existing pins. Hide their live windows
 /// during editing so only the snapshot receives gestures; restore without activation.
 pub(crate) fn set_frozen(frozen: bool) {
-    let windows = STATE.with(|s| {
-        s.borrow()
-            .as_ref()
-            .map(|r| {
-                r.windows
-                    .iter()
-                    .filter(|(_, p)| p.phase == Phase::Visible)
-                    .map(|(&id, p)| {
-                        p.gesture.cancel();
-                        (
-                            id,
-                            p.window.get().unwrap().clone_strong(),
-                            r.lifecycle.clone(),
-                        )
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
-    });
-    for (id, window, lifecycle) in windows {
-        if frozen {
-            clear_feedback(id, None);
-            window.invoke_close_menu();
-            (lifecycle.cancel_window_interaction)(window.window());
-            let _ = window.hide();
-        } else {
-            let _ = window.show();
-            policy::schedule_frame(id);
-        }
-    }
+    visibility::frozen(frozen);
 }
 #[cfg(test)]
 pub(crate) fn diagnostic_visible_count() -> usize {
@@ -1154,20 +1144,37 @@ fn show_from(
         window.on_output_requested(move |kind| request_output(id, kind));
         window.on_option_requested(move |kind, value| change_option(id, kind, value));
         window.on_annotate_requested(move || {
+            if !visibility::operable(id) {
+                return;
+            }
             emit_pin(lexift_core::domain::pinned_image::Event::EditRequested { id })
         });
         window.on_visibility_requested(move |hidden| {
-            if crate::annotation::pin_editor::cropping(id) {
+            if !visibility::operable(id) || crate::annotation::pin_editor::cropping(id) {
                 return;
             }
             emit_pin(lexift_core::domain::pinned_image::Event::VisibilityChanged { id, hidden })
         });
         window.on_edit_pointer(move |event, x, y| {
+            if !visibility::operable(id) {
+                return;
+            }
             crate::annotation::pin_editor::pointer(id, event, x, y)
         });
-        window.on_edit_key(move |key| crate::annotation::pin_editor::key(id, key));
-        window.on_edit_scroll(move |delta| crate::annotation::pin_editor::scroll(id, delta));
+        window.on_edit_key(move |key| {
+            if visibility::operable(id) {
+                crate::annotation::pin_editor::key(id, key);
+            }
+        });
+        window.on_edit_scroll(move |delta| {
+            if visibility::operable(id) {
+                crate::annotation::pin_editor::scroll(id, delta);
+            }
+        });
         window.on_escape_requested(move || {
+            if !visibility::operable(id) {
+                return;
+            }
             if cancel_recognition(id) {
                 return;
             }
@@ -1184,11 +1191,15 @@ fn show_from(
         let gesture = Rc::new(Gesture::default());
         let tracking = gesture.clone();
         window.on_press_changed(move |pressed| {
+            if !visibility::operable(id) {
+                return;
+            }
             if pressed {
                 tracking.press();
             } else {
                 tracking.cancel();
             }
+            crate::tray_menu::refresh_pin_recovery();
         });
         let input = owned.input();
         let tracking = gesture.clone();
@@ -1233,6 +1244,11 @@ fn show_from(
         r.windows.insert(
             id,
             Pin {
+                pointer_sink: None,
+                user_hidden: false,
+                visibility_pending: None,
+                visibility_epoch: 0,
+                hidden_work_area: None,
                 frame_queued: false,
                 interaction: Default::default(),
                 origin,
@@ -1289,8 +1305,12 @@ fn finish_native_drag(id: u64) {
         }
     });
     restore_recognition_input(id);
+    crate::tray_menu::refresh_pin_recovery();
 }
 fn begin_drag(id: u64, serial: u64) {
+    if !visibility::operable(id) {
+        return;
+    }
     let pair = STATE.with(|s| {
         let s = s.borrow();
         let r = s.as_ref()?;
@@ -1371,6 +1391,9 @@ fn prepare(id: u64, attempt: u8) {
                     deferred.post(move || finish_native_drag(id));
                     return;
                 }
+                if !visibility::operable(id) {
+                    return;
+                }
                 if matches!(event, crate::PopupPointerInput::LeftReleased { .. }) {
                     deferred.post(move || finish_native_drag(id));
                 }
@@ -1433,6 +1456,7 @@ fn prepare(id: u64, attempt: u8) {
                     }
                 }
             });
+            let owned_sink = sink.clone();
             let success = (lifecycle.prepare_pinned_image)(window.window())
                 && (lifecycle.complete_passive_window_show)(window.window(), sink)
                 && origin.current()
@@ -1445,6 +1469,7 @@ fn prepare(id: u64, attempt: u8) {
                     if let Some(pin) = s.borrow_mut().as_mut().and_then(|r| r.windows.get_mut(&id))
                     {
                         pin.phase = Phase::Visible;
+                        pin.pointer_sink = Some(owned_sink);
                     }
                 });
             }
@@ -1496,6 +1521,9 @@ fn prepare(id: u64, attempt: u8) {
     }
 }
 fn zoom(id: u64, delta: f32, x: f32, y: f32) {
+    if !visibility::operable(id) {
+        return;
+    }
     let allowed = STATE.with(|s| {
         s.borrow().as_ref().is_some_and(|r| {
             r.interactive

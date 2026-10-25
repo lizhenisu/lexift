@@ -1977,3 +1977,12 @@ msgstr "Mausdurchleitung ist aktiv. Stellen Sie die Mausbedienung über das Info
 
 msgid "{}%"
 msgstr "{} %"
+
+msgid "Hide all pins"
+msgstr "Alle Pins ausblenden"
+
+msgid "Restore hidden pins"
+msgstr "Ausgeblendete Pins wiederherstellen"
+
+msgid "Some pins could not be hidden or restored. Try again."
+msgstr "Einige Pins konnten nicht ausgeblendet oder wiederhergestellt werden. Versuchen Sie es erneut."

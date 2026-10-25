@@ -1977,3 +1977,12 @@ msgstr "Les clics traversants sont activés. Rétablissez le contrôle depuis le
 
 msgid "{}%"
 msgstr "{} %"
+
+msgid "Hide all pins"
+msgstr "Masquer toutes les images épinglées"
+
+msgid "Restore hidden pins"
+msgstr "Rétablir les images épinglées masquées"
+
+msgid "Some pins could not be hidden or restored. Try again."
+msgstr "Certaines images épinglées n’ont pas pu être masquées ou rétablies. Réessayez."

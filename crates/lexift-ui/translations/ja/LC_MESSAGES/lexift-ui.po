@@ -1977,3 +1977,12 @@ msgstr "マウス透過が有効です。トレイメニューからマウス操
 
 msgid "{}%"
 msgstr "{}%"
+
+msgid "Hide all pins"
+msgstr "すべてのピン留め画像を非表示"
+
+msgid "Restore hidden pins"
+msgstr "非表示のピン留め画像を再表示"
+
+msgid "Some pins could not be hidden or restored. Try again."
+msgstr "一部のピン留め画像を非表示または再表示できませんでした。もう一度お試しください。"

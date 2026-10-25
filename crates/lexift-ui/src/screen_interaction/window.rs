@@ -26,6 +26,7 @@ pub(crate) fn premultiplied_snapshot(
 /// Retirement also disables callbacks from externally retained Slint components.
 pub(crate) struct InputWork {
     active: Cell<bool>,
+    epoch: Cell<u64>,
     pointer_gate: PointerGate,
     timer: slint::Timer,
     pending: RefCell<Vec<Box<dyn FnOnce()>>>,
@@ -35,6 +36,7 @@ impl InputWork {
     pub fn new() -> Rc<Self> {
         Rc::new(Self {
             active: Cell::new(true),
+            epoch: Cell::new(0),
             pointer_gate: PointerGate::default(),
             timer: slint::Timer::default(),
             pending: RefCell::new(Vec::new()),
@@ -110,9 +112,10 @@ impl InputWork {
         self.timer
             .start(slint::TimerMode::SingleShot, Duration::ZERO, move || {
                 let Some(work) = weak.upgrade() else { return };
+                let epoch = work.epoch.get();
                 let batch = std::mem::take(&mut *work.pending.borrow_mut());
                 for action in batch {
-                    if !work.active.get() {
+                    if !work.active.get() || work.epoch.get() != epoch {
                         break;
                     }
                     action();
@@ -137,18 +140,30 @@ impl InputWork {
         self.timer.running() || !self.pending.borrow().is_empty()
     }
 
-    pub fn retire(&self) {
-        self.active.set(false);
+    /// Drop queued input when hiding a surviving window, without retiring its
+    /// native receivers. Also stop the remainder of a currently executing batch.
+    pub fn cancel_pending(&self) {
+        self.epoch.set(
+            self.epoch
+                .get()
+                .checked_add(1)
+                .expect("input epoch exhausted"),
+        );
         self.timer.stop();
         self.pending.borrow_mut().clear();
         for route in self
             .pointer_routes
-            .borrow_mut()
-            .drain(..)
+            .borrow()
+            .iter()
             .filter_map(|route| route.upgrade())
         {
             route.cancel();
         }
+    }
+    pub fn retire(&self) {
+        self.active.set(false);
+        self.cancel_pending();
+        self.pointer_routes.borrow_mut().clear();
     }
 }
 
@@ -355,6 +370,59 @@ mod tests {
     use super::*;
     use crate::{AnnotationPanel, AnnotationWatermarkInput};
     use std::rc::Rc;
+
+    #[test]
+    fn hiding_cancels_pending_and_in_flight_input_but_receivers_can_resume() {
+        use slint::platform::{
+            Platform, WindowAdapter,
+            software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+        };
+        struct Clock(Rc<Cell<Duration>>);
+        impl Platform for Clock {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer))
+            }
+            fn duration_since_start(&self) -> Duration {
+                self.0.get()
+            }
+        }
+        let clock = Rc::new(Cell::new(Duration::ZERO));
+        slint::platform::set_platform(Box::new(Clock(clock.clone()))).unwrap();
+        let advance = || {
+            clock.set(clock.get() + Duration::from_millis(1));
+            slint::platform::update_timers_and_animations();
+        };
+        let work = InputWork::new();
+        let values = Rc::new(RefCell::new(vec![]));
+        let current = work.clone();
+        let output = values.clone();
+        work.post(move || {
+            current.cancel_pending();
+            output.borrow_mut().push(1);
+            current.post(move || output.borrow_mut().push(3));
+        });
+        let output = values.clone();
+        work.post(move || output.borrow_mut().push(2));
+        advance();
+        assert_eq!(*values.borrow(), vec![1]);
+        advance();
+        assert_eq!(*values.borrow(), vec![1, 3]);
+        let ready = Rc::new(Cell::new(false));
+        let usable = ready.clone();
+        let output = values.clone();
+        let receive = work.pointer_sink_when_ready(
+            Rc::new(move || usable.get()),
+            Rc::new(move |_| output.borrow_mut().push(4)),
+        );
+        receive(crate::PopupPointerInput::Exited);
+        work.cancel_pending();
+        ready.set(true);
+        advance();
+        assert_eq!(*values.borrow(), vec![1, 3]);
+        receive(crate::PopupPointerInput::Exited);
+        assert_eq!(*values.borrow(), vec![1, 3, 4]);
+        assert!(!work.retired());
+    }
 
     #[test]
     fn pointer_retry_cannot_move_press_behind_release_when_readiness_changes() {
