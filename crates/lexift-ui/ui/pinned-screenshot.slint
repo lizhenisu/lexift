@@ -9,12 +9,16 @@ import { AnnotationCursor } from "annotation-canvas.slint";
 // A shared Gaussian alpha mask works in software renderers without drop-shadow.
 // Fixed corners preserve the 8px exterior falloff when the image is resized.
 component PinGlow inherits Image {
+    // Hollow the mask before nine-slice scaling; its center must not obscure
+    // the desktop when the independent content texture becomes translucent.
     source:@image-url("assets/pin-glow-mask.png", nine-slice(16));
     colorize:Colors.primary;
     image-rendering:smooth;
 }
 export component PinnedScreenshotWindow inherits Window {
     in property <bool> locked: false;
+    in property <int> content-opacity-percent: 100;
+    callback opacity-requested(int);
     in property <bool> mouse-passthrough: false;
     in property <bool> policy-busy: false;
     in property <bool> policy-idle: true;
@@ -55,8 +59,11 @@ export component PinnedScreenshotWindow inherits Window {
     Rectangle {
         x:MenuMetrics.shadow-inset; y:MenuMetrics.shadow-inset;
         width:parent.width - 2 * MenuMetrics.shadow-inset; height:parent.height - 2 * MenuMetrics.shadow-inset;
-        background:Colors.surface;
-        Image { source:root.picture; width:parent.width; height:parent.height; image-fit:fill; }
+        Rectangle {
+            width:parent.width; height:parent.height;
+            opacity: root.content-opacity-percent / 100;
+            Image { source:root.picture; width:parent.width; height:parent.height; image-fit:fill; }
+        }
         if root.editing && !root.cropping: Image {source:root.decoration;width:parent.width;height:parent.height;image-fit:fill;}
         if root.cropping: ImageCropFeedback {x:0px;y:0px;width:parent.width;height:parent.height;
             source-width:root.crop-source-width;source-height:root.crop-source-height;
@@ -93,6 +100,14 @@ export component PinnedScreenshotWindow inherits Window {
                 MenuItem { title:@tr("Always on top"); checkable:true; checked <=> root.topmost; activated=>{root.option-requested(1,self.checked);} }
                 MenuItem { title:@tr("Lock position and size"); enabled:root.policy-idle && !root.output-busy && !root.recognizing && !root.cropping; checkable:true; checked:root.locked; activated=>{root.policy-requested(!root.locked,root.mouse-passthrough);} }
                 MenuItem { title:@tr("Mouse passthrough"); enabled:root.policy-idle && !root.output-busy && !root.recognizing && !root.cropping && !root.editing; checkable:true; checked:root.mouse-passthrough; activated=>{root.policy-requested(root.locked,!root.mouse-passthrough);} }
+                Menu {
+                    title:@tr("Opacity");
+                    enabled:root.policy-idle && !root.policy-busy && !root.output-busy && !root.recognizing && !root.cropping;
+                    for value in [100,80,60,40,20]: MenuItem {
+                        title: @tr("{}%", value); checkable:true; checked:root.content-opacity-percent == value;
+                        activated=>{root.opacity-requested(value);}
+                    }
+                }
                 MenuSeparator {}
                 MenuItem { title:@tr("Close"); activated=>{root.close-requested();} }
             }

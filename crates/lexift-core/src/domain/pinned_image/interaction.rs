@@ -2,10 +2,45 @@
 use super::{Command, State as Pin};
 use crate::{AppCommand, AppState, Result};
 
+/// Window-only display strength; never part of an editable image or its history.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Opacity {
+    #[default]
+    Full,
+    Eighty,
+    Sixty,
+    Forty,
+    Twenty,
+}
+impl Opacity {
+    pub const ALL: [Self; 5] = [
+        Self::Full,
+        Self::Eighty,
+        Self::Sixty,
+        Self::Forty,
+        Self::Twenty,
+    ];
+    pub const fn percent(self) -> u8 {
+        match self {
+            Self::Full => 100,
+            Self::Eighty => 80,
+            Self::Sixty => 60,
+            Self::Forty => 40,
+            Self::Twenty => 20,
+        }
+    }
+    pub fn from_percent(value: i32) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|v| i32::from(v.percent()) == value)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Policy {
     pub locked: bool,
     pub passthrough: bool,
+    pub opacity: Opacity,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Pending {
@@ -49,6 +84,8 @@ pub(super) fn request(state: &mut AppState, id: u64, policy: Policy) -> Vec<AppC
             && p.proposed.is_none()
             && p.interaction.pending.is_none()
             && (!policy.passthrough || p.editing.is_none())
+            && (!p.interaction.applied.passthrough
+                || policy.opacity == p.interaction.applied.opacity)
     }) else {
         return vec![];
     };
@@ -192,6 +229,7 @@ mod tests {
                 let policy = Policy {
                     locked,
                     passthrough,
+                    ..Policy::default()
                 };
                 let request = send(&mut s, 1, policy);
                 assert_eq!(s.pinned_images[&1].interaction.applied, Policy::default());
@@ -221,6 +259,7 @@ mod tests {
         let policy = Policy {
             locked: true,
             passthrough: true,
+            ..Policy::default()
         };
         let old = send(&mut s, 1, policy);
         let other = send(&mut s, 2, policy);
@@ -240,7 +279,8 @@ mod tests {
             s.pinned_images[&1].interaction.applied,
             Policy {
                 locked: true,
-                passthrough: false
+                passthrough: false,
+                ..Policy::default()
             }
         );
         assert_eq!(s.pinned_images[&2].interaction.applied, policy);
@@ -261,6 +301,7 @@ mod tests {
         let policy = Policy {
             locked: true,
             passthrough: true,
+            ..Policy::default()
         };
         assert!(
             s.reduce(AppEvent::PinnedImage(Event::InteractionRequested {
@@ -275,6 +316,7 @@ mod tests {
             Policy {
                 locked: true,
                 passthrough: false,
+                ..Policy::default()
             },
         );
         finish(&mut s, 1, n, true);
@@ -293,5 +335,78 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn opacity_is_window_only_bounded_and_preserved_by_recovery() {
+        assert_eq!(Policy::default().opacity, Opacity::Full);
+        for value in [-1, 0, 19, 21, 50, 99, 101, i32::MAX] {
+            assert_eq!(Opacity::from_percent(value), None);
+        }
+        let mut s = state();
+        let history = s.image_history.clone();
+        let region = s.screenshot.last_region.clone();
+        for opacity in Opacity::ALL {
+            assert_eq!(
+                Opacity::from_percent(i32::from(opacity.percent())),
+                Some(opacity)
+            );
+            let policy = Policy {
+                opacity,
+                ..Policy::default()
+            };
+            if policy == s.pinned_images[&1].interaction.applied {
+                continue;
+            }
+            s.pinned_images.get_mut(&1).unwrap().editing = Some(22);
+            let n = send(&mut s, 1, policy);
+            finish(&mut s, 1, n, true);
+            assert_eq!(s.pinned_images[&1].interaction.applied.opacity, opacity);
+            assert_eq!(
+                s.pinned_images[&2].interaction.applied.opacity,
+                Opacity::Full
+            );
+        }
+        s.pinned_images.get_mut(&1).unwrap().editing = None;
+        let policy = Policy {
+            locked: true,
+            passthrough: true,
+            opacity: Opacity::Twenty,
+        };
+        let n = send(&mut s, 1, policy);
+        finish(&mut s, 1, n, true);
+        assert!(
+            s.reduce(AppEvent::PinnedImage(Event::InteractionRequested {
+                id: 1,
+                policy: Policy {
+                    opacity: Opacity::Full,
+                    ..policy
+                }
+            }))
+            .is_empty()
+        );
+        s.reduce(AppEvent::PinnedImage(Event::RestoreMouseInput));
+        let pending = s.pinned_images[&1].interaction.pending.unwrap();
+        assert_eq!(
+            pending.policy,
+            Policy {
+                passthrough: false,
+                ..policy
+            }
+        );
+        finish(&mut s, 1, pending.request, false);
+        assert_eq!(s.pinned_images[&1].interaction.applied, policy);
+        s.reduce(AppEvent::PinnedImage(Event::RestoreMouseInput));
+        let n = s.pinned_images[&1].interaction.pending.unwrap().request;
+        finish(&mut s, 1, n, true);
+        assert_eq!(
+            s.pinned_images[&1].interaction.applied.opacity,
+            Opacity::Twenty
+        );
+        assert_eq!(s.image_history, history);
+        assert_eq!(s.screenshot.last_region, region);
+        s.reduce(AppEvent::PinnedImage(Event::Closed { id: 1 }));
+        finish(&mut s, 1, n, true);
+        assert!(!s.pinned_images.contains_key(&1));
     }
 }

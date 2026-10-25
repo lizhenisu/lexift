@@ -1984,6 +1984,7 @@ mod tests {
             policy: Policy {
                 locked: true,
                 passthrough: true,
+                ..Policy::default()
             },
         }));
         let s = state.lock().unwrap();

@@ -1974,3 +1974,6 @@ msgstr "Turn off mouse passthrough for all pins"
 
 msgid "Mouse passthrough is on. Restore mouse input from the tray menu."
 msgstr "Mouse passthrough is on. Restore mouse input from the tray menu."
+
+msgid "{}%"
+msgstr "{}%"

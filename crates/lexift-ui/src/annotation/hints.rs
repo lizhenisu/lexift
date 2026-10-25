@@ -61,21 +61,14 @@ pub(super) fn show_capture_feedback(
     lifecycle: &WindowLifecycleCallbacks,
     window: &slint::Window,
 ) -> bool {
-    let Ok(snapshot) = window.take_snapshot() else {
+    let Ok(snapshot) = crate::screen_interaction::window::premultiplied_snapshot(window) else {
         return false;
     };
-    let mut rgba = snapshot.as_bytes().to_vec();
-    for pixel in rgba.as_chunks_mut::<4>().0 {
-        let a = u32::from(pixel[3]);
-        for channel in &mut pixel[..3] {
-            *channel = ((u32::from(*channel) * a + 127) / 255) as u8;
-        }
-    }
     (lifecycle.configure_capture_feedback)(window)
         && window.show().is_ok()
         && (lifecycle.annotation_frame_presenter)(
             window,
-            &rgba,
+            snapshot.as_bytes(),
             snapshot.width(),
             snapshot.height(),
         )

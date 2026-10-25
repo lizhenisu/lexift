@@ -7,6 +7,21 @@ use std::{
     time::Duration,
 };
 
+/// Slint snapshots expose straight RGBA; native layered presenters consume
+/// premultiplied RGBA. Convert the owned snapshot once, never the source image.
+pub(crate) fn premultiplied_snapshot(
+    window: &slint::Window,
+) -> Result<slint::SharedPixelBuffer<slint::Rgba8Pixel>, slint::PlatformError> {
+    let mut pixels = window.take_snapshot()?;
+    for p in pixels.make_mut_slice() {
+        let premultiply = |c: u8| ((u16::from(c) * u16::from(p.a) + 127) / 255) as u8;
+        p.r = premultiply(p.r);
+        p.g = premultiply(p.g);
+        p.b = premultiply(p.b);
+    }
+    Ok(pixels)
+}
+
 /// FIFO input work belongs to one transient window, independently of Registry borrows.
 /// Retirement also disables callbacks from externally retained Slint components.
 pub(crate) struct InputWork {

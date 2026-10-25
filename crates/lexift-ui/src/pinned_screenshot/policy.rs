@@ -2,7 +2,7 @@
 use super::*;
 use lexift_core::domain::pinned_image::{
     Event, States,
-    interaction::{Policy, State as PolicyState},
+    interaction::{Opacity, Policy, State as PolicyState},
 };
 
 pub(crate) fn recoverable() -> bool {
@@ -30,6 +30,7 @@ pub(crate) fn locked(id: u64) -> bool {
 fn project(w: &PinnedScreenshotWindow, state: &PolicyState) {
     w.set_locked(state.applied.locked);
     w.set_mouse_passthrough(state.applied.passthrough);
+    w.set_content_opacity_percent(i32::from(state.applied.opacity.percent()));
     w.set_policy_busy(state.pending.is_some());
 }
 pub(super) fn sync(states: &States) {
@@ -76,6 +77,32 @@ pub(super) fn sync(states: &States) {
     crate::tray_menu::refresh_pin_recovery();
 }
 pub(super) fn request(id: u64, locked: bool, passthrough: bool) {
+    let policy = current(id).map(|p| Policy {
+        locked,
+        passthrough,
+        ..p
+    });
+    if let Some(policy) = policy {
+        request_policy(id, policy);
+    }
+}
+fn current(id: u64) -> Option<Policy> {
+    STATE.with(|s| {
+        s.borrow()
+            .as_ref()?
+            .windows
+            .get(&id)
+            .map(|p| p.interaction.applied)
+    })
+}
+pub(super) fn request_opacity(id: u64, percent: i32) {
+    if let Some(opacity) = Opacity::from_percent(percent)
+        && let Some(policy) = current(id).filter(|p| !p.passthrough)
+    {
+        request_policy(id, Policy { opacity, ..policy });
+    }
+}
+fn request_policy(id: u64, policy: Policy) {
     let allowed = STATE.with(|s| {
         let s = s.borrow();
         s.as_ref().is_some_and(|r| {
@@ -86,11 +113,13 @@ pub(super) fn request(id: u64, locked: bool, passthrough: bool) {
                         && !p.gesture.pressed.get()
                         && p.window.get().is_some_and(|w| {
                             !w.get_output_busy()
+                                && !w.get_policy_busy()
                                 && !w.get_recognizing()
                                 && !w.get_cropping()
-                                && (!passthrough || !w.get_editing())
+                                && (!policy.passthrough || !w.get_editing())
                         })
                         && p.interaction.pending.is_none()
+                        && p.interaction.applied != policy
                 })
         })
     });
@@ -106,18 +135,13 @@ pub(super) fn request(id: u64, locked: bool, passthrough: bool) {
             }
         });
         crate::annotation::pin_editor::policy_requested(id);
-        emit_pin(Event::InteractionRequested {
-            id,
-            policy: Policy {
-                locked,
-                passthrough,
-            },
-        });
+        emit_pin(Event::InteractionRequested { id, policy });
     }
 }
 fn frame(w: &PinnedScreenshotWindow, lifecycle: &WindowLifecycleCallbacks, enabled: bool) -> bool {
     if enabled {
-        let Ok(pixels) = w.window().take_snapshot() else {
+        let Ok(pixels) = crate::screen_interaction::window::premultiplied_snapshot(w.window())
+        else {
             return false;
         };
         (lifecycle.pinned_passthrough_frame)(
@@ -197,12 +221,15 @@ pub(crate) fn apply(id: u64, request: u64, policy: Policy) {
     clear_feedback(id, None);
     w.set_locked(policy.locked);
     w.set_mouse_passthrough(policy.passthrough);
+    w.set_content_opacity_percent(i32::from(policy.opacity.percent()));
     let success = (policy.passthrough == before.passthrough
+        && (!policy.passthrough || policy.opacity == before.opacity)
         || frame(&w, &lifecycle, policy.passthrough))
         && apply_policy(id);
     if !success {
         w.set_locked(before.locked);
         w.set_mouse_passthrough(before.passthrough);
+        w.set_content_opacity_percent(i32::from(before.opacity.percent()));
         frame(&w, &lifecycle, before.passthrough);
         apply_policy(id);
     }

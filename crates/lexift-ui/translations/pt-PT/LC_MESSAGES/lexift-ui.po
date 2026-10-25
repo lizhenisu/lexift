@@ -1974,3 +1974,6 @@ msgstr "Desativar passagem do rato em todas as imagens fixadas"
 
 msgid "Mouse passthrough is on. Restore mouse input from the tray menu."
 msgstr "A passagem do rato está ativada. Restaure o controlo pelo menu da área de notificação."
+
+msgid "{}%"
+msgstr "{}%"

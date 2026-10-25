@@ -1974,3 +1974,6 @@ msgstr "取消所有贴图鼠标穿透"
 
 msgid "Mouse passthrough is on. Restore mouse input from the tray menu."
 msgstr "已开启鼠标穿透，可从托盘菜单恢复鼠标操作。"
+
+msgid "{}%"
+msgstr "{}%"

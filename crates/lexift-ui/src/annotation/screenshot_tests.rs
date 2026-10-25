@@ -1054,6 +1054,7 @@ fn pinned_editor_keeps_documents_history_and_hidden_output_separate() {
     slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
     let mut l = lifecycle();
     let sinks = Rc::new(RefCell::new(Vec::<crate::PopupPointerSink>::new()));
+    l.configure_pinned_image = Rc::new(|_, _, _, _| true);
     let recorded_sinks = sinks.clone();
     l.complete_toolbar_show = Rc::new(move |_, sink| {
         recorded_sinks.borrow_mut().push(sink);
@@ -1084,6 +1085,16 @@ fn pinned_editor_keeps_documents_history_and_hidden_output_separate() {
                 lexift_core::AppCommand::PinnedImage(PinCommand::EndEdit { id, edit }) => {
                     let (id, edit) = (*id, *edit);
                     slint::Timer::single_shot(Duration::ZERO, move || pin_editor::end(id, edit));
+                }
+                lexift_core::AppCommand::PinnedImage(PinCommand::ApplyInteraction {
+                    id,
+                    request,
+                    policy,
+                }) => {
+                    let (id, request, policy) = (*id, *request, *policy);
+                    slint::Timer::single_shot(Duration::ZERO, move || {
+                        crate::pinned_screenshot::policy::apply(id, request, policy)
+                    });
                 }
                 _ => {}
             }
@@ -1169,6 +1180,16 @@ fn pinned_editor_keeps_documents_history_and_hidden_output_separate() {
             .session
             .objects
             .clone()
+    });
+    pin.invoke_opacity_requested(40);
+    pump("pin opacity", || {
+        pin.get_content_opacity_percent() == 40 && !pin.get_policy_busy()
+    });
+    REGISTRY.with(|s| {
+        assert_eq!(
+            s.borrow().as_ref().unwrap().document.session.objects,
+            before
+        )
     });
     // Recognition keeps the edit session/tool, but temporarily routes pointer input to browsing.
     let source = core.borrow().pinned_images[&id]
@@ -1284,6 +1305,7 @@ fn pinned_editor_keeps_documents_history_and_hidden_output_separate() {
     pin.invoke_output_requested(0);
     assert!(commands.borrow().iter().any(|c|matches!(c,lexift_core::AppCommand::PinnedImage(PinCommand::Output{document:Some(d),hidden:false,..}) if d.snapshot.session.objects.len()==2)));
     assert!(pin.get_editing(), "copy must keep editing open");
+    assert_eq!(pin.get_content_opacity_percent(), 40);
     let operation = core.borrow().pinned_images[&id].operation;
     emit_pin(PinEvent::Completed {
         id,
@@ -1307,6 +1329,7 @@ fn pinned_editor_keeps_documents_history_and_hidden_output_separate() {
         pin_editor::active()
             && REGISTRY.with(|s| s.borrow().as_ref().unwrap().canvas_state.annotation_ready)
     });
+    assert_eq!(pin.get_content_opacity_percent(), 40);
     undo();
     assert_eq!(
         REGISTRY.with(|s| s.borrow().as_ref().unwrap().document.session.objects.len()),

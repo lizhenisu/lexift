@@ -1974,3 +1974,6 @@ msgstr "Mausdurchleitung für alle Bilder ausschalten"
 
 msgid "Mouse passthrough is on. Restore mouse input from the tray menu."
 msgstr "Mausdurchleitung ist aktiv. Stellen Sie die Mausbedienung über das Infobereichmenü wieder her."
+
+msgid "{}%"
+msgstr "{} %"

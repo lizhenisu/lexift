@@ -19,6 +19,7 @@
 | 冻结帧取色／像素放大 | 已实现，验证范围见记录 | 首次框选及截图鼠标模式显示 15×9 物理像素网格，C 复制大写 HEX；采样冻结底图，不含截图新增标注和装饰，见 [像素放大镜验证](../releases/screenshot-pixel-picker.md) |
 | 顶层窗口候选 | 已实现，验证范围见记录 | 悬停预览、单击进入编辑，超过 4px 逻辑距离转自由框选；同次截图冻结候选，内部控件见下一项，见 [窗口自动框选验证](../releases/screenshot-window-candidates.md) |
 | 贴图锁定与鼠标穿透 | 已接入，验证边界见专项记录 | 每实例独立锁定／穿透，托盘逐张恢复；不修改文档或输出。见[交互策略](../features/pin-interaction.md)及[验证](../releases/pin-lock-passthrough.md) |
+| 贴图透明度 | 已接入，验证边界见专项记录 | 右键五档透明度，编辑时保留，控制反馈独立；穿透与截图挂起恢复保留确认值，成品不受影响。见[交互策略](../features/pin-interaction.md)及[验证](../releases/pin-opacity.md) |
 | 贴图 OCR 复制 | 已接入，验证边界见专项记录 | 识别已确认裁剪底图；保留贴图及编辑，共用长图分块检测，不按字符串去重。见[贴图 OCR](../releases/pin-image-ocr.md) |
 | 截图 OCR 复制 | 已实现，验证范围见记录 | 识别冻结底图选区，复制文字；成功、空结果或失败均退出截图并显示 toast，不自动翻译，见 [截图 OCR 验证](../releases/screenshot-ocr.md) |
 | 内部元素候选与滚轮层级 | 已实现，验证范围见记录 | 已改为所属窗口内的有界后台按点 UIA 查询，首帧不等元素；点击采用已呈现范围，结果过期隔离。新验证见[按点优化记录](../releases/screenshot-point-query-performance.md)，[冻结快照验证](../releases/screenshot-element-candidates.md)作为历史记录 |

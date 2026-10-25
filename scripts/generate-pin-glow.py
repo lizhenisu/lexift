@@ -1,7 +1,7 @@
 """Reproduce the shared nine-slice alpha mask; requires only Python's stdlib.
 
-The image overlays the inner 17px square. Sixteen-pixel slice corners retain
-the 8px outer falloff plus the blur's inner corner transition when stretched.
+The inner 17px square is hollow so translucent content reveals the desktop.
+Sixteen-pixel slice corners retain the existing 8px outer falloff.
 """
 
 import math
@@ -11,7 +11,7 @@ import zlib
 
 
 def generate_mask() -> bytes:
-    """Return a 33px RGBA Gaussian mask with transparent outermost pixels."""
+    """Return a 33px Gaussian ring, transparent inside the image and at its outer edge."""
     size, sigma = 33, 2.5
 
     def integral(position: float) -> float:
@@ -26,7 +26,7 @@ def generate_mask() -> bytes:
         rows.append(0)  # PNG scanline: no filtering.
         for x in range(size):
             alpha = round(255 * min(1, 1.5 * integral(x + 0.5) * integral(y + 0.5)))
-            if x in (0, size - 1) or y in (0, size - 1):
+            if x in (0, size - 1) or y in (0, size - 1) or (8 <= x < 25 and 8 <= y < 25):
                 alpha = 0
             rows.extend((255, 255, 255, alpha))
 

@@ -1974,3 +1974,6 @@ msgstr "すべての貼り付け画像のマウス透過を解除"
 
 msgid "Mouse passthrough is on. Restore mouse input from the tray menu."
 msgstr "マウス透過が有効です。トレイメニューからマウス操作を復元できます。"
+
+msgid "{}%"
+msgstr "{}%"

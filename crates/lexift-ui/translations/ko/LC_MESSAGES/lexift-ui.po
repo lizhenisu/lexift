@@ -1974,3 +1974,6 @@ msgstr "모든 고정 이미지의 마우스 통과 해제"
 
 msgid "Mouse passthrough is on. Restore mouse input from the tray menu."
 msgstr "마우스 통과가 켜졌습니다. 트레이 메뉴에서 마우스 조작을 복원하세요."
+
+msgid "{}%"
+msgstr "{}%"

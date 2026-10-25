@@ -224,10 +224,12 @@ fn apply_policy(id: u64) -> bool {
         (l.configure_pinned_image)(
             w.window(),
             w.get_topmost(),
-            // Mouse mode disables drawing, but an edited pin still owns its menu input.
+            // Pending work is gated by Slint, not HWND disablement: temporarily
+            // disabling an edited pin would discard the user's keyboard focus.
             allowed
                 && !w.get_mouse_passthrough()
-                && (w.get_interactive() || w.get_context_available()),
+                && (w.get_interactive()
+                    || (w.get_context_input() && w.get_editing() && !w.get_cropping())),
             (w.get_frame_inset() * native_scale(w.window())).round() as i32,
         )
     })
@@ -275,13 +277,20 @@ pub(crate) fn apply_theme() {
             .map(|r| {
                 r.windows
                     .iter()
-                    .filter_map(|(&id, p)| p.window.get().map(|w| (id, w.clone_strong())))
+                    .filter_map(|(&id, p)| {
+                        p.window
+                            .get()
+                            .map(|w| (id, w.clone_strong(), p.image.clone()))
+                    })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default()
     });
-    for (id, window) in windows {
+    for (id, window, image) in windows {
         crate::theme::apply(&window);
+        if !window.get_editing() {
+            set_picture(&window, &image);
+        }
         policy::schedule_frame(id);
     }
 }
@@ -709,7 +718,7 @@ fn show_feedback_details(
                 }
             }
             if outcome.is_some() {
-                let frame = w.window().take_snapshot();
+                let frame = crate::screen_interaction::window::premultiplied_snapshot(w.window());
                 if !(lifecycle.configure_capture_feedback)(w.window())
                     || !frame.as_ref().is_ok_and(|pixels| {
                         (lifecycle.annotation_frame_presenter)(
@@ -944,13 +953,38 @@ pub(crate) fn present(id: u64, revision: u64, image: Arc<CapturedRegion>) {
     });
 }
 fn set_picture(window: &PinnedScreenshotWindow, image: &CapturedRegion) {
-    window.set_picture(slint::Image::from_rgba8_premultiplied(
-        slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
-            &image.pixels,
-            (image.bounds.right - image.bounds.left) as u32,
-            (image.bounds.bottom - image.bounds.top) as u32,
-        ),
+    window.set_picture(display_picture(
+        window,
+        &image.pixels,
+        (image.bounds.right - image.bounds.left) as u32,
+        (image.bounds.bottom - image.bounds.top) as u32,
     ));
+}
+/// Fold the existing view background into the normal texture upload. A single
+/// image can then fade once on GPU and software renderers alike. Source pixels
+/// remain untouched; opacity changes never repeat this upload or composition.
+fn display_picture(
+    window: &PinnedScreenshotWindow,
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+) -> slint::Image {
+    let mut buffer =
+        slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(pixels, width, height);
+    let bg = window.global::<crate::Colors>().get_surface();
+    for p in buffer.make_mut_slice() {
+        if p.a != 255 {
+            let blend = |value: u8, background: u8| {
+                (u16::from(value) + (u16::from(background) * u16::from(255 - p.a) + 127) / 255)
+                    .min(255) as u8
+            };
+            p.r = blend(p.r, bg.red());
+            p.g = blend(p.g, bg.green());
+            p.b = blend(p.b, bg.blue());
+            p.a = 255;
+        }
+    }
+    slint::Image::from_rgba8_premultiplied(buffer)
 }
 /// Current content geometry, excluding the glow; independent of the source image extent.
 pub(crate) fn geometry(
@@ -1025,12 +1059,11 @@ pub(crate) fn present_edit(id: u64, frame: tiny_skia::Pixmap, controls: tiny_ski
                     controls.height(),
                 ),
             ));
-            w.set_picture(slint::Image::from_rgba8_premultiplied(
-                slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
-                    frame.data(),
-                    frame.width(),
-                    frame.height(),
-                ),
+            w.set_picture(display_picture(
+                w,
+                frame.data(),
+                frame.width(),
+                frame.height(),
             ));
         }
     });
@@ -1097,13 +1130,7 @@ fn show_from(
         let window = crate::screen_interaction::create(&r.lifecycle, PinnedScreenshotWindow::new)
             .map_err(|_| ())?;
         crate::theme::apply(&window);
-        window.set_picture(slint::Image::from_rgba8_premultiplied(
-            slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
-                &image.pixels,
-                w as u32,
-                h as u32,
-            ),
-        ));
+        window.set_picture(display_picture(&window, &image.pixels, w as u32, h as u32));
         r.next = r.next.checked_add(1).ok_or(())?;
         let id = r.next;
         let mut owned = Slot::default();
@@ -1173,6 +1200,7 @@ fn show_from(
         window.on_policy_requested(move |locked, passthrough| {
             policy::request(id, locked, passthrough)
         });
+        window.on_opacity_requested(move |percent| policy::request_opacity(id, percent));
         window.on_zoom_requested(move |delta, x, y| zoom(id, delta, x, y));
         let initial = match origin {
             Origin::History(
@@ -1660,6 +1688,8 @@ mod tests {
         let failure = fail.clone();
         let input = Rc::new(Cell::new(true));
         let native = input.clone();
+        let input_calls = Rc::new(RefCell::new(Vec::new()));
+        let recorded_input = input_calls.clone();
         let frame_fail = Rc::new(Cell::new(false));
         let fail_frame = frame_fail.clone();
         let lifecycle = WindowLifecycleCallbacks::new(
@@ -1678,6 +1708,7 @@ mod tests {
             !fail_frame.replace(false)
         })
         .with_pinned_image_policy(move |_, _, enabled, _| {
+            recorded_input.borrow_mut().push(enabled);
             if failure.replace(false) {
                 return false;
             }
@@ -1733,16 +1764,37 @@ mod tests {
         slint::platform::update_timers_and_animations();
         assert!(w.get_locked() && input.get());
         // Browsing an edited pin owns context input even though drawing is off.
-        // Pending policy work temporarily disables it; acknowledgement must restore it.
+        // Policy settlement must retain context input without disabling the HWND.
         w.set_editing(true);
         w.set_interactive(false);
         w.set_context_input(true);
+        input_calls.borrow_mut().clear();
         for locked in [false, true] {
             policy::request(id, locked, false);
             slint::platform::update_timers_and_animations();
             assert_eq!(w.get_locked(), locked);
             assert!(w.get_context_available() && input.get());
         }
+        for percent in [80, 60, 40, 20, 100, 20] {
+            policy::request_opacity(id, percent);
+            slint::platform::update_timers_and_animations();
+            assert_eq!(w.get_content_opacity_percent(), percent);
+            assert!(w.get_locked() && w.get_context_available() && input.get());
+        }
+        assert!(
+            input_calls.borrow().iter().all(|enabled| *enabled),
+            "display changes must not disable a focused editor"
+        );
+        let serial = core.borrow().pinned_images[&id].interaction.serial;
+        policy::request_opacity(id, 20);
+        policy::request_opacity(id, 50);
+        slint::platform::update_timers_and_animations();
+        assert_eq!(core.borrow().pinned_images[&id].interaction.serial, serial);
+        fail.set(true);
+        policy::request_opacity(id, 80);
+        slint::platform::update_timers_and_animations();
+        assert_eq!(w.get_content_opacity_percent(), 20);
+        assert!(w.get_locked() && input.get());
         w.set_editing(false);
         w.set_interactive(true);
         let size = w.window().size();
@@ -1756,6 +1808,9 @@ mod tests {
         policy::request(id, true, true);
         slint::platform::update_timers_and_animations();
         assert!(w.get_mouse_passthrough());
+        assert_eq!(w.get_content_opacity_percent(), 20);
+        policy::request_opacity(id, 100);
+        assert_eq!(w.get_content_opacity_percent(), 20);
         assert!(!input.get());
         assert!(!w.get_context_available());
         set_annotation_interaction(false);
@@ -1781,6 +1836,7 @@ mod tests {
         slint::platform::update_timers_and_animations();
         policy::sync(&stale);
         assert!(!w.get_mouse_passthrough() && w.get_locked());
+        assert_eq!(w.get_content_opacity_percent(), 20);
         w.set_interactive(true);
         assert!(apply_policy(id));
         assert!(!w.window().is_visible());
@@ -1796,6 +1852,7 @@ mod tests {
             Policy {
                 locked: false,
                 passthrough: true,
+                ..Policy::default()
             },
         );
         assert!(!w.get_mouse_passthrough());
@@ -2388,6 +2445,127 @@ fn pin_glow_without_hover_border_renders_at_both_scales_and_themes() {
                             }
                         }
                         previous_pixels = Some(pixels);
+                    }
+                }
+            }
+        }
+    }
+}
+#[cfg(test)]
+#[test]
+fn opacity_composites_content_once_and_keeps_controls_and_glow_clear() {
+    use slint::platform::{
+        Platform, WindowAdapter, WindowEvent,
+        software_renderer::{MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType},
+    };
+    struct Backend(Rc<RefCell<Option<Rc<MinimalSoftwareWindow>>>>);
+    impl Platform for Backend {
+        fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+            let w = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+            *self.0.borrow_mut() = Some(w.clone());
+            Ok(w)
+        }
+    }
+    let slot = Rc::new(RefCell::new(None));
+    slint::platform::set_platform(Box::new(Backend(slot.clone()))).unwrap();
+    let pin = PinnedScreenshotWindow::new().unwrap();
+    let adapter = slot.borrow().as_ref().unwrap().clone();
+    for language in lexift_core::domain::ui_language::UiLanguage::ALL {
+        crate::i18n::select(language);
+        assert!(!crate::i18n::tr("Opacity").is_empty());
+        assert!(crate::i18n::tr("{}%").contains("{}"));
+    }
+    let mut controls = vec![0; 100 * 80 * 4];
+    for p in controls[..100 * 10 * 4].as_chunks_mut::<4>().0 {
+        p.copy_from_slice(&[0, 255, 0, 255]);
+    }
+    pin.set_decoration(slint::Image::from_rgba8_premultiplied(
+        slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&controls, 100, 80),
+    ));
+    for dark in [false, true] {
+        pin.global::<crate::Colors>()
+            .set_preference(i32::from(dark));
+        for scale in [1., 1.25] {
+            adapter
+                .window()
+                .dispatch_event(WindowEvent::ScaleFactorChanged {
+                    scale_factor: scale,
+                });
+            let width = (116. * scale) as usize;
+            let height = (96. * scale) as usize;
+            adapter.set_size(slint::PhysicalSize::new(width as u32, height as u32));
+            let sample = |pixels: &[PremultipliedRgbaColor], x: f32, y: f32| {
+                pixels[(y * scale) as usize * width + (x * scale) as usize]
+            };
+            for semi in [false, true] {
+                let color = if semi {
+                    [100, 50, 25, 128]
+                } else {
+                    [200, 100, 50, 255]
+                };
+                pin.set_picture(display_picture(&pin, &color.repeat(100 * 80), 100, 80));
+                for editing in [false, true] {
+                    pin.set_editing(editing);
+                    let mut full = None;
+                    let mut glow = None;
+                    for percent in [100, 80, 60, 40, 20] {
+                        pin.set_content_opacity_percent(percent);
+                        let mut pixels = vec![PremultipliedRgbaColor::default(); width * height];
+                        adapter.request_redraw();
+                        adapter.draw_if_needed(|r| {
+                            r.render(&mut pixels, width);
+                        });
+                        let body = sample(&pixels, 58., 48.);
+                        let channels = [body.red, body.green, body.blue, body.alpha];
+                        let snapshot =
+                            crate::screen_interaction::window::premultiplied_snapshot(pin.window())
+                                .unwrap();
+                        let captured = snapshot.as_slice()
+                            [(48. * scale) as usize * width + (58. * scale) as usize];
+                        for (actual, expected) in [captured.r, captured.g, captured.b, captured.a]
+                            .into_iter()
+                            .zip(channels)
+                        {
+                            assert!(
+                                (i16::from(actual) - i16::from(expected)).abs() <= 1,
+                                "layered snapshot preserves premultiplied content"
+                            );
+                        }
+                        if percent == 100 {
+                            full = Some(channels);
+                            glow = Some(sample(&pixels, 4., 48.));
+                        }
+                        for (actual, original) in channels.into_iter().zip(full.unwrap()) {
+                            let expected = i32::from(original) * percent / 100;
+                            assert!(
+                                (i32::from(actual) - expected).abs() <= 2,
+                                "single content opacity: dark={dark} scale={scale} semi={semi} editing={editing} percent={percent}, actual={channels:?}"
+                            );
+                        }
+                        let g = sample(&pixels, 4., 48.);
+                        let original = glow.unwrap();
+                        assert_eq!(
+                            [g.red, g.green, g.blue, g.alpha],
+                            [original.red, original.green, original.blue, original.alpha],
+                            "glow is outside the opacity group"
+                        );
+                        if editing {
+                            let c = sample(&pixels, 58., 12.);
+                            assert_eq!(
+                                [c.red, c.green, c.blue, c.alpha],
+                                [0, 255, 0, 255],
+                                "controls remain clear"
+                            );
+                        }
+                        if let Ok(dir) = std::env::var("LEXIFT_PIN_OPACITY_RENDER_DIR") {
+                            crate::i18n::write_test_bitmap(
+                                &dir,
+                                &format!("pin-{dark}-{scale}-{semi}-{editing}-{percent}"),
+                                width as u32,
+                                height as u32,
+                                pixels.iter().map(|p| [p.red, p.green, p.blue, p.alpha]),
+                            );
+                        }
                     }
                 }
             }

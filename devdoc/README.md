@@ -44,7 +44,7 @@
 - [屏幕区域选择基础](features/region-selection.md)
 - [共用屏幕交互宿主](features/screen-interaction.md)
 - [截图模式与临时贴图](features/screenshot-mode.md)
-- [贴图锁定与鼠标穿透](features/pin-interaction.md)
+- [贴图锁定、鼠标穿透与透明度](features/pin-interaction.md)
 - [截图／长图图片历史](features/image-history.md)
 - [图片历史验证](releases/screenshot-image-history.md)
 - [标注撤销与重做](annotation/annotation-history.md)
@@ -145,3 +145,4 @@
 - [图片保存格式验证](releases/image-save-formats.md)
 - [从文件／剪贴板打开图片](features/image-import.md)
 - [图片导入验证](releases/image-import.md)
+- [贴图透明度验证](releases/pin-opacity.md)
