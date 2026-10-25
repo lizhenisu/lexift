@@ -234,6 +234,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
             Err(error) => { tracing::warn!(%error, "About link could not be opened"); false }
         })
         .with_pinned_image_policy(|window,topmost,interactive,inset|lexift_platform::configure_pinned_image(&window.window_handle(),topmost,interactive,inset).is_ok())
+        .with_pinned_passthrough_frame(|window,frame|lexift_platform::present_pinned_passthrough(&window.window_handle(),frame).is_ok())
         .with_pinned_image_preparation(|window| lexift_platform::prepare_pinned_image_window(&window.window_handle()).is_ok())
         .with_app_window_preparation(|window, role| {
             match window.with_winit_window(|native| lexift_platform::configure_window_shell_role(native, role == lexift_ui::WindowRole::Settings)) {

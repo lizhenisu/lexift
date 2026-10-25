@@ -1961,3 +1961,16 @@ msgstr "左右反転"
 
 msgid "Flip vertically"
 msgstr "上下反転"
+
+
+msgid "Lock position and size"
+msgstr "位置とサイズを固定"
+
+msgid "Mouse passthrough"
+msgstr "マウス操作を透過"
+
+msgid "Turn off mouse passthrough for all pins"
+msgstr "すべての貼り付け画像のマウス透過を解除"
+
+msgid "Mouse passthrough is on. Restore mouse input from the tray menu."
+msgstr "マウス透過が有効です。トレイメニューからマウス操作を復元できます。"

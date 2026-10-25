@@ -1961,3 +1961,16 @@ msgstr "Inverter horizontalmente"
 
 msgid "Flip vertically"
 msgstr "Inverter verticalmente"
+
+
+msgid "Lock position and size"
+msgstr "Bloquear posição e tamanho"
+
+msgid "Mouse passthrough"
+msgstr "Passagem do rato"
+
+msgid "Turn off mouse passthrough for all pins"
+msgstr "Desativar passagem do rato em todas as imagens fixadas"
+
+msgid "Mouse passthrough is on. Restore mouse input from the tray menu."
+msgstr "A passagem do rato está ativada. Restaure o controlo pelo menu da área de notificação."

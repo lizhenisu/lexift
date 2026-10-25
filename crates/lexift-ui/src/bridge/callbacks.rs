@@ -130,6 +130,7 @@ pub enum PassiveWindowPreparation {
     Failed,
 }
 
+type PinnedPassthroughFrame = Rc<dyn Fn(&slint::Window, Option<(u32, u32, &[u8])>) -> bool>;
 type ConfigurePinnedImage = Rc<dyn Fn(&slint::Window, bool, bool, i32) -> bool>;
 
 #[derive(Clone)]
@@ -180,6 +181,7 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) configure_window_paint_repair: ConfigureWindowPaintRepair,
     pub(super) configure_app_window_icon: fn(&slint::Window) -> bool,
     pub(super) prepare_app_window: PrepareAppWindow,
+    pub(crate) pinned_passthrough_frame: PinnedPassthroughFrame,
     pub(crate) configure_pinned_image: ConfigurePinnedImage,
     pub(crate) prepare_pinned_image: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(super) open_about_link: Rc<dyn Fn(crate::AboutLink) -> bool>,
@@ -253,6 +255,7 @@ impl WindowLifecycleCallbacks {
             configure_app_window_icon: |_| true,
             prepare_app_window: Rc::new(|_, _| PassiveWindowPreparation::Ready),
             prepare_pinned_image: Rc::new(|_| true),
+            pinned_passthrough_frame: Rc::new(|_, _| false),
             configure_pinned_image: Rc::new(|_, _, _, _| true),
             open_about_link: Rc::new(|_| false),
         }
@@ -306,6 +309,13 @@ impl WindowLifecycleCallbacks {
         self
     }
 
+    pub fn with_pinned_passthrough_frame(
+        mut self,
+        callback: impl Fn(&slint::Window, Option<(u32, u32, &[u8])>) -> bool + 'static,
+    ) -> Self {
+        self.pinned_passthrough_frame = Rc::new(callback);
+        self
+    }
     pub fn with_pinned_image_policy(
         mut self,
         callback: impl Fn(&slint::Window, bool, bool, i32) -> bool + 'static,

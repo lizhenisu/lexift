@@ -230,6 +230,19 @@ impl ScreenshotRuntime {
     }
     pub fn execute_pin(self: &Arc<Self>, controller: &Arc<AppController>, command: PinCommand) {
         match command {
+            PinCommand::ApplyInteraction {
+                id,
+                request,
+                policy,
+            } => {
+                if !controller.ui.apply_pinned_interaction(id, request, policy) {
+                    controller.dispatch(AppEvent::PinnedImage(PinEvent::InteractionApplied {
+                        id,
+                        request,
+                        result: Err(lexift_core::Error::new("Window unavailable")),
+                    }));
+                }
+            }
             PinCommand::RetainHistory { id, ticket } => {
                 let asset = self.history.lock().unwrap().assets.get(&ticket).cloned();
                 if let Some(asset) = asset {

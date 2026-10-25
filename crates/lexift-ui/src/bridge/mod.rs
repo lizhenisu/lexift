@@ -595,6 +595,17 @@ impl UiHandle {
     pub fn close_pinned_image(&self, id: u64) {
         let _ = slint::invoke_from_event_loop(move || crate::pinned_screenshot::request_close(id));
     }
+    pub fn apply_pinned_interaction(
+        &self,
+        id: u64,
+        request: u64,
+        policy: lexift_core::domain::pinned_image::interaction::Policy,
+    ) -> bool {
+        slint::invoke_from_event_loop(move || {
+            crate::pinned_screenshot::policy::apply(id, request, policy)
+        })
+        .is_ok()
+    }
     pub fn begin_pinned_edit(&self, id: u64, edit: u64) {
         let _ =
             slint::invoke_from_event_loop(move || crate::annotation::pin_editor::begin(id, edit));

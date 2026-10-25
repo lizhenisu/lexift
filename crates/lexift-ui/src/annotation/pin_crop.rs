@@ -62,7 +62,8 @@ fn saved(r: &Registry) -> Option<Edit> {
     })
 }
 pub(super) fn begin(r: &mut Registry) {
-    if active()
+    if pin_editor::current().is_some_and(|p| crate::pinned_screenshot::policy::locked(p.0))
+        || active()
         || r.gesture().is_some()
         || !r.pending_drawing.is_none()
         || r.toolbar_state.menus.current.is_some()
@@ -322,6 +323,18 @@ pub(super) fn finish(apply: bool) {
     });
 }
 fn propose(r: &Registry, session: Session) {
+    if let Some((id, _)) =
+        pin_editor::current().filter(|p| crate::pinned_screenshot::policy::locked(p.0))
+    {
+        let full = pin_editor::source(id);
+        let size = |s: &Session| {
+            full.and_then(|f| s.image_orientation.rect(s.image_crop.unwrap_or(f), f).ok())
+                .map(|b| (b.right - b.left, b.bottom - b.top))
+        };
+        if size(&session) != size(&r.document.session) {
+            return;
+        }
+    }
     let Some(request) = pin_editor::propose(r, session.clone()) else {
         return;
     };

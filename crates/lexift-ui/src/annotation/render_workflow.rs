@@ -802,6 +802,12 @@ pub(super) fn magnifier_from_source(
 
 impl Registry {
     pub(super) fn queue_render(&mut self) {
+        if let Some((id, _)) = self.screenshot.as_ref().and_then(|e| e.pin) {
+            crate::pinned_screenshot::set_policy_idle(
+                id,
+                self.gesture().is_none() && self.pending_drawing.is_none() && !pin_crop::active(),
+            );
+        }
         sync_history_controls(self);
         cursor::refresh(self);
         self.render_state

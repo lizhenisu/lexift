@@ -1961,3 +1961,16 @@ msgstr "Voltear horizontalmente"
 
 msgid "Flip vertically"
 msgstr "Voltear verticalmente"
+
+
+msgid "Lock position and size"
+msgstr "Bloquear posición y tamaño"
+
+msgid "Mouse passthrough"
+msgstr "Paso del ratón"
+
+msgid "Turn off mouse passthrough for all pins"
+msgstr "Desactivar el paso del ratón en todas las imágenes fijadas"
+
+msgid "Mouse passthrough is on. Restore mouse input from the tray menu."
+msgstr "El paso del ratón está activado. Restaure el control desde el menú de la bandeja."

@@ -285,8 +285,16 @@ pub(crate) fn apply_theme() {
 
 fn sync_history_controls(r: &Registry) {
     if let Some(main) = r.toolbar_state.main.get() {
-        main.set_can_undo(!image_crop::active() && r.document.session.can_undo());
-        main.set_can_redo(!image_crop::active() && r.document.session.can_redo());
+        main.set_can_undo(
+            !image_crop::active()
+                && pin_editor::history_allowed(r, false)
+                && r.document.session.can_undo(),
+        );
+        main.set_can_redo(
+            !image_crop::active()
+                && pin_editor::history_allowed(r, true)
+                && r.document.session.can_redo(),
+        );
     }
     if let Some(panel) = r.toolbar_state.panel.get() {
         panel.set_can_clear(r.document.session.has_content());

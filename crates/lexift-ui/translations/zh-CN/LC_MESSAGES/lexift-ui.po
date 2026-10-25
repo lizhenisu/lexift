@@ -1961,3 +1961,16 @@ msgstr "水平翻转"
 
 msgid "Flip vertically"
 msgstr "垂直翻转"
+
+
+msgid "Lock position and size"
+msgstr "锁定位置与大小"
+
+msgid "Mouse passthrough"
+msgstr "鼠标穿透"
+
+msgid "Turn off mouse passthrough for all pins"
+msgstr "取消所有贴图鼠标穿透"
+
+msgid "Mouse passthrough is on. Restore mouse input from the tray menu."
+msgstr "已开启鼠标穿透，可从托盘菜单恢复鼠标操作。"

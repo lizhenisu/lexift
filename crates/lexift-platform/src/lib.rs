@@ -833,6 +833,20 @@ pub fn configure_pinned_image(
     }
 }
 
+/// Temporarily present one pin through the existing native RGBA surface.
+pub fn present_pinned_passthrough(
+    window: &impl raw_window_handle::HasWindowHandle,
+    frame: Option<(u32, u32, &[u8])>,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    return windows::pinned_image::passthrough_frame(window, frame);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, frame);
+        Err(lexift_core::Error::new("Pin passthrough unavailable"))
+    }
+}
+
 /// Stop the single accessibility snapshot worker; in-flight native calls unwind on its MTA.
 pub fn shutdown_screenshot_element_queries() {
     #[cfg(target_os = "windows")]

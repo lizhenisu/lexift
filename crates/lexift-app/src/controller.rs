@@ -107,6 +107,14 @@ pub(crate) trait ViewPort: Send + Sync {
     }
     fn close_pinned_image(&self, _id: u64) {}
     fn begin_pinned_edit(&self, _id: u64, _edit: u64) {}
+    fn apply_pinned_interaction(
+        &self,
+        _id: u64,
+        _request: u64,
+        _policy: lexift_core::domain::pinned_image::interaction::Policy,
+    ) -> bool {
+        false
+    }
     fn end_pinned_edit(&self, _id: u64, _edit: u64) {}
     fn present_pinned_image(
         &self,
@@ -189,6 +197,14 @@ impl ViewPort for lexift_ui::UiHandle {
 
     fn begin_pinned_edit(&self, id: u64, edit: u64) {
         self.begin_pinned_edit(id, edit);
+    }
+    fn apply_pinned_interaction(
+        &self,
+        id: u64,
+        request: u64,
+        policy: lexift_core::domain::pinned_image::interaction::Policy,
+    ) -> bool {
+        self.apply_pinned_interaction(id, request, policy)
     }
     fn end_pinned_edit(&self, id: u64, edit: u64) {
         self.end_pinned_edit(id, edit);
@@ -602,19 +618,25 @@ impl AppController {
             AppCommand::PinnedImage(command) => {
                 if let Some(runtime) = &self.screenshot {
                     runtime.execute_pin(self, command);
-                } else if let lexift_core::domain::pinned_image::Command::Output {
-                    id,
-                    operation,
-                    ..
-                } = command
-                {
-                    self.dispatch(AppEvent::PinnedImage(
-                        lexift_core::domain::pinned_image::Event::Completed {
-                            id,
-                            operation,
-                            result: Err(lexift_core::Error::new("Screenshot unavailable")),
-                        },
-                    ));
+                } else {
+                    use lexift_core::domain::pinned_image::{Command, Event};
+                    match command {
+                        Command::Output { id, operation, .. } => {
+                            self.dispatch(AppEvent::PinnedImage(Event::Completed {
+                                id,
+                                operation,
+                                result: Err(lexift_core::Error::new("Screenshot unavailable")),
+                            }))
+                        }
+                        Command::ApplyInteraction { id, request, .. } => {
+                            self.dispatch(AppEvent::PinnedImage(Event::InteractionApplied {
+                                id,
+                                request,
+                                result: Err(lexift_core::Error::new("Window unavailable")),
+                            }))
+                        }
+                        _ => {}
+                    }
                 }
             }
             AppCommand::Screenshot(command) => {
@@ -1934,6 +1956,42 @@ mod tests {
         }
     }
 
+    #[test]
+    fn missing_pin_runtime_completes_policy_failure_without_committing_flags() {
+        use lexift_core::domain::pinned_image::{
+            Event as PinEvent, State as PinState, interaction::Policy,
+        };
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        let providers = lexift_translate::ProviderRegistry::with_mock();
+        let state = Arc::new(Mutex::new(AppState::default()));
+        state
+            .lock()
+            .unwrap()
+            .pinned_images
+            .insert(1, PinState::default());
+        let view = Arc::new(RecordingView::default());
+        let controller = Arc::new(AppController::new(
+            runtime.handle().clone(),
+            state.clone(),
+            None,
+            None,
+            providers.default_translator(),
+            Arc::new(RecordingSettingsStore::default()),
+            view.clone(),
+        ));
+        controller.dispatch(AppEvent::PinnedImage(PinEvent::InteractionRequested {
+            id: 1,
+            policy: Policy {
+                locked: true,
+                passthrough: true,
+            },
+        }));
+        let s = state.lock().unwrap();
+        assert_eq!(s.pinned_images[&1].interaction.applied, Policy::default());
+        assert!(s.pinned_images[&1].interaction.pending.is_none());
+        assert!(s.pinned_images[&1].interaction.failed.is_some());
+        assert!(!view.states.lock().unwrap().is_empty());
+    }
     #[test]
     fn pin_ocr_serializes_latest_request_and_crops_confirmed_base_without_rendering() {
         use lexift_core::{

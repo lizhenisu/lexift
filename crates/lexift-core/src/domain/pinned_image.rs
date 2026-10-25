@@ -3,6 +3,7 @@ use super::annotation_export::ExportRequest;
 use crate::ports::{annotation_save::SaveOutcome, magnifier::WindowToken};
 use crate::{AppCommand, AppState, Result};
 use std::collections::BTreeMap;
+pub mod interaction;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Output {
     Copy,
@@ -10,6 +11,7 @@ pub enum Output {
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct State {
+    pub interaction: interaction::State,
     pub operation: u64,
     pub busy: bool,
     pub recognition: Option<Recognition>,
@@ -34,6 +36,16 @@ pub struct Recognition {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    InteractionRequested {
+        id: u64,
+        policy: interaction::Policy,
+    },
+    RestoreMouseInput,
+    InteractionApplied {
+        id: u64,
+        request: u64,
+        result: Result<()>,
+    },
     HistoryOpened {
         id: u64,
         hidden: bool,
@@ -121,6 +133,11 @@ pub enum Event {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    ApplyInteraction {
+        id: u64,
+        request: u64,
+        policy: interaction::Policy,
+    },
     RetainHistory {
         id: u64,
         ticket: super::image_history::Ticket,
@@ -201,8 +218,32 @@ pub(crate) fn before_event(pins: &mut States, event: &crate::AppEvent) {
     }
 }
 pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
+    let input_id = match &event {
+        Event::Recognize { id }
+        | Event::Requested { id, .. }
+        | Event::EditRequested { id }
+        | Event::VisibilityChanged { id, .. }
+        | Event::DocumentProposed { id, .. } => Some(*id),
+        _ => None,
+    };
+    if input_id
+        .and_then(|id| state.pinned_images.get(&id))
+        .is_some_and(|p| p.interaction.applied.passthrough || p.interaction.pending.is_some())
+    {
+        return vec![];
+    }
     let command = |c| vec![AppCommand::PinnedImage(c)];
     match event {
+        Event::InteractionRequested { id, policy } => interaction::request(state, id, policy),
+        Event::RestoreMouseInput => interaction::restore(state),
+        Event::InteractionApplied {
+            id,
+            request,
+            result,
+        } => {
+            interaction::complete(state, id, request, result);
+            vec![]
+        }
         Event::Recognize { id } => {
             if state.screenshot.active()
                 || matches!(
@@ -281,6 +322,13 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
             else {
                 return vec![];
             };
+            if p.interaction.applied.locked
+                && p.document.as_ref().is_some_and(|old| {
+                    interaction::display_size(old) != interaction::display_size(&document)
+                })
+            {
+                return vec![];
+            }
             let b = document.snapshot.monitor;
             if document.session != edit
                 || p.document

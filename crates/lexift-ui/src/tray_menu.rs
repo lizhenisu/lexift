@@ -49,6 +49,13 @@ pub(crate) fn is_open() -> bool {
     REGISTRY.with(|slot| slot.borrow().as_ref().is_some_and(|r| r.window.is_some()))
 }
 
+pub(crate) fn refresh_pin_recovery() {
+    REGISTRY.with(|s| {
+        if let Some(w) = s.borrow().as_ref().and_then(|r| r.window.as_ref()) {
+            w.set_pin_recovery_available(crate::pinned_screenshot::policy::recoverable());
+        }
+    });
+}
 pub(crate) fn apply_theme() {
     REGISTRY.with(|slot| {
         if let Some(w) = slot.borrow().as_ref().and_then(|r| r.window.as_ref()) {
@@ -109,10 +116,14 @@ pub(crate) fn show(request: TrayMenuRequest) {
         window.set_open_label(labels.open.clone().into());
         window.set_settings_label(labels.settings.clone().into());
         window.set_quit_label(labels.quit.clone().into());
+        window.set_pin_recovery_available(crate::pinned_screenshot::policy::recoverable());
         window.set_import_available(crate::annotation::image_import::available());
         window.set_selected(if request.keyboard { 0 } else { -1 });
         let generation = r.generation;
         window.on_action(move |index| {
+            if index == 5 && !crate::pinned_screenshot::policy::recoverable() {
+                return;
+            }
             if matches!(index, 3 | 4) && !crate::annotation::image_import::available() {
                 return;
             }
@@ -131,10 +142,14 @@ pub(crate) fn show(request: TrayMenuRequest) {
                     &crate::i18n::tr("Image history"),
                     &crate::i18n::tr("Open image"),
                     &crate::i18n::tr("Pin image from clipboard"),
+                    &crate::i18n::tr("Turn off mouse passthrough for all pins"),
                     &labels.quit,
                 ],
                 &text,
             );
+            if matches == [5] && !crate::pinned_screenshot::policy::recoverable() {
+                return;
+            }
             if matches.len() == 1 {
                 finish_later(
                     generation,
@@ -269,7 +284,8 @@ fn action_for_index(index: i32, anchor: lexift_core::domain::geometry::Point) ->
             owner: None,
             title: crate::i18n::tr("Open image"),
         }),
-        5 => AppEvent::ExitRequested,
+        5 => AppEvent::PinnedImage(lexift_core::domain::pinned_image::Event::RestoreMouseInput),
+        6 => AppEvent::ExitRequested,
         _ => return None,
     })
 }
@@ -299,6 +315,63 @@ fn initial_matches(labels: &[&str], text: &str) -> Vec<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn recovery_tray_renders_all_locales_themes_dpis_and_recovery_states() {
+        use slint::platform::{
+            Platform, WindowAdapter, WindowEvent,
+            software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+        };
+        struct Backend(Rc<RefCell<Vec<Rc<MinimalSoftwareWindow>>>>);
+        impl Platform for Backend {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                let w = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+                self.0.borrow_mut().push(w.clone());
+                Ok(w)
+            }
+        }
+        let adapters = Rc::new(RefCell::new(vec![]));
+        slint::platform::set_platform(Box::new(Backend(adapters.clone()))).unwrap();
+        let w = TrayMenuWindow::new().unwrap();
+        let adapter = adapters.borrow().last().unwrap().clone();
+        for language in lexift_core::domain::ui_language::UiLanguage::ALL {
+            crate::i18n::select(language);
+            let labels = crate::i18n::tray_labels();
+            w.set_open_label(labels.open.into());
+            w.set_settings_label(labels.settings.into());
+            w.set_quit_label(labels.quit.into());
+            for dark in [false, true] {
+                w.global::<crate::Colors>().set_preference(i32::from(dark));
+                for dpi in [1., 1.25] {
+                    w.window()
+                        .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
+                    for enabled in [false, true] {
+                        w.set_pin_recovery_available(enabled);
+                        w.set_selected(5);
+                        let width = (w.get_menu_width() * dpi).ceil() as u32;
+                        let height = (w.get_menu_height() * dpi).ceil() as u32;
+                        adapter.set_size(slint::PhysicalSize::new(width, height));
+                        adapter.request_redraw();
+                        let mut pixels =
+                            vec![slint::Rgb8Pixel::default(); (width * height) as usize];
+                        adapter.draw_if_needed(|r| {
+                            r.render(&mut pixels, width as usize);
+                        });
+                        assert!(pixels.windows(2).any(|p| p[0] != p[1]));
+                        assert!(width < 1500);
+                        if let Ok(dir) = std::env::var("LEXIFT_PIN_POLICY_RENDER_DIR") {
+                            crate::i18n::write_test_bitmap(
+                                &dir,
+                                &format!("tray-{}-{dark}-{dpi}-{enabled}", language.code()),
+                                width,
+                                height,
+                                pixels.iter().map(|p| [p.r, p.g, p.b, 255]),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
     #[test]
     fn reopening_drops_previous_window_and_invalidates_queued_work() {
         use slint::platform::{
@@ -382,7 +455,7 @@ mod tests {
             Some(AppEvent::SettingsWindowRequested)
         );
         assert_eq!(
-            action_for_index(5, Default::default()),
+            action_for_index(6, Default::default()),
             Some(AppEvent::ExitRequested)
         );
         assert_eq!(action_for_index(-1, Default::default()), None);
@@ -404,6 +477,12 @@ mod tests {
                 }
             ))
         ));
-        assert_eq!(action_for_index(6, Default::default()), None);
+        assert_eq!(
+            action_for_index(5, Default::default()),
+            Some(AppEvent::PinnedImage(
+                lexift_core::domain::pinned_image::Event::RestoreMouseInput
+            ))
+        );
+        assert_eq!(action_for_index(7, Default::default()), None);
     }
 }

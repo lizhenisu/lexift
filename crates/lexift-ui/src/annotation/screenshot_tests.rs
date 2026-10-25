@@ -1049,7 +1049,7 @@ fn screenshot_toolbars_render_all_locales_themes_and_dpi() {
 fn pinned_editor_keeps_documents_history_and_hidden_output_separate() {
     use lexift_core::domain::{
         annotation_export::ExportRequest,
-        pinned_image::{Command as PinCommand, Event as PinEvent, Output},
+        pinned_image::{Command as PinCommand, Event as PinEvent},
     };
     slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
     let mut l = lifecycle();
@@ -1280,7 +1280,8 @@ fn pinned_editor_keeps_documents_history_and_hidden_output_separate() {
         pin.get_interactive(),
         "drawing restores only the target pin input"
     );
-    pin_editor::output(Output::Copy);
+    // The native menu must settle the current document, just like the toolbar.
+    pin.invoke_output_requested(0);
     assert!(commands.borrow().iter().any(|c|matches!(c,lexift_core::AppCommand::PinnedImage(PinCommand::Output{document:Some(d),hidden:false,..}) if d.snapshot.session.objects.len()==2)));
     assert!(pin.get_editing(), "copy must keep editing open");
     let operation = core.borrow().pinned_images[&id].operation;

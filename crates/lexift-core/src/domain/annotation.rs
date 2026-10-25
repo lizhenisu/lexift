@@ -1259,6 +1259,23 @@ impl Session {
         self.image_crop = next;
         true
     }
+    /// Inspect the next history extent without cloning objects or consuming the entry.
+    pub fn history_changes_image_extent(&self, forward: bool, full: Rect) -> bool {
+        let next = if forward {
+            self.redo.last()
+        } else {
+            self.undo.last()
+        };
+        let size = |crop: Option<Rect>, direction: super::image_transform::Orientation| {
+            direction
+                .rect(crop.unwrap_or(full), full)
+                .ok()
+                .map(|b| (b.right - b.left, b.bottom - b.top))
+        };
+        next.is_some_and(|n| {
+            size(n.image_crop, n.image_orientation) != size(self.image_crop, self.image_orientation)
+        })
+    }
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }

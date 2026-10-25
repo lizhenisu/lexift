@@ -110,6 +110,16 @@ pub(crate) fn refresh_recognition_busy(id: u64, busy: bool) {
         });
     }
 }
+pub(super) fn history_allowed(r: &Registry, forward: bool) -> bool {
+    let Some((id, _)) = current().filter(|p| crate::pinned_screenshot::policy::locked(p.0)) else {
+        return true;
+    };
+    source(id).is_some_and(|full| {
+        !r.document
+            .session
+            .history_changes_image_extent(forward, full)
+    })
+}
 pub(crate) fn sync_outputs(states: &lexift_core::domain::pinned_image::States) {
     let Some((id, _)) = current() else {
         return;
@@ -118,10 +128,14 @@ pub(crate) fn sync_outputs(states: &lexift_core::domain::pinned_image::States) {
     let busy = crate::pinned_screenshot::recognition_input_paused(id)
         || states
             .get(&id)
-            .is_some_and(|p| p.busy || p.proposed.is_some());
+            .is_some_and(|p| p.busy || p.proposed.is_some() || p.interaction.pending.is_some());
     REGISTRY.with(|s| {
-        if let Some(main) = s.borrow().as_ref().and_then(|r| r.toolbar_state.main.get()) {
-            main.set_output_busy(busy);
+        if let Some(r) = s.borrow().as_ref() {
+            sync_history_controls(r);
+            if let Some(main) = r.toolbar_state.main.get() {
+                main.set_output_busy(busy);
+                main.set_crop_locked(crate::pinned_screenshot::policy::locked(id));
+            }
         }
     });
 }
@@ -232,6 +246,44 @@ pub(crate) fn begin(id: u64, edit: u64) {
     };
     ACTIVE.with(|s| *s.borrow_mut() = Some(recovery));
     toggle(Instant::now());
+}
+/// Policy changes never reinterpret a live drawing or candidate gesture.
+pub(crate) fn interaction_idle(id: u64) -> bool {
+    if current().is_none_or(|p| p.0 != id) {
+        return true;
+    }
+    REGISTRY.with(|s| {
+        s.try_borrow().ok().is_some_and(|s| {
+            s.as_ref().is_some_and(|r| {
+                r.gesture().is_none() && r.pending_drawing.is_none() && !pin_crop::active()
+            })
+        })
+    })
+}
+pub(crate) fn policy_requested(id: u64) {
+    if current().is_some_and(|p| p.0 == id) {
+        REGISTRY.with(|s| {
+            if let Some(m) = s.borrow().as_ref().and_then(|r| r.toolbar_state.main.get()) {
+                m.set_output_busy(true);
+            }
+        });
+    }
+}
+pub(crate) fn prepare_interaction(id: u64) -> bool {
+    if !interaction_idle(id) {
+        return false;
+    }
+    if current().is_some_and(|p| p.0 == id) {
+        REGISTRY.with(|s| {
+            if let Some(r) = s.borrow_mut().as_mut() {
+                finish_text_edit_registry(r, true);
+                r.finish_style_edit();
+                r.close_panel();
+                r.hints.clear();
+            }
+        });
+    }
+    true
 }
 pub(crate) fn finish() {
     if let Some((id, edit)) = current() {

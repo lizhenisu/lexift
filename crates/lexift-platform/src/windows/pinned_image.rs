@@ -12,6 +12,7 @@ struct State {
     interactive: bool,
     inset: i32,
     dpi: u32,
+    layered_passthrough: bool,
 }
 pub(crate) fn configure(
     window: &impl HasWindowHandle,
@@ -29,19 +30,24 @@ pub(crate) fn configure(
     apply(hwnd, topmost, interactive, inset).map_err(|e| lexift_core::Error::new(e.to_string()))
 }
 fn apply(hwnd: HWND, topmost: bool, interactive: bool, inset: i32) -> Result<()> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, IsWindowEnabled};
     super::annotation_window_order::set_pin_level(hwnd, topmost)?;
     unsafe {
         let existing = GetPropW(hwnd, w!("Lexift.PinnedImagePolicy"));
+        let interaction_changed;
         if !existing.is_invalid() {
             let s = &mut *(existing.0 as *mut State);
+            interaction_changed = s.interactive != interactive;
             s.interactive = interactive;
             s.inset = inset;
             s.dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd).max(96);
         } else {
+            interaction_changed = true;
             let pointer = Box::into_raw(Box::new(State {
                 interactive,
                 inset,
                 dpi: windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd).max(96),
+                layered_passthrough: false,
             }));
             if let Err(e) = SetPropW(
                 hwnd,
@@ -57,7 +63,15 @@ fn apply(hwnd: HWND, topmost: bool, interactive: bool, inset: i32) -> Result<()>
                 return Err(windows::core::Error::from_thread());
             }
         }
-        // WS_EX_TRANSPARENT handles layered-window hit routing across application threads.
+        // Disable local keyboard/focus handling independently of layered mouse routing.
+        // HTTRANSPARENT alone cannot pass mouse input across application threads.
+        // Do not re-enable an unchanged policy: native modal dialogs may own disablement.
+        if interaction_changed {
+            let _ = EnableWindow(hwnd, interactive);
+            if IsWindowEnabled(hwnd).as_bool() != interactive {
+                return Err(windows::core::Error::from_thread());
+            }
+        }
         let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
         SetWindowLongPtrW(
             hwnd,
@@ -81,6 +95,9 @@ fn apply(hwnd: HWND, topmost: bool, interactive: bool, inset: i32) -> Result<()>
             0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
         )?;
+        if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TRANSPARENT.0 != 0) == interactive {
+            return Err(windows::core::Error::from_thread());
+        }
     }
     Ok(())
 }
@@ -106,6 +123,17 @@ unsafe extern "system" fn subclass(
         } else {
             styles.styleNew | WS_EX_TRANSPARENT.0
         };
+        if s.layered_passthrough {
+            styles.styleNew |= (WS_EX_LAYERED | WS_EX_TRANSPARENT).0;
+        }
+    }
+    if message == WM_STYLECHANGING && wparam.0 == GWL_STYLE.0 as isize as usize && lparam.0 != 0 {
+        let s = unsafe { &*(pointer as *const State) };
+        if !s.interactive {
+            unsafe {
+                (*(lparam.0 as *mut STYLESTRUCT)).styleNew |= WS_DISABLED.0;
+            }
+        }
     }
     if message == WM_NCHITTEST {
         let s = unsafe { &*(pointer as *const State) };
@@ -133,9 +161,101 @@ unsafe extern "system" fn subclass(
     unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
 }
 
+/// A read-only Slint snapshot supplies per-pixel alpha while native layered input
+/// routing passes across application threads. Pins remain ordinary capture content.
+pub(crate) fn passthrough_frame(
+    window: &impl HasWindowHandle,
+    frame: Option<(u32, u32, &[u8])>,
+) -> lexift_core::Result<()> {
+    let handle = window
+        .window_handle()
+        .map_err(|e| lexift_core::Error::new(e.to_string()))?;
+    let RawWindowHandle::Win32(raw) = handle.as_raw() else {
+        return Err(lexift_core::Error::new("expected Win32 pin"));
+    };
+    let hwnd = HWND(raw.hwnd.get() as _);
+    let pointer = unsafe { GetPropW(hwnd, w!("Lexift.PinnedImagePolicy")) };
+    if pointer.is_invalid() {
+        return Err(lexift_core::Error::new("Pin policy unavailable"));
+    }
+    if let Some((width, height, pixels)) = frame {
+        unsafe {
+            (*(pointer.0 as *mut State)).layered_passthrough = true;
+        }
+        super::popup::present_annotation_frame(window, pixels, width, height)
+    } else {
+        unsafe {
+            (*(pointer.0 as *mut State)).layered_passthrough = false;
+            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style & !(WS_EX_LAYERED.0 as isize));
+            if GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED.0 as isize != 0 {
+                return Err(lexift_core::Error::new("Could not restore pin rendering"));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn layered_pin_frame_guards_passthrough_and_keeps_capture_identity() {
+        struct Window(HWND);
+        impl raw_window_handle::HasWindowHandle for Window {
+            fn window_handle(
+                &self,
+            ) -> std::result::Result<
+                raw_window_handle::WindowHandle<'_>,
+                raw_window_handle::HandleError,
+            > {
+                let raw = raw_window_handle::Win32WindowHandle::new(
+                    std::num::NonZeroIsize::new(self.0.0 as isize).unwrap(),
+                );
+                Ok(unsafe { raw_window_handle::WindowHandle::borrow_raw(raw.into()) })
+            }
+        }
+        unsafe {
+            let hwnd = CreateWindowExW(
+                WS_EX_TOOLWINDOW,
+                w!("STATIC"),
+                w!("pin frame fixture"),
+                WS_POPUP,
+                100,
+                100,
+                200,
+                100,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            apply(hwnd, true, true, 8).unwrap();
+            let pixels = [20, 40, 60, 255].repeat(200 * 100);
+            passthrough_frame(&Window(hwnd), Some((200, 100, &pixels))).unwrap();
+            apply(hwnd, true, false, 8).unwrap();
+            assert!(!super::super::annotation_overlay::contains(hwnd));
+            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+            SetWindowLongPtrW(
+                hwnd,
+                GWL_EXSTYLE,
+                (style & !(WS_EX_LAYERED | WS_EX_TRANSPARENT).0) as isize,
+            );
+            assert_eq!(
+                GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 & (WS_EX_LAYERED | WS_EX_TRANSPARENT).0,
+                (WS_EX_LAYERED | WS_EX_TRANSPARENT).0
+            );
+            passthrough_frame(&Window(hwnd), None).unwrap();
+            apply(hwnd, true, true, 8).unwrap();
+            assert_eq!(
+                GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 & (WS_EX_LAYERED | WS_EX_TRANSPARENT).0,
+                0
+            );
+            assert!(!super::super::annotation_overlay::contains(hwnd));
+            DestroyWindow(hwnd).unwrap();
+        }
+    }
     #[test]
     fn independent_pin_policy_guards_input_without_capture_exclusion() {
         unsafe {
@@ -173,6 +293,14 @@ mod tests {
                 0,
                 "backend style rewrites must not restore drawing interception"
             );
+            use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, IsWindowEnabled};
+            assert!(!IsWindowEnabled(hwnd).as_bool());
+            let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+            SetWindowLongPtrW(hwnd, GWL_STYLE, (style & !WS_DISABLED.0) as isize);
+            assert!(
+                !IsWindowEnabled(hwnd).as_bool(),
+                "backend cannot re-enable a passive pin"
+            );
             let center = LPARAM(((150u32 << 16) | 150) as isize);
             assert_eq!(
                 SendMessageW(hwnd, WM_NCHITTEST, None, Some(center)).0,
@@ -184,6 +312,14 @@ mod tests {
                     & (WS_EX_TRANSPARENT.0 | WS_EX_TOPMOST.0),
                 0
             );
+            assert!(IsWindowEnabled(hwnd).as_bool());
+            let _ = EnableWindow(hwnd, false);
+            apply(hwnd, false, true, 10).unwrap();
+            assert!(
+                !IsWindowEnabled(hwnd).as_bool(),
+                "unchanged policy preserves native dialog modality"
+            );
+            let _ = EnableWindow(hwnd, true);
             DestroyWindow(hwnd).unwrap();
             assert!(!IsWindow(Some(hwnd)).as_bool());
         }

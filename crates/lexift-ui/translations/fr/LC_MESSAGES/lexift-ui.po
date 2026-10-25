@@ -1961,3 +1961,16 @@ msgstr "Retourner horizontalement"
 
 msgid "Flip vertically"
 msgstr "Retourner verticalement"
+
+
+msgid "Lock position and size"
+msgstr "Verrouiller la position et la taille"
+
+msgid "Mouse passthrough"
+msgstr "Clics traversants"
+
+msgid "Turn off mouse passthrough for all pins"
+msgstr "Désactiver les clics traversants pour toutes les images épinglées"
+
+msgid "Mouse passthrough is on. Restore mouse input from the tray menu."
+msgstr "Les clics traversants sont activés. Rétablissez le contrôle depuis le menu de la zone de notification."

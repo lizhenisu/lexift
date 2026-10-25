@@ -14,8 +14,13 @@ component PinGlow inherits Image {
     image-rendering:smooth;
 }
 export component PinnedScreenshotWindow inherits Window {
+    in property <bool> locked: false;
+    in property <bool> mouse-passthrough: false;
+    in property <bool> policy-busy: false;
+    in property <bool> policy-idle: true;
+    callback policy-requested(bool, bool);
     in property <bool> context-input: true;
-    out property <bool> context-available: root.context-input && (root.interactive || root.editing) && !root.cropping;
+    out property <bool> context-available: root.context-input && !root.mouse-passthrough && !root.policy-busy && (root.interactive || root.editing) && !root.cropping;
     title:@tr("Pinned screenshot"); no-frame:true; always-on-top:root.topmost; background:transparent;
     in property <image> picture;
     in property <image> decoration;
@@ -42,6 +47,9 @@ export component PinnedScreenshotWindow inherits Window {
     callback press-changed(bool); callback drag-requested(); callback close-requested(); callback zoom-requested(float,float,float);
     callback output-requested(int); callback option-requested(int,bool);
     public function close-menu() { context.close(); }
+    public function open-menu(x:length,y:length) {
+        if root.context-available { context.show({x:x - MenuMetrics.shadow-inset,y:y - MenuMetrics.shadow-inset}); }
+    }
     forward-focus:keys;
     if root.shadow-enabled: PinGlow {width:parent.width; height:parent.height;}
     Rectangle {
@@ -55,9 +63,9 @@ export component PinnedScreenshotWindow inherits Window {
             selection-left:root.crop-left;selection-top:root.crop-top;selection-right:root.crop-right;selection-bottom:root.crop-bottom;
         }
         area := TouchArea {
-            width:parent.width; height:parent.height; enabled:root.interactive;
+            width:parent.width; height:parent.height; enabled:root.interactive && !root.mouse-passthrough && !root.policy-busy;
             pointer-event(event)=>{
-                if (!root.editing || root.browsing) && event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.press-changed(true);root.drag-requested();}
+                if !root.locked && (!root.editing || root.browsing) && event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.press-changed(true);root.drag-requested();}
                 if event.kind==PointerEventKind.up || event.kind==PointerEventKind.cancel {root.press-changed(false);}
                 if root.editing && !root.browsing {
                     if event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.edit-pointer(0,self.mouse-x/1px,self.mouse-y/1px);}
@@ -68,7 +76,7 @@ export component PinnedScreenshotWindow inherits Window {
             }
             changed has-hover=>{if root.editing && !root.browsing && !self.has-hover {root.edit-pointer(4,self.mouse-x/1px,self.mouse-y/1px);}}
             mouse-cursor: root.editing && !root.browsing ? (root.cursor==AnnotationCursor.moving ? move : root.cursor==AnnotationCursor.text ? text : root.cursor==AnnotationCursor.horizontal ? ew-resize : root.cursor==AnnotationCursor.vertical ? ns-resize : root.cursor==AnnotationCursor.diagonal-down ? nwse-resize : root.cursor==AnnotationCursor.diagonal-up ? nesw-resize : root.cursor==AnnotationCursor.drawing ? crosshair : default) : default;
-            scroll-event(event)=>{if root.editing && !root.browsing {root.edit-scroll(event.delta-y/1px);return accept;}root.zoom-requested(event.delta-y/1px,self.mouse-x/1px+root.frame-inset,self.mouse-y/1px+root.frame-inset);return accept;}
+            scroll-event(event)=>{if root.locked && (!root.editing || root.browsing) {return accept;}if root.editing && !root.browsing {root.edit-scroll(event.delta-y/1px);return accept;}root.zoom-requested(event.delta-y/1px,self.mouse-x/1px+root.frame-inset,self.mouse-y/1px+root.frame-inset);return accept;}
         }
             // Context input remains available while browsing an edited pin; drawing is separate.
             context := ContextMenuArea {
@@ -83,10 +91,12 @@ export component PinnedScreenshotWindow inherits Window {
                 MenuSeparator {}
                 MenuItem { title:@tr("Window shadow"); checkable:true; checked <=> root.shadow-enabled; activated=>{root.option-requested(0,self.checked);} }
                 MenuItem { title:@tr("Always on top"); checkable:true; checked <=> root.topmost; activated=>{root.option-requested(1,self.checked);} }
+                MenuItem { title:@tr("Lock position and size"); enabled:root.policy-idle && !root.output-busy && !root.recognizing && !root.cropping; checkable:true; checked:root.locked; activated=>{root.policy-requested(!root.locked,root.mouse-passthrough);} }
+                MenuItem { title:@tr("Mouse passthrough"); enabled:root.policy-idle && !root.output-busy && !root.recognizing && !root.cropping && !root.editing; checkable:true; checked:root.mouse-passthrough; activated=>{root.policy-requested(root.locked,!root.mouse-passthrough);} }
                 MenuSeparator {}
                 MenuItem { title:@tr("Close"); activated=>{root.close-requested();} }
             }
-                keys := FocusScope { key-pressed(event)=>{if root.interactive && event.text==Key.Escape {root.escape-requested();return accept;}
+                keys := FocusScope { key-pressed(event)=>{if root.mouse-passthrough || root.policy-busy {return reject;}if root.interactive && event.text==Key.Escape {root.escape-requested();return accept;}
                     if root.editing && !root.browsing {
                         if event.text==Key.Delete {root.edit-key(1);return accept;}
                         if event.text==Key.Return {root.edit-key(2);return accept;}

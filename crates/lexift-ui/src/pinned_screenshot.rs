@@ -16,6 +16,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+pub(crate) mod policy;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
     Preparing,
@@ -151,6 +152,8 @@ impl Origin {
     }
 }
 struct Pin {
+    frame_queued: bool,
+    interaction: lexift_core::domain::pinned_image::interaction::State,
     origin: Origin,
     window: Slot<PinnedScreenshotWindow>,
     image: Arc<CapturedRegion>,
@@ -211,14 +214,20 @@ fn apply_policy(id: u64) -> bool {
         let s = s.borrow();
         let r = s.as_ref()?;
         let p = r.windows.get(&id)?;
-        Some((p.window.get()?.clone_strong(), r.lifecycle.clone()))
+        Some((
+            p.window.get()?.clone_strong(),
+            r.lifecycle.clone(),
+            r.interactive,
+        ))
     });
-    context.is_some_and(|(w, l)| {
+    context.is_some_and(|(w, l, allowed)| {
         (l.configure_pinned_image)(
             w.window(),
             w.get_topmost(),
             // Mouse mode disables drawing, but an edited pin still owns its menu input.
-            w.get_interactive() || w.get_context_available(),
+            allowed
+                && !w.get_mouse_passthrough()
+                && (w.get_interactive() || w.get_context_available()),
             (w.get_frame_inset() * native_scale(w.window())).round() as i32,
         )
     })
@@ -265,14 +274,15 @@ pub(crate) fn apply_theme() {
             .as_ref()
             .map(|r| {
                 r.windows
-                    .values()
-                    .filter_map(|p| p.window.get().map(ComponentHandle::clone_strong))
+                    .iter()
+                    .filter_map(|(&id, p)| p.window.get().map(|w| (id, w.clone_strong())))
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default()
     });
-    for window in windows {
+    for (id, window) in windows {
         crate::theme::apply(&window);
+        policy::schedule_frame(id);
     }
 }
 pub(crate) fn close_menus() {
@@ -450,12 +460,21 @@ pub(crate) fn request_output(id: u64, kind: i32) {
             return None;
         };
         let w = p.window.get()?;
-        if w.get_output_busy() || w.get_cropping() {
+        if w.get_output_busy()
+            || w.get_cropping()
+            || w.get_mouse_passthrough()
+            || w.get_policy_busy()
+        {
             return None;
         };
         Some((r.lifecycle.annotation_window_token)(w.window()))
     });
     if let Some(owner) = owner {
+        // The native pin menu shares the toolbar's document settlement path.
+        // Otherwise an edited pin exports its previous published document.
+        if !crate::annotation::pin_editor::prepare_recognition(id) {
+            return;
+        }
         emit_pin(lexift_core::domain::pinned_image::Event::Requested {
             id,
             kind: if kind == 0 {
@@ -469,6 +488,7 @@ pub(crate) fn request_output(id: u64, kind: i32) {
     }
 }
 pub(crate) fn sync_outputs(states: &lexift_core::domain::pinned_image::States) {
+    policy::sync(states);
     let errors = STATE.with(|s| {
         let mut s = s.borrow_mut();
         let Some(r) = s.as_mut() else { return vec![] };
@@ -540,6 +560,21 @@ fn show_feedback_kind(
     attempt: u8,
     expected: Option<u64>,
 ) {
+    show_feedback_details(
+        id,
+        message,
+        outcome.map(|o| o != lexift_core::domain::ocr::OcrOutcome::Copied),
+        attempt,
+        expected,
+    );
+}
+fn show_feedback_details(
+    id: u64,
+    message: &str,
+    outcome: Option<bool>,
+    attempt: u8,
+    expected: Option<u64>,
+) {
     let context = STATE.with(|s| {
         let s = s.borrow();
         let r = s.as_ref()?;
@@ -576,7 +611,7 @@ fn show_feedback_kind(
             w.window().set_position(position);
         }
         w.set_passive(outcome.is_some());
-        w.set_error(outcome != Some(lexift_core::domain::ocr::OcrOutcome::Copied));
+        w.set_error(outcome.unwrap_or(true));
         let revision = STATE.with(|s| {
             let mut s = s.borrow_mut();
             let p = s.as_mut()?.windows.get_mut(&id)?;
@@ -660,7 +695,7 @@ fn show_feedback_kind(
                         if let Some(p) = s.borrow().as_ref().and_then(|r| r.windows.get(&id)) {
                             p.feedback
                                 .prepare_after(Duration::from_millis(16), move || {
-                                    show_feedback_kind(
+                                    show_feedback_details(
                                         id,
                                         &message,
                                         outcome,
@@ -670,6 +705,22 @@ fn show_feedback_kind(
                                 });
                         }
                     });
+                    return;
+                }
+            }
+            if outcome.is_some() {
+                let frame = w.window().take_snapshot();
+                if !(lifecycle.configure_capture_feedback)(w.window())
+                    || !frame.as_ref().is_ok_and(|pixels| {
+                        (lifecycle.annotation_frame_presenter)(
+                            w.window(),
+                            pixels.as_bytes(),
+                            pixels.width(),
+                            pixels.height(),
+                        )
+                    })
+                {
+                    clear_feedback(id, Some(revision));
                     return;
                 }
             }
@@ -690,7 +741,13 @@ fn show_feedback_kind(
                 if let Some(p) = s.borrow().as_ref().and_then(|r| r.windows.get(&id)) {
                     p.feedback
                         .prepare_after(Duration::from_millis(16), move || {
-                            show_feedback_kind(id, &message, outcome, attempt + 1, Some(revision))
+                            show_feedback_details(
+                                id,
+                                &message,
+                                outcome,
+                                attempt + 1,
+                                Some(revision),
+                            )
                         });
                 }
             });
@@ -707,23 +764,29 @@ pub(crate) fn set_frozen(frozen: bool) {
             .as_ref()
             .map(|r| {
                 r.windows
-                    .values()
-                    .filter(|p| p.phase == Phase::Visible)
-                    .map(|p| {
+                    .iter()
+                    .filter(|(_, p)| p.phase == Phase::Visible)
+                    .map(|(&id, p)| {
                         p.gesture.cancel();
-                        (p.window.get().unwrap().clone_strong(), r.lifecycle.clone())
+                        (
+                            id,
+                            p.window.get().unwrap().clone_strong(),
+                            r.lifecycle.clone(),
+                        )
                     })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default()
     });
-    for (window, lifecycle) in windows {
+    for (id, window, lifecycle) in windows {
         if frozen {
+            clear_feedback(id, None);
             window.invoke_close_menu();
             (lifecycle.cancel_window_interaction)(window.window());
             let _ = window.hide();
         } else {
             let _ = window.show();
+            policy::schedule_frame(id);
         }
     }
 }
@@ -814,6 +877,18 @@ pub(crate) fn input(id: u64) -> Option<Rc<crate::screen_interaction::window::Inp
             .and_then(|r| r.windows.get(&id))
             .map(|p| p.window.input())
     })
+}
+pub(crate) fn set_policy_idle(id: u64, idle: bool) {
+    STATE.with(|s| {
+        if let Some(w) = s
+            .borrow()
+            .as_ref()
+            .and_then(|r| r.windows.get(&id))
+            .and_then(|p| p.window.get())
+        {
+            w.set_policy_idle(idle);
+        }
+    });
 }
 pub(crate) fn edit_window(id: u64, editing: bool) -> Option<PinnedScreenshotWindow> {
     let context = STATE.with(|s| {
@@ -1035,6 +1110,13 @@ fn show_from(
         owned.open(window);
         let window = owned.get().ok_or(())?;
         window.window().on_winit_window_event(move |_, event| {
+            if matches!(
+                event,
+                winit::event::WindowEvent::Resized(_)
+                    | winit::event::WindowEvent::ScaleFactorChanged { .. }
+            ) {
+                policy::schedule_frame(id);
+            }
             if matches!(event, winit::event::WindowEvent::Focused(false)) {
                 crate::annotation::pin_editor::lost_focus(id);
             }
@@ -1088,6 +1170,9 @@ fn show_from(
                 input.post(move || begin_drag(id, serial));
             }
         });
+        window.on_policy_requested(move |locked, passthrough| {
+            policy::request(id, locked, passthrough)
+        });
         window.on_zoom_requested(move |delta, x, y| zoom(id, delta, x, y));
         let initial = match origin {
             Origin::History(
@@ -1120,6 +1205,8 @@ fn show_from(
         r.windows.insert(
             id,
             Pin {
+                frame_queued: false,
+                interaction: Default::default(),
                 origin,
                 window: owned,
                 visible: image.bounds,
@@ -1181,6 +1268,10 @@ fn begin_drag(id: u64, serial: u64) {
         let r = s.as_ref()?;
         let pin = r.windows.get(&id)?;
         if !r.interactive
+            || pin.window.get().is_some_and(|w| w.get_policy_busy())
+            || pin.interaction.applied.locked
+            || pin.interaction.applied.passthrough
+            || pin.interaction.pending.is_some()
             || pin
                 .window
                 .get()
@@ -1245,6 +1336,9 @@ fn prepare(id: u64, attempt: u8) {
             let weak = window.as_weak();
             let deferred = input.clone();
             let sink = input.pointer_sink(move |event| {
+                if weak.upgrade().is_none_or(|w| w.get_mouse_passthrough()) {
+                    return;
+                }
                 if matches!(event, crate::PopupPointerInput::NativeMoveFinished) {
                     deferred.post(move || finish_native_drag(id));
                     return;
@@ -1270,7 +1364,13 @@ fn prepare(id: u64, attempt: u8) {
                             .upgrade()
                             .filter(|w| w.get_context_available() && w.window().is_visible())
                         {
-                            crate::bridge::dispatch_pointer_input(w.window(), event);
+                            w.set_policy_idle(crate::annotation::pin_editor::interaction_idle(id));
+                            // Open the owned menu directly: synthetic pointer dispatch
+                            // depends on stale Slint grabs after an editor handoff.
+                            if let crate::PopupPointerInput::RightPressed { x, y } = event {
+                                let scale = native_scale(w.window());
+                                w.invoke_open_menu(x / scale, y / scale);
+                            }
                         }
                     });
                     return;
@@ -1371,9 +1471,12 @@ fn zoom(id: u64, delta: f32, x: f32, y: f32) {
     let allowed = STATE.with(|s| {
         s.borrow().as_ref().is_some_and(|r| {
             r.interactive
-                && r.windows
-                    .get(&id)
-                    .is_some_and(|p| p.phase == Phase::Visible)
+                && r.windows.get(&id).is_some_and(|p| {
+                    p.phase == Phase::Visible
+                        && !p.interaction.applied.locked
+                        && !p.interaction.applied.passthrough
+                        && p.interaction.pending.is_none()
+                })
         })
     });
     if allowed
@@ -1545,6 +1648,170 @@ mod tests {
             button: slint::platform::PointerEventButton::Left,
         });
         true
+    }
+    #[test]
+    fn policy_native_failure_suspension_and_recovery_keep_instance_state() {
+        use lexift_core::{
+            AppCommand,
+            domain::pinned_image::{self as pin, interaction::Policy},
+        };
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        let fail = Rc::new(Cell::new(false));
+        let failure = fail.clone();
+        let input = Rc::new(Cell::new(true));
+        let native = input.clone();
+        let frame_fail = Rc::new(Cell::new(false));
+        let fail_frame = frame_fail.clone();
+        let lifecycle = WindowLifecycleCallbacks::new(
+            |_, _| true,
+            |_| true,
+            native_drag,
+            |_, _, _| true,
+            |_, _| true,
+            |_, _| true,
+            || true,
+        )
+        .with_pinned_passthrough_frame(move |_, frame| {
+            if let Some((width, height, pixels)) = frame {
+                assert_eq!(pixels.len(), width as usize * height as usize * 4);
+            }
+            !fail_frame.replace(false)
+        })
+        .with_pinned_image_policy(move |_, _, enabled, _| {
+            if failure.replace(false) {
+                return false;
+            }
+            native.set(enabled);
+            true
+        });
+        init(|_| PassiveWindowPreparation::Ready, lifecycle);
+        crate::annotation::screenshot::sync(&state(1, 1));
+        show(
+            1,
+            1,
+            Arc::new(CapturedRegion {
+                bounds: Rect {
+                    left: 0,
+                    top: 0,
+                    right: 200,
+                    bottom: 100,
+                },
+                pixels: [50, 80, 100, 255].repeat(200 * 100),
+            }),
+        );
+        let id = STATE.with(|s| *s.borrow().as_ref().unwrap().windows.keys().next().unwrap());
+        let w = STATE.with(|s| {
+            s.borrow().as_ref().unwrap().windows[&id]
+                .window
+                .get()
+                .unwrap()
+                .clone_strong()
+        });
+        let core = Rc::new(RefCell::new(lexift_core::AppState::default()));
+        core.borrow_mut()
+            .pinned_images
+            .insert(id, pin::State::default());
+        let state = core.clone();
+        crate::annotation::set_handler(Rc::new(move |event| {
+            let commands = state.borrow_mut().reduce(event);
+            let snapshot = state.borrow().pinned_images.clone();
+            sync_outputs(&snapshot);
+            for c in commands {
+                if let AppCommand::PinnedImage(pin::Command::ApplyInteraction {
+                    id,
+                    request,
+                    policy,
+                }) = c
+                {
+                    slint::Timer::single_shot(Duration::ZERO, move || {
+                        policy::apply(id, request, policy)
+                    });
+                }
+            }
+        }));
+        policy::request(id, true, false);
+        slint::platform::update_timers_and_animations();
+        assert!(w.get_locked() && input.get());
+        // Browsing an edited pin owns context input even though drawing is off.
+        // Pending policy work temporarily disables it; acknowledgement must restore it.
+        w.set_editing(true);
+        w.set_interactive(false);
+        w.set_context_input(true);
+        for locked in [false, true] {
+            policy::request(id, locked, false);
+            slint::platform::update_timers_and_animations();
+            assert_eq!(w.get_locked(), locked);
+            assert!(w.get_context_available() && input.get());
+        }
+        w.set_editing(false);
+        w.set_interactive(true);
+        let size = w.window().size();
+        zoom(id, 120., 40., 40.);
+        assert_eq!(w.window().size(), size);
+        frame_fail.set(true);
+        policy::request(id, true, true);
+        slint::platform::update_timers_and_animations();
+        assert!(!w.get_mouse_passthrough());
+        assert!(input.get());
+        policy::request(id, true, true);
+        slint::platform::update_timers_and_animations();
+        assert!(w.get_mouse_passthrough());
+        assert!(!input.get());
+        assert!(!w.get_context_available());
+        set_annotation_interaction(false);
+        set_annotation_interaction(true);
+        assert!(!input.get());
+        fail.set(true);
+        emit_pin(pin::Event::RestoreMouseInput);
+        slint::platform::update_timers_and_animations();
+        assert!(w.get_mouse_passthrough() && w.get_locked());
+        assert!(!input.get());
+        assert!(
+            core.borrow().pinned_images[&id]
+                .interaction
+                .failed
+                .is_some()
+        );
+        let stale = core.borrow().pinned_images.clone();
+        set_annotation_interaction(false);
+        set_frozen(true);
+        assert!(!w.window().is_visible());
+        core.borrow_mut().screenshot.phase = ScreenshotPhase::Preparing;
+        emit_pin(pin::Event::RestoreMouseInput);
+        slint::platform::update_timers_and_animations();
+        policy::sync(&stale);
+        assert!(!w.get_mouse_passthrough() && w.get_locked());
+        w.set_interactive(true);
+        assert!(apply_policy(id));
+        assert!(!w.window().is_visible());
+        assert!(!input.get());
+        core.borrow_mut().screenshot.phase = ScreenshotPhase::Idle;
+        set_frozen(false);
+        set_annotation_interaction(true);
+        assert!(input.get());
+        let before = core.borrow().pinned_images[&id].interaction.serial;
+        policy::apply(
+            id,
+            before - 1,
+            Policy {
+                locked: false,
+                passthrough: true,
+            },
+        );
+        assert!(!w.get_mouse_passthrough());
+        assert!(input.get());
+        let keys = Rc::new(Cell::new(0));
+        let captured = keys.clone();
+        w.on_escape_requested(move || captured.set(captured.get() + 1));
+        w.set_mouse_passthrough(true);
+        w.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::Escape.into(),
+            });
+        assert_eq!(keys.get(), 0);
+        close(id);
+        policy::apply(id, before, Policy::default());
+        crate::annotation::screenshot::shutdown();
     }
     #[test]
     fn edited_pin_keeps_context_input_independent_of_drawing_and_global_suspend() {

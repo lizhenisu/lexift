@@ -1961,3 +1961,16 @@ msgstr "Flip horizontally"
 
 msgid "Flip vertically"
 msgstr "Flip vertically"
+
+
+msgid "Lock position and size"
+msgstr "Lock position and size"
+
+msgid "Mouse passthrough"
+msgstr "Mouse passthrough"
+
+msgid "Turn off mouse passthrough for all pins"
+msgstr "Turn off mouse passthrough for all pins"
+
+msgid "Mouse passthrough is on. Restore mouse input from the tray menu."
+msgstr "Mouse passthrough is on. Restore mouse input from the tray menu."

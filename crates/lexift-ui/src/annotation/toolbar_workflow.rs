@@ -1597,6 +1597,12 @@ impl Registry {
             crate::pinned_screenshot::set_edit_interaction(id, !self.document.mode.is_mouse());
         }
         if let Some(main) = self.toolbar_state.main.get() {
+            main.set_crop_locked(
+                self.screenshot
+                    .as_ref()
+                    .and_then(|e| e.pin)
+                    .is_some_and(|p| crate::pinned_screenshot::policy::locked(p.0)),
+            );
             main.set_operate(self.document.mode.is_mouse());
             main.set_long_capture_available(screenshot::long::available(self));
             main.set_active_group(self.document.mode.selected_group());

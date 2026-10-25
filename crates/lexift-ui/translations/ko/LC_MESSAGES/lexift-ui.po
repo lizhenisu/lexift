@@ -1961,3 +1961,16 @@ msgstr "좌우 뒤집기"
 
 msgid "Flip vertically"
 msgstr "상하 뒤집기"
+
+
+msgid "Lock position and size"
+msgstr "위치 및 크기 잠금"
+
+msgid "Mouse passthrough"
+msgstr "마우스 통과"
+
+msgid "Turn off mouse passthrough for all pins"
+msgstr "모든 고정 이미지의 마우스 통과 해제"
+
+msgid "Mouse passthrough is on. Restore mouse input from the tray menu."
+msgstr "마우스 통과가 켜졌습니다. 트레이 메뉴에서 마우스 조작을 복원하세요."

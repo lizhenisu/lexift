@@ -1961,3 +1961,16 @@ msgstr "Capovolgi orizzontalmente"
 
 msgid "Flip vertically"
 msgstr "Capovolgi verticalmente"
+
+
+msgid "Lock position and size"
+msgstr "Blocca posizione e dimensioni"
+
+msgid "Mouse passthrough"
+msgstr "Passaggio del mouse"
+
+msgid "Turn off mouse passthrough for all pins"
+msgstr "Disattiva il passaggio del mouse per tutte le immagini fissate"
+
+msgid "Mouse passthrough is on. Restore mouse input from the tray menu."
+msgstr "Il passaggio del mouse è attivo. Ripristina i comandi dal menu nell’area di notifica."

@@ -776,6 +776,9 @@ fn history(forward: bool) {
                 return None;
             }
         }
+        if !pin_editor::history_allowed(r, forward) {
+            return None;
+        }
         if pin_editor::active() {
             let mut candidate = r.document.session.clone();
             let changed = if forward {
