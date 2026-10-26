@@ -2025,3 +2025,6 @@ msgstr "+{}"
 
 msgid "{}"
 msgstr "{}"
+
+msgid "Contrast"
+msgstr "コントラスト"

@@ -448,11 +448,25 @@ fn image_color_changes_content_once_but_never_edit_controls() {
     let original = paint_frames(&input, &cancel, &mut cache).unwrap();
     for grayscale in [false, true] {
         for inverted in [false, true] {
-            for brightness in lexift_core::domain::image_color::Brightness::ALL {
+            for (brightness, contrast) in lexift_core::domain::image_color::Brightness::ALL
+                .into_iter()
+                .map(|b| (b, Default::default()))
+                .chain(
+                    lexift_core::domain::image_color::Contrast::levels()
+                        .into_iter()
+                        .map(|c| {
+                            (
+                                lexift_core::domain::image_color::Brightness::new(25).unwrap(),
+                                c,
+                            )
+                        }),
+                )
+            {
                 let color = lexift_core::domain::image_color::Color {
                     grayscale,
                     inverted,
                     brightness,
+                    contrast,
                 };
                 Arc::make_mut(&mut input.snapshot.session).image_color = color;
                 let frames = paint_frames(&input, &cancel, &mut cache).unwrap();
@@ -471,9 +485,15 @@ fn image_color_changes_content_once_but_never_edit_controls() {
                         for i in 0..3 {
                             let c = if grayscale { y } else { p[i] };
                             let c = if inverted { p[3] - c } else { c };
+                            let mid = f64::from(p[3]) / 2.;
+                            let c = ((f64::from(c) - mid)
+                                * (1. + f64::from(contrast.value()) / 100.)
+                                + mid)
+                                .round()
+                                .clamp(0., 2. * mid);
                             let delta =
                                 (f64::from(p[3]) * f64::from(brightness.value()) / 100.).round();
-                            out[i] = (f64::from(c) + delta).clamp(0., f64::from(p[3])) as u8;
+                            out[i] = (c + delta).clamp(0., f64::from(p[3])) as u8;
                         }
                         out
                     })

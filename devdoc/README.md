@@ -153,3 +153,4 @@
 - [贴图灰度与反色验证](releases/pin-image-color.md)
 - [托盘菜单连续打开验证](releases/tray-menu-stability.md)
 - [贴图亮度调节验证](releases/pin-brightness.md)
+- [贴图对比度调节验证](releases/pin-contrast.md)

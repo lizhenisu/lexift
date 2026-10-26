@@ -1427,7 +1427,13 @@ mod tests {
                 );
                 for grayscale in [false, true] {
                     for inverted in [false, true] {
-                        for brightness in lexift_core::domain::image_color::Brightness::ALL {
+                        // Pair representative levels here; exhaustive combinations are pure-pixel tests.
+                        for (index, brightness) in lexift_core::domain::image_color::Brightness::ALL
+                            .into_iter()
+                            .enumerate()
+                        {
+                            let contrast = lexift_core::domain::image_color::Contrast::levels()
+                                [(index + 3) % 9];
                             let mut colored = snapshot.clone();
                             let session = Arc::make_mut(&mut colored.session);
                             session.image_orientation = direction;
@@ -1435,6 +1441,7 @@ mod tests {
                                 grayscale,
                                 inverted,
                                 brightness,
+                                contrast,
                             };
                             let output = runtime
                                 .output_image(
@@ -1462,6 +1469,15 @@ mod tests {
                                     for c in &mut p[..3] {
                                         *c = a - *c;
                                     }
+                                }
+                                let mid = f64::from(p[3]) / 2.;
+                                for c in &mut p[..3] {
+                                    *c = ((f64::from(*c) - mid)
+                                        * (1. + f64::from(contrast.value()) / 100.)
+                                        + mid)
+                                        .round()
+                                        .clamp(0., 2. * mid)
+                                        as u8;
                                 }
                                 let delta = (f64::from(p[3]) * f64::from(brightness.value())
                                     / 100.)

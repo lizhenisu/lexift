@@ -53,6 +53,15 @@ pub(super) fn brightness_request(id: u64, value: i32) {
         lexift_core::domain::image_color::Action::Brightness(level),
     );
 }
+pub(super) fn contrast_request(id: u64, value: i32) {
+    let Some(level) = lexift_core::domain::image_color::Contrast::new(value) else {
+        return;
+    };
+    request_color_action(
+        id,
+        lexift_core::domain::image_color::Action::Contrast(level),
+    );
+}
 fn request_color_action(id: u64, action: lexift_core::domain::image_color::Action) {
     let allowed = visibility::operable(id)
         && !super::zoom::panning(id)
@@ -176,6 +185,7 @@ pub(super) fn sync(states: &States) {
                         w.set_grayscale(color.grayscale);
                         w.set_inverted(color.inverted);
                         w.set_brightness(i32::from(color.brightness.value()));
+                        w.set_contrast(i32::from(color.contrast.value()));
                         w.set_transform_busy(s.transforming);
                         w.set_transform_enabled(
                             !p.user_hidden

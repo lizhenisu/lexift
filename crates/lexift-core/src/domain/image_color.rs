@@ -27,17 +27,34 @@ impl Brightness {
     }
 }
 
+/// Contrast uses the same supported levels, with a distinct document meaning.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Contrast(Brightness);
+impl Contrast {
+    pub fn new(value: i32) -> Option<Self> {
+        Brightness::new(value).map(Self)
+    }
+    pub fn levels() -> [Self; 9] {
+        Brightness::ALL.map(Self)
+    }
+    pub fn value(self) -> i16 {
+        self.0.value()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Color {
     pub grayscale: bool,
     pub inverted: bool,
     pub brightness: Brightness,
+    pub contrast: Contrast,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Grayscale,
     Invert,
     Brightness(Brightness),
+    Contrast(Contrast),
 }
 impl Color {
     pub fn action(mut self, action: Action) -> Self {
@@ -45,6 +62,7 @@ impl Color {
             Action::Grayscale => self.grayscale = !self.grayscale,
             Action::Invert => self.inverted = !self.inverted,
             Action::Brightness(level) => self.brightness = level,
+            Action::Contrast(level) => self.contrast = level,
         }
         self
     }
@@ -79,6 +97,15 @@ impl Color {
                     *c = a.saturating_sub(*c);
                 }
             }
+            let contrast = i32::from(self.contrast.value());
+            if contrast != 0 {
+                for c in &mut p[..3] {
+                    // Work around the premultiplied midpoint without unpremultiplying.
+                    let n = 200 * i32::from(*c) + contrast * (2 * i32::from(*c) - i32::from(a));
+                    let rounded = n.signum() * ((n.abs() + 100) / 200);
+                    *c = rounded.clamp(0, i32::from(a)) as u8;
+                }
+            }
             let level = self.brightness.value();
             if level != 0 {
                 let offset = level.signum() * ((i16::from(a) * level.abs() + 50) / 100);
@@ -93,6 +120,135 @@ impl Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn contrast_and_brightness_match_independent_reference_for_every_alpha() {
+        for value in [i32::MIN, -101, -99, 1, 24, 101, i32::MAX] {
+            assert!(Contrast::new(value).is_none());
+        }
+        for contrast in Contrast::levels() {
+            assert_eq!(Contrast::new(i32::from(contrast.value())), Some(contrast));
+            for brightness in Brightness::ALL {
+                for a in 0..=255u8 {
+                    for grayscale in [false, true] {
+                        for inverted in [false, true] {
+                            let original = [a / 7, a / 2, a, a];
+                            let mut actual = original;
+                            Color {
+                                grayscale,
+                                inverted,
+                                brightness,
+                                contrast,
+                            }
+                            .apply(&mut actual, &AtomicBool::new(false))
+                            .unwrap();
+                            let gray = (54 * u32::from(original[0])
+                                + 183 * u32::from(original[1])
+                                + 19 * u32::from(original[2])
+                                + 128)
+                                / 256;
+                            for i in 0..3 {
+                                let mut c = if grayscale {
+                                    f64::from(gray)
+                                } else {
+                                    f64::from(original[i])
+                                };
+                                if inverted {
+                                    c = f64::from(a) - c;
+                                }
+                                let mid = f64::from(a) / 2.;
+                                c = ((c - mid) * (1. + f64::from(contrast.value()) / 100.) + mid)
+                                    .round()
+                                    .clamp(0., f64::from(a));
+                                let delta =
+                                    (f64::from(a) * f64::from(brightness.value()) / 100.).round();
+                                assert_eq!(
+                                    actual[i],
+                                    (c + delta).clamp(0., f64::from(a)) as u8,
+                                    "{a} {contrast:?} {brightness:?}"
+                                );
+                            }
+                            assert_eq!(actual[3], a);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn contrast_midpoint_endpoints_reset_and_mixed_history() {
+        use crate::domain::{
+            annotation::{Bounds, Extra, Kind, Object, Session, Style},
+            geometry::Rect,
+            image_transform::{Action as Turn, Orientation},
+        };
+        let mut session = Session::new();
+        session.image_source = Some(Rect {
+            left: -10,
+            top: 2,
+            right: 90,
+            bottom: 202,
+        });
+        session.add(Object {
+            id: Default::default(),
+            image_basis: Default::default(),
+            kind: Kind::Rectangle,
+            bounds: Bounds::from_corners((0., 10.), (20., 30.)),
+            points: vec![],
+            erased: vec![],
+            style: Style::default(),
+            extra: Extra::None,
+        });
+        let baseline = Color::default()
+            .action(Action::Grayscale)
+            .action(Action::Invert)
+            .action(Action::Brightness(Brightness::new(25).unwrap()));
+        session.color_image(baseline);
+        assert!(session.set_image_crop(
+            Rect {
+                left: 0,
+                top: 10,
+                right: 50,
+                bottom: 100
+            },
+            session.image_source.unwrap()
+        ));
+        session.orient_image(Orientation::identity().action(Turn::Right));
+        let changed = baseline.action(Action::Contrast(Contrast::new(100).unwrap()));
+        assert!(session.color_image(changed));
+        assert!(session.undo());
+        assert!(!session.color_image(baseline));
+        assert!(session.can_redo());
+        assert!(session.redo());
+        let frozen = session.freeze_visible(&session).restored_image();
+        assert_eq!(frozen.image_color, changed);
+        assert_eq!(frozen.objects.len(), 1);
+        assert_eq!(frozen.image_crop, session.image_crop);
+        assert_eq!(frozen.image_orientation, session.image_orientation);
+        assert!(!frozen.can_undo());
+        let original = [25, 90, 210, 255];
+        let mut reset = original;
+        changed
+            .action(Action::Contrast(Contrast::default()))
+            .apply(&mut reset, &AtomicBool::new(false))
+            .unwrap();
+        let mut expected = original;
+        baseline
+            .apply(&mut expected, &AtomicBool::new(false))
+            .unwrap();
+        assert_eq!(reset, expected);
+        let mut gray = [0, 1, 255, 255];
+        Color::default()
+            .action(Action::Contrast(Contrast::new(-100).unwrap()))
+            .apply(&mut gray, &AtomicBool::new(false))
+            .unwrap();
+        assert_eq!(gray, [128, 128, 128, 255]);
+        let mut doubled = [96, 160, 128, 255];
+        Color::default()
+            .action(Action::Contrast(Contrast::new(100).unwrap()))
+            .apply(&mut doubled, &AtomicBool::new(false))
+            .unwrap();
+        assert_eq!(doubled, [65, 193, 129, 255]);
+    }
     #[test]
     fn nine_levels_match_independent_reference_for_every_alpha() {
         for value in [i32::MIN, -101, -99, 1, 24, 101, i32::MAX] {
@@ -109,6 +265,7 @@ mod tests {
                             grayscale,
                             inverted,
                             brightness: level,
+                            contrast: Default::default(),
                         }
                         .apply(&mut actual, &AtomicBool::new(false))
                         .unwrap();

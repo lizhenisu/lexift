@@ -33,6 +33,8 @@ export component PinnedScreenshotWindow inherits Window {
     in property <int> brightness:0;
     callback color-requested(int);
     callback brightness-requested(int);
+    in property <int> contrast:0;
+    callback contrast-requested(int);
     in property <bool> locked: false;
     in property <int> content-opacity-percent: 100;
     callback opacity-requested(int);
@@ -162,6 +164,15 @@ export component PinnedScreenshotWindow inherits Window {
                         title:value == 0 ? @tr("0 (No adjustment)") : value > 0 ? @tr("+{}",value) : @tr("{}",value);
                         checkable:true;checked:root.brightness == value;
                         activated=>{root.brightness-requested(value);}
+                    }
+                }
+                Menu {
+                    title:@tr("Contrast");
+                    enabled:root.color-enabled && root.policy-idle && !root.output-busy && !root.recognizing && !root.cropping;
+                    for value in [-100,-75,-50,-25,0,25,50,75,100]: MenuItem {
+                        title:value == 0 ? @tr("0 (No adjustment)") : value > 0 ? @tr("+{}",value) : @tr("{}",value);
+                        checkable:true;checked:root.contrast == value;
+                        activated=>{root.contrast-requested(value);}
                     }
                 }
                 MenuSeparator {}

@@ -36,6 +36,7 @@
 | 贴图倍率与编辑视口 | 已接入，验收边界见记录 | 普通显示提供物理倍率和适应工作区；编辑使用有界视口平移和局部放大，复用原 HWND、坐标和原始输出。见[交互说明](../features/pin-interaction.md#贴图倍率与编辑视口)及[验证](../releases/pin-image-zoom.md) |
 | 贴图灰度／反色 | 已接入，验收边界见记录 | 独立勾选、共享历史、完整成品处理及处理后底图 OCR；保留原资源和视口。见[交互说明](../features/pin-interaction.md#灰度与反色)与[验证](../releases/pin-image-color.md) |
 | 贴图亮度 | 已接入，验证边界见专项记录 | 九档非破坏亮度，位于灰度／反色之后；共享历史、后台候选、输出和 OCR，不影响窗口几何或透明度。见[交互说明](../features/pin-interaction.md#亮度)及[验证](../releases/pin-brightness.md) |
+| 贴图对比度 | 已接入，验证边界见专项记录 | 九档非破坏对比度，位于灰度／反色之后、亮度之前；共享历史、候选和输出，最高增益为 2 倍。见[交互说明](../features/pin-interaction.md#对比度)及[验证](../releases/pin-contrast.md) |
 | 外部图片导入 | 已接入，验证边界见专项记录 | 工具条／托盘打开 PNG／JPEG 编辑，或从剪贴板直接贴图；成功输出才记历史，不修改 R。见[导入说明](../features/image-import.md)与[验证记录](../releases/image-import.md) |
 | PNG／JPEG 保存 | 已接入 | 全部图片保存入口统一支持，PNG 默认，JPEG 95% 质量及白底；见[保存格式验证](../releases/image-save-formats.md) |
 

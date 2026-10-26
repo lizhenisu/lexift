@@ -479,4 +479,55 @@ mod tests {
         assert_eq!(s.pinned_images[&1].document, before);
         finish(&mut s);
     }
+    #[test]
+    fn contrast_candidates_keep_lock_history_and_retire_failures_by_revision() {
+        use crate::domain::image_color::{Action as C, Contrast};
+        let mut s = state();
+        s.pinned_images
+            .get_mut(&1)
+            .unwrap()
+            .interaction
+            .applied
+            .locked = true;
+        let original = s.pinned_images[&1].document.clone();
+        assert!(color_request(&mut s, 1, C::Contrast(Contrast::default())).is_empty());
+        color_request(&mut s, 1, C::Contrast(Contrast::new(50).unwrap()));
+        assert_eq!(s.pinned_images[&1].document, original);
+        assert!(color_request(&mut s, 1, C::Contrast(Contrast::new(100).unwrap())).is_empty());
+        let stale = s.pinned_images[&1].revision;
+        pin::reduce(
+            &mut s,
+            Event::PreviewFailed {
+                id: 1,
+                revision: stale,
+                error: "fixture".into(),
+            },
+        );
+        assert_eq!(s.pinned_images[&1].document, original);
+        assert!(!s.pinned_images[&1].busy);
+        color_request(&mut s, 1, C::Contrast(Contrast::new(100).unwrap()));
+        pin::reduce(
+            &mut s,
+            Event::PreviewFailed {
+                id: 1,
+                revision: stale,
+                error: "stale".into(),
+            },
+        );
+        assert!(s.pinned_images[&1].busy);
+        finish(&mut s);
+        assert_eq!(s.pinned_images[&2].document, original);
+        let mut doc = (*s.pinned_images[&1]
+            .document
+            .as_ref()
+            .unwrap()
+            .snapshot
+            .session)
+            .clone();
+        assert_eq!(doc.image_color.contrast, Contrast::new(100).unwrap());
+        assert!(doc.undo());
+        assert_eq!(doc.image_color.contrast, Contrast::default());
+        assert!(doc.redo());
+        assert!(color_request(&mut s, 1, C::Contrast(Contrast::new(100).unwrap())).is_empty());
+    }
 }

@@ -3672,6 +3672,8 @@ mod tests {
                 let gray = (turn / 18) & 1 != 0;
                 let invert = (turn / 18) & 2 != 0;
                 let brightness = lexift_core::domain::image_color::Brightness::ALL[(turn / 2) % 9];
+                let contrast =
+                    lexift_core::domain::image_color::Contrast::levels()[((turn / 2) + 3) % 9];
                 let filter = |mut pixels: Vec<u8>| {
                     for p in pixels.as_chunks_mut::<4>().0.iter_mut() {
                         let y = ((54 * u32::from(p[0])
@@ -3687,6 +3689,13 @@ mod tests {
                             for c in &mut p[..3] {
                                 *c = alpha - *c;
                             }
+                        }
+                        let mid = f64::from(p[3]) / 2.;
+                        for c in &mut p[..3] {
+                            *c = ((f64::from(*c) - mid) * (1. + f64::from(contrast.value()) / 100.)
+                                + mid)
+                                .round()
+                                .clamp(0., 2. * mid) as u8;
                         }
                         let delta =
                             (f64::from(p[3]) * f64::from(brightness.value()) / 100.).round();
@@ -3825,6 +3834,8 @@ mod tests {
                         inverted: (turn / 18) & 2 != 0,
                         brightness: lexift_core::domain::image_color::Brightness::ALL
                             [(turn / 2) % 9],
+                        contrast: lexift_core::domain::image_color::Contrast::levels()
+                            [((turn / 2) + 3) % 9],
                     },
                     orientation,
                     source: fixture().bounds,
