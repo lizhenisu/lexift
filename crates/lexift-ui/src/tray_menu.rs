@@ -1,5 +1,9 @@
 //! On-demand notification-area menu. Deferred callbacks are scoped to one opening.
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use lexift_core::{AppEvent, ports::tray::TrayMenuRequest};
 use slint::ComponentHandle;
@@ -10,7 +14,15 @@ use crate::{
     bridge::{PassiveWindowPreparation, PopupPointerInput, WindowLifecycleCallbacks},
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Opening {
+    generation: u64,
+    request_id: u64,
+}
 struct Registry {
+    request: Option<TrayMenuRequest>,
+    last_request: u64,
+    started: Option<Instant>,
     window: Option<TrayMenuWindow>,
     handler: Option<Rc<dyn Fn(AppEvent)>>,
     prepare: fn(&slint::Window) -> PassiveWindowPreparation,
@@ -28,6 +40,9 @@ pub(crate) fn init(
 ) {
     REGISTRY.with(|slot| {
         *slot.borrow_mut() = Some(Registry {
+            request: None,
+            last_request: 0,
+            started: None,
             window: None,
             handler: None,
             prepare,
@@ -66,17 +81,33 @@ pub(crate) fn apply_theme() {
     });
 }
 
+fn matches(r: &Registry, key: Opening) -> bool {
+    r.generation == key.generation && r.request.is_some_and(|q| q.request_id == key.request_id)
+}
 pub(crate) fn close(return_focus: bool) {
+    close_with_reason(return_focus, "external_close");
+}
+fn close_with_reason(return_focus: bool, reason: &'static str) {
     let restore = REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut()?;
+        let request = r.request.take();
+        let started = r.started.take();
         r.generation = r.generation.wrapping_add(1);
         let window = r.window.take()?;
-        // Never return focus if cancellation raced with activation of another app.
         let focused = window
             .window()
             .with_winit_window(|w| w.has_focus())
             .unwrap_or(false);
+        tracing::debug!(
+            request_id = request.map(|q| q.request_id),
+            generation = r.generation,
+            elapsed_ms = started.map(|t| t.elapsed().as_millis()),
+            reason,
+            focused,
+            return_focus,
+            "Destroy tray menu instance"
+        );
         (r.lifecycle.set_popup_dismissal)(window.window(), false);
         let _ = window.hide();
         drop(window);
@@ -87,18 +118,25 @@ pub(crate) fn close(return_focus: bool) {
     }
     crate::bridge::schedule_idle_memory_trim();
 }
-
-fn finish_later(generation: u64, action: Option<AppEvent>, restore: bool) {
+/// Deferred focus, pointer and action callbacks belong to one native intent and instance.
+fn finish_later(key: Opening, action: Option<AppEvent>, restore: bool, reason: &'static str) {
     let _ = slint::invoke_from_event_loop(move || {
         let handler = REGISTRY.with(|slot| {
             let slot = slot.borrow();
             let r = slot
                 .as_ref()
-                .filter(|r| r.generation == generation && r.window.is_some())?;
+                .filter(|r| matches(r, key) && r.window.is_some())?;
             Some(r.handler.clone())
         });
         let Some(handler) = handler else { return };
-        close(restore);
+        tracing::debug!(
+            request_id = key.request_id,
+            generation = key.generation,
+            reason,
+            has_action = action.is_some(),
+            "Finish tray menu intent"
+        );
+        close_with_reason(restore, reason);
         if let Some((handler, action)) = handler.zip(action) {
             handler(action);
         }
@@ -106,12 +144,33 @@ fn finish_later(generation: u64, action: Option<AppEvent>, restore: bool) {
 }
 
 pub(crate) fn show(request: TrayMenuRequest) {
-    close(false);
+    let accepted = REGISTRY.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|r| request.request_id > r.last_request)
+    });
+    if !accepted {
+        tracing::debug!(
+            request_id = request.request_id,
+            "Ignore retired tray menu intent"
+        );
+        return;
+    }
+    close_with_reason(false, "replaced");
     let result = REGISTRY.with(|slot| -> Result<(), slint::PlatformError> {
         let mut slot = slot.borrow_mut();
         let Some(r) = slot.as_mut() else {
             return Ok(());
         };
+        r.last_request = request.request_id;
+        r.request = Some(request);
+        r.started = Some(Instant::now());
+        tracing::debug!(
+            request_id = request.request_id,
+            generation = r.generation,
+            keyboard = request.keyboard,
+            "Create tray menu instance"
+        );
         let window = TrayMenuWindow::new()?;
         crate::theme::apply(&window);
         let labels = crate::i18n::tray_labels();
@@ -123,7 +182,10 @@ pub(crate) fn show(request: TrayMenuRequest) {
         window.set_pin_restore_available(crate::pinned_screenshot::visibility::available(false));
         window.set_import_available(crate::annotation::image_import::available());
         window.set_selected(if request.keyboard { 0 } else { -1 });
-        let generation = r.generation;
+        let key = Opening {
+            generation: r.generation,
+            request_id: request.request_id,
+        };
         window.on_action(move |index| {
             if index == 5 && !crate::pinned_screenshot::policy::recoverable() {
                 return;
@@ -137,10 +199,10 @@ pub(crate) fn show(request: TrayMenuRequest) {
                 return;
             }
             if let Some(event) = action_for_index(index, request.anchor) {
-                finish_later(generation, Some(event), false);
+                finish_later(key, Some(event), false, "action");
             }
         });
-        window.on_cancel(move || finish_later(generation, None, true));
+        window.on_cancel(move || finish_later(key, None, true, "explicit_cancel"));
         let weak = window.as_weak();
         window.on_character(move |text| {
             let Some(window) = weak.upgrade() else { return };
@@ -169,9 +231,10 @@ pub(crate) fn show(request: TrayMenuRequest) {
             }
             if matches.len() == 1 {
                 finish_later(
-                    generation,
+                    key,
                     action_for_index(matches[0], request.anchor),
                     false,
+                    "mnemonic_action",
                 );
             } else if let Some(next) = matches
                 .iter()
@@ -183,14 +246,21 @@ pub(crate) fn show(request: TrayMenuRequest) {
             }
         });
         window.window().on_close_requested(move || {
-            finish_later(generation, None, true);
+            finish_later(key, None, true, "window_close");
             slint::CloseRequestResponse::KeepWindowShown
         });
         let mut was_focused = false;
         window.window().on_winit_window_event(move |_, event| {
             if let winit::event::WindowEvent::Focused(focused) = event {
+                tracing::debug!(
+                    request_id = key.request_id,
+                    generation = key.generation,
+                    focused,
+                    was_focused,
+                    "Tray menu focus event"
+                );
                 if was_focused && !focused {
-                    finish_later(generation, None, false);
+                    finish_later(key, None, false, "focus_lost");
                 }
                 was_focused |= focused;
             }
@@ -202,21 +272,22 @@ pub(crate) fn show(request: TrayMenuRequest) {
         ));
         r.window = Some(window);
         crate::bridge::cancel_idle_memory_trim();
-        schedule_show(generation, request, 0);
+        schedule_show(key, request, 0);
         Ok(())
     });
     if let Err(error) = result {
-        tracing::warn!(%error, "could not create tray menu");
+        tracing::warn!(request_id = request.request_id, %error, "could not create tray menu");
+        close_with_reason(false, "create_failed");
     }
 }
 
-fn schedule_show(generation: u64, request: TrayMenuRequest, attempt: u8) {
+fn schedule_show(key: Opening, request: TrayMenuRequest, attempt: u8) {
     slint::Timer::single_shot(
         Duration::from_millis(if attempt == 0 { 0 } else { 16 }),
         move || {
             REGISTRY.with(|slot| {
                 let slot = slot.borrow();
-                let Some(r) = slot.as_ref().filter(|r| r.generation == generation) else {
+                let Some(r) = slot.as_ref().filter(|r| matches(r, key)) else {
                     return;
                 };
                 let Some(window) = r.window.as_ref() else {
@@ -224,44 +295,62 @@ fn schedule_show(generation: u64, request: TrayMenuRequest, attempt: u8) {
                 };
                 match (r.prepare)(window.window()) {
                     PassiveWindowPreparation::Ready => {
+                        tracing::debug!(request_id = key.request_id, generation = key.generation, attempt,
+                            elapsed_ms = r.started.map(|t| t.elapsed().as_millis()), "Tray menu prepared");
                         place(window, request, &r.lifecycle);
-                        if !(r.lifecycle.configure_menu_window)(window.window())
-                            || window.show().is_err()
-                        {
-                            finish_later(generation, None, false);
+                        if !(r.lifecycle.configure_menu_window)(window.window()) {
+                            finish_later(key, None, false, "configure_before_show_failed");
+                            return;
+                        }
+                        if let Err(error) = window.show() {
+                            tracing::warn!(request_id = key.request_id, %error, "Could not show tray menu");
+                            finish_later(key, None, false, "show_failed");
                             return;
                         }
                         place(window, request, &r.lifecycle);
                         let weak = window.as_weak();
                         let sink = Rc::new(move |input| {
-                            if matches!(input, PopupPointerInput::DismissRequested { .. }) {
-                                finish_later(generation, None, false);
+                            if !REGISTRY.with(|s| s.borrow().as_ref().is_some_and(|r| matches(r,key))) { return; }
+                            if let PopupPointerInput::DismissRequested { cause } = input {
+                                tracing::debug!(request_id = key.request_id, generation = key.generation, ?cause, "Tray menu dismissal requested");
+                                finish_later(key, None, false, "native_dismissal");
                             } else if let Some(window) = weak.upgrade() {
                                 crate::bridge::dispatch_pointer_input(window.window(), input);
                             }
                         });
                         // Showing may refresh native styles from Winit's cached flags.
-                        if !(r.lifecycle.configure_menu_window)(window.window())
-                            || !(r.lifecycle.complete_passive_window_show)(window.window(), sink)
-                            || !(r.lifecycle.activate_user_requested_window)(window.window())
-                            || !(r.lifecycle.set_popup_dismissal)(window.window(), true)
-                        {
-                            tracing::warn!("could not initialize tray menu interaction");
-                            finish_later(generation, None, false);
+                        let failed = if !(r.lifecycle.configure_menu_window)(window.window()) {
+                            Some("configure_after_show_failed")
+                        } else if !(r.lifecycle.complete_passive_window_show)(window.window(), sink) {
+                            Some("input_bridge_failed")
+                        } else if !(r.lifecycle.activate_user_requested_window)(window.window()) {
+                            Some("activation_failed")
+                        } else if !(r.lifecycle.set_popup_dismissal)(window.window(), true) {
+                            Some("dismissal_install_failed")
+                        } else { None };
+                        if let Some(reason) = failed {
+                            tracing::warn!(request_id = key.request_id, generation = key.generation, reason, "Could not initialize tray menu interaction");
+                            finish_later(key, None, false, reason);
+                        } else {
+                            tracing::debug!(request_id = key.request_id, generation = key.generation,
+                                elapsed_ms = r.started.map(|t| t.elapsed().as_millis()),
+                                dpi = window.window().scale_factor(), size = ?window.window().size(),
+                                window = ?window.window().with_winit_window(|w| w.id()),
+                                "Tray menu shown and activated");
                         }
                         // Moving to another monitor can change the scale factor after showing.
                         let weak = window.as_weak();
                         let lifecycle = r.lifecycle.clone();
                         slint::Timer::single_shot(Duration::ZERO, move || {
-                            if let Some(window) = weak.upgrade() {
-                                place(&window, request, &lifecycle);
-                            }
+                            let current = REGISTRY.with(|s| s.borrow().as_ref().is_some_and(|r| matches(r,key)));
+                            if current && let Some(window) = weak.upgrade() { place(&window, request, &lifecycle); }
                         });
                     }
                     PassiveWindowPreparation::Pending if attempt < 8 => {
-                        schedule_show(generation, request, attempt + 1)
+                        tracing::debug!(request_id = key.request_id, generation = key.generation, attempt, "Tray menu preparation pending");
+                        schedule_show(key, request, attempt + 1)
                     }
-                    _ => finish_later(generation, None, false),
+                    _ => finish_later(key, None, false, "prepare_failed"),
                 }
             });
         },
@@ -430,6 +519,7 @@ mod tests {
             ),
         );
         let request = TrayMenuRequest {
+            request_id: 1,
             anchor: Default::default(),
             keyboard: true,
         };
@@ -442,6 +532,7 @@ mod tests {
             (window.as_weak(), r.generation)
         });
         show(TrayMenuRequest {
+            request_id: 2,
             keyboard: false,
             ..request
         });
@@ -531,3 +622,7 @@ mod tests {
         assert_eq!(action_for_index(9, Default::default()), None);
     }
 }
+
+#[cfg(test)]
+#[path = "tray_menu/lifecycle_tests.rs"]
+mod lifecycle_tests;

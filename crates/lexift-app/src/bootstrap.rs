@@ -549,7 +549,10 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         });
     if let Some(tray) = &services.tray {
         let menu_ui = ui.handle();
-        tray.set_menu_handler(Arc::new(move |request| menu_ui.show_tray_menu(request)));
+        tray.set_menu_handler(Arc::new(move |request| {
+            tracing::debug!(request_id = request.request_id, "Dispatch tray menu intent");
+            menu_ui.show_tray_menu(request);
+        }));
     }
     let tray_registered = register_tray(services.tray.as_ref(), controller.tray_handler());
     ui.set_background_mode(tray_registered);

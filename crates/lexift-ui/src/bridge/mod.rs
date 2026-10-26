@@ -668,7 +668,17 @@ impl UiHandle {
         let _ = slint::invoke_from_event_loop(move || crate::ocr::show(generation, frames));
     }
     pub fn show_tray_menu(&self, request: lexift_core::ports::tray::TrayMenuRequest) {
-        let _ = slint::invoke_from_event_loop(move || crate::tray_menu::show(request));
+        let queued = Instant::now();
+        if let Err(error) = slint::invoke_from_event_loop(move || {
+            tracing::debug!(
+                request_id = request.request_id,
+                queue_ms = queued.elapsed().as_millis(),
+                "Receive tray menu intent"
+            );
+            crate::tray_menu::show(request);
+        }) {
+            tracing::warn!(request_id = request.request_id, %error, "Could not enqueue tray menu intent");
+        }
     }
 
     pub fn toggle_annotation_toolbar(&self) {

@@ -12,6 +12,8 @@ pub enum TrayAction {
 /// Where and how the notification-area menu was requested.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TrayMenuRequest {
+    /// Process-local identity of one native menu intent; duplicates must not reopen it.
+    pub request_id: u64,
     pub anchor: crate::domain::geometry::Point,
     pub keyboard: bool,
 }

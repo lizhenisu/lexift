@@ -151,3 +151,4 @@
 
 - [贴图倍率与编辑视口验证](releases/pin-image-zoom.md)
 - [贴图灰度与反色验证](releases/pin-image-color.md)
+- [托盘菜单连续打开验证](releases/tray-menu-stability.md)

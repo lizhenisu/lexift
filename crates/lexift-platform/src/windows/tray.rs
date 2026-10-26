@@ -2,7 +2,11 @@ use std::{
     cell::{Cell, RefCell},
     mem::size_of,
     panic::{AssertUnwindSafe, catch_unwind},
-    sync::{Arc, Mutex, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+        mpsc,
+    },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -37,6 +41,13 @@ const TRAY_ICON_ID: u32 = 1;
 const TRAY_CALLBACK_MESSAGE: u32 = WM_APP + 1;
 const MENU_CANCELLED_MESSAGE: u32 = WM_APP + 2;
 const NIN_KEYSELECT: u32 = NIN_SELECT + 1;
+static MENU_REQUEST: AtomicU64 = AtomicU64::new(0);
+fn next_menu_request() -> u64 {
+    MENU_REQUEST
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+        .expect("tray request identity exhausted")
+        + 1
+}
 
 thread_local! {
     static WINDOW_STATE: RefCell<Option<TrayWindowState>> = const { RefCell::new(None) };
@@ -304,7 +315,16 @@ fn handle_tray_notification(state: &TrayWindowState, raw_event: u32, position: W
             .last_right_click
             .set(Some((Instant::now(), notification_anchor(position))));
     }
-    match notification_for_event(raw_event) {
+    let notification = notification_for_event(raw_event);
+    if let Some(kind) = notification {
+        tracing::debug!(
+            ?kind,
+            raw_event,
+            tray_hwnd = state.hwnd.0 as usize,
+            "Windows tray semantic notification"
+        );
+    }
+    match notification {
         Some(TrayNotification::Open) => {
             invoke_handler(&state.handler, TrayAction::OpenMainWindow);
         }
@@ -335,6 +355,9 @@ fn notification_anchor(position: WPARAM) -> lexift_core::domain::geometry::Point
 }
 
 fn show_context_menu(state: &TrayWindowState) {
+    let request_id = next_menu_request();
+    let source_foreground =
+        unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
     // Version 4 defines wParam coordinates for mouse notifications, but not
     // WM_CONTEXTMENU. Preserve the preceding right-button anchor instead.
     let mouse = state
@@ -365,7 +388,17 @@ fn show_context_menu(state: &TrayWindowState) {
     // The shell grants foreground permission to its notification recipient.
     // Transfer it within our process before dispatching to the UI event loop.
     unsafe {
-        let _ = SetForegroundWindow(state.hwnd);
+        let activated = SetForegroundWindow(state.hwnd);
+        tracing::debug!(
+            request_id,
+            keyboard,
+            ?anchor,
+            tray_hwnd = state.hwnd.0 as usize,
+            source_foreground = source_foreground.0 as usize,
+            activated = activated.as_bool(),
+            foreground = windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow().0 as usize,
+            "Tray menu native intent"
+        );
     }
     let handler = state
         .menu_handler
@@ -374,7 +407,11 @@ fn show_context_menu(state: &TrayWindowState) {
         .clone();
     if let Some(handler) = handler {
         let _ = catch_unwind(AssertUnwindSafe(|| {
-            handler(TrayMenuRequest { anchor, keyboard })
+            handler(TrayMenuRequest {
+                request_id,
+                anchor,
+                keyboard,
+            })
         }));
     }
 }
@@ -531,5 +568,12 @@ mod tests {
     fn version_four_icon_requests_standard_tooltip() {
         let data = notify_data(HWND::default());
         assert!(data.uFlags.contains(NIF_TIP | NIF_SHOWTIP));
+    }
+    #[test]
+    fn menu_intent_identity_is_process_monotonic() {
+        let first = next_menu_request();
+        let next = next_menu_request();
+        assert!(first > 0);
+        assert!(next > first);
     }
 }
