@@ -1274,6 +1274,7 @@ fn show_from(
         window.on_opacity_requested(move |percent| policy::request_opacity(id, percent));
         window.on_transform_requested(move |index| transform::request(id, index));
         window.on_color_requested(move |index| transform::color_request(id, index));
+        window.on_brightness_requested(move |value| transform::brightness_request(id, value));
         window.on_zoom_requested(move |delta, x, y| zoom(id, delta, x, y));
         window.on_zoom_preset_requested(move |percent| zoom::request(id, percent));
         window

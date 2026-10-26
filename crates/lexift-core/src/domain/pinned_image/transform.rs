@@ -359,7 +359,8 @@ mod tests {
             d.snapshot.session.image_color,
             Color {
                 grayscale: true,
-                inverted: false
+                inverted: false,
+                ..Default::default()
             }
         );
         let mut history = (*d.snapshot.session).clone();
@@ -400,7 +401,8 @@ mod tests {
                 .image_color,
             Color {
                 grayscale: true,
-                inverted: true
+                inverted: true,
+                ..Default::default()
             }
         );
         color_request(&mut s, 1, ColorAction::Grayscale);
@@ -423,5 +425,58 @@ mod tests {
                 color_request(&mut s, 1, crate::domain::image_color::Action::Grayscale).is_empty()
             );
         }
+    }
+    #[test]
+    fn brightness_is_absolute_transactional_and_noop_keeps_redo() {
+        use crate::domain::image_color::{Action as C, Brightness};
+        let mut s = state();
+        s.pinned_images
+            .get_mut(&1)
+            .unwrap()
+            .interaction
+            .applied
+            .locked = true;
+        let baseline = s.pinned_images[&1].document.clone();
+        assert!(color_request(&mut s, 1, C::Brightness(Brightness::default())).is_empty());
+        for level in Brightness::ALL {
+            let old = s.pinned_images[&1].document.clone();
+            let commands = color_request(&mut s, 1, C::Brightness(level));
+            assert_eq!(s.pinned_images[&1].document, old);
+            if !commands.is_empty() {
+                assert!(color_request(&mut s, 1, C::Brightness(level)).is_empty());
+                finish(&mut s);
+            }
+            assert_eq!(
+                s.pinned_images[&1]
+                    .document
+                    .as_ref()
+                    .unwrap()
+                    .snapshot
+                    .session
+                    .image_color
+                    .brightness,
+                level
+            );
+            assert_eq!(s.pinned_images[&2].document, baseline);
+            let revision = s.pinned_images[&1].revision;
+            assert!(color_request(&mut s, 1, C::Brightness(level)).is_empty());
+            assert_eq!(s.pinned_images[&1].revision, revision);
+        }
+        let before = s.pinned_images[&1].document.clone();
+        color_request(&mut s, 1, C::Brightness(Brightness::default()));
+        let stale = s.pinned_images[&1].revision;
+        cancel(s.pinned_images.get_mut(&1).unwrap());
+        color_request(&mut s, 1, C::Brightness(Brightness::new(25).unwrap()));
+        pin::reduce(
+            &mut s,
+            Event::PreviewFailed {
+                id: 1,
+                revision: stale,
+                error: "stale".into(),
+            },
+        );
+        assert!(s.pinned_images[&1].busy);
+        assert_eq!(s.pinned_images[&1].document, before);
+        finish(&mut s);
     }
 }

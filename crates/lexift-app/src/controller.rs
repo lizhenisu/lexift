@@ -3669,8 +3669,9 @@ mod tests {
                 _: &AtomicBool,
             ) -> lexift_core::Result<String> {
                 let turn = self.0.fetch_add(1, Ordering::AcqRel);
-                let gray = (turn / 2) & 1 != 0;
-                let invert = (turn / 2) & 2 != 0;
+                let gray = (turn / 18) & 1 != 0;
+                let invert = (turn / 18) & 2 != 0;
+                let brightness = lexift_core::domain::image_color::Brightness::ALL[(turn / 2) % 9];
                 let filter = |mut pixels: Vec<u8>| {
                     for p in pixels.as_chunks_mut::<4>().0.iter_mut() {
                         let y = ((54 * u32::from(p[0])
@@ -3687,6 +3688,12 @@ mod tests {
                                 *c = alpha - *c;
                             }
                         }
+                        let delta =
+                            (f64::from(p[3]) * f64::from(brightness.value()) / 100.).round();
+                        let alpha = f64::from(p[3]);
+                        for c in &mut p[..3] {
+                            *c = (f64::from(*c) + delta).clamp(0., alpha) as u8;
+                        }
                     }
                     pixels
                 };
@@ -3702,7 +3709,7 @@ mod tests {
                     );
                     assert_eq!(image.pixels, filter(vec![12, 20, 30, 255, 14, 20, 30, 255]));
                 } else {
-                    assert!(turn < 8);
+                    assert!(turn < 72);
                     assert_eq!(
                         image.bounds,
                         Rect {
@@ -3795,7 +3802,7 @@ mod tests {
             operation: e.id,
             result: Ok(SaveOutcome::Cancelled),
         }));
-        for (turn, orientation) in (0..4)
+        for (turn, orientation) in (0..36)
             .flat_map(|_| {
                 [
                     lexift_core::domain::image_transform::Orientation::identity(),
@@ -3814,8 +3821,10 @@ mod tests {
                     },
                     revision: 99,
                     color: lexift_core::domain::image_color::Color {
-                        grayscale: (turn / 2) & 1 != 0,
-                        inverted: (turn / 2) & 2 != 0,
+                        grayscale: (turn / 18) & 1 != 0,
+                        inverted: (turn / 18) & 2 != 0,
+                        brightness: lexift_core::domain::image_color::Brightness::ALL
+                            [(turn / 2) % 9],
                     },
                     orientation,
                     source: fixture().bounds,

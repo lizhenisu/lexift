@@ -2013,3 +2013,15 @@ msgstr "灰度"
 
 msgid "Invert colors"
 msgstr "反色"
+
+msgid "Brightness"
+msgstr "亮度"
+
+msgid "0 (No adjustment)"
+msgstr "0（不调整）"
+
+msgid "+{}"
+msgstr "+{}"
+
+msgid "{}"
+msgstr "{}"

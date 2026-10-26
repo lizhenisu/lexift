@@ -1427,45 +1427,55 @@ mod tests {
                 );
                 for grayscale in [false, true] {
                     for inverted in [false, true] {
-                        let mut colored = snapshot.clone();
-                        let session = Arc::make_mut(&mut colored.session);
-                        session.image_orientation = direction;
-                        session.image_color = lexift_core::domain::image_color::Color {
-                            grayscale,
-                            inverted,
-                        };
-                        let output = runtime
-                            .output_image(
-                                &ExportRequest {
-                                    session: 1,
-                                    request: 4,
-                                    snapshot: Arc::new(colored),
-                                },
-                                frames.clone(),
-                                &AtomicBool::new(false),
-                            )
-                            .unwrap();
-                        let mut expected = reference.clone();
-                        for p in expected.pixels.as_chunks_mut::<4>().0.iter_mut() {
-                            let y = ((54 * u32::from(p[0])
-                                + 183 * u32::from(p[1])
-                                + 19 * u32::from(p[2])
-                                + 128)
-                                / 256) as u8;
-                            if grayscale {
-                                p[..3].fill(y);
-                            }
-                            if inverted {
-                                let a = p[3];
+                        for brightness in lexift_core::domain::image_color::Brightness::ALL {
+                            let mut colored = snapshot.clone();
+                            let session = Arc::make_mut(&mut colored.session);
+                            session.image_orientation = direction;
+                            session.image_color = lexift_core::domain::image_color::Color {
+                                grayscale,
+                                inverted,
+                                brightness,
+                            };
+                            let output = runtime
+                                .output_image(
+                                    &ExportRequest {
+                                        session: 1,
+                                        request: 4,
+                                        snapshot: Arc::new(colored),
+                                    },
+                                    frames.clone(),
+                                    &AtomicBool::new(false),
+                                )
+                                .unwrap();
+                            let mut expected = reference.clone();
+                            for p in expected.pixels.as_chunks_mut::<4>().0.iter_mut() {
+                                let y = ((54 * u32::from(p[0])
+                                    + 183 * u32::from(p[1])
+                                    + 19 * u32::from(p[2])
+                                    + 128)
+                                    / 256) as u8;
+                                if grayscale {
+                                    p[..3].fill(y);
+                                }
+                                if inverted {
+                                    let a = p[3];
+                                    for c in &mut p[..3] {
+                                        *c = a - *c;
+                                    }
+                                }
+                                let delta = (f64::from(p[3]) * f64::from(brightness.value())
+                                    / 100.)
+                                    .round();
+                                let alpha = f64::from(p[3]);
                                 for c in &mut p[..3] {
-                                    *c = a - *c;
+                                    *c = (f64::from(*c) + delta).clamp(0., alpha) as u8;
                                 }
                             }
+                            assert_eq!(
+                                output, expected,
+                                "color after all effects, crop and direction"
+                            );
                         }
-                        assert_eq!(
-                            output, expected,
-                            "color after all effects, crop and direction"
-                        );
                     }
                 }
             }

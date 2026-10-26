@@ -2013,3 +2013,15 @@ msgstr "회색조"
 
 msgid "Invert colors"
 msgstr "색상 반전"
+
+msgid "Brightness"
+msgstr "밝기"
+
+msgid "0 (No adjustment)"
+msgstr "0 (조정 안 함)"
+
+msgid "+{}"
+msgstr "+{}"
+
+msgid "{}"
+msgstr "{}"

@@ -2013,3 +2013,15 @@ msgstr "Escala de cinza"
 
 msgid "Invert colors"
 msgstr "Inverter cores"
+
+msgid "Brightness"
+msgstr "Brilho"
+
+msgid "0 (No adjustment)"
+msgstr "0 (Sem ajuste)"
+
+msgid "+{}"
+msgstr "+{}"
+
+msgid "{}"
+msgstr "{}"

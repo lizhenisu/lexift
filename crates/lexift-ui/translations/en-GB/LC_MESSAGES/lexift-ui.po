@@ -2013,3 +2013,15 @@ msgstr "Greyscale"
 
 msgid "Invert colors"
 msgstr "Invert colours"
+
+msgid "Brightness"
+msgstr "Brightness"
+
+msgid "0 (No adjustment)"
+msgstr "0 (No adjustment)"
+
+msgid "+{}"
+msgstr "+{}"
+
+msgid "{}"
+msgstr "{}"

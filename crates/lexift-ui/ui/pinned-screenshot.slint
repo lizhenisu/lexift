@@ -30,7 +30,9 @@ export component PinnedScreenshotWindow inherits Window {
     in property <bool> color-enabled:false;
     in property <bool> grayscale:false;
     in property <bool> inverted:false;
+    in property <int> brightness:0;
     callback color-requested(int);
+    callback brightness-requested(int);
     in property <bool> locked: false;
     in property <int> content-opacity-percent: 100;
     callback opacity-requested(int);
@@ -153,6 +155,15 @@ export component PinnedScreenshotWindow inherits Window {
                 }
                 MenuItem { title:@tr("Grayscale"); checkable:true; checked:root.grayscale; enabled:root.color-enabled && root.policy-idle && !root.output-busy && !root.recognizing && !root.cropping; activated=>{root.color-requested(0);} }
                 MenuItem { title:@tr("Invert colors"); checkable:true; checked:root.inverted; enabled:root.color-enabled && root.policy-idle && !root.output-busy && !root.recognizing && !root.cropping; activated=>{root.color-requested(1);} }
+                Menu {
+                    title:@tr("Brightness");
+                    enabled:root.color-enabled && root.policy-idle && !root.output-busy && !root.recognizing && !root.cropping;
+                    for value in [-100,-75,-50,-25,0,25,50,75,100]: MenuItem {
+                        title:value == 0 ? @tr("0 (No adjustment)") : value > 0 ? @tr("+{}",value) : @tr("{}",value);
+                        checkable:true;checked:root.brightness == value;
+                        activated=>{root.brightness-requested(value);}
+                    }
+                }
                 MenuSeparator {}
                 MenuItem { title:@tr("Close"); activated=>{root.close-requested();} }
             }

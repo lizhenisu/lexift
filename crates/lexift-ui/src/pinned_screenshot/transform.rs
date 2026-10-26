@@ -42,6 +42,18 @@ pub(super) fn color_request(id: u64, index: i32) {
     .copied() else {
         return;
     };
+    request_color_action(id, action);
+}
+pub(super) fn brightness_request(id: u64, value: i32) {
+    let Some(level) = lexift_core::domain::image_color::Brightness::new(value) else {
+        return;
+    };
+    request_color_action(
+        id,
+        lexift_core::domain::image_color::Action::Brightness(level),
+    );
+}
+fn request_color_action(id: u64, action: lexift_core::domain::image_color::Action) {
     let allowed = visibility::operable(id)
         && !super::zoom::panning(id)
         && STATE.with(|s| {
@@ -163,6 +175,7 @@ pub(super) fn sync(states: &States) {
                             .map_or(Default::default(), |d| d.snapshot.session.image_color);
                         w.set_grayscale(color.grayscale);
                         w.set_inverted(color.inverted);
+                        w.set_brightness(i32::from(color.brightness.value()));
                         w.set_transform_busy(s.transforming);
                         w.set_transform_enabled(
                             !p.user_hidden

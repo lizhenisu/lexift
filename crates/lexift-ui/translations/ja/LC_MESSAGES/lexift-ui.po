@@ -2013,3 +2013,15 @@ msgstr "グレースケール"
 
 msgid "Invert colors"
 msgstr "色を反転"
+
+msgid "Brightness"
+msgstr "明るさ"
+
+msgid "0 (No adjustment)"
+msgstr "0（調整なし）"
+
+msgid "+{}"
+msgstr "+{}"
+
+msgid "{}"
+msgstr "{}"

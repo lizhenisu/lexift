@@ -2013,3 +2013,15 @@ msgstr "Escala de grises"
 
 msgid "Invert colors"
 msgstr "Invertir colores"
+
+msgid "Brightness"
+msgstr "Brillo"
+
+msgid "0 (No adjustment)"
+msgstr "0 (Sin ajuste)"
+
+msgid "+{}"
+msgstr "+{}"
+
+msgid "{}"
+msgstr "{}"
