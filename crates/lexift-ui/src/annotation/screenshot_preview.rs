@@ -41,6 +41,7 @@ impl Base {
         let b = &input.snapshot;
         Arc::ptr_eq(&self.capture, &input.capture)
             && a.monitor == b.monitor
+            && a.session.image_color == b.session.image_color
             && a.scale == b.scale
             && a.monitors == b.monitors
             && a.session.objects == b.session.objects
@@ -334,7 +335,13 @@ pub(super) fn paint_frames(
             )?,
         )
     };
-    Some(vec![orient(image)?, orient(controls)?])
+    let mut image = orient(image)?;
+    snapshot
+        .session
+        .image_color
+        .apply(image.data_mut(), cancelled)
+        .ok()?;
+    Some(vec![image, orient(controls)?])
 }
 pub(super) struct Job {
     pub generation: u64,

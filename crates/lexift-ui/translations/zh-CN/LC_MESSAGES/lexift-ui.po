@@ -2007,3 +2007,9 @@ msgstr "滚轮缩放 · 拖动平移 · 空格切换绘图／浏览"
 
 msgid "Zoom limit reached for accurate annotation coordinates."
 msgstr "已达到保证标注坐标准确的缩放限制。"
+
+msgid "Grayscale"
+msgstr "灰度"
+
+msgid "Invert colors"
+msgstr "反色"

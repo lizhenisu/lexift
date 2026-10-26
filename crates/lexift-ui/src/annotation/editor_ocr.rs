@@ -99,6 +99,7 @@ pub(super) fn request() {
             token,
             owner,
             revision,
+            color: r.document.session.image_color,
             orientation: r.document.session.image_orientation,
             source,
             bounds,

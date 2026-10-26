@@ -507,7 +507,11 @@ pub(super) fn present(id: u64, revision: u64, image: Arc<CapturedRegion>) -> boo
             return false;
         }
         if let Some(w) = e.window.upgrade() {
-            let positioned = if e.orientation != p.session.image_orientation {
+            let color_only = r.document.session.image_crop == p.session.image_crop
+                && r.document.session.image_orientation == p.session.image_orientation;
+            let positioned = if color_only {
+                true
+            } else if e.orientation != p.session.image_orientation {
                 crate::pinned_screenshot::transform::geometry(id, image.bounds)
             } else {
                 geometry_with(r, &e, &w, image.bounds, true)

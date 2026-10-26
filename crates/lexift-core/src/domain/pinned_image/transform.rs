@@ -4,6 +4,13 @@ use crate::{AppCommand, AppState, domain::image_transform::Action};
 use std::sync::Arc;
 
 pub fn available(s: &AppState, id: u64) -> bool {
+    color_available(s, id)
+        && s.pinned_images
+            .get(&id)
+            .is_some_and(|p| !p.interaction.applied.locked)
+}
+/// Color changes do not alter geometry and remain available while locked.
+pub fn color_available(s: &AppState, id: u64) -> bool {
     !s.screenshot.active()
         && s.pin_visibility.pending.is_none()
         && s.image_import.request.is_none()
@@ -24,7 +31,6 @@ pub fn available(s: &AppState, id: u64) -> bool {
                 && p.proposed.is_none()
                 && p.recognition.is_none()
                 && p.interaction.pending.is_none()
-                && !p.interaction.applied.locked
                 && !p.interaction.applied.passthrough
                 && p.document.is_some()
         })
@@ -33,12 +39,33 @@ pub(super) fn request(s: &mut AppState, id: u64, action: Action) -> Vec<AppComma
     if !available(s, id) {
         return vec![];
     }
+    propose(s, id, |session| {
+        session.orient_image(session.image_orientation.action(action))
+    })
+}
+pub(super) fn color_request(
+    s: &mut AppState,
+    id: u64,
+    action: super::super::image_color::Action,
+) -> Vec<AppCommand> {
+    if !color_available(s, id) {
+        return vec![];
+    }
+    propose(s, id, |session| {
+        session.color_image(session.image_color.action(action))
+    })
+}
+fn propose(
+    s: &mut AppState,
+    id: u64,
+    change: impl FnOnce(&mut super::super::annotation::Session) -> bool,
+) -> Vec<AppCommand> {
     let p = s.pinned_images.get_mut(&id).unwrap();
     let mut document = p.document.clone().unwrap();
     let mut snapshot = (*document.snapshot).clone();
     let mut session = (*snapshot.session).clone();
     session.image_source = session.image_source.or(p.source);
-    if !session.orient_image(session.image_orientation.action(action)) {
+    if !change(&mut session) {
         return vec![];
     }
     snapshot.session = Arc::new(session);
@@ -308,6 +335,93 @@ mod tests {
                 }
                 assert!(request(&mut s, 1, action).is_empty());
             }
+        }
+    }
+    #[test]
+    fn colors_allow_lock_but_commit_only_matching_ready_candidate() {
+        use crate::domain::image_color::{Action as ColorAction, Color};
+        let mut s = state();
+        s.pinned_images
+            .get_mut(&1)
+            .unwrap()
+            .interaction
+            .applied
+            .locked = true;
+        let other = s.pinned_images[&2].clone();
+        let before = s.pinned_images[&1].document.clone();
+        assert_eq!(color_request(&mut s, 1, ColorAction::Grayscale).len(), 1);
+        assert_eq!(s.pinned_images[&1].document, before);
+        assert!(color_request(&mut s, 1, ColorAction::Invert).is_empty());
+        finish(&mut s);
+        assert_eq!(s.pinned_images[&2], other);
+        let d = s.pinned_images[&1].document.as_ref().unwrap();
+        assert_eq!(
+            d.snapshot.session.image_color,
+            Color {
+                grayscale: true,
+                inverted: false
+            }
+        );
+        let mut history = (*d.snapshot.session).clone();
+        assert!(history.undo());
+        assert_eq!(history.image_color, Color::default());
+        assert!(history.redo());
+        let gray = s.pinned_images[&1].document.clone();
+        color_request(&mut s, 1, ColorAction::Invert);
+        let stale = s.pinned_images[&1].revision;
+        pin::reduce(
+            &mut s,
+            Event::PreviewFailed {
+                id: 1,
+                revision: stale,
+                error: "fixture".into(),
+            },
+        );
+        assert_eq!(s.pinned_images[&1].document, gray);
+        assert!(!s.pinned_images[&1].busy);
+        color_request(&mut s, 1, ColorAction::Invert);
+        pin::reduce(
+            &mut s,
+            Event::PreviewFailed {
+                id: 1,
+                revision: stale,
+                error: "stale".into(),
+            },
+        );
+        assert!(s.pinned_images[&1].transforming);
+        finish(&mut s);
+        assert_eq!(
+            s.pinned_images[&1]
+                .document
+                .as_ref()
+                .unwrap()
+                .snapshot
+                .session
+                .image_color,
+            Color {
+                grayscale: true,
+                inverted: true
+            }
+        );
+        color_request(&mut s, 1, ColorAction::Grayscale);
+        cancel(s.pinned_images.get_mut(&1).unwrap());
+        assert!(!s.pinned_images[&1].busy);
+    }
+    #[test]
+    fn color_requests_obey_visibility_input_and_global_busy_guards() {
+        for conflict in 0..5 {
+            let mut s = state();
+            let p = s.pinned_images.get_mut(&1).unwrap();
+            match conflict {
+                0 => p.user_hidden = true,
+                1 => p.interaction.applied.passthrough = true,
+                2 => p.busy = true,
+                3 => p.proposed = p.document.clone(),
+                _ => s.screenshot.phase = crate::domain::screenshot::ScreenshotPhase::Selecting,
+            }
+            assert!(
+                color_request(&mut s, 1, crate::domain::image_color::Action::Grayscale).is_empty()
+            );
         }
     }
 }

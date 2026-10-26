@@ -2007,3 +2007,9 @@ msgstr "ホイール：ズーム · ドラッグ：移動 · スペース：編�
 
 msgid "Zoom limit reached for accurate annotation coordinates."
 msgstr "注釈座標の精度を維持するためのズーム限界に達しました。"
+
+msgid "Grayscale"
+msgstr "グレースケール"
+
+msgid "Invert colors"
+msgstr "色を反転"

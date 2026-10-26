@@ -3669,7 +3669,28 @@ mod tests {
                 _: &AtomicBool,
             ) -> lexift_core::Result<String> {
                 let turn = self.0.fetch_add(1, Ordering::AcqRel);
-                if turn == 0 {
+                let gray = (turn / 2) & 1 != 0;
+                let invert = (turn / 2) & 2 != 0;
+                let filter = |mut pixels: Vec<u8>| {
+                    for p in pixels.as_chunks_mut::<4>().0.iter_mut() {
+                        let y = ((54 * u32::from(p[0])
+                            + 183 * u32::from(p[1])
+                            + 19 * u32::from(p[2])
+                            + 128)
+                            / 256) as u8;
+                        if gray {
+                            p[..3].fill(y);
+                        }
+                        if invert {
+                            let alpha = p[3];
+                            for c in &mut p[..3] {
+                                *c = alpha - *c;
+                            }
+                        }
+                    }
+                    pixels
+                };
+                if turn.is_multiple_of(2) {
                     assert_eq!(
                         image.bounds,
                         Rect {
@@ -3679,9 +3700,9 @@ mod tests {
                             bottom: 3
                         }
                     );
-                    assert_eq!(image.pixels, [12, 20, 30, 255, 14, 20, 30, 255]);
+                    assert_eq!(image.pixels, filter(vec![12, 20, 30, 255, 14, 20, 30, 255]));
                 } else {
-                    assert_eq!(turn, 1);
+                    assert!(turn < 8);
                     assert_eq!(
                         image.bounds,
                         Rect {
@@ -3691,7 +3712,7 @@ mod tests {
                             bottom: 1
                         }
                     );
-                    assert_eq!(image.pixels, [14, 20, 30, 255, 12, 20, 30, 255]);
+                    assert_eq!(image.pixels, filter(vec![14, 20, 30, 255, 12, 20, 30, 255]));
                 }
                 Ok("EDITOR OCR".into())
             }
@@ -3774,13 +3795,15 @@ mod tests {
             operation: e.id,
             result: Ok(SaveOutcome::Cancelled),
         }));
-        for (turn, orientation) in [
-            lexift_core::domain::image_transform::Orientation::identity(),
-            lexift_core::domain::image_transform::Orientation::identity()
-                .action(lexift_core::domain::image_transform::Action::Right),
-        ]
-        .into_iter()
-        .enumerate()
+        for (turn, orientation) in (0..4)
+            .flat_map(|_| {
+                [
+                    lexift_core::domain::image_transform::Orientation::identity(),
+                    lexift_core::domain::image_transform::Orientation::identity()
+                        .action(lexift_core::domain::image_transform::Action::Right),
+                ]
+            })
+            .enumerate()
         {
             controller.dispatch(AppEvent::EditorOcr(
                 lexift_core::domain::editor_ocr::Event::Requested {
@@ -3790,6 +3813,10 @@ mod tests {
                         editor: e.id,
                     },
                     revision: 99,
+                    color: lexift_core::domain::image_color::Color {
+                        grayscale: (turn / 2) & 1 != 0,
+                        inverted: (turn / 2) & 2 != 0,
+                    },
                     orientation,
                     source: fixture().bounds,
                     bounds: Rect {

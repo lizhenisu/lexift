@@ -959,6 +959,7 @@ pub(crate) fn present(id: u64, revision: u64, image: Arc<CapturedRegion>) {
     }
     let candidate = transformed == Some(true)
         || crate::annotation::pin_editor::candidate_present(id, revision, image.clone());
+    let viewport_installed = candidate && zoom::replace_content(id, image.clone());
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         let Some(p) = s
@@ -969,7 +970,9 @@ pub(crate) fn present(id: u64, revision: u64, image: Arc<CapturedRegion>) {
             return;
         };
         if let Some(w) = p.window.get().filter(|w| !w.get_editing() || candidate) {
-            set_picture(w, &image);
+            if !viewport_installed {
+                set_picture(w, &image);
+            }
             p.visible = image.bounds;
             p.image = image;
         }
@@ -1270,6 +1273,7 @@ fn show_from(
         });
         window.on_opacity_requested(move |percent| policy::request_opacity(id, percent));
         window.on_transform_requested(move |index| transform::request(id, index));
+        window.on_color_requested(move |index| transform::color_request(id, index));
         window.on_zoom_requested(move |delta, x, y| zoom(id, delta, x, y));
         window.on_zoom_preset_requested(move |percent| zoom::request(id, percent));
         window

@@ -33,6 +33,32 @@ pub(super) fn forget(id: u64) {
     PLACEMENT.with(|s| s.borrow_mut().remove(&id));
     SETTLED.with(|s| s.borrow_mut().remove(&id));
 }
+pub(super) fn color_request(id: u64, index: i32) {
+    let Some(action) = [
+        lexift_core::domain::image_color::Action::Grayscale,
+        lexift_core::domain::image_color::Action::Invert,
+    ]
+    .get(index as usize)
+    .copied() else {
+        return;
+    };
+    let allowed = visibility::operable(id)
+        && !super::zoom::panning(id)
+        && STATE.with(|s| {
+            s.borrow().as_ref().is_some_and(|r| {
+                r.windows.get(&id).is_some_and(|p| {
+                    !p.native_drag
+                        && !p.gesture.pressed.get()
+                        && p.window
+                            .get()
+                            .is_some_and(|w| w.get_color_enabled() && !w.get_output_busy())
+                })
+            })
+        });
+    if allowed && crate::annotation::pin_editor::prepare_recognition(id) {
+        emit_pin(Event::ColorRequested { id, action });
+    }
+}
 pub(super) fn request(id: u64, index: i32) {
     let action = [
         lexift_core::domain::image_transform::Action::Left,
@@ -95,13 +121,22 @@ pub(super) fn sync(states: &States) {
                     .is_some_and(|w| w.phase == Phase::Visible && w.window.revision() == p.instance)
             });
             if current {
-                super::set_geometry(id, p.image.bounds, p.position, p.size);
+                if p.document.snapshot.session.image_orientation
+                    != p.before.snapshot.session.image_orientation
+                    || p.document.snapshot.session.image_crop
+                        != p.before.snapshot.session.image_crop
+                {
+                    super::set_geometry(id, p.image.bounds, p.position, p.size);
+                }
                 crate::annotation::pin_editor::install_direction(id, &p.before);
+                let viewport_installed = super::zoom::replace_content(id, p.image.clone());
                 STATE.with(|s| {
                     if let Some(pin) = s.borrow_mut().as_mut().and_then(|r| r.windows.get_mut(&id))
                     {
                         if let Some(w) = pin.window.get() {
-                            set_picture(w, &p.image);
+                            if !viewport_installed {
+                                set_picture(w, &p.image);
+                            }
                             w.set_decoration(slint::Image::default());
                         }
                         pin.visible = p.image.bounds;
@@ -122,6 +157,12 @@ pub(super) fn sync(states: &States) {
                         continue;
                     }
                     if let Some(w) = p.window.get() {
+                        let color = s
+                            .document
+                            .as_ref()
+                            .map_or(Default::default(), |d| d.snapshot.session.image_color);
+                        w.set_grayscale(color.grayscale);
+                        w.set_inverted(color.inverted);
                         w.set_transform_busy(s.transforming);
                         w.set_transform_enabled(
                             !p.user_hidden
@@ -167,6 +208,7 @@ pub(crate) fn project(state: &lexift_core::AppState) {
                         .is_some_and(|s| s.revision >= p.revision)
                 }) {
                     w.set_transform_enabled(domain::available(state, id));
+                    w.set_color_enabled(domain::color_available(state, id));
                 }
             }
         }
@@ -311,7 +353,10 @@ pub(super) fn present(id: u64, revision: u64, image: &CapturedRegion) -> Option<
         });
         return Some(false);
     }
-    if !geometry(id, image.bounds) {
+    let geometry_changed = p.document.snapshot.session.image_orientation
+        != p.before.snapshot.session.image_orientation
+        || p.document.snapshot.session.image_crop != p.before.snapshot.session.image_crop;
+    if geometry_changed && !geometry(id, image.bounds) {
         emit_pin(Event::PreviewFailed {
             id,
             revision,

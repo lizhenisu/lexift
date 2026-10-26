@@ -793,7 +793,8 @@ fn history(forward: bool) {
             };
             if changed
                 && (candidate.image_crop != r.document.session.image_crop
-                    || candidate.image_orientation != r.document.session.image_orientation)
+                    || candidate.image_orientation != r.document.session.image_orientation
+                    || candidate.image_color != r.document.session.image_color)
             {
                 pin_crop::history(r, candidate);
                 return None;

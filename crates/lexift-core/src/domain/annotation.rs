@@ -1007,6 +1007,7 @@ fn segment_distance(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
 
 #[derive(Clone, Debug, PartialEq)]
 struct Snapshot {
+    image_color: super::image_color::Color,
     image_orientation: super::image_transform::Orientation,
     image_crop: Option<Rect>,
     next_sequence: i32,
@@ -1020,7 +1021,8 @@ struct Snapshot {
 
 impl Snapshot {
     fn same_content(&self, other: &Self) -> bool {
-        self.image_orientation == other.image_orientation
+        self.image_color == other.image_color
+            && self.image_orientation == other.image_orientation
             && self.image_crop == other.image_crop
             && self.next_sequence == other.next_sequence
             && self.objects == other.objects
@@ -1040,6 +1042,7 @@ pub enum Hit {
 /// Owns the undoable document; a drag is committed as one undo step on release.
 #[derive(Clone, Default)]
 pub struct Session {
+    pub image_color: super::image_color::Color,
     pub image_orientation: super::image_transform::Orientation,
     /// Source-pixel visible range for image editors; None means the complete image.
     pub image_crop: Option<Rect>,
@@ -1111,6 +1114,7 @@ impl Session {
     /// outside the confirmed crop.
     pub fn restored_image(&self) -> Self {
         let mut restored = Self {
+            image_color: self.image_color,
             image_orientation: self.image_orientation,
             image_crop: self.image_crop,
             image_source: self.image_source,
@@ -1163,6 +1167,7 @@ impl Session {
             .cloned()
             .collect();
         frozen.displays = visible.displays.clone();
+        frozen.image_color = visible.image_color;
         frozen.image_orientation = visible.image_orientation;
         frozen.image_crop = visible.image_crop;
         frozen.image_source = visible.image_source;
@@ -1184,6 +1189,7 @@ impl Session {
     }
     fn snapshot(&self) -> Snapshot {
         Snapshot {
+            image_color: self.image_color,
             image_orientation: self.image_orientation,
             image_crop: self.image_crop,
             next_sequence: self.next_sequence,
@@ -1229,7 +1235,17 @@ impl Session {
             self.watermark_erased.clear();
         }
     }
-    /// Commit one non-destructive crop in the same chronology as annotation edits.
+    /// Record one whole-composite color change in the shared chronology.
+    pub fn color_image(&mut self, color: super::image_color::Color) -> bool {
+        if self.image_source.is_none() || self.image_color == color {
+            return false;
+        }
+        self.finish_drag();
+        let before = self.snapshot();
+        self.image_color = color;
+        self.commit_snapshot(before);
+        true
+    }
     /// Record one whole-image orientation in the shared annotation chronology.
     pub fn orient_image(&mut self, orientation: super::image_transform::Orientation) -> bool {
         if self.image_source.is_none() || self.image_orientation == orientation {
@@ -1241,6 +1257,7 @@ impl Session {
         self.commit_snapshot(before);
         true
     }
+    /// Commit one non-destructive crop in the shared annotation chronology.
     pub fn set_image_crop(&mut self, bounds: Rect, image: Rect) -> bool {
         if bounds.left < image.left
             || bounds.top < image.top
@@ -1400,6 +1417,7 @@ impl Session {
     }
     fn restore_snapshot(&mut self, before: Snapshot) {
         // Identity allocation belongs to the session lifetime, not undo history.
+        self.image_color = before.image_color;
         self.image_orientation = before.image_orientation;
         self.image_crop = before.image_crop;
         self.objects = before.objects;

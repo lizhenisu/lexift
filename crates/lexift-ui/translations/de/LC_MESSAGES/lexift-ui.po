@@ -2007,3 +2007,9 @@ msgstr "Mausrad: Zoom · Ziehen: Verschieben · Leertaste: Bearbeiten/Verschiebe
 
 msgid "Zoom limit reached for accurate annotation coordinates."
 msgstr "Zoomgrenze für genaue Anmerkungskoordinaten erreicht."
+
+msgid "Grayscale"
+msgstr "Graustufen"
+
+msgid "Invert colors"
+msgstr "Farben umkehren"

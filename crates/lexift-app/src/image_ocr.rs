@@ -157,6 +157,10 @@ impl ScreenshotRuntime {
             let started = std::time::Instant::now();
             let outcome =
                 self.recognize_text(task.frames.frames(), task.bounds, &task.cancel, |image| {
+                    let color = match task.identity {
+                        Identity::Editor(r) => r.color,
+                        Identity::Pin { request, .. } => request.color,
+                    };
                     let orientation = match task.identity {
                         Identity::Editor(r) => r.orientation,
                         Identity::Pin { request, .. } => request.orientation,
@@ -165,6 +169,7 @@ impl ScreenshotRuntime {
                         image,
                         task.frames.frames()[0].bounds,
                         orientation,
+                        color,
                         &task.cancel,
                     )
                     .map_err(|_| OcrOutcome::RecognitionFailed)?;

@@ -943,6 +943,28 @@ pub(crate) fn space(id: u64, down: bool) -> Option<Option<usize>> {
         })
     })
 }
+/// Install candidate content without resetting the instance-owned view or controls.
+pub(super) fn replace_content(id: u64, frame: Arc<CapturedRegion>) -> bool {
+    let installed = STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        let Some(e) = s
+            .as_mut()
+            .and_then(|r| r.windows.get_mut(&id))
+            .and_then(|p| p.view.edit.as_mut())
+        else {
+            return false;
+        };
+        if e.source != frame.bounds {
+            return false;
+        }
+        e.frame = Some(frame);
+        true
+    });
+    if installed {
+        redraw(id);
+    }
+    installed
+}
 pub(super) fn present(id: u64, frame: tiny_skia::Pixmap, controls: tiny_skia::Pixmap) -> bool {
     let active = STATE.with(|s| {
         if let Some(e) = s

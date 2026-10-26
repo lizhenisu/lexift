@@ -425,3 +425,60 @@ fn side_captions_share_crop_frames_in_both_themes_and_scales() {
         }
     }
 }
+
+#[test]
+fn image_color_changes_content_once_but_never_edit_controls() {
+    prepare_font_fixture(1., false);
+    let mut input = fixture(1.);
+    input.crop_border = false;
+    let session = Arc::make_mut(&mut input.snapshot.session);
+    session.image_source = Some(input.snapshot.monitor);
+    session.add(Object {
+        image_basis: Default::default(),
+        id: Default::default(),
+        kind: Kind::Rectangle,
+        bounds: Bounds::from_corners((20., 40.), (160., 180.)),
+        points: vec![],
+        erased: vec![],
+        style: Style::default(),
+        extra: Extra::None,
+    });
+    let cancel = AtomicBool::new(false);
+    let mut cache = Cache::default();
+    let original = paint_frames(&input, &cancel, &mut cache).unwrap();
+    for grayscale in [false, true] {
+        for inverted in [false, true] {
+            let color = lexift_core::domain::image_color::Color {
+                grayscale,
+                inverted,
+            };
+            Arc::make_mut(&mut input.snapshot.session).image_color = color;
+            let frames = paint_frames(&input, &cancel, &mut cache).unwrap();
+            let expected: Vec<u8> = original[0]
+                .data()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .flat_map(|p| {
+                    let y = ((54 * u32::from(p[0])
+                        + 183 * u32::from(p[1])
+                        + 19 * u32::from(p[2])
+                        + 128)
+                        / 256) as u8;
+                    let mut out = [p[0], p[1], p[2], p[3]];
+                    for i in 0..3 {
+                        let c = if grayscale { y } else { p[i] };
+                        out[i] = if inverted { p[3] - c } else { c };
+                    }
+                    out
+                })
+                .collect();
+            assert_eq!(frames[0].data(), expected);
+            assert_eq!(
+                frames[1].data(),
+                original[1].data(),
+                "controls remain unfiltered"
+            );
+        }
+    }
+}

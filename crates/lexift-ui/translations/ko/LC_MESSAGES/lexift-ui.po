@@ -2007,3 +2007,9 @@ msgstr "휠: 확대/축소 · 드래그: 이동 · Space: 편집/이동"
 
 msgid "Zoom limit reached for accurate annotation coordinates."
 msgstr "주석 좌표의 정확도를 유지하기 위한 확대 한도에 도달했습니다."
+
+msgid "Grayscale"
+msgstr "회색조"
+
+msgid "Invert colors"
+msgstr "색상 반전"

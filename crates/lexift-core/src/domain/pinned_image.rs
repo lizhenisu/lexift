@@ -33,6 +33,7 @@ pub struct State {
 /// Immutable input identity; geometry changes of the pin window do not change it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Recognition {
+    pub color: super::image_color::Color,
     pub orientation: super::image_transform::Orientation,
     pub operation: u64,
     pub revision: u64,
@@ -40,6 +41,10 @@ pub struct Recognition {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    ColorRequested {
+        id: u64,
+        action: super::image_color::Action,
+    },
     TransformRequested {
         id: u64,
         action: super::image_transform::Action,
@@ -250,6 +255,7 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
     let input_id = match &event {
         Event::Recognize { id }
         | Event::TransformRequested { id, .. }
+        | Event::ColorRequested { id, .. }
         | Event::Requested { id, .. }
         | Event::EditRequested { id }
         | Event::VisibilityChanged { id, .. }
@@ -266,6 +272,7 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
     }
     let command = |c| vec![AppCommand::PinnedImage(c)];
     match event {
+        Event::ColorRequested { id, action } => transform::color_request(state, id, action),
         Event::TransformRequested { id, action } => transform::request(state, id, action),
         Event::TransformAccepted {
             id,
@@ -311,6 +318,10 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
                 .as_ref()
                 .map_or(p.source.unwrap(), |d| d.snapshot.monitor);
             let request = Recognition {
+                color: p
+                    .document
+                    .as_ref()
+                    .map_or(Default::default(), |d| d.snapshot.session.image_color),
                 orientation: p
                     .document
                     .as_ref()

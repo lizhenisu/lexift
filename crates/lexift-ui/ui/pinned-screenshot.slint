@@ -27,6 +27,10 @@ export component PinnedScreenshotWindow inherits Window {
     in property <bool> transform-enabled: false;
     in property <bool> transform-busy: false;
     callback transform-requested(int);
+    in property <bool> color-enabled:false;
+    in property <bool> grayscale:false;
+    in property <bool> inverted:false;
+    callback color-requested(int);
     in property <bool> locked: false;
     in property <int> content-opacity-percent: 100;
     callback opacity-requested(int);
@@ -147,6 +151,8 @@ export component PinnedScreenshotWindow inherits Window {
                     MenuItem { title:@tr("Flip horizontally"); activated=>{root.transform-requested(2);} }
                     MenuItem { title:@tr("Flip vertically"); activated=>{root.transform-requested(3);} }
                 }
+                MenuItem { title:@tr("Grayscale"); checkable:true; checked:root.grayscale; enabled:root.color-enabled && root.policy-idle && !root.output-busy && !root.recognizing && !root.cropping; activated=>{root.color-requested(0);} }
+                MenuItem { title:@tr("Invert colors"); checkable:true; checked:root.inverted; enabled:root.color-enabled && root.policy-idle && !root.output-busy && !root.recognizing && !root.cropping; activated=>{root.color-requested(1);} }
                 MenuSeparator {}
                 MenuItem { title:@tr("Close"); activated=>{root.close-requested();} }
             }

@@ -2007,3 +2007,9 @@ msgstr "Wheel: zoom · Drag: pan · Space: edit/pan"
 
 msgid "Zoom limit reached for accurate annotation coordinates."
 msgstr "Zoom limit reached for accurate annotation coordinates."
+
+msgid "Grayscale"
+msgstr "Grayscale"
+
+msgid "Invert colors"
+msgstr "Invert colors"

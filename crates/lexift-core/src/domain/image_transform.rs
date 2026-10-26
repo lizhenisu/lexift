@@ -170,13 +170,16 @@ pub fn finish(
     image: CapturedRegion,
     full: Rect,
     orientation: Orientation,
+    color: super::image_color::Color,
     cancel: &AtomicBool,
 ) -> Result<CapturedRegion> {
-    if orientation == Orientation::identity() {
-        Ok(image)
+    let mut image = if orientation == Orientation::identity() {
+        image
     } else {
-        orientation.pixels(&image, full, cancel)
-    }
+        orientation.pixels(&image, full, cancel)?
+    };
+    color.apply(&mut image.pixels, cancel)?;
+    Ok(image)
 }
 
 #[cfg(test)]

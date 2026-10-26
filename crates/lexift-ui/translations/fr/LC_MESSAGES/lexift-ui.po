@@ -2007,3 +2007,9 @@ msgstr "Molette : zoom · Glisser : déplacer · Espace : édition/déplacement"
 
 msgid "Zoom limit reached for accurate annotation coordinates."
 msgstr "Limite de zoom atteinte pour garantir la précision des annotations."
+
+msgid "Grayscale"
+msgstr "Niveaux de gris"
+
+msgid "Invert colors"
+msgstr "Inverser les couleurs"

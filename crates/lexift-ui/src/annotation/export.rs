@@ -70,6 +70,7 @@ pub(super) fn snapshot_at(r: &Registry, monitor: Rect, scale: f32) -> Option<Sna
     // Copy visible state, not the undo stack or parameter bindings.
     let mut session = Session::new();
     session.image_crop = r.document.session.image_crop;
+    session.image_color = r.document.session.image_color;
     session.image_orientation = r.document.session.image_orientation;
     session.image_source = r.document.session.image_source;
     session.objects = r.document.session.objects.clone();
