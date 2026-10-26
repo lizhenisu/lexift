@@ -128,6 +128,9 @@ fn geometry_with(
     b: Rect,
     fit: bool,
 ) -> bool {
+    if let Some(result) = crate::pinned_screenshot::zoom::reframe(e.id, b, false) {
+        return result;
+    }
     let inset = (w.get_frame_inset() * w.window().scale_factor()).round() as i32;
     let area = (r.lifecycle.popup_work_area)(Point {
         x: e.position.x + inset,
@@ -176,13 +179,19 @@ pub(super) fn preview_ready(r: &Registry, id: u64) -> bool {
     let failed = EDIT.with(|s| {
         if let Some(e) = s.borrow_mut().as_mut().filter(|e| e.id == id && e.entering) {
             if let Some(w) = e.window.upgrade() {
-                if !geometry_with(
-                    r,
-                    e,
-                    &w,
+                if !crate::pinned_screenshot::zoom::crop_begin(
+                    id,
                     e.orientation.rect(e.source, e.source).unwrap_or(e.source),
-                    true,
-                ) {
+                )
+                .unwrap_or_else(|| {
+                    geometry_with(
+                        r,
+                        e,
+                        &w,
+                        e.orientation.rect(e.source, e.source).unwrap_or(e.source),
+                        true,
+                    )
+                }) {
                     return Some((e.id, e.edit));
                 }
                 w.set_cropping(true);
@@ -240,6 +249,15 @@ pub(super) fn pointer(id: u64, event: i32, x: f32, y: f32) -> bool {
                 + f64::from(y * w.window().scale_factor()) * f64::from(b.bottom - b.top)
                     / f64::from(d.bottom - d.top),
         ];
+        let p = crate::pinned_screenshot::zoom::local(
+            id,
+            [
+                f64::from(x * w.window().scale_factor()),
+                f64::from(y * w.window().scale_factor()),
+            ],
+        )
+        .unwrap_or(p);
+        let z = crate::pinned_screenshot::zoom::scale(id).unwrap_or(z);
         let p = e.orientation.inverse().point(
             p,
             e.orientation.rect(e.source, e.source).unwrap_or(e.source),
@@ -282,6 +300,15 @@ fn feedback(_r: &Registry) {
         {
             let b = e.orientation.rect(c.bounds, e.source).unwrap_or(c.bounds);
             let full = e.orientation.rect(e.source, e.source).unwrap_or(e.source);
+            if let Some((a, b, size)) = crate::pinned_screenshot::zoom::crop_feedback(e.id, b) {
+                w.set_crop_left(a[0] as f32);
+                w.set_crop_top(a[1] as f32);
+                w.set_crop_right(b[0] as f32);
+                w.set_crop_bottom(b[1] as f32);
+                w.set_crop_source_width(size[0] as f32);
+                w.set_crop_source_height(size[1] as f32);
+                return;
+            }
             w.set_crop_left((b.left - full.left) as f32);
             w.set_crop_top((b.top - full.top) as f32);
             w.set_crop_right((b.right - full.left) as f32);
@@ -392,7 +419,11 @@ pub(super) fn cancel(r: &mut Registry) -> bool {
         let _guard = r.pause_native_pointer_inputs();
         (r.lifecycle.cancel_window_interaction)(w.window());
         w.set_cropping(false);
-        geometry_with(r, &e, &w, e.before, true);
+        if crate::pinned_screenshot::zoom::active(e.id) {
+            crate::pinned_screenshot::zoom::crop_cancel(e.id);
+        } else {
+            geometry_with(r, &e, &w, e.before, true);
+        }
         w.set_picture(e.picture);
         w.set_decoration(slint::Image::default());
         crate::pinned_screenshot::set_edit_interaction(e.id, !r.document.mode.is_mouse());

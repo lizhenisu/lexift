@@ -16,6 +16,13 @@ component PinGlow inherits Image {
     image-rendering:smooth;
 }
 export component PinnedScreenshotWindow inherits Window {
+    in property <bool> viewport-active:false;
+    in property <bool> navigating:false;
+    in property <bool> zoom-enabled:false;
+    in property <float> zoom-percent:100;
+    in property <[bool]> zoom-presets:[true,true,true,true,true,true];
+    callback zoom-preset-requested(int);
+    callback navigation-key(bool) -> bool;
     in property <bool> window-suppressed: false;
     in property <bool> transform-enabled: false;
     in property <bool> transform-busy: false;
@@ -63,6 +70,16 @@ export component PinnedScreenshotWindow inherits Window {
     Rectangle {
         x:MenuMetrics.shadow-inset; y:MenuMetrics.shadow-inset;
         width:parent.width - 2 * MenuMetrics.shadow-inset; height:parent.height - 2 * MenuMetrics.shadow-inset;
+        clip:true;
+        if root.viewport-active: Rectangle {
+            width:parent.width;height:parent.height;background:Colors.image-workspace;
+            for row in ceil(self.height / Metrics.image-grid-spacing): Rectangle {
+                y:row * Metrics.image-grid-spacing;width:parent.width;height:1px;
+                for col in ceil(parent.width / Metrics.image-grid-spacing): Rectangle {
+                    x:col * Metrics.image-grid-spacing;width:1px;height:1px;background:Colors.image-workspace-dot;
+                }
+            }
+        }
         Rectangle {
             width:parent.width; height:parent.height;
             opacity: root.content-opacity-percent / 100;
@@ -76,9 +93,9 @@ export component PinnedScreenshotWindow inherits Window {
         area := TouchArea {
             width:parent.width; height:parent.height; enabled:!root.transform-busy && !root.window-suppressed && root.interactive && !root.mouse-passthrough && !root.policy-busy;
             pointer-event(event)=>{
-                if !root.locked && (!root.editing || root.browsing) && event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.press-changed(true);root.drag-requested();}
+                if !root.locked && (!root.viewport-active || root.recognizing) && (!root.editing || root.browsing) && event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.press-changed(true);root.drag-requested();}
                 if event.kind==PointerEventKind.up || event.kind==PointerEventKind.cancel {root.press-changed(false);}
-                if root.editing && !root.browsing {
+                if root.editing && (!root.browsing || root.viewport-active) {
                     if event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.edit-pointer(0,self.mouse-x/1px,self.mouse-y/1px);}
                     if event.kind==PointerEventKind.move {root.edit-pointer(1,self.mouse-x/1px,self.mouse-y/1px);}
                     if event.kind==PointerEventKind.up && event.button==PointerEventButton.left {root.edit-pointer(2,self.mouse-x/1px,self.mouse-y/1px);}
@@ -87,7 +104,7 @@ export component PinnedScreenshotWindow inherits Window {
             }
             changed has-hover=>{if root.editing && !root.browsing && !self.has-hover {root.edit-pointer(4,self.mouse-x/1px,self.mouse-y/1px);}}
             mouse-cursor: root.editing && !root.browsing ? (root.cursor==AnnotationCursor.moving ? move : root.cursor==AnnotationCursor.text ? text : root.cursor==AnnotationCursor.horizontal ? ew-resize : root.cursor==AnnotationCursor.vertical ? ns-resize : root.cursor==AnnotationCursor.diagonal-down ? nwse-resize : root.cursor==AnnotationCursor.diagonal-up ? nesw-resize : root.cursor==AnnotationCursor.drawing ? crosshair : default) : default;
-            scroll-event(event)=>{if root.locked && (!root.editing || root.browsing) {return accept;}if root.editing && !root.browsing {root.edit-scroll(event.delta-y/1px);return accept;}root.zoom-requested(event.delta-y/1px,self.mouse-x/1px+root.frame-inset,self.mouse-y/1px+root.frame-inset);return accept;}
+            scroll-event(event)=>{if event.delta-x != 0px || event.modifiers.control || event.modifiers.shift || event.modifiers.alt || event.modifiers.meta {return reject;}if root.locked && (!root.editing || root.navigating) {return accept;}if root.editing && !root.navigating && !root.browsing {root.edit-scroll(event.delta-y/1px);return accept;}root.zoom-requested(event.delta-y/1px,self.mouse-x/1px+root.frame-inset,self.mouse-y/1px+root.frame-inset);return accept;}
         }
             // Context input remains available while browsing an edited pin; drawing is separate.
             context := ContextMenuArea {
@@ -113,6 +130,16 @@ export component PinnedScreenshotWindow inherits Window {
                     }
                 }
                 Menu {
+                    title:@tr("Zoom: {}%", round(root.zoom-percent * 10) / 10);
+                    enabled:root.zoom-enabled && root.policy-idle && !root.locked && !root.output-busy && !root.recognizing && !root.cropping;
+                    for value[index] in [25,50,75,100,150,200]: MenuItem {
+                        title:root.zoom-presets[index] ? @tr("{}%",value) : @tr("{}% (window limit)",value);checkable:true;checked:abs(root.zoom-percent - value)<0.01;
+                        enabled:root.zoom-presets[index];activated=>{root.zoom-preset-requested(value);}
+                    }
+                    MenuSeparator {}
+                    MenuItem {title:@tr("Fit to work area");activated=>{root.zoom-preset-requested(0);}}
+                }
+                Menu {
                     title:@tr("Rotate / flip");
                     enabled:root.transform-enabled && root.policy-idle && !root.locked && !root.output-busy && !root.recognizing && !root.cropping;
                     MenuItem { title:@tr("Rotate left 90°"); activated=>{root.transform-requested(0);} }
@@ -123,7 +150,9 @@ export component PinnedScreenshotWindow inherits Window {
                 MenuSeparator {}
                 MenuItem { title:@tr("Close"); activated=>{root.close-requested();} }
             }
-                keys := FocusScope { key-pressed(event)=>{if root.window-suppressed || root.mouse-passthrough || root.policy-busy {return reject;}if root.interactive && event.text==Key.Escape {root.escape-requested();return accept;}
+                keys := FocusScope {
+                    key-released(event)=>{if event.text==" " && root.viewport-active {root.navigation-key(false);return accept;}return reject;}
+                    key-pressed(event)=>{if root.window-suppressed || root.mouse-passthrough || root.policy-busy {return reject;}if event.text==" " && !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta && !event.modifiers.shift && root.viewport-active {if root.navigation-key(true) {return accept;}}if root.interactive && event.text==Key.Escape {root.escape-requested();return accept;}
                     if root.editing && !root.browsing {
                         if event.text==Key.Delete {root.edit-key(1);return accept;}
                         if event.text==Key.Return {root.edit-key(2);return accept;}

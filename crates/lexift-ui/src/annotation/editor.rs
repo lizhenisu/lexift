@@ -576,7 +576,9 @@ pub(super) fn place(
     let map = |p| super::pin_editor::view_point(p, false);
     let bounds = mapped_bounds(glyph_bounds, &map);
     // Desktop limits apply after projection: image coordinates may have a negative origin.
-    let viewport = super::screenshot::long_editor::clip_text(viewport(bounds, displays));
+    let viewport = super::pin_editor::clip_text(super::screenshot::long_editor::clip_text(
+        viewport(bounds, displays),
+    ));
     let scale = scale * super::pin_editor::view_zoom();
     editor.window().set_position(slint::PhysicalPosition::new(
         viewport.left.floor() as i32,

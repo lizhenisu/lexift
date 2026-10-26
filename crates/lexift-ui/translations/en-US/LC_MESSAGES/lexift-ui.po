@@ -1989,3 +1989,21 @@ msgstr "Some pins could not be hidden or restored. Try again."
 
 msgid "Rotate / flip"
 msgstr "Rotate / flip"
+
+msgid "Zoom: {}%"
+msgstr "Zoom: {}%"
+
+msgid "Fit to work area"
+msgstr "Fit to work area"
+
+msgid "Zoom limit reached. Use the editor to view details."
+msgstr "Zoom limit reached. Use the editor to view details."
+
+msgid "{}% (window limit)"
+msgstr "{}% (window limit)"
+
+msgid "Wheel: zoom · Drag: pan · Space: edit/pan"
+msgstr "Wheel: zoom · Drag: pan · Space: edit/pan"
+
+msgid "Zoom limit reached for accurate annotation coordinates."
+msgstr "Zoom limit reached for accurate annotation coordinates."

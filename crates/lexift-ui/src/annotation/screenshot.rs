@@ -574,8 +574,12 @@ pub(super) fn pointer(r: &mut Registry, index: usize, event: i32, x: f32, y: f32
         return true;
     };
     let scale = layer.scale();
-    let (px, py) =
-        crate::screen_interaction::screen_point(layer.bounds, (x, y), layer.input_scale());
+    let (px, py) = editing
+        .pin
+        .and_then(|(id, _)| pin_editor::input_point(id, x, y))
+        .unwrap_or_else(|| {
+            crate::screen_interaction::screen_point(layer.bounds, (x, y), layer.input_scale())
+        });
     let point = Point {
         x: px.round() as i32,
         y: py.round() as i32,

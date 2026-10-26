@@ -182,7 +182,7 @@ export component AnnotationToolbar inherits Window {
             if !root.collapsed: HorizontalLayout {
             x: 34px; y: 7px; width: parent.width - 85px; height: 38px; spacing: 7px;
             alignment: space-between;
-            ToolButton { kind: 17; enabled: !root.output-busy; selected: root.operate; clicked => { root.operate-requested(); } }
+            ToolButton { kind: 17; label: root.pin-edit-mode ? @tr("Wheel: zoom · Drag: pan · Space: edit/pan") : @tr("Mouse mode"); enabled: !root.output-busy; selected: root.operate; clicked => { root.operate-requested(); } }
             for tool[group] in root.tools: HorizontalLayout {
                 spacing: 0px;
                 ToolButton { kind: tool; enabled: !root.output-busy; label:tool == 0 ? @tr("Geometry") : AnnotationPresentation.tool(tool,0,0); selected: root.active-group == group;

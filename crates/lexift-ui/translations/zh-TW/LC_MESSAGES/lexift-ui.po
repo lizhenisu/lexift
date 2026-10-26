@@ -1989,3 +1989,21 @@ msgstr "部分貼圖無法隱藏或恢復，請重試。"
 
 msgid "Rotate / flip"
 msgstr "旋轉／翻轉"
+
+msgid "Zoom: {}%"
+msgstr "縮放：{}%"
+
+msgid "Fit to work area"
+msgstr "符合工作區"
+
+msgid "Zoom limit reached. Use the editor to view details."
+msgstr "已達縮放限制。可進入編輯器查看細節。"
+
+msgid "{}% (window limit)"
+msgstr "{}%（視窗限制）"
+
+msgid "Wheel: zoom · Drag: pan · Space: edit/pan"
+msgstr "滾輪縮放 · 拖曳平移 · 空白鍵切換繪圖／瀏覽"
+
+msgid "Zoom limit reached for accurate annotation coordinates."
+msgstr "已達確保標註座標準確的縮放限制。"

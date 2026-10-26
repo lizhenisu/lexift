@@ -1989,3 +1989,21 @@ msgstr "일부 고정 이미지를 숨기거나 복원하지 못했습니다. �
 
 msgid "Rotate / flip"
 msgstr "회전 / 뒤집기"
+
+msgid "Zoom: {}%"
+msgstr "확대/축소: {}%"
+
+msgid "Fit to work area"
+msgstr "작업 영역에 맞추기"
+
+msgid "Zoom limit reached. Use the editor to view details."
+msgstr "확대 한도에 도달했습니다. 편집기에서 세부 정보를 확인하세요."
+
+msgid "{}% (window limit)"
+msgstr "{}% (창 제한)"
+
+msgid "Wheel: zoom · Drag: pan · Space: edit/pan"
+msgstr "휠: 확대/축소 · 드래그: 이동 · Space: 편집/이동"
+
+msgid "Zoom limit reached for accurate annotation coordinates."
+msgstr "주석 좌표의 정확도를 유지하기 위한 확대 한도에 도달했습니다."

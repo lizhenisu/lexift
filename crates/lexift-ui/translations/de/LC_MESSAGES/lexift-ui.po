@@ -1989,3 +1989,21 @@ msgstr "Einige Pins konnten nicht ausgeblendet oder wiederhergestellt werden. Ve
 
 msgid "Rotate / flip"
 msgstr "Drehen / spiegeln"
+
+msgid "Zoom: {}%"
+msgstr "Zoom: {}%"
+
+msgid "Fit to work area"
+msgstr "An Arbeitsbereich anpassen"
+
+msgid "Zoom limit reached. Use the editor to view details."
+msgstr "Zoomgrenze erreicht. Details im Editor anzeigen."
+
+msgid "{}% (window limit)"
+msgstr "{}% (Fenstergrenze)"
+
+msgid "Wheel: zoom · Drag: pan · Space: edit/pan"
+msgstr "Mausrad: Zoom · Ziehen: Verschieben · Leertaste: Bearbeiten/Verschieben"
+
+msgid "Zoom limit reached for accurate annotation coordinates."
+msgstr "Zoomgrenze für genaue Anmerkungskoordinaten erreicht."

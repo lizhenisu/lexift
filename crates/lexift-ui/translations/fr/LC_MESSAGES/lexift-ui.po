@@ -1989,3 +1989,21 @@ msgstr "Certaines images épinglées n’ont pas pu être masquées ou rétablie
 
 msgid "Rotate / flip"
 msgstr "Rotation / retournement"
+
+msgid "Zoom: {}%"
+msgstr "Zoom : {} %"
+
+msgid "Fit to work area"
+msgstr "Adapter à la zone de travail"
+
+msgid "Zoom limit reached. Use the editor to view details."
+msgstr "Limite de zoom atteinte. Utilisez l’éditeur pour voir les détails."
+
+msgid "{}% (window limit)"
+msgstr "{} % (limite de fenêtre)"
+
+msgid "Wheel: zoom · Drag: pan · Space: edit/pan"
+msgstr "Molette : zoom · Glisser : déplacer · Espace : édition/déplacement"
+
+msgid "Zoom limit reached for accurate annotation coordinates."
+msgstr "Limite de zoom atteinte pour garantir la précision des annotations."

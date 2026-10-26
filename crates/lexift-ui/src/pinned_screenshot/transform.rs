@@ -156,6 +156,7 @@ pub(super) fn sync(states: &States) {
     });
 }
 pub(crate) fn project(state: &lexift_core::AppState) {
+    super::zoom::sync(state);
     STATE.with(|s| {
         if let Some(r) = s.borrow().as_ref() {
             for (&id, p) in &r.windows {
@@ -195,6 +196,12 @@ fn centered(center: [f64; 2], zoom: f64, bounds: Rect, area: Rect) -> (Rect, f64
     )
 }
 pub(crate) fn geometry(id: u64, bounds: Rect) -> bool {
+    if let Some(result) = super::zoom::reframe(id, bounds, true) {
+        return result;
+    }
+    if let Some(result) = super::zoom::normal_transform(id, bounds) {
+        return result;
+    }
     let Some((source, display)) = super::geometry(id) else {
         return false;
     };

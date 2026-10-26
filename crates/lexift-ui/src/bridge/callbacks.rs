@@ -164,6 +164,7 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) annotation_corner_cursor: AnnotationCornerCursor,
     pub(crate) annotation_brush_cursor: AnnotationBrushCursor,
     pub(crate) image_pan_cursor: ImagePanCursor,
+    pub(crate) pin_window_budget: Option<(u32, u64)>,
     pub(crate) annotation_frame_presenter: AnnotationFramePresenter,
     pub(crate) annotation_magnifier_sync: AnnotationMagnifierSync,
     pub(crate) annotation_magnifier_refresh: AnnotationMagnifierRefresh,
@@ -239,6 +240,7 @@ impl WindowLifecycleCallbacks {
             annotation_corner_cursor: Rc::new(|_, _| false),
             annotation_brush_cursor: Rc::new(|_, _| false),
             image_pan_cursor: Rc::new(|_, _| false),
+            pin_window_budget: None,
             annotation_frame_presenter: Rc::new(|_, _, _, _| false),
             annotation_magnifier_sync: Rc::new(|_, _| false),
             annotation_magnifier_refresh: Rc::new(|| false),
@@ -415,6 +417,12 @@ impl WindowLifecycleCallbacks {
         self.annotation_brush_cursor = Rc::new(cursor);
         self
     }
+    /// Conservative native edge/area allocation budget; None keeps pins within the work area.
+    pub fn with_pin_window_budget(mut self, budget: Option<(u32, u64)>) -> Self {
+        self.pin_window_budget = budget;
+        self
+    }
+
     /// Selects a window-owned open/closed hand; None releases the native cursor.
     pub fn with_image_pan_cursor(
         mut self,

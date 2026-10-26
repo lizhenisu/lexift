@@ -300,22 +300,23 @@ fn show(id: u64) -> bool {
     };
     let position = w.window().position();
     let size = w.window().size();
-    if let Some(area) = (l.popup_work_area)(lexift_core::domain::geometry::Point {
+    let needs_clamp = (l.popup_work_area)(lexift_core::domain::geometry::Point {
         x: position.x + 1,
         y: position.y + 1,
-    }) && saved_area.is_some_and(|old| old != area)
-        && (position.x < area.left
-            || position.y < area.top
-            || i64::from(position.x) + i64::from(size.width) > i64::from(area.right)
-            || i64::from(position.y) + i64::from(size.height) > i64::from(area.bottom))
-    {
-        fit(id, None);
-    }
+    })
+    .is_some_and(|area| {
+        saved_area.is_some_and(|old| old != area)
+            && (position.x < area.left
+                || position.y < area.top
+                || i64::from(position.x) + i64::from(size.width) > i64::from(area.right)
+                || i64::from(position.y) + i64::from(size.height) > i64::from(area.bottom))
+    });
+    // Preparation temporarily restores the passive role. Reinstall the owned
+    // receiver before transactional geometry checks call the pin policy bridge.
     (l.prepare_pinned_image)(w.window())
-        // Generic preparation reinstalls the passive role. Reuse this pin's
-        // receiver to restore normal user activation without activating now.
         && (l.complete_passive_window_show)(w.window(), sink)
         && apply_policy(id)
+        && (!needs_clamp || super::zoom::settled(id))
         && (!w.get_mouse_passthrough() || policy::frame(&w, &l, true))
         && w.show().is_ok()
         && w.window().is_visible()
@@ -878,7 +879,14 @@ mod tests {
         });
         intent(false);
         pump(&core);
-        assert!(first.window().position().x >= 100 && first.window().position().y >= 100);
+        let pos = first.window().position();
+        let size = first.window().size();
+        let inset = (first.get_frame_inset() * first.window().scale_factor()).round() as i32;
+        let grip = (64. * first.window().scale_factor()).round() as i32;
+        let width = size.width as i32 - 2 * inset;
+        let height = size.height as i32 - 2 * inset;
+        assert!((pos.x + inset + width).min(900) - (pos.x + inset).max(100) >= width.min(grip));
+        assert!((pos.y + inset + height).min(600) - (pos.y + inset).max(100) >= height.min(grip));
         assert!(first.get_locked() && first.get_content_opacity_percent() == 20);
         intent(true);
         let closing = queued.borrow().last().copied().unwrap();

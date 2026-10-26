@@ -1989,3 +1989,21 @@ msgstr "一部のピン留め画像を非表示または再表示できません
 
 msgid "Rotate / flip"
 msgstr "回転／反転"
+
+msgid "Zoom: {}%"
+msgstr "ズーム：{}%"
+
+msgid "Fit to work area"
+msgstr "作業領域に合わせる"
+
+msgid "Zoom limit reached. Use the editor to view details."
+msgstr "ズームの限界に達しました。エディターで詳細を確認できます。"
+
+msgid "{}% (window limit)"
+msgstr "{}%（ウィンドウ制限）"
+
+msgid "Wheel: zoom · Drag: pan · Space: edit/pan"
+msgstr "ホイール：ズーム · ドラッグ：移動 · スペース：編集/移動"
+
+msgid "Zoom limit reached for accurate annotation coordinates."
+msgstr "注釈座標の精度を維持するためのズーム限界に達しました。"

@@ -260,6 +260,9 @@ pub(crate) fn begin(id: u64, edit: u64) {
 }
 /// Policy changes never reinterpret a live drawing or candidate gesture.
 pub(crate) fn interaction_idle(id: u64) -> bool {
+    if crate::pinned_screenshot::zoom::panning(id) {
+        return false;
+    }
     if current().is_none_or(|p| p.0 != id) {
         return true;
     }
@@ -319,12 +322,31 @@ pub(super) fn view_point(point: (f32, f32), reverse: bool) -> (f32, f32) {
                     .get(&id)
                     .map(|p| (p.base.bounds, p.presented_orientation))
             })?;
+            if crate::pinned_screenshot::zoom::active(id) {
+                let p = if reverse {
+                    [f64::from(point.0), f64::from(point.1)]
+                } else {
+                    orientation.point([f64::from(point.0), f64::from(point.1)], full)
+                };
+                let p = crate::pinned_screenshot::zoom::map(id, p, reverse)?;
+                let p = if reverse {
+                    orientation
+                        .inverse()
+                        .point(p, orientation.rect(full, full).ok()?)
+                } else {
+                    p
+                };
+                return Some((p[0] as f32, p[1] as f32));
+            }
             mapped_point(point, reverse, full, source, display, orientation)
         })
         .unwrap_or(point)
 }
 pub(super) fn view_zoom() -> f32 {
     screenshot::long_editor::view_zoom().unwrap_or_else(|| {
+        if let Some(z) = current().and_then(|(id, _)| crate::pinned_screenshot::zoom::scale(id)) {
+            return z as f32;
+        }
         current()
             .and_then(|(id, _)| crate::pinned_screenshot::geometry(id))
             .map_or(1., |(s, d)| {
@@ -551,12 +573,41 @@ pub(crate) fn pointer(id: u64, event: i32, x: f32, y: f32) {
         if pin_crop::pointer(id, event, x, y) {
             return;
         }
+        if event == 0
+            && let Some(w) = crate::pinned_screenshot::window_for_view(id)
+            && !crate::pinned_screenshot::zoom::contains(
+                id,
+                [
+                    f64::from(x * w.window().scale_factor()),
+                    f64::from(y * w.window().scale_factor()),
+                ],
+            )
+            && !browse(id)
+        {
+            return;
+        }
+        if browse(id) && crate::pinned_screenshot::zoom::active(id) {
+            if let Some(w) = crate::pinned_screenshot::window_for_view(id) {
+                let dpi = f64::from(w.window().scale_factor());
+                crate::pinned_screenshot::zoom::pointer(
+                    id,
+                    event,
+                    [f64::from(x) * dpi, f64::from(y) * dpi],
+                );
+            }
+            return;
+        }
         // The OS rounds width and height independently at fractional DPI. Match
         // the actual filled image on each axis, rather than deriving Y from width.
-        let y = crate::pinned_screenshot::geometry(id).map_or(y, |(s, d)| {
-            y * (s.bottom - s.top) as f32 / (d.bottom - d.top) as f32 * (d.right - d.left) as f32
-                / (s.right - s.left) as f32
-        });
+        let y = if crate::pinned_screenshot::zoom::active(id) {
+            y
+        } else {
+            crate::pinned_screenshot::geometry(id).map_or(y, |(s, d)| {
+                y * (s.bottom - s.top) as f32 / (d.bottom - d.top) as f32
+                    * (d.right - d.left) as f32
+                    / (s.right - s.left) as f32
+            })
+        };
         canvas_pointer(0, event, x, y);
         let enabled = REGISTRY.with(|s| {
             s.borrow()
@@ -568,6 +619,7 @@ pub(crate) fn pointer(id: u64, event: i32, x: f32, y: f32) {
 }
 /// Retire only the gesture belonging to the focus-losing edit instance.
 pub(crate) fn lost_focus(id: u64) {
+    crate::pinned_screenshot::zoom::lost_focus(id);
     if let Some(owner) = current().filter(|p| p.0 == id) {
         slint::Timer::single_shot(Duration::ZERO, move || {
             if current() == Some(owner) {
@@ -578,6 +630,9 @@ pub(crate) fn lost_focus(id: u64) {
 }
 pub(crate) fn key(id: u64, key: i32) {
     if crate::pinned_screenshot::recognizing(id) || !current().is_some_and(|p| p.0 == id) {
+        return;
+    }
+    if crate::pinned_screenshot::zoom::panning(id) {
         return;
     }
     match key {
@@ -598,9 +653,89 @@ pub(crate) fn scroll(id: u64, delta: f32) {
     }
 }
 pub(crate) fn escape(id: u64) {
+    if crate::pinned_screenshot::zoom::cancel_pan(id) {
+        return;
+    }
     if current().is_some_and(|p| p.0 == id) {
         escape_from(current_focus_origin());
     }
+}
+
+pub(crate) fn browse(id: u64) -> bool {
+    current().is_some_and(|p| p.0 == id)
+        && REGISTRY.with(|s| {
+            s.borrow()
+                .as_ref()
+                .is_some_and(|r| r.document.mode.is_mouse())
+        })
+}
+pub(crate) fn navigation_key(id: u64, down: bool) -> bool {
+    if current().is_none_or(|p| p.0 != id) {
+        return false;
+    }
+    if !down {
+        crate::pinned_screenshot::zoom::space(id, false);
+        return true;
+    }
+    let allowed = REGISTRY.with(|s| {
+        s.borrow().as_ref().is_some_and(|r| {
+            r.editor.window().is_none()
+                && r.toolbar_state.menus.current.is_none()
+                && r.toolbar_state.watermark.get().is_none()
+                && r.gesture.is_none()
+                && r.pending_drawing.is_none()
+        })
+    });
+    if !allowed
+        || pin_crop::active()
+        || crate::pinned_screenshot::recognizing(id)
+        || crate::pinned_screenshot::zoom::panning(id)
+    {
+        return true;
+    }
+    if let Some(tool) = crate::pinned_screenshot::zoom::space(id, down) {
+        REGISTRY.with(|s| {
+            if let Some(r) = s.borrow_mut().as_mut() {
+                if let Some(tool) = tool {
+                    if tool == usize::MAX {
+                        r.select_tool_variant(1, 3);
+                    } else {
+                        r.set_mode(InteractionMode::Tool(tool));
+                    }
+                } else {
+                    r.set_mode(InteractionMode::Mouse);
+                }
+            }
+        });
+    }
+    true
+}
+pub(super) fn sync_view_mode(r: &Registry) {
+    if let Some((id, _)) = r.screenshot.as_ref().and_then(|e| e.pin) {
+        crate::pinned_screenshot::zoom::mode(
+            id,
+            r.document.mode.is_mouse(),
+            if let InteractionMode::Tool(tool) = r.document.mode {
+                Some(tool)
+            } else {
+                None
+            },
+        );
+    }
+}
+pub(super) fn input_point(id: u64, x: f32, y: f32) -> Option<(f32, f32)> {
+    let w = crate::pinned_screenshot::window_for_view(id)?;
+    let dpi = f64::from(w.window().scale_factor());
+    let p = crate::pinned_screenshot::zoom::local(id, [f64::from(x) * dpi, f64::from(y) * dpi])?;
+    DOCUMENTS.with(|s| {
+        let s = s.borrow();
+        let pinfo = s.get(&id)?;
+        let o = pinfo.presented_orientation;
+        let p = o
+            .inverse()
+            .point(p, o.rect(pinfo.base.bounds, pinfo.base.bounds).ok()?);
+        Some((p[0] as f32, p[1] as f32))
+    })
 }
 pub(crate) fn shutdown() {
     pin_crop::clear();
@@ -610,6 +745,9 @@ pub(crate) fn shutdown() {
 
 /// Publish input geometry only with the pixels belonging to this document.
 pub(super) fn presented(id: u64, session: &Session) {
+    if let Some(full) = source(id) {
+        crate::pinned_screenshot::zoom::precision(id, full, session.image_orientation);
+    }
     DOCUMENTS.with(|s| {
         if let Some(p) = s.borrow_mut().get_mut(&id) {
             p.presented_orientation = session.image_orientation;
@@ -631,6 +769,9 @@ pub(crate) fn install_direction(id: u64, document: &ExportRequest) {
             None
         })
         .unwrap_or_else(|| (*document.snapshot.session).clone());
+    if let Some(full) = source(id) {
+        crate::pinned_screenshot::zoom::precision(id, full, session.image_orientation);
+    }
     if current().is_some_and(|p| p.0 == id) {
         REGISTRY.with(|s| {
             if let Some(r) = s.borrow_mut().as_mut() {
@@ -685,6 +826,23 @@ fn mapped_point(
         Some(p)
     }
 }
+/// Native text input uses the same bounded client area as image feedback.
+pub(super) fn clip_text(mut bounds: Bounds) -> Bounds {
+    if let Some((id, _)) = current().filter(|(id, _)| crate::pinned_screenshot::zoom::active(*id))
+        && let Some((_, display)) = crate::pinned_screenshot::geometry(id)
+    {
+        bounds.left = bounds
+            .left
+            .clamp(display.left as f32, display.right as f32 - 1.);
+        bounds.top = bounds
+            .top
+            .clamp(display.top as f32, display.bottom as f32 - 1.);
+        bounds.right = bounds.right.clamp(bounds.left + 1., display.right as f32);
+        bounds.bottom = bounds.bottom.clamp(bounds.top + 1., display.bottom as f32);
+    }
+    bounds
+}
+
 #[cfg(test)]
 mod orientation_tests {
     use super::*;

@@ -317,6 +317,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         .with_annotation_screen_capture(screen_capture_for_annotation)
         .with_annotation_export_support(lexift_platform::annotation_save_port().is_some_and(|p| p.is_available()) && lexift_platform::annotation_screen_capture_port().is_some_and(|p| p.is_available()))
         .with_annotation_renderer(renderer_for_annotation)
+        .with_pin_window_budget(software_renderer.then_some((8192, 16_000_000)))
         .with_annotation_window_token(|window| {
             lexift_platform::annotation_window_token(&window.window_handle())
         })

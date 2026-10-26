@@ -1146,7 +1146,10 @@ fn pinned_editor_keeps_documents_history_and_hidden_output_separate() {
             && REGISTRY.with(|s| s.borrow().as_ref().unwrap().canvas_state.annotation_ready)
     });
     assert!(pin.get_editing());
-    assert!(!pin.get_interactive());
+    assert!(
+        pin.get_interactive(),
+        "browse viewport accepts panning without drawing"
+    );
     REGISTRY.with(|s| {
         let mut s = s.borrow_mut();
         let r = s.as_mut().unwrap();
@@ -1274,8 +1277,8 @@ fn pinned_editor_keeps_documents_history_and_hidden_output_separate() {
         )
     });
     assert!(
-        !pin.get_interactive(),
-        "mouse mode must pass through the editing pin"
+        pin.get_interactive(),
+        "mouse mode pans inside the editing viewport"
     );
     for (event, x, y) in [(0, 130., 120.), (1, 180., 160.), (2, 180., 160.)] {
         pin.invoke_edit_pointer(event, x / scale, y / scale);
@@ -1360,6 +1363,12 @@ fn pin_crop_presents_atomically_restores_geometry_and_keeps_shared_history() {
     };
     slint::platform::set_platform(position_platform()).unwrap();
     let mut l = lifecycle();
+    let pan_cursors = Rc::new(RefCell::new(Vec::new()));
+    let recorded_cursors = pan_cursors.clone();
+    l.image_pan_cursor = Rc::new(move |_, shape| {
+        recorded_cursors.borrow_mut().push(shape);
+        true
+    });
     l.popup_work_area = Rc::new(|_| {
         Some(Rect {
             left: 0,
@@ -1532,7 +1541,10 @@ fn pin_crop_presents_atomically_restores_geometry_and_keeps_shared_history() {
     );
     assert_eq!(pin.window().position(), old_pos);
     assert_eq!(crate::pinned_screenshot::geometry(id).unwrap().0, crop);
-    assert!(!pin.get_interactive());
+    assert!(
+        pin.get_interactive(),
+        "browse viewport accepts panning without drawing"
+    );
     undo();
     pump("crop undo", || {
         !image_crop::active() && core.borrow().pinned_images[&id].proposed.is_none()
@@ -1564,6 +1576,75 @@ fn pin_crop_presents_atomically_restores_geometry_and_keeps_shared_history() {
     assert_eq!(
         REGISTRY.with(|s| s.borrow().as_ref().unwrap().document.session.image_crop),
         Some(crop)
+    );
+
+    // Browsing has its own bounded viewport; it does not replace the document.
+    pin.set_zoom_enabled(true);
+    let document = REGISTRY.with(|s| s.borrow().as_ref().unwrap().document.session.clone());
+    let before_size = pin.window().size();
+    pin.invoke_zoom_preset_requested(200);
+    assert_eq!(pin.get_zoom_percent(), 200.);
+    assert_eq!(pin.window().size(), before_size);
+    let original = pin_editor::view_point((150., 100.), false);
+    for (kind, x, y) in [(0, 50., 50.), (1, 80., 70.)] {
+        pin.invoke_edit_pointer(kind, x, y);
+    }
+    assert_ne!(pin_editor::view_point((150., 100.), false), original);
+    pin.invoke_escape_requested();
+    assert_eq!(pin_editor::view_point((150., 100.), false), original);
+    assert!(
+        pin_editor::active(),
+        "Escape cancels a pan before closing the editor"
+    );
+    pin.invoke_edit_pointer(2, 80., 70.);
+    assert!(pin.invoke_navigation_key(true));
+    assert_eq!(
+        pan_cursors.borrow().last(),
+        Some(&None),
+        "release the native hand before exposing the drawing tool"
+    );
+    assert!(REGISTRY.with(|s| !s.borrow().as_ref().unwrap().document.mode.is_mouse()));
+    assert!(pin.invoke_navigation_key(true));
+    assert!(
+        REGISTRY.with(|s| !s.borrow().as_ref().unwrap().document.mode.is_mouse()),
+        "repeat cannot toggle twice"
+    );
+    pin.invoke_navigation_key(false);
+    pin.invoke_navigation_key(true);
+    pin.invoke_navigation_key(false);
+    assert!(REGISTRY.with(|s| s.borrow().as_ref().unwrap().document.mode.is_mouse()));
+    assert_eq!(
+        REGISTRY.with(|s| s
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .document
+            .session
+            .objects
+            .clone()),
+        document.objects
+    );
+    assert_eq!(
+        REGISTRY.with(|s| s.borrow().as_ref().unwrap().document.session.can_undo()),
+        document.can_undo()
+    );
+    open_crop();
+    pump("viewport crop", || pin.get_cropping());
+    assert_eq!(pin.window().size(), before_size);
+    image_crop::finish(false);
+    assert_eq!(
+        pin.get_zoom_percent(),
+        200.,
+        "cancel crop restores local zoom"
+    );
+    assert_eq!(pin.window().size(), before_size);
+    pin_editor::finish_now();
+    assert!(!pin.get_viewport_active());
+    let inset = (pin.get_frame_inset() * pin.window().scale_factor()).round() as u32;
+    assert_eq!(
+        pin.window().size(),
+        slint::PhysicalSize::new(200 + 2 * inset, 130 + 2 * inset),
+        "normal return geometry follows the confirmed crop, not local zoom"
     );
     crate::pinned_screenshot::close_all();
     super::super::shutdown();

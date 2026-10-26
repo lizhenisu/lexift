@@ -19,6 +19,7 @@ use std::{
 pub(crate) mod policy;
 pub(crate) mod transform;
 pub(crate) mod visibility;
+pub(crate) mod zoom;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
     Preparing,
@@ -154,6 +155,7 @@ impl Origin {
     }
 }
 struct Pin {
+    view: zoom::View,
     pointer_sink: Option<crate::bridge::PopupPointerSink>,
     user_hidden: bool,
     visibility_pending: Option<lexift_core::domain::pinned_image::visibility::Request>,
@@ -304,6 +306,8 @@ pub(crate) fn apply_theme() {
         crate::theme::apply(&window);
         if !window.get_editing() {
             set_picture(&window, &image);
+        } else if zoom::active(id) {
+            zoom::redraw(id);
         }
         policy::schedule_frame(id);
     }
@@ -374,6 +378,7 @@ pub(crate) fn set_edit_interaction(id: u64, allowed: bool) -> bool {
     let Some((window, gesture, lifecycle)) = context else {
         return false;
     };
+    let allowed = allowed || window.get_viewport_active();
     if window.get_interactive() == allowed {
         return true;
     }
@@ -392,6 +397,17 @@ pub(crate) fn set_edit_interaction(id: u64, allowed: bool) -> bool {
         apply_policy(id);
         false
     }
+}
+pub(crate) fn window_for_view(id: u64) -> Option<PinnedScreenshotWindow> {
+    STATE.with(|s| {
+        s.borrow()
+            .as_ref()?
+            .windows
+            .get(&id)?
+            .window
+            .get()
+            .map(|w| w.clone_strong())
+    })
 }
 pub(crate) fn set_recognition_entry(id: u64, enabled: bool) {
     STATE.with(|s| {
@@ -871,6 +887,7 @@ fn destroy(id: u64, mut pin: Pin, lifecycle: &WindowLifecycleCallbacks) {
     pin.feedback.clear();
     if let Some(window) = pin.window.get() {
         window.invoke_close_menu();
+        (lifecycle.image_pan_cursor)(window.window(), None);
         (lifecycle.cancel_window_interaction)(window.window());
     }
     pin.window.clear();
@@ -914,6 +931,11 @@ pub(crate) fn edit_window(id: u64, editing: bool) -> Option<PinnedScreenshotWind
     window.set_editing(editing);
     window.set_browsing(false);
     window.set_recognition_enabled(true);
+    if editing {
+        zoom::begin(id);
+    } else {
+        zoom::end(id);
+    }
     if !editing {
         window.set_decoration(slint::Image::default());
     }
@@ -1032,6 +1054,11 @@ pub(crate) fn set_geometry(
     w.window().set_position(position);
     w.window().set_size(size);
     if apply_policy(id) {
+        STATE.with(|s| {
+            if let Some(p) = s.borrow_mut().as_mut().and_then(|r| r.windows.get_mut(&id)) {
+                p.prepared_inset = (w.get_frame_inset() * native_scale(w.window())).round() as i32;
+            }
+        });
         return true;
     }
     STATE.with(|s| {
@@ -1044,6 +1071,10 @@ pub(crate) fn set_geometry(
     false
 }
 pub(crate) fn present_edit(id: u64, frame: tiny_skia::Pixmap, controls: tiny_skia::Pixmap) {
+    if zoom::active(id) {
+        zoom::present(id, frame, controls);
+        return;
+    }
     STATE.with(|s| {
         let s = s.borrow();
         if let Some(w) = s
@@ -1144,6 +1175,21 @@ fn show_from(
                     | winit::event::WindowEvent::ScaleFactorChanged { .. }
             ) {
                 policy::schedule_frame(id);
+                if let Some(w) = window_for_view(id) {
+                    let weak = w.as_weak();
+                    let dpi = matches!(event, winit::event::WindowEvent::ScaleFactorChanged { .. });
+                    slint::Timer::single_shot(Duration::ZERO, move || {
+                        if let (Some(owner), Some(current)) = (weak.upgrade(), window_for_view(id))
+                            && std::ptr::eq(owner.window(), current.window())
+                        {
+                            if dpi {
+                                zoom::dpi_changed(id);
+                            } else {
+                                zoom::redraw(id);
+                            }
+                        }
+                    });
+                }
             }
             if matches!(event, winit::event::WindowEvent::Focused(false)) {
                 crate::annotation::pin_editor::lost_focus(id);
@@ -1225,6 +1271,9 @@ fn show_from(
         window.on_opacity_requested(move |percent| policy::request_opacity(id, percent));
         window.on_transform_requested(move |index| transform::request(id, index));
         window.on_zoom_requested(move |delta, x, y| zoom(id, delta, x, y));
+        window.on_zoom_preset_requested(move |percent| zoom::request(id, percent));
+        window
+            .on_navigation_key(move |down| crate::annotation::pin_editor::navigation_key(id, down));
         let initial = match origin {
             Origin::History(
                 lexift_core::domain::image_history::workflow::OutputKey::Import { operation },
@@ -1256,6 +1305,7 @@ fn show_from(
         r.windows.insert(
             id,
             Pin {
+                view: Default::default(),
                 pointer_sink: None,
                 user_hidden: false,
                 visibility_pending: None,
@@ -1324,6 +1374,7 @@ fn finish_native_drag(id: u64) {
         }
     });
     restore_recognition_input(id);
+    zoom::settled(id);
     crate::tray_menu::refresh_pin_recovery();
 }
 fn begin_drag(id: u64, serial: u64) {
@@ -1473,6 +1524,7 @@ fn prepare(id: u64, attempt: u8) {
                     } else {
                         crate::bridge::dispatch_pointer_input(window.window(), event);
                     }
+                    zoom::refresh_cursor(id);
                 }
             });
             let owned_sink = sink.clone();
@@ -1517,6 +1569,9 @@ fn prepare(id: u64, attempt: u8) {
                     });
                 }
             }
+            if success {
+                zoom::settled(id);
+            }
             origin.complete(if success {
                 Ok(SaveOutcome::Saved)
             } else {
@@ -1540,26 +1595,7 @@ fn prepare(id: u64, attempt: u8) {
     }
 }
 fn zoom(id: u64, delta: f32, x: f32, y: f32) {
-    if !visibility::operable(id) {
-        return;
-    }
-    let allowed = STATE.with(|s| {
-        s.borrow().as_ref().is_some_and(|r| {
-            r.interactive
-                && r.windows.get(&id).is_some_and(|p| {
-                    p.phase == Phase::Visible
-                        && !p.interaction.applied.locked
-                        && !p.interaction.applied.passthrough
-                        && p.interaction.pending.is_none()
-                })
-        })
-    });
-    if allowed
-        && delta != 0.
-        && (!crate::annotation::pin_editor::current().is_some_and(|p| p.0 == id) || recognizing(id))
-    {
-        fit(id, Some((if delta > 0. { 1.1 } else { 1. / 1.1 }, x, y)));
-    }
+    zoom::wheel(id, delta, x, y);
 }
 fn fit(id: u64, zoom: Option<(f32, f32, f32)>) {
     let value = STATE.with(|s| {
@@ -1615,6 +1651,7 @@ fn fit(id: u64, zoom: Option<(f32, f32, f32)>) {
         )
     });
     let (size, position) = placement(inner_pos, inner_size, image, area, scale, zoom);
+    let size = zoom::initial_size(size, margin, lifecycle.pin_window_budget);
     window.window().set_size(slint::PhysicalSize::new(
         size.width + 2 * margin as u32,
         size.height + 2 * margin as u32,

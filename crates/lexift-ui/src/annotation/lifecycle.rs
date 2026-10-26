@@ -43,6 +43,9 @@ pub(super) fn escape() {
 }
 
 pub(super) fn escape_from(origin: focus::Origin) {
+    if pin_editor::current().is_some_and(|(id, _)| crate::pinned_screenshot::zoom::cancel_pan(id)) {
+        return;
+    }
     if editor_ocr::cancel() {
         return;
     }

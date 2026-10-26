@@ -33,6 +33,7 @@
 | 图片历史 | 已实现 | 本进程 20 条／512MiB，保留可编辑底图与确认范围，同源成功输出更新；见[图片历史验证](../releases/screenshot-image-history.md) |
 | 屏幕录制 | 待实现 | 与截图独立的时钟、连续采集及编码生命周期，竞品菜单或静态字符串不代表 Lexift 已具备这些能力 |
 | 贴图旋转／翻转 | 已接入，验证边界见记录 | 普通与编辑贴图菜单四种方向操作，共享非破坏历史、中心定位、后台候选提交；锁定时全部禁用。见[专项验证](../releases/pin-image-transform.md) |
+| 贴图倍率与编辑视口 | 已接入，验收边界见记录 | 普通显示提供物理倍率和适应工作区；编辑使用有界视口平移和局部放大，复用原 HWND、坐标和原始输出。见[交互说明](../features/pin-interaction.md#贴图倍率与编辑视口)及[验证](../releases/pin-image-zoom.md) |
 | 外部图片导入 | 已接入，验证边界见专项记录 | 工具条／托盘打开 PNG／JPEG 编辑，或从剪贴板直接贴图；成功输出才记历史，不修改 R。见[导入说明](../features/image-import.md)与[验证记录](../releases/image-import.md) |
 | PNG／JPEG 保存 | 已接入 | 全部图片保存入口统一支持，PNG 默认，JPEG 95% 质量及白底；见[保存格式验证](../releases/image-save-formats.md) |
 

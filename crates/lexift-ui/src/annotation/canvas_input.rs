@@ -113,7 +113,12 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
         }
         let layer = r.canvas_state.canvases.get(index)?;
         let scale = layer.scale();
-        let mut point = cursor::screen_point(layer.bounds, (x, y), layer.input_scale());
+        let mut point = r
+            .screenshot
+            .as_ref()
+            .and_then(|e| e.pin)
+            .and_then(|(id, _)| pin_editor::input_point(id, x, y))
+            .unwrap_or_else(|| cursor::screen_point(layer.bounds, (x, y), layer.input_scale()));
         if let Some(full) = r.screenshot.as_ref().and_then(|e| e.region.bounds()) {
             let bounds = if screenshot::long::image_editing() {
                 r.document.session.image_crop.unwrap_or(full)
@@ -926,6 +931,9 @@ impl Registry {
 
     /// Apply the native input policy before exposing a new mode in the toolbar.
     pub(super) fn set_mode(&mut self, mode: InteractionMode) -> bool {
+        if let Some((id, _)) = self.screenshot.as_ref().and_then(|e| e.pin) {
+            crate::pinned_screenshot::zoom::release_cursor(id);
+        }
         if pin_editor::recognition_busy() {
             return false;
         }

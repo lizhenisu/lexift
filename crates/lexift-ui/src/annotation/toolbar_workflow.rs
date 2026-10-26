@@ -1588,6 +1588,7 @@ pub(super) fn pointer_panel(
 impl Registry {
     pub(super) fn sync_mode_display(&self) {
         image_navigation::sync_mode(self);
+        pin_editor::sync_view_mode(self);
         let _guards = self.pause_native_pointer_inputs();
         crate::pinned_screenshot::set_annotation_interaction(
             self.screenshot.as_ref().is_some_and(|e| e.pin.is_some())

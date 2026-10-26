@@ -1989,3 +1989,21 @@ msgstr "Impossibile nascondere o ripristinare alcune immagini fissate. Riprova."
 
 msgid "Rotate / flip"
 msgstr "Ruota / capovolgi"
+
+msgid "Zoom: {}%"
+msgstr "Zoom: {}%"
+
+msgid "Fit to work area"
+msgstr "Adatta all’area di lavoro"
+
+msgid "Zoom limit reached. Use the editor to view details."
+msgstr "Limite di zoom raggiunto. Usa l’editor per vedere i dettagli."
+
+msgid "{}% (window limit)"
+msgstr "{}% (limite finestra)"
+
+msgid "Wheel: zoom · Drag: pan · Space: edit/pan"
+msgstr "Rotella: zoom · Trascina: sposta · Spazio: modifica/sposta"
+
+msgid "Zoom limit reached for accurate annotation coordinates."
+msgstr "Limite di zoom raggiunto per mantenere precise le coordinate delle annotazioni."

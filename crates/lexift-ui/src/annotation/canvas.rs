@@ -177,6 +177,9 @@ impl Layer {
             Surface::Canvas(w) => w.window().scale_factor().max(0.1),
             Surface::Pin(w) => {
                 let native = w.window().scale_factor().max(0.1);
+                if w.get_viewport_active() {
+                    return native / (w.get_zoom_percent() / 100.).max(f32::MIN_POSITIVE);
+                }
                 let width = w.window().size().width as f32 / native - 2. * w.get_frame_inset();
                 (self.bounds.right - self.bounds.left) as f32 / width.max(1.)
             }

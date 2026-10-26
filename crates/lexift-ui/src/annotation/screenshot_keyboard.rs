@@ -134,6 +134,18 @@ fn handle(
     repeat: bool,
 ) -> bool {
     let (owner, epoch) = source;
+    if text == " "
+        && !control
+        && !shift
+        && let Some((id, _)) = pin_editor::current()
+    {
+        let eligible = REGISTRY.with(|s| {
+            s.borrow()
+                .as_ref()
+                .is_some_and(|r| current(r, generation, owner))
+        });
+        return eligible && pin_editor::navigation_key(id, down);
+    }
     if super::long::image_editing() && (text == " " || (text == "0" && control)) {
         let eligible = REGISTRY.with(|s| {
             s.borrow().as_ref().is_some_and(|r| {
