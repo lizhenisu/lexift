@@ -2028,3 +2028,6 @@ msgstr "{}"
 
 msgid "Contrast"
 msgstr "대비"
+
+msgid "Reset original colors"
+msgstr "원래 색상으로 복원"

@@ -51,6 +51,7 @@ pub struct Color {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
+    Reset,
     Grayscale,
     Invert,
     Brightness(Brightness),
@@ -59,6 +60,7 @@ pub enum Action {
 impl Color {
     pub fn action(mut self, action: Action) -> Self {
         match action {
+            Action::Reset => self = Self::default(),
             Action::Grayscale => self.grayscale = !self.grayscale,
             Action::Invert => self.inverted = !self.inverted,
             Action::Brightness(level) => self.brightness = level,
@@ -120,6 +122,57 @@ impl Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reset_is_one_reversible_document_edit_and_default_noop_preserves_redo() {
+        use crate::domain::{annotation::Session, geometry::Rect};
+        let bounds = Rect {
+            left: -30,
+            top: 20,
+            right: 70,
+            bottom: 220,
+        };
+        let mut session = Session::new();
+        session.image_source = Some(bounds);
+        session.set_image_crop(
+            Rect {
+                left: -20,
+                top: 30,
+                right: 40,
+                bottom: 130,
+            },
+            bounds,
+        );
+        let orientation = session
+            .image_orientation
+            .action(crate::domain::image_transform::Action::Right);
+        session.orient_image(orientation);
+        let colors = Color {
+            grayscale: true,
+            inverted: true,
+            brightness: Brightness::new(25).unwrap(),
+            contrast: Contrast::new(-50).unwrap(),
+        };
+        assert!(session.color_image(colors));
+        let crop = session.image_crop;
+        assert!(session.color_image(colors.action(Action::Reset)));
+        assert_eq!(session.image_color, Color::default());
+        assert_eq!(session.image_crop, crop);
+        assert_eq!(session.image_orientation, orientation);
+        assert!(session.undo());
+        assert_eq!(session.image_color, colors);
+        assert!(session.redo());
+        assert_eq!(session.image_color, Color::default());
+        assert!(session.undo());
+        assert!(session.undo());
+        assert_eq!(session.image_color, Color::default());
+        assert!(!session.color_image(session.image_color.action(Action::Reset)));
+        assert!(session.can_redo());
+        assert!(session.redo());
+        assert_eq!(session.image_color, colors);
+        let restored = session.restored_image();
+        assert_eq!(restored.image_color, colors);
+        assert!(!restored.can_undo());
+    }
     #[test]
     fn contrast_and_brightness_match_independent_reference_for_every_alpha() {
         for value in [i32::MIN, -101, -99, 1, 24, 101, i32::MAX] {

@@ -2028,3 +2028,6 @@ msgstr "{}"
 
 msgid "Contrast"
 msgstr "Contrast"
+
+msgid "Reset original colors"
+msgstr "Reset original colours"

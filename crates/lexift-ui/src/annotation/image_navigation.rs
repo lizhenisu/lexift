@@ -384,6 +384,7 @@ pub(super) fn lost_focus() {
             n.route = 0;
             n.view.finish_pan();
             if let Some(w) = n.window.upgrade() {
+                w.invoke_close_image_menu();
                 publish(n, &w);
             }
             return drawing.then(|| n.window.upgrade()).flatten();

@@ -1,4 +1,4 @@
-//! Candidate orientation is installed with its prepared base and feedback, never ahead of pixels.
+//! Image document candidates are installed with matching pixels and feedback.
 use super::*;
 use lexift_core::domain::image_transform::Action;
 struct Pending {
@@ -82,6 +82,61 @@ pub(super) fn apply(index: i32) {
         submit(r, candidate);
     });
 }
+/// Finish input transactions before opening the canvas menu, not while a native
+/// text control owns its own context menu. Stale canvases cannot open a menu.
+pub(super) fn prepare_menu() -> bool {
+    REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot.as_mut() else { return false };
+        if !idle(r) {
+            return false;
+        }
+        finish_text_edit_registry(r, true);
+        r.finish_style_edit();
+        r.close_panel();
+        r.hints.clear();
+        sync(r);
+        true
+    })
+}
+fn idle(r: &Registry) -> bool {
+    available()
+        && r.gesture().is_none()
+        && r.pending_drawing.is_none()
+        && r.toolbar_state.watermark.get().is_none()
+        && r.toolbar_state.menus.current.is_none()
+        && screenshot::long::editor().is_some_and(|w| !w.get_image_panning())
+}
+pub(super) fn color(action: lexift_core::domain::image_color::Action) {
+    REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot.as_mut() else { return };
+        if !idle(r) {
+            return;
+        }
+        finish_text_edit_registry(r, true);
+        r.finish_style_edit();
+        r.close_panel();
+        r.hints.clear();
+        let mut candidate = r.document.session.clone();
+        if candidate.color_image(candidate.image_color.action(action)) {
+            submit(r, candidate);
+        }
+    });
+}
+pub(super) fn sync(r: &Registry) {
+    if let Some(w) = screenshot::long::editor() {
+        let color = r.document.session.image_color;
+        w.set_image_color_enabled(idle(r));
+        w.set_image_output_busy(
+            busy() || editor_ocr::busy() || screenshot::long_editor::outputting(),
+        );
+        w.set_grayscale(color.grayscale);
+        w.set_inverted(color.inverted);
+        w.set_brightness(i32::from(color.brightness.value()));
+        w.set_contrast(i32::from(color.contrast.value()));
+    }
+}
 pub(super) fn ready(r: &mut Registry, revision: u64) {
     let pending = PENDING.with(|s| {
         let mut s = s.borrow_mut();
@@ -94,9 +149,13 @@ pub(super) fn ready(r: &mut Registry, revision: u64) {
         }
     });
     if let Some(p) = pending {
+        let geometry_changed = p.session.image_orientation != r.document.session.image_orientation
+            || p.session.image_crop != r.document.session.image_crop;
         r.document.session = p.session;
-        r.set_mode(InteractionMode::Mouse);
-        image_crop::sync(r, true);
+        if geometry_changed {
+            r.set_mode(InteractionMode::Mouse);
+            image_crop::sync(r, true);
+        }
         sync_history_controls(r);
         if let Some(m) = r.toolbar_state.main.get() {
             m.set_output_busy(false);
@@ -133,7 +192,21 @@ fn belongs(p: &Pending, r: &Registry) -> bool {
             .first()
             .is_some_and(|c| c.revision() == p.owner.1)
 }
-pub(super) fn submit(r: &mut Registry, session: Session) {
+pub(super) fn submit(r: &mut Registry, mut session: Session) {
+    if session.image_crop == r.document.session.image_crop
+        && session.image_orientation == r.document.session.image_orientation
+        && session.image_color != r.document.session.image_color
+    {
+        // Selection is temporary interaction state. A color-only history step
+        // must not jump back to the selection captured before that step.
+        session.selected = r.document.session.selected.and_then(|index| {
+            let id = r.document.session.objects.get(index)?.id;
+            session.objects.iter().position(|object| object.id == id)
+        });
+    }
+    if let Some(w) = screenshot::long::editor() {
+        w.invoke_close_image_menu();
+    }
     let Some(owner) = r
         .screenshot
         .as_ref()
@@ -172,6 +245,49 @@ mod tests {
     }
 
     use super::*;
+    #[test]
+    fn keyboard_menu_waits_for_releases_and_cancellation_retires_pending_open() {
+        use slint::platform::{Key, WindowEvent};
+        slint::platform::set_platform(Box::new(Backend)).unwrap();
+        let w = AnnotationCanvas::new().unwrap();
+        w.set_image_view(true);
+        w.invoke_focus_input();
+        let opens = Rc::new(std::cell::Cell::new(0));
+        let count = opens.clone();
+        w.on_prepare_image_menu(move || {
+            count.set(count.get() + 1);
+            false
+        });
+        let key = |key: Key, down| {
+            let text = char::from(key).to_string().into();
+            w.window().dispatch_event(if down {
+                WindowEvent::KeyPressed { text }
+            } else {
+                WindowEvent::KeyReleased { text }
+            });
+        };
+        key(Key::Shift, true);
+        key(Key::F10, true);
+        key(Key::F10, true); // Auto-repeat still yields one opening.
+        assert_eq!(opens.get(), 0);
+        key(Key::F10, false);
+        assert_eq!(opens.get(), 0);
+        key(Key::Shift, false);
+        assert_eq!(opens.get(), 1);
+        key(Key::Shift, true);
+        key(Key::F10, true);
+        key(Key::Shift, false); // The opposite release order also works.
+        assert_eq!(opens.get(), 1);
+        key(Key::F10, false);
+        assert_eq!(opens.get(), 2);
+        key(Key::Menu, true);
+        w.invoke_close_image_menu();
+        key(Key::Menu, false);
+        assert_eq!(opens.get(), 2);
+        key(Key::Menu, true);
+        key(Key::Menu, false);
+        assert_eq!(opens.get(), 3);
+    }
     #[test]
     fn late_failure_and_frame_after_canvas_rebuild_cannot_retire_new_candidate() {
         slint::platform::set_platform(Box::new(Backend)).unwrap();
@@ -241,6 +357,52 @@ mod tests {
             assert!(!busy());
             assert_eq!(r.document.session.image_orientation, old.image_orientation);
             assert_eq!(r.document.session.can_undo(), old.can_undo());
+
+            // Color candidates must not inherit orientation's switch-to-mouse
+            // behavior, including undo and redo prepared through the same path.
+            r.document.mode = InteractionMode::Tool(2);
+            r.document.session.add(Object {
+                id: Default::default(),
+                image_basis: Default::default(),
+                kind: Kind::Rectangle,
+                bounds: Bounds::from_corners((1., 2.), (8., 12.)),
+                points: vec![],
+                erased: vec![],
+                style: Style::default(),
+                extra: Extra::None,
+            });
+            r.document.session.selected = None;
+            let mut colored = r.document.session.clone();
+            colored.color_image(
+                colored
+                    .image_color
+                    .action(lexift_core::domain::image_color::Action::Grayscale),
+            );
+            submit(r, colored.clone());
+            track(r.generation, 11, 5);
+            assert!(!r.document.session.image_color.grayscale);
+            ready(r, 4);
+            assert!(busy());
+            ready(r, 5);
+            assert_eq!(r.document.mode, InteractionMode::Tool(2));
+            assert!(r.document.session.image_color.grayscale);
+            r.document.session.selected = Some(0);
+            let mut undo = r.document.session.clone();
+            assert!(undo.undo());
+            submit(r, undo);
+            track(r.generation, 11, 6);
+            ready(r, 6);
+            assert!(!r.document.session.image_color.grayscale);
+            assert_eq!(r.document.mode, InteractionMode::Tool(2));
+            assert_eq!(r.document.session.selected, Some(0));
+            let mut redo = r.document.session.clone();
+            assert!(redo.redo());
+            submit(r, redo);
+            track(r.generation, 11, 7);
+            ready(r, 7);
+            assert_eq!(r.document.session.image_color, colored.image_color);
+            assert_eq!(r.document.mode, InteractionMode::Tool(2));
+            assert_eq!(r.document.session.selected, Some(0));
         });
         clear();
         REGISTRY.with(|s| s.borrow_mut().take());

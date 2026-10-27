@@ -284,6 +284,7 @@ pub(crate) fn apply_theme() {
 }
 
 fn sync_history_controls(r: &Registry) {
+    image_transform::sync(r);
     if let Some(main) = r.toolbar_state.main.get() {
         main.set_can_undo(
             !image_crop::active()

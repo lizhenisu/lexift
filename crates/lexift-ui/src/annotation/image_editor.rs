@@ -185,6 +185,26 @@ fn install(token: u64) {
         w.set_imported_image(history_editor::imported());
         w.set_annotations_hidden(history_editor::hidden());
         w.on_visibility_requested(history_editor::visibility);
+        w.on_prepare_image_menu(move || {
+            canvas_current(generation, 0, revision) && image_transform::prepare_menu()
+        });
+        w.on_image_color_requested(move |kind, value| {
+            use lexift_core::domain::image_color::{Action, Brightness, Contrast};
+            if !canvas_current(generation, 0, revision) {
+                return;
+            }
+            let action = match kind {
+                0 => Some(Action::Grayscale),
+                1 => Some(Action::Invert),
+                2 => Brightness::new(value).map(Action::Brightness),
+                3 => Contrast::new(value).map(Action::Contrast),
+                4 => Some(Action::Reset),
+                _ => None,
+            };
+            if let Some(action) = action {
+                image_transform::color(action);
+            }
+        });
         image_navigation::bind(&w);
         let weak = w.as_weak();
         w.on_crop_action(move |apply| {

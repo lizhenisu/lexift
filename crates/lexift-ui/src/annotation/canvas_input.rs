@@ -720,6 +720,7 @@ pub(super) fn history_key(action: i32) {
                     .is_some_and(|p| p.get_menu() || p.get_parameter_input_active())
         })
     });
+    tracing::debug!(action, blocked, "Annotation history key requested");
     if !blocked {
         match action {
             1 => undo(),
@@ -738,6 +739,7 @@ pub(super) fn redo() {
 /// Both directions must invalidate the same render and parameter projections.
 fn history(forward: bool) {
     if image_crop::active() || screenshot::recognizing() || screenshot::long_editor::outputting() {
+        tracing::debug!(forward, "Annotation history blocked by image operation");
         return;
     }
     let generation = REGISTRY.with(|s| {
@@ -752,6 +754,17 @@ fn history(forward: bool) {
             || screenshot::size_input::busy(r)
             || screenshot::long::editor().is_some_and(|w| w.get_image_panning())
         {
+            tracing::debug!(
+                forward,
+                export = r.export.pending(),
+                toolbar_busy = r
+                    .toolbar_state
+                    .main
+                    .get()
+                    .is_some_and(|w| w.get_output_busy()),
+                panning = screenshot::long::editor().is_some_and(|w| w.get_image_panning()),
+                "Annotation history blocked by view operation"
+            );
             return None;
         }
         if forward
@@ -776,7 +789,10 @@ fn history(forward: bool) {
             } else {
                 candidate.undo()
             };
-            if changed && candidate.image_orientation != r.document.session.image_orientation {
+            if changed
+                && (candidate.image_orientation != r.document.session.image_orientation
+                    || candidate.image_color != r.document.session.image_color)
+            {
                 image_transform::submit(r, candidate);
                 return None;
             }

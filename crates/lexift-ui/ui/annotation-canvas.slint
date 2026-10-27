@@ -26,6 +26,22 @@ export component AnnotationCanvas inherits Window {
     in property <bool> image-output-busy: false;
     in property <bool> annotations-hidden: false;
     callback visibility-requested(bool);
+    in property <bool> image-color-enabled:false;
+    in property <bool> grayscale:false;
+    in property <bool> inverted:false;
+    in property <int> brightness:0;
+    in property <int> contrast:0;
+    callback prepare-image-menu() -> bool;
+    callback image-color-requested(int, int);
+    private property <bool> image-menu-key-pending:false;
+    private property <bool> image-menu-key-down:false;
+    public function close-image-menu() {
+        root.image-menu-key-pending = false; root.image-menu-key-down = false;
+        image-context.close();
+    }
+    function open-image-menu(x:length, y:length) {
+        if root.prepare-image-menu() { image-context.show({x:x,y:y}); }
+    }
     out property <length> image-header-height: Metrics.image-view-header-height;
     in-out property <float> image-zoom: 1;
     in property <float> image-pixel-scale: 1;
@@ -131,6 +147,10 @@ export component AnnotationCanvas inherits Window {
             mouse-cursor: root.image-cropping ? (root.crop-cursor == AnnotationCursor.moving ? move : root.crop-cursor == AnnotationCursor.horizontal ? ew-resize : root.crop-cursor == AnnotationCursor.vertical ? ns-resize : root.crop-cursor == AnnotationCursor.diagonal-down ? nwse-resize : root.crop-cursor == AnnotationCursor.diagonal-up ? nesw-resize : crosshair) : root.image-browsing ? (root.image-panning ? grabbing : grab)
                 : root.cursor == AnnotationCursor.text ? text : root.cursor == AnnotationCursor.idle ? default : crosshair;
             pointer-event(event) => {
+                if event.kind == PointerEventKind.down { root.close-image-menu(); }
+                if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                    root.open-image-menu(self.mouse-x, self.mouse-y);
+                }
                 if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
                     keys.focus(); root.viewport-pointer(0, self.mouse-x / 1px, self.mouse-y / 1px);
                 }
@@ -144,10 +164,35 @@ export component AnnotationCanvas inherits Window {
                     event.modifiers.control || event.modifiers.shift || event.modifiers.alt || event.modifiers.meta);
                 return accept;
             }
-            if root.history-image: ContextMenuArea {
-                width:parent.width; height:parent.height;
-                Menu { MenuItem { title:@tr("Hide annotations"); enabled:!root.image-cropping && !root.image-output-busy; checkable:true; checked:root.annotations-hidden; activated=>{root.visibility-requested(!root.annotations-hidden);} } }
+
+        }
+    }
+    image-context := ContextMenuArea {
+        // Open explicitly after committing text/style transactions. Disabling
+        // automatic dispatch prevents a second menu for the same right click.
+        y:root.image-header-height; width:root.width; height:max(0px,root.height - root.image-header-height - root.image-footer-height); enabled:false;
+        Menu {
+            MenuItem { title:@tr("Grayscale"); enabled:root.image-color-enabled; checkable:true; checked:root.grayscale; activated=>{root.image-color-requested(0,0);} }
+            MenuItem { title:@tr("Invert colors"); enabled:root.image-color-enabled; checkable:true; checked:root.inverted; activated=>{root.image-color-requested(1,0);} }
+            Menu {
+                title:@tr("Brightness"); enabled:root.image-color-enabled;
+                for value in [-100,-75,-50,-25,0,25,50,75,100]: MenuItem {
+                    title:value == 0 ? @tr("0 (No adjustment)") : value > 0 ? @tr("+{}",value) : @tr("{}",value);
+                    checkable:true; checked:root.brightness == value;
+                    activated=>{root.image-color-requested(2,value);}
+                }
             }
+            Menu {
+                title:@tr("Contrast"); enabled:root.image-color-enabled;
+                for value in [-100,-75,-50,-25,0,25,50,75,100]: MenuItem {
+                    title:value == 0 ? @tr("0 (No adjustment)") : value > 0 ? @tr("+{}",value) : @tr("{}",value);
+                    checkable:true; checked:root.contrast == value;
+                    activated=>{root.image-color-requested(3,value);}
+                }
+            }
+            MenuItem { title:@tr("Reset original colors"); enabled:root.image-color-enabled && (root.grayscale || root.inverted || root.brightness != 0 || root.contrast != 0); activated=>{root.image-color-requested(4,0);} }
+            if root.history-image: MenuSeparator {}
+            if root.history-image: MenuItem { title:@tr("Hide annotations"); enabled:!root.image-cropping && !root.image-output-busy; checkable:true; checked:root.annotations-hidden; activated=>{root.visibility-requested(!root.annotations-hidden);} }
         }
     }
     TouchArea {
@@ -178,6 +223,15 @@ export component AnnotationCanvas inherits Window {
     }
     keys := FocusScope {
         key-pressed(event) => {
+            if root.image-menu-key-pending && event.text == Key.Escape {
+                root.close-image-menu(); return accept;
+            }
+            if root.image-view && !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta && (event.text == Key.Menu || (event.text == Key.F10 && event.modifiers.shift)) {
+                // Native menus own their message loop. Let Slint observe key and
+                // modifier releases first, or Shift can remain stuck after F10.
+                root.image-menu-key-pending = true; root.image-menu-key-down = true;
+                return accept;
+            }
             if event.text == Key.Escape { root.escape-requested(); return accept; }
             if event.text == Key.Delete { root.delete-requested(); return accept; }
             if event.text == Key.Return { root.finish-path-requested(); return accept; }
@@ -188,6 +242,14 @@ export component AnnotationCanvas inherits Window {
             return reject;
         }
         key-released(event) => {
+            if root.image-menu-key-pending {
+                if event.text == Key.Menu || event.text == Key.F10 { root.image-menu-key-down = false; }
+                if !root.image-menu-key-down && !event.modifiers.shift && !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta {
+                    root.image-menu-key-pending = false;
+                    root.open-image-menu(0px, 0px);
+                }
+                return accept;
+            }
             if root.region-key(event.text, false, event.modifiers.control, event.modifiers.shift) { return accept; }
             return reject;
         }

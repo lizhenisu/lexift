@@ -154,3 +154,6 @@
 - [托盘菜单连续打开验证](releases/tray-menu-stability.md)
 - [贴图亮度调节验证](releases/pin-brightness.md)
 - [贴图对比度调节验证](releases/pin-contrast.md)
+
+- [独立图片编辑器颜色调整](features/image-editor-colors.md)
+- [独立图片编辑器颜色验证](releases/image-editor-colors.md)
