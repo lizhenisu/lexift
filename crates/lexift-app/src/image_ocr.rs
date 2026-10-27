@@ -165,11 +165,16 @@ impl ScreenshotRuntime {
                         Identity::Editor(r) => r.orientation,
                         Identity::Pin { request, .. } => request.orientation,
                     };
-                    let image = lexift_core::domain::image_transform::finish(
+                    let scale = match task.identity {
+                        Identity::Editor(r) => r.scale,
+                        Identity::Pin { request, .. } => request.scale,
+                    };
+                    let image = lexift_core::domain::image_transform::finish_scaled(
                         image,
                         task.frames.frames()[0].bounds,
                         orientation,
                         color,
+                        scale,
                         &task.cancel,
                     )
                     .map_err(|_| OcrOutcome::RecognitionFailed)?;

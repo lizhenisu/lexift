@@ -508,3 +508,33 @@ fn image_color_changes_content_once_but_never_edit_controls() {
         }
     }
 }
+
+#[test]
+fn resized_preview_and_controls_share_the_confirmed_raster_and_invalidate_cache() {
+    prepare_font_fixture(1., false);
+    let mut input = fixture(1.);
+    input.crop_border = false;
+    let full = input.snapshot.monitor;
+    let session = Arc::make_mut(&mut input.snapshot.session);
+    session.image_source = Some(full);
+    let cancel = AtomicBool::new(false);
+    let mut cache = Cache::default();
+    let original = paint_frames(&input, &cancel, &mut cache).unwrap();
+    for ratio in [(1, 2), (3, 2), (1, 1)] {
+        let scale = lexift_core::domain::image_resize::ImageScale::new(ratio.0, ratio.1).unwrap();
+        Arc::make_mut(&mut input.snapshot.session).image_scale = scale;
+        let frames = paint_frames(&input, &cancel, &mut cache).unwrap();
+        let expected = scale
+            .pixels(
+                lexift_core::ports::screen_capture::CapturedRegion {
+                    bounds: full,
+                    pixels: original[0].data().to_vec(),
+                },
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(frames[0].data(), expected.pixels);
+        assert_eq!(frames[0].width(), frames[1].width());
+        assert_eq!(frames[0].height(), frames[1].height());
+    }
+}

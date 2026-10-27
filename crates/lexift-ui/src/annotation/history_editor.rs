@@ -262,7 +262,12 @@ pub(super) fn presented() {
     });
 }
 pub(super) fn output(kind: lexift_core::domain::screenshot::ScreenshotOutput) {
-    if image_transform::busy() || editor_ocr::busy() || busy() || image_crop::active() {
+    if image_resize::busy()
+        || image_transform::busy()
+        || editor_ocr::busy()
+        || busy()
+        || image_crop::active()
+    {
         return;
     }
     let Some((window, editor)) = identity() else {
@@ -305,4 +310,22 @@ pub(super) fn visibility(hidden: bool) {
             hidden,
         });
     }
+}
+
+pub(super) fn source_dpi(point: (f32, f32)) -> Option<f32> {
+    ACTIVE.with(|s| {
+        s.borrow().as_ref().map(|s| {
+            let snapshot = &s.image.document.snapshot;
+            snapshot
+                .monitors
+                .iter()
+                .find(|(b, _)| {
+                    point.0 >= b.left as f32
+                        && point.0 < b.right as f32
+                        && point.1 >= b.top as f32
+                        && point.1 < b.bottom as f32
+                })
+                .map_or(snapshot.scale, |(_, scale)| *scale)
+        })
+    })
 }

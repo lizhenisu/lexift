@@ -35,4 +35,5 @@ pub mod image_history;
 pub mod editor_ocr;
 pub mod image_color;
 pub mod image_import;
+pub mod image_resize;
 pub mod image_transform;

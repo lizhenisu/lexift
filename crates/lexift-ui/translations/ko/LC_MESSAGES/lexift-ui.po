@@ -2031,3 +2031,15 @@ msgstr "대비"
 
 msgid "Reset original colors"
 msgstr "원래 색상으로 복원"
+
+msgid "Resize image"
+msgstr "이미지 크기 조정"
+
+msgid "Original size"
+msgstr "원래 크기"
+
+msgid "Enter valid image dimensions (maximum 40 MP)"
+msgstr "유효한 이미지 크기를 입력하세요 (최대 4천만 화소)"
+
+msgid "Image dimensions exceed the memory limit"
+msgstr "이미지 크기가 메모리 한도를 초과합니다"

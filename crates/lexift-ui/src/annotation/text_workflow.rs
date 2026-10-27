@@ -108,7 +108,11 @@ pub(super) fn finish_text_edit_registry(r: &mut Registry, commit: bool) {
                 object.extra = Extra::Text(text);
             });
         }
-        editor::EditChange::New(object) => {
+        editor::EditChange::New(mut object) => {
+            object.style = image_resize::style_to_source(
+                object.style,
+                image_resize::style_factor(r, Some(object.bounds.center())),
+            );
             r.document.session.add(*object);
         }
     }
@@ -421,7 +425,14 @@ pub(super) fn open_text_editor_with_settings(
         );
         let values = index.is_none().then(|| {
             let mut values = r.document.parameter_values.defaults(8).clone();
-            text_dimensions_to_values(&mut values, &edit.original);
+            let mut projected = edit.original.clone();
+            if image_resize::pixel_units(r) {
+                image_resize::text_lengths(
+                    &mut projected,
+                    r.document.session.image_scale.factor() as f32 * edit.scale,
+                );
+            }
+            text_dimensions_to_values(&mut values, &projected);
             values
         });
         edit.bind_input(
@@ -549,6 +560,11 @@ pub(super) fn attach_text_editor_owner(r: &Registry) -> bool {
     let (Some(editor), Some(edit)) = (r.editor.window(), r.editor.edit()) else {
         return false;
     };
+    if screenshot::long::image_editing() || pin_editor::active() {
+        return r.canvas_state.canvases.first().is_some_and(|owner| {
+            (r.lifecycle.attach_tool_window)(editor.window(), owner.window.window())
+        });
+    }
     let displays: Vec<_> = r
         .canvas_state
         .canvases
@@ -748,12 +764,19 @@ pub(super) fn finish_text_handle(r: &mut Registry, point: (f32, f32)) {
     }
     let parameter_object = r.parameter_object(8);
     if editing && active {
-        if !r.editor.sync_draft_dimensions()
+        let factor = if image_resize::pixel_units(r) {
+            r.document.session.image_scale.factor() as f32 * r.editor.edit().map_or(1., |e| e.scale)
+        } else {
+            1.
+        };
+        if !r.editor.sync_draft_dimensions(factor)
             && let Some(edit) = r.editor.edit()
         {
+            let mut projected = edit.original.clone();
+            image_resize::text_lengths(&mut projected, factor);
             text_dimensions_to_values(
                 r.document.parameter_values.edit(8, parameter_object),
-                &edit.original,
+                &projected,
             );
         }
         if let Some(panel) = r.toolbar_state.panel.get()

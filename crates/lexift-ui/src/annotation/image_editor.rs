@@ -185,6 +185,11 @@ fn install(token: u64) {
         w.set_imported_image(history_editor::imported());
         w.set_annotations_hidden(history_editor::hidden());
         w.on_visibility_requested(history_editor::visibility);
+        w.on_image_dimensions_requested(move || {
+            if canvas_current(generation, 0, revision) {
+                image_resize::begin();
+            }
+        });
         w.on_prepare_image_menu(move || {
             canvas_current(generation, 0, revision) && image_transform::prepare_menu()
         });
@@ -276,6 +281,9 @@ fn install(token: u64) {
         let weak = w.as_weak();
         let drag = r.lifecycle.begin_window_drag;
         w.on_header_drag_requested(move || {
+            if image_resize::consume_pointer(-1) {
+                return;
+            }
             let weak = weak.clone();
             // Dispatch after the native down message establishes the bridge capture lease.
             slint::Timer::single_shot(Duration::ZERO, move || {
@@ -380,6 +388,7 @@ fn install(token: u64) {
             r.document.session.image_source = Some(p.image.bounds);
             r.document.session.displays = vec![p.image.bounds];
         }
+        r.document.session.image_pixel_parameters = true;
         r.document.mode = InteractionMode::Mouse;
         r.sync_edit_scope();
         let e = r.screenshot.as_mut()?;
@@ -463,7 +472,9 @@ pub(in crate::annotation) fn view_point(point: (f32, f32), reverse: bool) -> Opt
     Some((q[0], q[1]))
 }
 pub(in crate::annotation) fn view_zoom() -> Option<f32> {
-    long::editor().map(|w| w.get_image_zoom() * w.window().scale_factor())
+    long::editor().map(|w| {
+        w.get_image_zoom() * w.window().scale_factor() * image_navigation::document_scale(&w)
+    })
 }
 /// Native text surfaces must not escape the image viewport into the title or status bar.
 pub(in crate::annotation) fn clip_text(mut bounds: Bounds) -> Bounds {

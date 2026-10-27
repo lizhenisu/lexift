@@ -131,7 +131,7 @@ impl State {
             .as_mut()
             .and_then(|instance| instance.values.as_mut())
     }
-    pub fn sync_draft_dimensions(&mut self) -> bool {
+    pub fn sync_draft_dimensions(&mut self, factor: f32) -> bool {
         let Some(instance) = self
             .active
             .as_mut()
@@ -139,10 +139,9 @@ impl State {
         else {
             return false;
         };
-        super::parameters::text_dimensions_to_values(
-            instance.values.as_mut().unwrap(),
-            &instance.edit.original,
-        );
+        let mut projected = instance.edit.original.clone();
+        super::image_resize::text_lengths(&mut projected, factor);
+        super::parameters::text_dimensions_to_values(instance.values.as_mut().unwrap(), &projected);
         true
     }
 
@@ -577,7 +576,13 @@ pub(super) fn place(
     let bounds = mapped_bounds(glyph_bounds, &map);
     // Desktop limits apply after projection: image coordinates may have a negative origin.
     let viewport = super::pin_editor::clip_text(super::screenshot::long_editor::clip_text(
-        viewport(bounds, displays),
+        if super::screenshot::long::image_editing() || super::pin_editor::active() {
+            // Retained image display partitions are source coordinates. After
+            // projection only the image viewport can clip a native input surface.
+            bounds
+        } else {
+            viewport(bounds, displays)
+        },
     ));
     let scale = scale * super::pin_editor::view_zoom();
     editor.window().set_position(slint::PhysicalPosition::new(
@@ -1260,5 +1265,33 @@ mod tests {
         drop(edit);
         advance(1000);
         assert_eq!(ticks.get(), 1);
+    }
+    #[test]
+    fn new_text_draft_dimensions_use_output_units_without_changing_source_typography() {
+        struct TestPlatform;
+        impl slint::platform::Platform for TestPlatform {
+            fn create_window_adapter(
+                &self,
+            ) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
+                Ok(
+                    slint::platform::software_renderer::MinimalSoftwareWindow::new(
+                        slint::platform::software_renderer::RepaintBufferType::NewBuffer,
+                    ),
+                )
+            }
+        }
+        slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+        let mut state = State::default();
+        let mut edit = make_edit();
+        edit.original.font_size = 12.;
+        state.open(
+            AnnotationTextInput::new().unwrap(),
+            edit,
+            Some(AnnotationValues::default()),
+        );
+        assert!(state.sync_draft_dimensions(2.5));
+        assert_eq!(state.draft_values().unwrap().text_size, 30);
+        assert_eq!(state.edit().unwrap().original.font_size, 12.);
+        state.clear();
     }
 }

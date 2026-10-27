@@ -33,6 +33,7 @@ pub struct State {
 /// Immutable input identity; geometry changes of the pin window do not change it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Recognition {
+    pub scale: super::image_resize::ImageScale,
     pub color: super::image_color::Color,
     pub orientation: super::image_transform::Orientation,
     pub operation: u64,
@@ -318,6 +319,10 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
                 .as_ref()
                 .map_or(p.source.unwrap(), |d| d.snapshot.monitor);
             let request = Recognition {
+                scale: p
+                    .document
+                    .as_ref()
+                    .map_or(Default::default(), |d| d.snapshot.session.image_scale),
                 color: p
                     .document
                     .as_ref()
@@ -379,7 +384,8 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
             };
             if p.interaction.applied.locked
                 && p.document.as_ref().is_some_and(|old| {
-                    interaction::display_size(old) != interaction::display_size(&document)
+                    old.snapshot.session.image_scale != document.snapshot.session.image_scale
+                        || interaction::display_size(old) != interaction::display_size(&document)
                         || old.snapshot.session.image_orientation
                             != document.snapshot.session.image_orientation
                 })

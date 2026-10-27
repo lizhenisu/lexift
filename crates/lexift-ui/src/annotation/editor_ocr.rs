@@ -44,7 +44,8 @@ pub(super) fn busy() -> bool {
     VIEW.with(|s| s.borrow().as_ref().is_some_and(|v| v.busy))
 }
 pub(super) fn request() {
-    if image_transform::busy()
+    if image_resize::busy()
+        || image_transform::busy()
         || busy()
         || image_crop::active()
         || screenshot::long_editor::outputting()
@@ -99,6 +100,7 @@ pub(super) fn request() {
             token,
             owner,
             revision,
+            scale: r.document.session.image_scale,
             color: r.document.session.image_color,
             orientation: r.document.session.image_orientation,
             source,

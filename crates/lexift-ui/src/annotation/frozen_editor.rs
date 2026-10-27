@@ -14,6 +14,7 @@ pub(super) struct Editing {
     pub(super) preview: Option<screenshot_preview::Preview>,
     pub(super) revision: u64,
     pub(super) presented: u64,
+    pub(super) accepted_after: u64,
     pub(super) feedback_placement: Option<(Point, slint::PhysicalSize)>,
     pub(super) toolbar_adjustment: u64,
     pub(super) keyboard: screenshot::keyboard::State,
@@ -35,6 +36,7 @@ impl Editing {
             frames,
             preview: None,
             revision: 0,
+            accepted_after: 0,
             presented: 0,
             feedback_placement: None,
             toolbar_adjustment: 0,
@@ -70,6 +72,9 @@ fn input(r: &Registry, index: usize) -> Option<screenshot_preview::Input> {
         snapshot.session = Arc::new(candidate);
     }
     let session = Arc::get_mut(&mut snapshot.session)?;
+    if image_crop::active() {
+        session.image_scale = Default::default();
+    }
     session.set_edit_scope(EditScope::All);
     session.selected = r.document.session.selected;
     if let Some((index, object)) = edited_document_object(r) {
@@ -186,7 +191,8 @@ pub(super) fn present(
         {
             return;
         }
-        if !image_transform::current(generation, id, revision) {
+        if revision < editing.accepted_after || !image_transform::current(generation, id, revision)
+        {
             return;
         }
         let Some(frames) = frames else {
@@ -225,9 +231,21 @@ pub(super) fn present(
                             p.data(), p.width(), p.height()
                         ))
                     };
+                    let crop_transition = window.get_image_cropping() != image_crop::active();
+                    window.set_frame_resized(
+                        !image_crop::active()
+                            && image_transform::preview(r)
+                                .as_ref()
+                                .unwrap_or(&r.document.session)
+                                .image_scale
+                                != Default::default(),
+                    );
                     window.set_frame(as_image(base));
                     window.set_controls(as_image(controls));
                     image_transform::ready(r, revision);
+                    if crop_transition {
+                        image_crop::sync(r, true);
+                    }
                     if let Some(canvas) = r.canvas_state.canvases.first() {
                         let canvas_revision = canvas.revision();
                         slint::Timer::single_shot(std::time::Duration::ZERO, move || {

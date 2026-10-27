@@ -2031,3 +2031,15 @@ msgstr "Contrasto"
 
 msgid "Reset original colors"
 msgstr "Ripristina colori originali"
+
+msgid "Resize image"
+msgstr "Ridimensiona immagine"
+
+msgid "Original size"
+msgstr "Dimensioni originali"
+
+msgid "Enter valid image dimensions (maximum 40 MP)"
+msgstr "Inserisci dimensioni valide (massimo 40 MP)"
+
+msgid "Image dimensions exceed the memory limit"
+msgstr "Le dimensioni superano il limite di memoria"

@@ -449,12 +449,14 @@ impl ScreenshotRuntime {
         let orientation =
             document.map_or(Default::default(), |d| d.snapshot.session.image_orientation);
         let color = document.map_or(Default::default(), |d| d.snapshot.session.image_color);
+        let image_scale = document.map_or(Default::default(), |d| d.snapshot.session.image_scale);
         let Some(document) = document.filter(|_| !hidden) else {
-            return lexift_core::domain::image_transform::finish(
+            return lexift_core::domain::image_transform::finish_scaled(
                 crop_frames(std::slice::from_ref(base.as_ref()), visible)?,
                 base.bounds,
                 orientation,
                 color,
+                image_scale,
                 cancel,
             );
         };
@@ -478,11 +480,12 @@ impl ScreenshotRuntime {
             snapshot.scale = scale;
             rendered.push(self.render.compose(&snapshot, capture.clone(), cancel)?);
         }
-        lexift_core::domain::image_transform::finish(
+        lexift_core::domain::image_transform::finish_scaled(
             crop_frames(&rendered, visible)?,
             base.bounds,
             orientation,
             color,
+            image_scale,
             cancel,
         )
     }
@@ -1002,7 +1005,7 @@ impl ScreenshotRuntime {
             snapshot.scale = *scale;
             rendered.push(self.render.compose(&snapshot, capture.clone(), cancelled)?);
         }
-        lexift_core::domain::image_transform::finish(
+        lexift_core::domain::image_transform::finish_scaled(
             crop_frames(&rendered, request.snapshot.monitor)?,
             request
                 .snapshot
@@ -1011,6 +1014,7 @@ impl ScreenshotRuntime {
                 .unwrap_or(request.snapshot.monitor),
             request.snapshot.session.image_orientation,
             request.snapshot.session.image_color,
+            request.snapshot.session.image_scale,
             cancelled,
         )
     }
@@ -1425,6 +1429,33 @@ mod tests {
                     output, reference,
                     "compose effects before crop and direction: {direction:?}"
                 );
+                for scale in [
+                    lexift_core::domain::image_resize::ImageScale::new(1, 2).unwrap(),
+                    lexift_core::domain::image_resize::ImageScale::new(3, 2).unwrap(),
+                ] {
+                    let mut resized = snapshot.clone();
+                    let doc = Arc::make_mut(&mut resized.session);
+                    doc.image_orientation = direction;
+                    assert!(doc.resize_image(scale).unwrap());
+                    let result = runtime
+                        .output_image(
+                            &ExportRequest {
+                                session: 1,
+                                request: 4,
+                                snapshot: Arc::new(resized),
+                            },
+                            frames.clone(),
+                            &AtomicBool::new(false),
+                        )
+                        .unwrap();
+                    assert_eq!(
+                        result,
+                        scale
+                            .pixels(reference.clone(), &AtomicBool::new(false))
+                            .unwrap(),
+                        "resize after original effect composition, crop and orientation"
+                    );
+                }
                 for grayscale in [false, true] {
                     for inverted in [false, true] {
                         // Pair representative levels here; exhaustive combinations are pure-pixel tests.

@@ -134,13 +134,12 @@ pub(super) fn complete(state: &mut AppState, id: u64, request: u64, result: Resu
 /// Window geometry changes cannot consume a history entry while a pin is locked.
 pub fn display_size(document: &super::ExportRequest) -> (i32, i32) {
     let b = document.snapshot.monitor;
-    let b = document
+    document
         .snapshot
         .session
-        .image_orientation
-        .rect(b, b)
-        .unwrap_or(b);
-    (b.right - b.left, b.bottom - b.top)
+        .image_scale
+        .bounds_size(b, document.snapshot.session.image_orientation)
+        .map_or((0, 0), |size| (size[0] as i32, size[1] as i32))
 }
 
 #[cfg(test)]

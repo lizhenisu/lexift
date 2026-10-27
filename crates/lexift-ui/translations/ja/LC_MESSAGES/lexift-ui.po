@@ -2031,3 +2031,15 @@ msgstr "コントラスト"
 
 msgid "Reset original colors"
 msgstr "元の色に戻す"
+
+msgid "Resize image"
+msgstr "画像サイズを変更"
+
+msgid "Original size"
+msgstr "元のサイズ"
+
+msgid "Enter valid image dimensions (maximum 40 MP)"
+msgstr "有効な画像サイズを入力してください（最大4000万画素）"
+
+msgid "Image dimensions exceed the memory limit"
+msgstr "画像サイズがメモリ上限を超えています"

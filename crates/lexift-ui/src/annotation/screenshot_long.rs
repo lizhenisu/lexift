@@ -1196,6 +1196,7 @@ mod tests {
                 region: RegionEditor::new(bounds),
                 preview: None,
                 revision: 0,
+                accepted_after: 0,
                 presented: 0,
                 feedback_placement: None,
                 toolbar_adjustment: 0,
@@ -1596,6 +1597,66 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, ScreenshotEvent::Failed { .. }))
         );
+        clear();
+        crate::annotation::shutdown();
+    }
+
+    #[test]
+    fn resized_oriented_text_input_clips_in_screen_space_instead_of_source_partitions() {
+        fixture();
+        let full = Rect {
+            left: -500,
+            top: -300,
+            right: 100,
+            bottom: 500,
+        };
+        FLOW.with(|f| {
+            f.borrow_mut().state.long = Some(lexift_core::domain::long_capture::workflow::State {
+                operation: 3,
+                source: full,
+                phase: Phase::Editing,
+                sequence: 3,
+                width: 600,
+                height: 800,
+                feedback: Feedback::Accepted,
+                target: None,
+            })
+        });
+        let w = AnnotationCanvas::new().unwrap();
+        w.set_image_view(true);
+        w.set_source_left(full.left as f32);
+        w.set_source_top(full.top as f32);
+        w.set_frame(slint::Image::from_rgba8_premultiplied(
+            slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(600, 800),
+        ));
+        w.window().set_size(slint::LogicalSize::new(900., 700.));
+        w.show().unwrap();
+        set_editor(&w);
+        super::super::super::image_navigation::bind(&w);
+        for direction in lexift_core::domain::image_transform::Orientation::ALL {
+            for ratio in [(1, 2), (2, 1)] {
+                let scale =
+                    lexift_core::domain::image_resize::ImageScale::new(ratio.0, ratio.1).unwrap();
+                super::super::super::image_navigation::orient(&w, full, direction);
+                super::super::super::image_navigation::content(&w, full, true, scale);
+                let input = AnnotationTextInput::new().unwrap();
+                let mut text =
+                    parameters::text(&AnnotationValues::default(), "Arial".into(), "ABC".into());
+                text.font_size = 12.;
+                let at = (-200., 100.);
+                let bounds = crate::annotation_text::text_bounds(at, &text, 1.);
+                super::super::super::editor::place(&input, bounds, 1., &text, &[full]);
+                assert!(
+                    input.window().size().width > 1 && input.window().size().height > 1,
+                    "{direction:?} {ratio:?}"
+                );
+                let zoom = super::super::long_editor::view_zoom().unwrap();
+                assert!(
+                    (input.get_text_size() * input.window().scale_factor() - 12. * zoom).abs()
+                        < 0.001
+                );
+            }
+        }
         clear();
         crate::annotation::shutdown();
     }

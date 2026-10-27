@@ -337,6 +337,18 @@ pub(super) fn finish(apply: bool) {
                 return None;
             }
             let mut session = r.document.session.clone();
+            if session
+                .image_scale
+                .validate(
+                    e.source,
+                    e.draft.as_ref()?.bounds,
+                    session.image_orientation,
+                )
+                .is_err()
+            {
+                mosaic::notify(r, "Enter valid image dimensions (maximum 40 MP)");
+                return None;
+            }
             session.set_image_crop(e.draft.as_ref()?.bounds, e.source);
             Some(session)
         });
@@ -359,6 +371,7 @@ fn propose(r: &Registry, session: Session) {
                 .map(|b| (b.right - b.left, b.bottom - b.top))
         };
         if size(&session) != size(&r.document.session)
+            || session.image_scale != r.document.session.image_scale
             || session.image_orientation != r.document.session.image_orientation
         {
             return;
@@ -495,19 +508,30 @@ pub(super) fn present(id: u64, revision: u64, image: Arc<CapturedRegion>) -> boo
         let Some(p) = e.pending.take() else {
             return false;
         };
+        let expected_origin = p
+            .session
+            .image_orientation
+            .rect(p.request.snapshot.monitor, e.source)
+            .ok();
         if pin_editor::current() != Some((id, e.edit))
+            || expected_origin
+                .is_none_or(|b| b.left != image.bounds.left || b.top != image.bounds.top)
             || p.session
-                .image_orientation
-                .rect(p.request.snapshot.monitor, e.source)
+                .image_scale
+                .bounds_size(p.request.snapshot.monitor, p.session.image_orientation)
                 .ok()
-                != Some(image.bounds)
+                != Some([
+                    (image.bounds.right - image.bounds.left) as u32,
+                    (image.bounds.bottom - image.bounds.top) as u32,
+                ])
         {
             e.pending = Some(p);
             EDIT.with(|s| *s.borrow_mut() = Some(e));
             return false;
         }
         if let Some(w) = e.window.upgrade() {
-            let color_only = r.document.session.image_crop == p.session.image_crop
+            let color_only = r.document.session.image_scale == p.session.image_scale
+                && r.document.session.image_crop == p.session.image_crop
                 && r.document.session.image_orientation == p.session.image_orientation;
             let positioned = if color_only {
                 true

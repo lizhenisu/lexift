@@ -1,7 +1,10 @@
 //! Annotation parameter workflow; scoped to its owning session.
 use super::*;
 pub(super) fn current_style(r: &Registry, tool: i32) -> Style {
-    parameters::style(r.values(tool as usize), tool)
+    image_resize::style_to_source(
+        parameters::style(r.values(tool as usize), tool),
+        image_resize::style_factor(r, None),
+    )
 }
 
 pub(super) fn chosen_font(r: &Registry, tool: usize) -> String {
@@ -13,11 +16,33 @@ pub(super) fn chosen_font(r: &Registry, tool: usize) -> String {
 }
 
 pub(super) fn text_from_values(r: &Registry, content: String) -> TextAnnotation {
-    parameters::text(r.values(8), chosen_font(r, 8), content)
+    let mut text = parameters::text(r.values(8), chosen_font(r, 8), content);
+    image_resize::text_lengths(
+        &mut text,
+        1. / (r.document.session.image_scale.factor() as f32
+            * if image_resize::pixel_units(r) {
+                r.editor.edit().map_or_else(
+                    || {
+                        r.document
+                            .session
+                            .selected
+                            .and_then(|i| r.document.session.objects.get(i))
+                            .filter(|o| o.kind == Kind::Text)
+                            .map_or(1., crate::annotation_text::object_scale)
+                    },
+                    |e| e.scale,
+                )
+            } else {
+                1.
+            }),
+    );
+    text
 }
 
 pub(super) fn watermark_from_values(r: &Registry, template: String, content: String) -> Watermark {
-    parameters::watermark(r.values(9), chosen_font(r, 9), template, content)
+    let mut value = parameters::watermark(r.values(9), chosen_font(r, 9), template, content);
+    value.font_size /= image_resize::style_factor(r, None);
+    value
 }
 
 pub(super) fn adopt_watermark_style(r: &mut Registry) {
@@ -33,9 +58,15 @@ pub(super) fn adopt_watermark_style(r: &mut Registry) {
                 .position(|name| name == &watermark.font_family)
         })
         .unwrap_or(0) as i32;
+    let mut projected = r.document.session.watermark.clone();
+    if image_resize::pixel_units(r)
+        && let Some(w) = projected.as_mut()
+    {
+        w.font_size *= image_resize::style_factor(r, None);
+    }
     r.document
         .parameter_values
-        .project_watermark(r.document.session.watermark.as_ref(), font_index);
+        .project_watermark(projected.as_ref(), font_index);
     choice::close_if_context_changed(r);
     if let Some(panel) = r.toolbar_state.panel.get()
         && panel.get_tool() == 9
@@ -81,7 +112,13 @@ pub(super) fn deselect_object(r: &mut Registry) {
 }
 
 pub(super) fn project_object_parameters(r: &mut Registry, index: usize) -> [u8; 3] {
-    let object = &r.document.session.objects[index];
+    let projected = image_resize::projected_object(
+        &r.document.session.objects[index],
+        r.document.session.image_scale.factor() as f32,
+        image_resize::style_factor(r, Some(r.document.session.objects[index].bounds.center())),
+        image_resize::pixel_units(r),
+    );
+    let object = &projected;
     let font_family = match &object.extra {
         Extra::Text(text) => Some(&text.font_family),
         Extra::Sequence(sequence) => Some(&sequence.caption.font_family),
@@ -222,9 +259,30 @@ pub(super) fn update_sequence_style(
     crate::annotation_sequence::layout(object);
 }
 
+fn update_sequence_scaled(
+    object: &mut Object,
+    values: &AnnotationValues,
+    fonts: &[String],
+    style: Style,
+    factor: f32,
+) {
+    update_sequence_style(object, values, fonts, style);
+    if factor != 1. {
+        if let Extra::Sequence(sequence) = &mut object.extra {
+            sequence.size = values.text_size.max(5) as f32 / factor / sequence.scale;
+            if let Some(outline) = sequence.caption.outline.as_mut() {
+                outline.width /= factor;
+            }
+        }
+        crate::annotation_sequence::layout(object);
+    }
+}
 pub(super) fn sequence_from_values(r: &Registry, at: (f32, f32), scale: f32) -> Object {
     let v = r.document.parameter_values.defaults(10);
-    let style = parameters::style(v, 10);
+    let style = image_resize::style_to_source(
+        parameters::style(v, 10),
+        image_resize::style_factor(r, Some(at)),
+    );
     let mut caption = text_from_values(r, String::new());
     caption.outline = None;
     caption.background = None;
@@ -254,7 +312,13 @@ pub(super) fn sequence_from_values(r: &Registry, at: (f32, f32), scale: f32) -> 
             endpoint: Endpoint::FilledArrow,
         }),
     };
-    update_sequence_style(&mut object, v, r.fonts.names(), style);
+    update_sequence_scaled(
+        &mut object,
+        v,
+        r.fonts.names(),
+        style,
+        r.document.session.image_scale.factor() as f32,
+    );
     object
 }
 
@@ -397,7 +461,10 @@ pub(super) fn apply_parameter_values(
     if let Some(main) = r.toolbar_state.main.get() {
         main.set_tools(ModelRc::new(VecModel::from(toolbar_tools(r))));
     }
-    let style = parameters::style(&edited, tool);
+    let style = image_resize::style_to_source(
+        parameters::style(&edited, tool),
+        image_resize::style_factor(r, None),
+    );
     if let Some(panel) = r.toolbar_state.panel.get() {
         panel.set_custom_preview(slint::Color::from_rgb_u8(
             style.color[0],
@@ -458,13 +525,14 @@ pub(super) fn apply_parameter_values(
         if edited.start != previous_values.start {
             r.document.session.next_sequence = edited.start.max(1);
         }
+        let resize_factor = r.document.session.image_scale.factor() as f32;
         let fonts = r.fonts.names();
         r.document.session.update_selected(|object| {
             if Some(object.id) != source_object {
                 return;
             }
             if object.kind == Kind::Sequence {
-                update_sequence_style(object, &edited, fonts, style);
+                update_sequence_scaled(object, &edited, fonts, style, resize_factor);
             }
         });
         if let Some(index) = r
@@ -476,6 +544,8 @@ pub(super) fn apply_parameter_values(
             r.editor.apply_caption_style(object, &displays);
         }
     } else if let Some(kind) = kind {
+        let resize_factor = r.document.session.image_scale.factor() as f32;
+        let pixel_units = image_resize::pixel_units(r);
         r.document.session.update_selected(|object| {
             if Some(object.id) != source_object {
                 return;
@@ -505,13 +575,24 @@ pub(super) fn apply_parameter_values(
                             };
                             value.opacity = edited.strength.round().clamp(0., 100.) as u8;
                             if edited.zoom != previous_values.zoom {
-                                value.set_displayed_size(edited.zoom as f32);
+                                if pixel_units {
+                                    let creation = value.creation_scale;
+                                    value.creation_scale = 1. / resize_factor;
+                                    value.set_displayed_size(edited.zoom as f32);
+                                    value.creation_scale = creation;
+                                } else {
+                                    value.set_displayed_size(edited.zoom as f32);
+                                }
                             }
                             if edited.size != previous_values.size
                                 && object.kind == Kind::StickerBrush
                             {
-                                value.diameter =
-                                    edited.size.clamp(1, 100) as f32 * value.creation_scale;
+                                value.diameter = edited.size.clamp(1, 100) as f32
+                                    * if pixel_units {
+                                        1. / resize_factor
+                                    } else {
+                                        value.creation_scale
+                                    };
                             }
                         }
                         if object.kind == Kind::StickerBrush {
@@ -529,8 +610,12 @@ pub(super) fn apply_parameter_values(
                             if edited.size != previous_values.size
                                 && object.kind == Kind::MosaicBrush
                             {
-                                value.diameter =
-                                    edited.size.clamp(1, 100) as f32 * value.creation_scale;
+                                value.diameter = edited.size.clamp(1, 100) as f32
+                                    * if pixel_units {
+                                        1. / resize_factor
+                                    } else {
+                                        value.creation_scale
+                                    };
                             }
                         }
                         if object.kind == Kind::MosaicBrush {

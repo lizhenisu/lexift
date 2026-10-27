@@ -7,11 +7,12 @@ struct Draft {
     crop: Crop,
     image: Rect,
 }
-thread_local! { static DRAFT: RefCell<Option<Draft>> = const { RefCell::new(None) }; }
+thread_local! { static DRAFT: RefCell<Option<Draft>> = const { RefCell::new(None) }; static APPLYING:RefCell<Option<Draft>>=const{RefCell::new(None)}; }
 pub(super) fn active() -> bool {
     pin_crop::active() || DRAFT.with(|s| s.borrow().is_some())
 }
 pub(super) fn clear() {
+    APPLYING.with(|s| s.borrow_mut().take());
     DRAFT.with(|s| s.borrow_mut().take());
 }
 pub(super) fn begin() {
@@ -22,7 +23,8 @@ pub(super) fn begin() {
             pin_crop::begin(r);
             return;
         }
-        if editor_ocr::busy()
+        if image_resize::busy()
+            || editor_ocr::busy()
             || active()
             || !screenshot::long::image_editing()
             || screenshot::long_editor::outputting()
@@ -57,7 +59,11 @@ pub(super) fn begin() {
                 image,
             })
         });
-        sync(r, true);
+        if r.document.session.image_scale == Default::default() {
+            sync(r, true);
+        }
+        retire_frames(r);
+        r.queue_render();
     });
 }
 pub(super) fn cancel(r: &mut Registry) -> bool {
@@ -68,7 +74,11 @@ pub(super) fn cancel(r: &mut Registry) -> bool {
         return false;
     }
     clear();
-    sync(r, true);
+    if r.document.session.image_scale == Default::default() {
+        sync(r, true);
+    }
+    retire_frames(r);
+    r.queue_render();
     true
 }
 pub(super) fn finish(apply: bool) {
@@ -79,6 +89,20 @@ pub(super) fn finish(apply: bool) {
     REGISTRY.with(|s| {
         let mut s = s.borrow_mut();
         let Some(r) = s.as_mut() else { return };
+        if apply
+            && DRAFT.with(|s| {
+                s.borrow().as_ref().is_some_and(|d| {
+                    r.document
+                        .session
+                        .image_scale
+                        .validate(d.image, d.crop.bounds, r.document.session.image_orientation)
+                        .is_err()
+                })
+            })
+        {
+            mosaic::notify(r, "Enter valid image dimensions (maximum 40 MP)");
+            return;
+        }
         let Some(d) = DRAFT.with(|s| s.borrow_mut().take()) else {
             return;
         };
@@ -90,7 +114,14 @@ pub(super) fn finish(apply: bool) {
         }) {
             return;
         }
-        if apply {
+        if apply && r.document.session.image_scale != Default::default() {
+            let mut candidate = r.document.session.clone();
+            if candidate.set_image_crop(d.crop.bounds, d.image) {
+                APPLYING.with(|s| *s.borrow_mut() = Some(d));
+                image_transform::submit(r, candidate);
+                return;
+            }
+        } else if apply {
             r.document.session.set_image_crop(d.crop.bounds, d.image);
         }
         sync(r, true);
@@ -138,7 +169,16 @@ pub(super) fn sync(r: &Registry, fit: bool) {
         main.set_can_undo(!active() && r.document.session.can_undo());
         main.set_can_redo(!active() && r.document.session.can_redo());
     }
-    image_navigation::content(&w, visible, fit);
+    image_navigation::content(
+        &w,
+        visible,
+        fit,
+        if draft.is_some() {
+            Default::default()
+        } else {
+            r.document.session.image_scale
+        },
+    );
 }
 /// Input is already instance-checked and converted through the shared viewport.
 pub(super) fn pointer(w: &AnnotationCanvas, kind: i32, p: [f32; 2], tolerance: f64) -> bool {
@@ -196,4 +236,20 @@ pub(super) fn lost_focus() {
             }
         }
     });
+}
+
+pub(super) fn candidate_done() {
+    APPLYING.with(|s| s.borrow_mut().take());
+}
+pub(super) fn candidate_failed() {
+    if let Some(d) = APPLYING.with(|s| s.borrow_mut().take()) {
+        DRAFT.with(|s| *s.borrow_mut() = Some(d));
+    }
+}
+
+fn retire_frames(r: &mut Registry) {
+    if let Some(e) = r.screenshot.as_mut() {
+        e.revision = e.revision.saturating_add(1);
+        e.accepted_after = e.revision;
+    }
 }

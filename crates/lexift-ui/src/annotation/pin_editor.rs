@@ -12,6 +12,8 @@ use std::{collections::BTreeMap, sync::Arc};
 
 struct Stored {
     presented_orientation: lexift_core::domain::image_transform::Orientation,
+    presented_scale: lexift_core::domain::image_resize::ImageScale,
+    presented_crop: Option<Rect>,
     document: editor_document::EditorDocument,
     base: Arc<CapturedRegion>,
     request: ExportRequest,
@@ -86,6 +88,8 @@ fn install_owned(
             id,
             Stored {
                 presented_orientation: document.session.image_orientation,
+                presented_scale: document.session.image_scale,
+                presented_crop: document.session.image_crop,
                 initial_watermark: request.snapshot.session.watermark.clone(),
                 original_displays: request.snapshot.session.displays.clone(),
                 document,
@@ -225,6 +229,7 @@ pub(crate) fn begin(id: u64, edit: u64) {
             }),
             preview: None,
             revision: 0,
+            accepted_after: 0,
             presented: 0,
             feedback_placement: None,
             toolbar_adjustment: 0,
@@ -317,6 +322,28 @@ pub(super) fn view_point(point: (f32, f32), reverse: bool) -> (f32, f32) {
     current()
         .and_then(|(id, _)| {
             let (source, display) = crate::pinned_screenshot::geometry(id)?;
+            if let Some(projection) = presented_projection(id) {
+                let image_point = if reverse {
+                    crate::pinned_screenshot::zoom::map(
+                        id,
+                        [f64::from(point.0), f64::from(point.1)],
+                        true,
+                    )?
+                } else {
+                    let p = projection.forward([f64::from(point.0), f64::from(point.1)]);
+                    return crate::pinned_screenshot::zoom::map(
+                        id,
+                        [p[0] + f64::from(source.left), p[1] + f64::from(source.top)],
+                        false,
+                    )
+                    .map(|p| (p[0] as f32, p[1] as f32));
+                };
+                let p = projection.inverse([
+                    image_point[0] - f64::from(source.left),
+                    image_point[1] - f64::from(source.top),
+                ]);
+                return Some((p[0] as f32, p[1] as f32));
+            }
             let (full, orientation) = DOCUMENTS.with(|s| {
                 s.borrow()
                     .get(&id)
@@ -342,10 +369,34 @@ pub(super) fn view_point(point: (f32, f32), reverse: bool) -> (f32, f32) {
         })
         .unwrap_or(point)
 }
+fn presented_projection(id: u64) -> Option<lexift_core::domain::image_resize::Projection> {
+    DOCUMENTS.with(|s| {
+        let s = s.borrow();
+        let p = s.get(&id)?;
+        (p.presented_scale != Default::default())
+            .then(|| {
+                lexift_core::domain::image_resize::Projection::new(
+                    p.base.bounds,
+                    p.presented_crop.unwrap_or(p.base.bounds),
+                    p.presented_orientation,
+                    p.presented_scale,
+                )
+                .ok()
+            })
+            .flatten()
+    })
+}
 pub(super) fn view_zoom() -> f32 {
     screenshot::long_editor::view_zoom().unwrap_or_else(|| {
-        if let Some(z) = current().and_then(|(id, _)| crate::pinned_screenshot::zoom::scale(id)) {
-            return z as f32;
+        if let Some((id, z)) =
+            current().and_then(|(id, _)| crate::pinned_screenshot::zoom::scale(id).map(|z| (id, z)))
+        {
+            let factor = DOCUMENTS.with(|s| {
+                s.borrow()
+                    .get(&id)
+                    .map_or(1., |p| p.presented_scale.factor())
+            });
+            return (z * factor) as f32;
         }
         current()
             .and_then(|(id, _)| crate::pinned_screenshot::geometry(id))
@@ -727,6 +778,11 @@ pub(super) fn input_point(id: u64, x: f32, y: f32) -> Option<(f32, f32)> {
     let w = crate::pinned_screenshot::window_for_view(id)?;
     let dpi = f64::from(w.window().scale_factor());
     let p = crate::pinned_screenshot::zoom::local(id, [f64::from(x) * dpi, f64::from(y) * dpi])?;
+    if let Some(projection) = presented_projection(id) {
+        let (source, _) = crate::pinned_screenshot::geometry(id)?;
+        let p = projection.inverse([p[0] - f64::from(source.left), p[1] - f64::from(source.top)]);
+        return Some((p[0] as f32, p[1] as f32));
+    }
     DOCUMENTS.with(|s| {
         let s = s.borrow();
         let pinfo = s.get(&id)?;
@@ -751,6 +807,8 @@ pub(super) fn presented(id: u64, session: &Session) {
     DOCUMENTS.with(|s| {
         if let Some(p) = s.borrow_mut().get_mut(&id) {
             p.presented_orientation = session.image_orientation;
+            p.presented_scale = session.image_scale;
+            p.presented_crop = session.image_crop;
         }
     });
 }
@@ -761,6 +819,8 @@ pub(crate) fn install_direction(id: u64, document: &ExportRequest) {
         .with(|s| {
             if let Some(p) = s.borrow_mut().get_mut(&id) {
                 p.presented_orientation = document.snapshot.session.image_orientation;
+                p.presented_scale = document.snapshot.session.image_scale;
+                p.presented_crop = document.snapshot.session.image_crop;
                 p.document.session = (*document.snapshot.session).clone();
                 p.document.session.image_source = Some(p.base.bounds);
                 p.request = document.clone();
@@ -841,6 +901,25 @@ pub(super) fn clip_text(mut bounds: Bounds) -> Bounds {
         bounds.bottom = bounds.bottom.clamp(bounds.top + 1., display.bottom as f32);
     }
     bounds
+}
+
+pub(super) fn source_dpi(point: (f32, f32)) -> Option<f32> {
+    let (id, _) = current()?;
+    DOCUMENTS.with(|s| {
+        s.borrow().get(&id).map(|p| {
+            let snapshot = &p.request.snapshot;
+            snapshot
+                .monitors
+                .iter()
+                .find(|(b, _)| {
+                    point.0 >= b.left as f32
+                        && point.0 < b.right as f32
+                        && point.1 >= b.top as f32
+                        && point.1 < b.bottom as f32
+                })
+                .map_or(snapshot.scale, |(_, scale)| *scale)
+        })
+    })
 }
 
 #[cfg(test)]

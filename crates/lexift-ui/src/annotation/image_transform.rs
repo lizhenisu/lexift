@@ -11,6 +11,7 @@ thread_local! {static PENDING:RefCell<Option<Pending>>=const {RefCell::new(None)
 pub(super) fn clear() {
     PENDING.with(|s| s.borrow_mut().take());
     screenshot::delay::clear();
+    image_resize::clear();
 }
 pub(super) fn busy() -> bool {
     PENDING.with(|s| s.borrow().is_some())
@@ -18,6 +19,7 @@ pub(super) fn busy() -> bool {
 pub(super) fn available() -> bool {
     screenshot::long::image_editing()
         && !busy()
+        && !image_resize::busy()
         && !editor_ocr::busy()
         && !image_crop::active()
         && !screenshot::long_editor::outputting()
@@ -150,11 +152,20 @@ pub(super) fn ready(r: &mut Registry, revision: u64) {
     });
     if let Some(p) = pending {
         let geometry_changed = p.session.image_orientation != r.document.session.image_orientation
-            || p.session.image_crop != r.document.session.image_crop;
+            || p.session.image_crop != r.document.session.image_crop
+            || p.session.image_scale != r.document.session.image_scale;
+        let scale_changed = p.session.image_scale != r.document.session.image_scale;
         r.document.session = p.session;
+        image_crop::candidate_done();
         if geometry_changed {
-            r.set_mode(InteractionMode::Mouse);
+            if !scale_changed {
+                r.set_mode(InteractionMode::Mouse);
+            }
             image_crop::sync(r, true);
+        }
+        if scale_changed {
+            image_resize::completed();
+            restore_parameter_projection(r);
         }
         sync_history_controls(r);
         if let Some(m) = r.toolbar_state.main.get() {
@@ -175,6 +186,8 @@ pub(super) fn failed(r: &mut Registry, revision: u64) -> bool {
         }
     });
     if failed {
+        image_crop::candidate_failed();
+        image_resize::failed();
         if let Some(m) = r.toolbar_state.main.get() {
             m.set_output_busy(false);
         }
@@ -191,6 +204,28 @@ fn belongs(p: &Pending, r: &Registry) -> bool {
             .canvases
             .first()
             .is_some_and(|c| c.revision() == p.owner.1)
+}
+pub(super) fn cancel_scale(r: &mut Registry) {
+    let cancelled = PENDING.with(|s| {
+        let mut s = s.borrow_mut();
+        if s.as_ref().is_some_and(|p| {
+            belongs(p, r) && p.session.image_scale != r.document.session.image_scale
+        }) {
+            s.take();
+            true
+        } else {
+            false
+        }
+    });
+    if cancelled {
+        if let Some(e) = r.screenshot.as_mut() {
+            e.revision = e.revision.saturating_add(1);
+            e.accepted_after = e.revision;
+        }
+        if let Some(w) = r.toolbar_state.main.get() {
+            w.set_output_busy(false);
+        }
+    }
 }
 pub(super) fn submit(r: &mut Registry, mut session: Session) {
     if session.image_crop == r.document.session.image_crop
@@ -401,6 +436,28 @@ mod tests {
             track(r.generation, 11, 7);
             ready(r, 7);
             assert_eq!(r.document.session.image_color, colored.image_color);
+            assert_eq!(r.document.mode, InteractionMode::Tool(2));
+            assert_eq!(r.document.session.selected, Some(0));
+            let before = r.document.session.clone();
+            let mut resized = before.clone();
+            let scale = lexift_core::domain::image_resize::ImageScale::new(3, 2).unwrap();
+            assert!(resized.resize_image(scale).unwrap());
+            submit(r, resized.clone());
+            track(r.generation, 11, 8);
+            assert!(failed(r, 8));
+            assert_eq!(r.document.session.image_scale, before.image_scale);
+            submit(r, resized.clone());
+            track(r.generation, 11, 9);
+            cancel_scale(r);
+            assert!(!busy());
+            ready(r, 9);
+            assert_eq!(r.document.session.image_scale, before.image_scale);
+            submit(r, resized);
+            track(r.generation, 11, 10);
+            ready(r, 9);
+            assert!(busy());
+            ready(r, 10);
+            assert_eq!(r.document.session.image_scale, scale);
             assert_eq!(r.document.mode, InteractionMode::Tool(2));
             assert_eq!(r.document.session.selected, Some(0));
         });

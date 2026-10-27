@@ -1007,6 +1007,7 @@ fn segment_distance(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
 
 #[derive(Clone, Debug, PartialEq)]
 struct Snapshot {
+    image_scale: super::image_resize::ImageScale,
     image_color: super::image_color::Color,
     image_orientation: super::image_transform::Orientation,
     image_crop: Option<Rect>,
@@ -1021,7 +1022,8 @@ struct Snapshot {
 
 impl Snapshot {
     fn same_content(&self, other: &Self) -> bool {
-        self.image_color == other.image_color
+        self.image_scale == other.image_scale
+            && self.image_color == other.image_color
             && self.image_orientation == other.image_orientation
             && self.image_crop == other.image_crop
             && self.next_sequence == other.next_sequence
@@ -1042,6 +1044,10 @@ pub enum Hit {
 /// Owns the undoable document; a drag is committed as one undo step on release.
 #[derive(Clone, Default)]
 pub struct Session {
+    /// Image-origin parameter units follow the document into pins, including a restored 1:1 scale.
+    /// This host contract does not participate in pixel history.
+    pub image_pixel_parameters: bool,
+    pub image_scale: super::image_resize::ImageScale,
     pub image_color: super::image_color::Color,
     pub image_orientation: super::image_transform::Orientation,
     /// Source-pixel visible range for image editors; None means the complete image.
@@ -1114,10 +1120,12 @@ impl Session {
     /// outside the confirmed crop.
     pub fn restored_image(&self) -> Self {
         let mut restored = Self {
+            image_scale: self.image_scale,
             image_color: self.image_color,
             image_orientation: self.image_orientation,
             image_crop: self.image_crop,
             image_source: self.image_source,
+            image_pixel_parameters: self.image_pixel_parameters,
             next_sequence: self.next_sequence,
             objects: self.objects.clone(),
             spotlight_opacity: self.spotlight_opacity,
@@ -1167,10 +1175,12 @@ impl Session {
             .cloned()
             .collect();
         frozen.displays = visible.displays.clone();
+        frozen.image_scale = visible.image_scale;
         frozen.image_color = visible.image_color;
         frozen.image_orientation = visible.image_orientation;
         frozen.image_crop = visible.image_crop;
         frozen.image_source = visible.image_source;
+        frozen.image_pixel_parameters = visible.image_pixel_parameters;
         frozen.watermark = visible.watermark.clone();
         frozen.watermark_erased = visible.watermark_erased.clone();
         frozen.spotlight_erased = visible.spotlight_erased.clone();
@@ -1189,6 +1199,7 @@ impl Session {
     }
     fn snapshot(&self) -> Snapshot {
         Snapshot {
+            image_scale: self.image_scale,
             image_color: self.image_color,
             image_orientation: self.image_orientation,
             image_crop: self.image_crop,
@@ -1235,6 +1246,25 @@ impl Session {
             self.watermark_erased.clear();
         }
     }
+    /// Commit a validated non-destructive scale without modifying source geometry.
+    pub fn resize_image(&mut self, scale: super::image_resize::ImageScale) -> crate::Result<bool> {
+        let source = self
+            .image_source
+            .ok_or_else(|| crate::Error::new("Image source unavailable"))?;
+        scale.validate(
+            source,
+            self.image_crop.unwrap_or(source),
+            self.image_orientation,
+        )?;
+        if self.image_scale == scale {
+            return Ok(false);
+        }
+        self.finish_drag();
+        let before = self.snapshot();
+        self.image_scale = scale;
+        self.commit_snapshot(before);
+        Ok(true)
+    }
     /// Record one whole-composite color change in the shared chronology.
     pub fn color_image(&mut self, color: super::image_color::Color) -> bool {
         if self.image_source.is_none() || self.image_color == color {
@@ -1265,6 +1295,13 @@ impl Session {
             || bounds.bottom > image.bottom
             || bounds.right <= bounds.left
             || bounds.bottom <= bounds.top
+        {
+            return false;
+        }
+        if self
+            .image_scale
+            .validate(image, bounds, self.image_orientation)
+            .is_err()
         {
             return false;
         }
@@ -1299,7 +1336,9 @@ impl Session {
                 .map(|b| (b.right - b.left, b.bottom - b.top))
         };
         next.is_some_and(|n| {
-            size(n.image_crop, n.image_orientation) != size(self.image_crop, self.image_orientation)
+            n.image_scale != self.image_scale
+                || size(n.image_crop, n.image_orientation)
+                    != size(self.image_crop, self.image_orientation)
         })
     }
     pub fn can_undo(&self) -> bool {
@@ -1417,6 +1456,7 @@ impl Session {
     }
     fn restore_snapshot(&mut self, before: Snapshot) {
         // Identity allocation belongs to the session lifetime, not undo history.
+        self.image_scale = before.image_scale;
         self.image_color = before.image_color;
         self.image_orientation = before.image_orientation;
         self.image_crop = before.image_crop;

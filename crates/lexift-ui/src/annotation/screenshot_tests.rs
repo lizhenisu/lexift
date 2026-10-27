@@ -1699,6 +1699,7 @@ fn screenshot_completed_frames_ignore_newer_input_and_reject_late_results() {
             }),
             preview: None,
             revision: 2,
+            accepted_after: 0,
             presented: 0,
             feedback_placement: None,
             toolbar_adjustment: 0,

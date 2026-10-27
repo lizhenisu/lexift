@@ -75,6 +75,7 @@ mod hints;
 mod history_tests;
 mod image_crop;
 mod image_navigation;
+mod image_resize;
 mod image_transform;
 pub(crate) mod image_viewport;
 #[path = "mosaic_session.rs"]

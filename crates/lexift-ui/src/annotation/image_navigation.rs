@@ -7,6 +7,8 @@ struct Navigation {
     window: slint::Weak<AnnotationCanvas>,
     source: Rect,
     orientation: lexift_core::domain::image_transform::Orientation,
+    resized: Option<lexift_core::domain::image_resize::Projection>,
+    document_scale: f32,
     view: Viewport,
     route: u8, // idle, drawing, window chrome, panning, cancelled pan awaiting release
     space: bool,
@@ -36,8 +38,24 @@ fn publish(n: &mut Navigation, w: &AnnotationCanvas) {
     let dpi = w.window().scale_factor();
     w.set_image_pixel_scale(dpi);
     w.set_image_zoom(n.view.scale / dpi);
-    w.set_image_pan_x((n.view.offset[0] + w.get_source_left() * n.view.scale) / dpi);
-    w.set_image_pan_y((n.view.offset[1] + w.get_source_top() * n.view.scale) / dpi);
+    w.set_image_pan_x(
+        (n.view.offset[0]
+            + if n.resized.is_some() {
+                0.
+            } else {
+                w.get_source_left() * n.view.scale
+            })
+            / dpi,
+    );
+    w.set_image_pan_y(
+        (n.view.offset[1]
+            + if n.resized.is_some() {
+                0.
+            } else {
+                w.get_source_top() * n.view.scale
+            })
+            / dpi,
+    );
     w.set_image_panning(n.view.panning());
     if let Some(cursor) = &n.cursor {
         let active =
@@ -81,6 +99,8 @@ pub(super) fn bind(w: &AnnotationCanvas) {
                 bottom: w.get_source_top() as i32 + image.height as i32,
             },
             orientation: Default::default(),
+            resized: None,
+            document_scale: 1.,
             view: Viewport::new([image.width as f32, image.height as f32], size(w)),
             route: 0,
             space: false,
@@ -142,6 +162,14 @@ fn slint_input(w: &AnnotationCanvas) -> bool {
             .is_some_and(|n| matches(n, w) && !n.forwarding)
     })
 }
+pub(super) fn document_scale(w: &AnnotationCanvas) -> f32 {
+    NAV.with(|s| {
+        s.borrow()
+            .as_ref()
+            .filter(|n| matches(n, w))
+            .map_or(1., |n| n.document_scale)
+    })
+}
 pub(super) fn fit(w: &AnnotationCanvas) {
     NAV.with(|s| {
         if let Some(n) = s.borrow_mut().as_mut().filter(|n| matches(n, w)) {
@@ -167,6 +195,9 @@ pub(super) fn refresh_geometry() {
     }
 }
 fn original(n: &Navigation, p: [f32; 2]) -> [f32; 2] {
+    if let Some(project) = n.resized {
+        return project.inverse(p.map(f64::from)).map(|v| v as f32);
+    }
     let full = n.orientation.rect(n.source, n.source).unwrap_or(n.source);
     n.orientation
         .inverse()
@@ -191,9 +222,44 @@ pub(super) fn orient(
         }
     });
 }
-pub(super) fn content(w: &AnnotationCanvas, bounds: Rect, fit: bool) {
+pub(super) fn content(
+    w: &AnnotationCanvas,
+    bounds: Rect,
+    fit: bool,
+    scale: lexift_core::domain::image_resize::ImageScale,
+) {
     NAV.with(|s| {
         if let Some(n) = s.borrow_mut().as_mut().filter(|n| matches(n, w)) {
+            n.document_scale = scale.factor() as f32;
+            n.resized = (scale != Default::default())
+                .then(|| {
+                    lexift_core::domain::image_resize::Projection::new(
+                        n.source,
+                        bounds,
+                        n.orientation,
+                        scale,
+                    )
+                    .ok()
+                })
+                .flatten();
+            if let Some(p) = n.resized {
+                n.view.image = p.size.map(|v| v as f32);
+                n.view.content = [0., 0., n.view.image[0], n.view.image[1]];
+                w.set_content_left(0.);
+                w.set_content_top(0.);
+                w.set_content_right(n.view.image[0]);
+                w.set_content_bottom(n.view.image[1]);
+                w.set_crop_left(0.);
+                w.set_crop_top(0.);
+                w.set_crop_right(n.view.image[0]);
+                w.set_crop_bottom(n.view.image[1]);
+                n.view.resize(size(w));
+                if fit {
+                    n.view.fit();
+                }
+                publish(n, w);
+                return;
+            }
             let bounds = n.orientation.rect(bounds, n.source).unwrap_or(bounds);
             n.view.content = [
                 (bounds.left as f32)
@@ -236,6 +302,9 @@ fn document_gesture() -> bool {
 }
 /// Coordinates here are physical pixels relative to the image viewport, never the source image.
 pub(super) fn pointer(w: &AnnotationCanvas, kind: i32, point: [f32; 2]) -> bool {
+    if image_resize::consume_pointer(kind) {
+        return true;
+    }
     if kind == 0 || kind == 1 {
         REGISTRY.with(|s| {
             if let Ok(mut s) = s.try_borrow_mut()
@@ -483,11 +552,12 @@ pub(super) fn map(w: &AnnotationCanvas, point: [f32; 2], reverse: bool) -> Optio
             if reverse {
                 original(n, n.view.source(point))
             } else {
-                n.view.screen(
-                    n.orientation
-                        .point(point.map(f64::from), n.source)
-                        .map(|v| v as f32),
-                )
+                let p = if let Some(projection) = n.resized {
+                    projection.forward(point.map(f64::from))
+                } else {
+                    n.orientation.point(point.map(f64::from), n.source)
+                };
+                n.view.screen(p.map(|v| v as f32))
             }
         })
     })
@@ -517,6 +587,12 @@ fn route_native(w: &AnnotationCanvas, event: PopupPointerInput) -> bool {
     let header = w.get_image_header_height() * dpi;
     let hit = |x: f32, y: f32| x >= 0. && x < size(w)[0] && y >= header && y < header + size(w)[1];
     match event {
+        PopupPointerInput::LeftPressed { .. } if image_resize::consume_pointer(0) => true,
+        PopupPointerInput::LeftReleased { .. } | PopupPointerInput::LeftCancelled { .. }
+            if image_resize::consume_pointer(2) =>
+        {
+            true
+        }
         PopupPointerInput::LeftPressed { x, y } => {
             if hit(x, y) {
                 w.invoke_focus_input();
@@ -642,7 +718,7 @@ mod tests {
         };
         for direction in lexift_core::domain::image_transform::Orientation::ALL {
             orient(&w, full, direction);
-            content(&w, crop, true);
+            content(&w, crop, true, Default::default());
             let (a, b) = visible_screen_bounds(&w).unwrap();
             assert!(a[0] < b[0] && a[1] < b[1]);
             let corners = [
@@ -690,7 +766,7 @@ mod tests {
             right: -120,
             bottom: 1840,
         };
-        content(&w, full, true);
+        content(&w, full, true, Default::default());
         let p = [240., 320.];
         let before = map(&w, p, true).unwrap();
         assert!(before[0] < 0.);
@@ -712,6 +788,7 @@ mod tests {
                 bottom: 1000,
             },
             true,
+            Default::default(),
         );
         assert!(w.get_image_zoom() >= scale);
         clear();
@@ -883,6 +960,39 @@ mod tests {
             )
         });
         crate::annotation::shutdown();
+        clear();
+    }
+    #[test]
+    fn resized_view_uses_target_pixels_and_original_input_coordinates() {
+        let w = window();
+        let full = Rect {
+            left: 0,
+            top: 0,
+            right: 600,
+            bottom: 2000,
+        };
+        let crop = Rect {
+            left: 100,
+            top: 300,
+            right: 501,
+            bottom: 1801,
+        };
+        for direction in lexift_core::domain::image_transform::Orientation::ALL {
+            orient(&w, full, direction);
+            let scale = lexift_core::domain::image_resize::ImageScale::new(2, 3).unwrap();
+            content(&w, crop, true, scale);
+            assert!((document_scale(&w) - 2. / 3.).abs() < 1e-5);
+            for p in [[100., 300.], [501., 1801.], [301., 1111.]] {
+                let q = map(&w, p, false).unwrap();
+                let back = map(&w, q, true).unwrap();
+                assert!((back[0] - p[0]).abs() < 0.001 && (back[1] - p[1]).abs() < 0.001);
+            }
+            let p = [300., 1000.];
+            let anchor = map(&w, p, false).unwrap();
+            scroll(&w, anchor, 0., 60., false);
+            let after = map(&w, p, false).unwrap();
+            assert!((anchor[0] - after[0]).abs() < 0.01 && (anchor[1] - after[1]).abs() < 0.01);
+        }
         clear();
     }
 }

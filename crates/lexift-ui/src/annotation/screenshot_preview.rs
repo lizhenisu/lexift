@@ -41,6 +41,7 @@ impl Base {
         let b = &input.snapshot;
         Arc::ptr_eq(&self.capture, &input.capture)
             && a.monitor == b.monitor
+            && a.session.image_scale == b.session.image_scale
             && a.session.image_color == b.session.image_color
             && a.scale == b.scale
             && a.monitors == b.monitors
@@ -341,7 +342,63 @@ pub(super) fn paint_frames(
         .image_color
         .apply(image.data_mut(), cancelled)
         .ok()?;
-    Some(vec![image, orient(controls)?])
+    let mut controls = orient(controls)?;
+    if snapshot.session.image_scale != Default::default() {
+        let full = snapshot.monitor;
+        let visible = snapshot
+            .session
+            .image_orientation
+            .rect(snapshot.session.image_crop.unwrap_or(full), full)
+            .ok()?;
+        let area = tiny_skia::IntRect::from_xywh(
+            visible.left - full.left,
+            visible.top - full.top,
+            (visible.right - visible.left) as u32,
+            (visible.bottom - visible.top) as u32,
+        )?;
+        image = image.clone_rect(area)?;
+        controls = controls.clone_rect(area)?;
+        let image = snapshot
+            .session
+            .image_scale
+            .pixels(
+                lexift_core::ports::screen_capture::CapturedRegion {
+                    bounds: visible,
+                    pixels: image.take(),
+                },
+                cancelled,
+            )
+            .ok()?;
+        let size = snapshot
+            .session
+            .image_scale
+            .bounds_size(
+                snapshot.session.image_crop.unwrap_or(full),
+                snapshot.session.image_orientation,
+            )
+            .ok()?;
+        let image = tiny_skia::Pixmap::from_vec(
+            image.pixels,
+            tiny_skia::IntSize::from_wh(size[0], size[1])?,
+        )?;
+        let controls = snapshot
+            .session
+            .image_scale
+            .pixels(
+                lexift_core::ports::screen_capture::CapturedRegion {
+                    bounds: visible,
+                    pixels: controls.take(),
+                },
+                cancelled,
+            )
+            .ok()?;
+        let controls = tiny_skia::Pixmap::from_vec(
+            controls.pixels,
+            tiny_skia::IntSize::from_wh(size[0], size[1])?,
+        )?;
+        return Some(vec![image, controls]);
+    }
+    Some(vec![image, controls])
 }
 pub(super) struct Job {
     pub generation: u64,

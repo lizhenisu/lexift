@@ -2031,3 +2031,15 @@ msgstr "对比度"
 
 msgid "Reset original colors"
 msgstr "恢复原始颜色"
+
+msgid "Resize image"
+msgstr "调整图片尺寸"
+
+msgid "Original size"
+msgstr "原始尺寸"
+
+msgid "Enter valid image dimensions (maximum 40 MP)"
+msgstr "请输入有效图片尺寸（最多 4000 万像素）"
+
+msgid "Image dimensions exceed the memory limit"
+msgstr "图片尺寸超出内存限制"

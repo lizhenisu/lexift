@@ -182,6 +182,18 @@ pub fn finish(
     Ok(image)
 }
 
+/// Shared confirmed output/OCR order; scaling never changes retained source resources.
+pub fn finish_scaled(
+    image: CapturedRegion,
+    full: Rect,
+    orientation: Orientation,
+    color: super::image_color::Color,
+    scale: super::image_resize::ImageScale,
+    cancel: &AtomicBool,
+) -> Result<CapturedRegion> {
+    scale.pixels(finish(image, full, orientation, color, cancel)?, cancel)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

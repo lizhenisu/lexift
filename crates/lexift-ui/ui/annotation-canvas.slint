@@ -19,6 +19,7 @@ export component AnnotationCanvas inherits Window {
     background: #00000001;
     in property <image> frame;
     in property <image> controls;
+    in property <bool> frame-resized:false;
     in property <bool> image-view: false;
     in property <float> source-left: 0;
     in property <float> source-top: 0;
@@ -33,6 +34,7 @@ export component AnnotationCanvas inherits Window {
     in property <int> contrast:0;
     callback prepare-image-menu() -> bool;
     callback image-color-requested(int, int);
+    callback image-dimensions-requested();
     private property <bool> image-menu-key-pending:false;
     private property <bool> image-menu-key-down:false;
     public function close-image-menu() {
@@ -129,13 +131,13 @@ export component AnnotationCanvas inherits Window {
             }
         }
         Rectangle {
-            x: root.image-pan-x + (root.content-left - root.source-left) * root.image-zoom * 1px;
-            y: root.image-pan-y + (root.content-top - root.source-top) * root.image-zoom * 1px;
+            x: root.image-pan-x + (root.content-left - (root.frame-resized ? 0 : root.source-left)) * root.image-zoom * 1px;
+            y: root.image-pan-y + (root.content-top - (root.frame-resized ? 0 : root.source-top)) * root.image-zoom * 1px;
             width: (root.content-right - root.content-left) * root.image-zoom * 1px;
             height: (root.content-bottom - root.content-top) * root.image-zoom * 1px;
             clip:true;
-            Image { x:-(root.content-left - root.source-left) * root.image-zoom * 1px; y:-(root.content-top - root.source-top) * root.image-zoom * 1px; width:root.frame.width * root.image-zoom * 1px; height:root.frame.height * root.image-zoom * 1px; source:root.frame; image-fit:fill; }
-            if !root.image-cropping: Image { x:-(root.content-left - root.source-left) * root.image-zoom * 1px; y:-(root.content-top - root.source-top) * root.image-zoom * 1px; width:root.frame.width * root.image-zoom * 1px; height:root.frame.height * root.image-zoom * 1px; source:root.controls; image-fit:fill; }
+            Image { x:root.frame-resized ? 0px : -(root.content-left - (root.frame-resized ? 0 : root.source-left)) * root.image-zoom * 1px; y:root.frame-resized ? 0px : -(root.content-top - (root.frame-resized ? 0 : root.source-top)) * root.image-zoom * 1px; width:root.frame-resized ? parent.width : root.frame.width * root.image-zoom * 1px; height:root.frame-resized ? parent.height : root.frame.height * root.image-zoom * 1px; source:root.frame; image-fit:fill; }
+            if !root.image-cropping: Image { x:root.frame-resized ? 0px : -(root.content-left - (root.frame-resized ? 0 : root.source-left)) * root.image-zoom * 1px; y:root.frame-resized ? 0px : -(root.content-top - (root.frame-resized ? 0 : root.source-top)) * root.image-zoom * 1px; width:root.frame-resized ? parent.width : root.frame.width * root.image-zoom * 1px; height:root.frame-resized ? parent.height : root.frame.height * root.image-zoom * 1px; source:root.controls; image-fit:fill; }
         }
         if root.image-cropping: ImageCropFeedback {
             x:root.image-pan-x; y:root.image-pan-y;
@@ -172,6 +174,8 @@ export component AnnotationCanvas inherits Window {
         // automatic dispatch prevents a second menu for the same right click.
         y:root.image-header-height; width:root.width; height:max(0px,root.height - root.image-header-height - root.image-footer-height); enabled:false;
         Menu {
+            MenuItem { title:@tr("Resize image"); enabled:root.image-color-enabled; activated=>{root.image-dimensions-requested();} }
+            MenuSeparator {}
             MenuItem { title:@tr("Grayscale"); enabled:root.image-color-enabled; checkable:true; checked:root.grayscale; activated=>{root.image-color-requested(0,0);} }
             MenuItem { title:@tr("Invert colors"); enabled:root.image-color-enabled; checkable:true; checked:root.inverted; activated=>{root.image-color-requested(1,0);} }
             Menu {

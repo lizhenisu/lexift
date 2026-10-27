@@ -69,13 +69,25 @@ pub(super) fn brush_size_scrolled(index: usize, delta: f32) {
         } else {
             r.replace_values(tool, values);
             let size = r.values(tool).size;
+            let factor = r.document.session.image_scale.factor() as f32;
+            let pixel_units = image_resize::pixel_units(r);
             r.document.session.update_selected(|object| {
                 match &mut object.extra {
                     Extra::Mosaic(value) if object.kind == Kind::MosaicBrush => {
-                        value.diameter = size as f32 * value.creation_scale
+                        value.diameter = size as f32
+                            * if pixel_units {
+                                1. / factor
+                            } else {
+                                value.creation_scale
+                            }
                     }
                     Extra::Sticker(value) if object.kind == Kind::StickerBrush => {
-                        value.diameter = size as f32 * value.creation_scale
+                        value.diameter = size as f32
+                            * if pixel_units {
+                                1. / factor
+                            } else {
+                                value.creation_scale
+                            }
                     }
                     _ => return,
                 }
@@ -112,7 +124,11 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
             return None;
         }
         let layer = r.canvas_state.canvases.get(index)?;
-        let scale = layer.scale();
+        let scale = if image_resize::pixel_units(r) {
+            1.
+        } else {
+            layer.scale()
+        } / r.document.session.image_scale.factor() as f32;
         let mut point = r
             .screenshot
             .as_ref()
@@ -217,7 +233,10 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                 {
                     if r.polyline().is_none() {
                         let values = capture_creation(r, 6);
-                        let style = parameters::style(&values, 6);
+                        let style = image_resize::style_to_source(
+                            parameters::style(&values, 6),
+                            image_resize::style_factor(r, Some(point)),
+                        );
                         r.pending_drawing.start_polyline(point, style, &values);
                     }
                     deselect_object(r);
@@ -297,7 +316,7 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                             {
                                 r.gesture = Some(Active::Action(Action::CreateText {
                                     at: point,
-                                    scale,
+                                    scale: scale * r.document.session.image_scale.factor() as f32,
                                     values: Box::new(creation.clone()),
                                 }));
                             } else if matches!(r.document.mode, InteractionMode::Tool(0..=2 | 5))
@@ -324,7 +343,10 @@ pub(super) fn canvas_pointer(index: usize, event: i32, x: f32, y: f32) {
                                     r.render_state.magnifier_sync = MagnifierSync::Cold;
                                     r.render_state.first_magnifier_timing = None;
                                 }
-                                let style = parameters::style(&creation, kind.tool() as i32);
+                                let style = image_resize::style_to_source(
+                                    parameters::style(&creation, kind.tool() as i32),
+                                    image_resize::style_factor(r, Some(point)),
+                                );
                                 let values = &creation;
                                 r.gesture = Some(Active::Drawing(drawing::Press::begin(
                                     point, kind, style, scale, values,
@@ -790,7 +812,8 @@ fn history(forward: bool) {
                 candidate.undo()
             };
             if changed
-                && (candidate.image_orientation != r.document.session.image_orientation
+                && (candidate.image_scale != r.document.session.image_scale
+                    || candidate.image_orientation != r.document.session.image_orientation
                     || candidate.image_color != r.document.session.image_color)
             {
                 image_transform::submit(r, candidate);
@@ -809,6 +832,7 @@ fn history(forward: bool) {
             };
             if changed
                 && (candidate.image_crop != r.document.session.image_crop
+                    || candidate.image_scale != r.document.session.image_scale
                     || candidate.image_orientation != r.document.session.image_orientation
                     || candidate.image_color != r.document.session.image_color)
             {

@@ -320,6 +320,7 @@ pub(crate) fn show(
                         region: RegionEditor::new(selection.bounds),
                         preview: None,
                         revision: 0,
+                        accepted_after: 0,
                         presented: 0,
                         feedback_placement: None,
                         toolbar_adjustment: 0,
@@ -407,7 +408,8 @@ pub(super) fn editor_ocr_owner() -> Option<lexift_core::domain::editor_ocr::Owne
     })
 }
 pub(super) fn recognizing() -> bool {
-    image_transform::busy()
+    image_resize::busy()
+        || image_transform::busy()
         || editor_ocr::busy()
         || long::busy()
         || FLOW.with(|s| s.borrow().state.phase == ScreenshotPhase::Recognizing)
@@ -484,7 +486,7 @@ pub(super) fn recognize_text() {
     }
 }
 pub(super) fn output(kind: ScreenshotOutput) {
-    if image_transform::busy() || editor_ocr::busy() {
+    if image_resize::busy() || image_transform::busy() || editor_ocr::busy() {
         return;
     }
     if history_editor::active() {

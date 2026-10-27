@@ -3706,30 +3706,42 @@ mod tests {
                     }
                     pixels
                 };
-                if turn.is_multiple_of(2) {
-                    assert_eq!(
-                        image.bounds,
-                        Rect {
-                            left: 0,
-                            top: 1,
-                            right: 1,
-                            bottom: 3
-                        }
-                    );
-                    assert_eq!(image.pixels, filter(vec![12, 20, 30, 255, 14, 20, 30, 255]));
+                let original = if turn.is_multiple_of(2) {
+                    filter(vec![12, 20, 30, 255, 14, 20, 30, 255])
                 } else {
-                    assert!(turn < 72);
-                    assert_eq!(
-                        image.bounds,
-                        Rect {
-                            left: 0,
-                            top: 0,
-                            right: 2,
-                            bottom: 1
+                    filter(vec![14, 20, 30, 255, 12, 20, 30, 255])
+                };
+                let vertical = turn.is_multiple_of(2);
+                let (w, h) = if turn < 72 {
+                    if vertical { (1, 2) } else { (2, 1) }
+                } else if vertical {
+                    (2, 4)
+                } else {
+                    (4, 2)
+                };
+                assert_eq!(image.bounds.right - image.bounds.left, w);
+                assert_eq!(image.bounds.bottom - image.bounds.top, h);
+                let expected = if turn < 72 {
+                    original
+                } else {
+                    let mut out = Vec::new();
+                    for y in 0..h {
+                        for x in 0..w {
+                            let i = if vertical { y } else { x };
+                            let weight = [0, 1, 3, 4][i as usize];
+                            for c in 0..4 {
+                                out.push(
+                                    ((u32::from(original[c]) * (4 - weight)
+                                        + u32::from(original[c + 4]) * weight
+                                        + 2)
+                                        / 4) as u8,
+                                );
+                            }
                         }
-                    );
-                    assert_eq!(image.pixels, filter(vec![14, 20, 30, 255, 12, 20, 30, 255]));
-                }
+                    }
+                    out
+                };
+                assert_eq!(image.pixels, expected);
                 Ok("EDITOR OCR".into())
             }
         }
@@ -3811,7 +3823,7 @@ mod tests {
             operation: e.id,
             result: Ok(SaveOutcome::Cancelled),
         }));
-        for (turn, orientation) in (0..36)
+        for (turn, orientation) in (0..72)
             .flat_map(|_| {
                 [
                     lexift_core::domain::image_transform::Orientation::identity(),
@@ -3838,6 +3850,11 @@ mod tests {
                             [((turn / 2) + 3) % 9],
                     },
                     orientation,
+                    scale: if turn >= 72 {
+                        lexift_core::domain::image_resize::ImageScale::new(2, 1).unwrap()
+                    } else {
+                        Default::default()
+                    },
                     source: fixture().bounds,
                     bounds: Rect {
                         left: 0,
