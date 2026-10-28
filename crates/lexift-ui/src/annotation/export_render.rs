@@ -63,6 +63,10 @@ pub(crate) fn compose_frozen(
         part.scale = scale;
         rendered.push(compose(&part, capture.clone(), cancelled)?);
     }
+    // A single complete partition already is the requested owned result.
+    if rendered.len() == 1 && rendered[0].bounds == snapshot.monitor {
+        return Ok(rendered.pop().unwrap());
+    }
     lexift_core::domain::screen_snapshot::crop_frames(&rendered, snapshot.monitor)
 }
 

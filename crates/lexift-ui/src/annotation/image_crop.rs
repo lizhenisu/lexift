@@ -251,5 +251,8 @@ fn retire_frames(r: &mut Registry) {
     if let Some(e) = r.screenshot.as_mut() {
         e.revision = e.revision.saturating_add(1);
         e.accepted_after = e.revision;
+        if let Some(preview) = &e.preview {
+            preview.retire_before(e.accepted_after);
+        }
     }
 }

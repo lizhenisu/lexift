@@ -1708,7 +1708,7 @@ fn placement(
     )
 }
 
-#[cfg(debug_assertions)]
+#[cfg(any(test, debug_assertions))]
 pub(crate) fn diagnostic_windows() -> Vec<(u64, PinnedScreenshotWindow)> {
     STATE.with(|s| {
         s.borrow()

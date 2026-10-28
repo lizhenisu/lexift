@@ -230,6 +230,7 @@ pub(crate) fn begin(id: u64, edit: u64) {
             preview: None,
             revision: 0,
             accepted_after: 0,
+            image_content: None,
             presented: 0,
             feedback_placement: None,
             toolbar_adjustment: 0,

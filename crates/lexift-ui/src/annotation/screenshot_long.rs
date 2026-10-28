@@ -1197,6 +1197,7 @@ mod tests {
                 preview: None,
                 revision: 0,
                 accepted_after: 0,
+                image_content: None,
                 presented: 0,
                 feedback_placement: None,
                 toolbar_adjustment: 0,

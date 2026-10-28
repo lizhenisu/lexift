@@ -158,3 +158,6 @@
 
 - [独立图片编辑器颜色调整](features/image-editor-colors.md)
 - [独立图片编辑器颜色验证](releases/image-editor-colors.md)
+
+- [大图编辑性能与资源管理](features/large-image-performance.md)
+- [大图编辑性能验证](releases/large-image-performance.md)

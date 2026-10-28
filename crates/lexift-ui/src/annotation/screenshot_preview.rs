@@ -26,6 +26,7 @@ pub(super) struct Input {
 pub(super) struct Cache {
     scene: crate::annotation_scene::SceneCompiler,
     base: Option<Base>,
+    image: Option<ImageBase>,
     #[cfg(test)]
     pub builds: usize,
 }
@@ -34,6 +35,35 @@ struct Base {
     capture: Arc<ScreenCaptureFrame>,
     composed: tiny_skia::Pixmap,
     dark: Arc<tiny_skia::Pixmap>,
+}
+// One optional, recomputable content raster per worker; never an input/output size limit.
+const MAX_CACHED_IMAGE_BYTES: usize = 32 * 1024 * 1024;
+struct ImageBase {
+    snapshot: ExportSnapshot,
+    capture: Arc<ScreenCaptureFrame>,
+    pixels: Arc<tiny_skia::Pixmap>,
+}
+fn content_matches(a: &ExportSnapshot, b: &ExportSnapshot) -> bool {
+    a.monitor == b.monitor
+        && a.scale == b.scale
+        && a.monitors == b.monitors
+        && a.session.objects == b.session.objects
+        && a.session.watermark == b.session.watermark
+        && a.session.watermark_erased == b.session.watermark_erased
+        && a.session.spotlight_opacity == b.session.spotlight_opacity
+        && a.session.spotlight_erased == b.session.spotlight_erased
+        && a.session.displays == b.session.displays
+        && a.session.image_source == b.session.image_source
+}
+impl ImageBase {
+    fn matches(&self, input: &Input) -> bool {
+        Arc::ptr_eq(&self.capture, &input.capture)
+            && content_matches(&self.snapshot, &input.snapshot)
+            && self.snapshot.session.image_crop == input.snapshot.session.image_crop
+            && self.snapshot.session.image_orientation == input.snapshot.session.image_orientation
+            && self.snapshot.session.image_color == input.snapshot.session.image_color
+            && self.snapshot.session.image_scale == input.snapshot.session.image_scale
+    }
 }
 impl Base {
     fn matches(&self, input: &Input) -> bool {
@@ -289,18 +319,65 @@ fn compose_base(
     };
     Some(pixmap)
 }
-/// Pins keep controls in a separate transparent texture so finishing cannot bake them in.
+/// Compatibility path for CPU fixtures. Runtime retains shared immutable content.
+#[cfg(test)]
 pub(super) fn paint_frames(
     input: &Input,
     cancelled: &AtomicBool,
     cache: &mut Cache,
 ) -> Option<Vec<tiny_skia::Pixmap>> {
-    let image = paint_cached(input, cancelled, cache, input.crop_border)?;
-    if input.crop_border {
-        return Some(vec![image]);
+    render_frames(input, cancelled, cache).map(|frames| {
+        frames
+            .into_iter()
+            .map(|p| Arc::try_unwrap(p).unwrap_or_else(|p| p.as_ref().clone()))
+            .collect()
+    })
+}
+/// Content is reused independently of selection and gesture feedback. No live views are read.
+fn render_frames(
+    input: &Input,
+    cancelled: &AtomicBool,
+    cache: &mut Cache,
+) -> Option<Vec<Arc<tiny_skia::Pixmap>>> {
+    if cancelled.load(Ordering::Acquire) {
+        return None;
     }
+    if input.crop_border {
+        cache.image = None;
+        return Some(vec![Arc::new(paint_cached(input, cancelled, cache, true)?)]);
+    }
+    cache.base = None;
+    let rebuilt = cache
+        .image
+        .as_ref()
+        .is_none_or(|image| !image.matches(input));
+    let compose_started = Instant::now();
+    let mut compose_ms = 0.;
+    let mut finish_ms = 0.;
+    if rebuilt {
+        // The installed Slint picture owns its copy. Retire the old worker cache before
+        // allocating a replacement, rather than retaining two complete cached versions.
+        cache.image = None;
+        let raw = compose_base(input, cancelled, &mut cache.scene)?;
+        compose_ms = compose_started.elapsed().as_secs_f64() * 1000.;
+        let started = Instant::now();
+        let pixels = Arc::new(finish_frame(raw, input, cancelled, true)?);
+        finish_ms = started.elapsed().as_secs_f64() * 1000.;
+        if cancelled.load(Ordering::Acquire) {
+            return None;
+        }
+        cache.image = Some(ImageBase {
+            snapshot: input.snapshot.clone(),
+            capture: input.capture.clone(),
+            pixels,
+        });
+    }
+    let started = Instant::now();
     let snapshot = &input.snapshot;
-    let mut controls = tiny_skia::Pixmap::new(image.width(), image.height())?;
+    let mut controls = tiny_skia::Pixmap::new(
+        (snapshot.monitor.right - snapshot.monitor.left) as u32,
+        (snapshot.monitor.bottom - snapshot.monitor.top) as u32,
+    )?;
     crate::annotation_render::draw_interaction(
         &mut controls,
         &snapshot.session,
@@ -317,12 +394,47 @@ pub(super) fn paint_frames(
             snapshot.scale,
         );
     }
-    let orient = |pixmap: tiny_skia::Pixmap| {
-        let full = snapshot.monitor;
-        let orientation = snapshot.session.image_orientation;
-        if orientation == Default::default() {
-            return Some(pixmap);
-        }
+    let controls = Arc::new(finish_frame(controls, input, cancelled, false)?);
+    if cancelled.load(Ordering::Acquire) {
+        return None;
+    }
+    let content = &cache.image.as_ref()?.pixels;
+    // Only content rebuilds are diagnosed, never each mouse/selection feedback update.
+    if rebuilt {
+        tracing::debug!(
+            compose_ms,
+            finish_ms,
+            feedback_ms = started.elapsed().as_secs_f64() * 1000.,
+            source_bytes = input
+                .capture
+                .regions
+                .iter()
+                .map(|r| r.pixels.len())
+                .sum::<usize>(),
+            content_bytes = content.data().len(),
+            feedback_bytes = controls.data().len(),
+            "Frozen image CPU stages complete (not presentation)"
+        );
+    }
+    let frames = vec![content.clone(), controls];
+    if content.data().len() > MAX_CACHED_IMAGE_BYTES {
+        cache.image = None;
+    }
+    Some(frames)
+}
+fn finish_frame(
+    pixmap: tiny_skia::Pixmap,
+    input: &Input,
+    cancelled: &AtomicBool,
+    colors: bool,
+) -> Option<tiny_skia::Pixmap> {
+    let snapshot = &input.snapshot;
+    let full = snapshot.monitor;
+    let orientation = snapshot.session.image_orientation;
+    let finish_started = Instant::now();
+    let mut pixmap = if orientation == Default::default() {
+        pixmap
+    } else {
         let image = lexift_core::ports::screen_capture::CapturedRegion {
             bounds: full,
             pixels: pixmap.take(),
@@ -334,20 +446,21 @@ pub(super) fn paint_frames(
                 (image.bounds.right - image.bounds.left) as u32,
                 (image.bounds.bottom - image.bounds.top) as u32,
             )?,
-        )
+        )?
     };
-    let mut image = orient(image)?;
-    snapshot
-        .session
-        .image_color
-        .apply(image.data_mut(), cancelled)
-        .ok()?;
-    let mut controls = orient(controls)?;
-    if snapshot.session.image_scale != Default::default() {
-        let full = snapshot.monitor;
-        let visible = snapshot
+    let orientation_ms = finish_started.elapsed().as_secs_f64() * 1000.;
+    let color_started = Instant::now();
+    if colors {
+        snapshot
             .session
-            .image_orientation
+            .image_color
+            .apply(pixmap.data_mut(), cancelled)
+            .ok()?;
+    }
+    let color_ms = color_started.elapsed().as_secs_f64() * 1000.;
+    let resize_started = Instant::now();
+    if snapshot.session.image_scale != Default::default() {
+        let visible = orientation
             .rect(snapshot.session.image_crop.unwrap_or(full), full)
             .ok()?;
         let area = tiny_skia::IntRect::from_xywh(
@@ -356,15 +469,21 @@ pub(super) fn paint_frames(
             (visible.right - visible.left) as u32,
             (visible.bottom - visible.top) as u32,
         )?;
-        image = image.clone_rect(area)?;
-        controls = controls.clone_rect(area)?;
+        // Full-range crops already own the correct pixels; avoid a second full allocation.
+        if area.x() != 0
+            || area.y() != 0
+            || area.width() != pixmap.width()
+            || area.height() != pixmap.height()
+        {
+            pixmap = pixmap.clone_rect(area)?;
+        }
         let image = snapshot
             .session
             .image_scale
             .pixels(
                 lexift_core::ports::screen_capture::CapturedRegion {
                     bounds: visible,
-                    pixels: image.take(),
+                    pixels: pixmap.take(),
                 },
                 cancelled,
             )
@@ -372,45 +491,73 @@ pub(super) fn paint_frames(
         let size = snapshot
             .session
             .image_scale
-            .bounds_size(
-                snapshot.session.image_crop.unwrap_or(full),
-                snapshot.session.image_orientation,
-            )
+            .bounds_size(snapshot.session.image_crop.unwrap_or(full), orientation)
             .ok()?;
-        let image = tiny_skia::Pixmap::from_vec(
+        if colors {
+            tracing::debug!(
+                orientation_ms,
+                color_ms,
+                resample_ms = resize_started.elapsed().as_secs_f64() * 1000.,
+                "Frozen image transform stages"
+            );
+        }
+        return tiny_skia::Pixmap::from_vec(
             image.pixels,
             tiny_skia::IntSize::from_wh(size[0], size[1])?,
-        )?;
-        let controls = snapshot
-            .session
-            .image_scale
-            .pixels(
-                lexift_core::ports::screen_capture::CapturedRegion {
-                    bounds: visible,
-                    pixels: controls.take(),
-                },
-                cancelled,
-            )
-            .ok()?;
-        let controls = tiny_skia::Pixmap::from_vec(
-            controls.pixels,
-            tiny_skia::IntSize::from_wh(size[0], size[1])?,
-        )?;
-        return Some(vec![image, controls]);
+        );
     }
-    Some(vec![image, controls])
+    if colors {
+        tracing::debug!(
+            orientation_ms,
+            color_ms,
+            resample_ms = 0.,
+            "Frozen image transform stages"
+        );
+    }
+    Some(pixmap)
 }
 pub(super) struct Job {
+    pub submitted: Instant,
     pub generation: u64,
     pub session: u64,
     pub revision: u64,
     pub inputs: Vec<Input>,
     pub canvases: Vec<u64>,
 }
+#[derive(Default)]
+struct QueueState {
+    pending: Option<Job>,
+    running: Option<(u64, Arc<AtomicBool>)>,
+    stopped: bool,
+    minimum_revision: u64,
+}
 struct Queue {
-    job: Mutex<Option<Job>>,
+    state: Mutex<QueueState>,
     wake: Condvar,
-    cancelled: AtomicBool,
+}
+impl QueueState {
+    fn retire_before(&mut self, revision: u64) {
+        self.minimum_revision = self.minimum_revision.max(revision);
+        if let Some((running, cancel)) = &self.running
+            && *running < revision
+        {
+            cancel.store(true, Ordering::Release);
+        }
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|job| job.revision < revision)
+        {
+            self.pending = None;
+        }
+    }
+    fn stop(&mut self) {
+        self.stopped = true;
+        self.pending = None;
+        if let Some((_, cancel)) = &self.running {
+            cancel.store(true, Ordering::Release);
+        }
+    }
 }
 pub(super) struct Preview {
     queue: Arc<Queue>,
@@ -418,9 +565,8 @@ pub(super) struct Preview {
 impl Preview {
     pub fn new() -> std::io::Result<Self> {
         let queue = Arc::new(Queue {
-            job: Mutex::new(None),
+            state: Mutex::new(QueueState::default()),
             wake: Condvar::new(),
-            cancelled: AtomicBool::new(false),
         });
         let worker = queue.clone();
         std::thread::Builder::new()
@@ -428,16 +574,21 @@ impl Preview {
             .spawn(move || {
                 let mut scenes = std::collections::HashMap::<[i32; 4], Cache>::new();
                 loop {
-                    let job = {
-                        let mut slot = worker.job.lock().unwrap_or_else(|p| p.into_inner());
-                        while slot.is_none() && !worker.cancelled.load(Ordering::Acquire) {
-                            slot = worker.wake.wait(slot).unwrap_or_else(|p| p.into_inner());
+                    let (job, cancelled) = {
+                        let mut state = worker.state.lock().unwrap_or_else(|p| p.into_inner());
+                        while state.pending.is_none() && !state.stopped {
+                            state = worker.wake.wait(state).unwrap_or_else(|p| p.into_inner());
                         }
-                        if worker.cancelled.load(Ordering::Acquire) {
+                        if state.stopped {
                             break;
                         }
-                        slot.take().unwrap()
+                        let job = state.pending.take().unwrap();
+                        let cancelled = Arc::new(AtomicBool::new(false));
+                        state.running = Some((job.revision, cancelled.clone()));
+                        (job, cancelled)
                     };
+                    let queue_ms = job.submitted.elapsed().as_secs_f64() * 1000.;
+                    let cpu_started = Instant::now();
                     let frames = job
                         .inputs
                         .iter()
@@ -446,12 +597,28 @@ impl Preview {
                             let scene = scenes
                                 .entry([b.left, b.top, b.right, b.bottom])
                                 .or_default();
-                            paint_frames(input, &worker.cancelled, scene)
+                            render_frames(input, &cancelled, scene)
                         })
                         .collect::<Option<Vec<_>>>()
                         .map(|frames| frames.into_iter().flatten().collect());
-                    if worker.cancelled.load(Ordering::Acquire) {
-                        break;
+                    {
+                        let mut state = worker.state.lock().unwrap_or_else(|p| p.into_inner());
+                        state.running = None;
+                        if state.stopped {
+                            break;
+                        }
+                    }
+                    if cancelled.load(Ordering::Acquire) {
+                        continue;
+                    }
+                    if cpu_started.elapsed() >= Duration::from_millis(100) {
+                        tracing::debug!(
+                            session = job.session,
+                            revision = job.revision,
+                            queue_ms,
+                            cpu_ms = cpu_started.elapsed().as_secs_f64() * 1000.,
+                            "Frozen preview slow task finished"
+                        );
                     }
                     let labels = job
                         .canvases
@@ -469,7 +636,7 @@ impl Preview {
                         }))
                         .collect();
                     let _ = slint::invoke_from_event_loop(move || {
-                        super::frozen_editor::present(
+                        super::frozen_editor::present_shared(
                             job.generation,
                             job.session,
                             job.revision,
@@ -482,18 +649,30 @@ impl Preview {
         Ok(Self { queue })
     }
     pub fn submit(&self, job: Job) {
-        *self.queue.job.lock().unwrap_or_else(|p| p.into_inner()) = Some(job);
+        let mut state = self.queue.state.lock().unwrap_or_else(|p| p.into_inner());
+        if !state.stopped && job.revision >= state.minimum_revision {
+            state.pending = Some(job);
+        }
+        drop(state);
         self.queue.wake.notify_one();
+    }
+    /// Retire explicitly cancelled/replaced candidates, not every hover update.
+    /// Letting ordinary in-flight feedback finish guarantees progress under continuous input.
+    pub fn retire_before(&self, revision: u64) {
+        self.queue
+            .state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .retire_before(revision);
     }
 }
 impl Drop for Preview {
     fn drop(&mut self) {
-        self.queue.cancelled.store(true, Ordering::Release);
         self.queue
-            .job
+            .state
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .take();
+            .stop();
         self.queue.wake.notify_one();
     }
 }
@@ -575,3 +754,7 @@ mod timing_tests {
 #[cfg(test)]
 #[path = "screenshot_feedback_tests.rs"]
 mod feedback_tests;
+
+#[cfg(test)]
+#[path = "large_image_performance_tests.rs"]
+mod large_image_performance_tests;

@@ -15,6 +15,7 @@ pub(super) struct Editing {
     pub(super) revision: u64,
     pub(super) presented: u64,
     pub(super) accepted_after: u64,
+    pub(super) image_content: Option<std::sync::Weak<tiny_skia::Pixmap>>,
     pub(super) feedback_placement: Option<(Point, slint::PhysicalSize)>,
     pub(super) toolbar_adjustment: u64,
     pub(super) keyboard: screenshot::keyboard::State,
@@ -37,6 +38,7 @@ impl Editing {
             preview: None,
             revision: 0,
             accepted_after: 0,
+            image_content: None,
             presented: 0,
             feedback_placement: None,
             toolbar_adjustment: 0,
@@ -146,6 +148,7 @@ pub(super) fn render(r: &mut Registry) {
         .as_ref()
         .unwrap()
         .submit(screenshot_preview::Job {
+            submitted: Instant::now(),
             generation: r.generation,
             session: editing.id,
             revision: editing.revision,
@@ -158,11 +161,27 @@ pub(super) fn render(r: &mut Registry) {
             inputs,
         });
 }
+#[cfg(test)]
 pub(super) fn present(
     generation: u64,
     id: u64,
     revision: u64,
     frames: Option<Vec<tiny_skia::Pixmap>>,
+    labels: Vec<(u64, Option<screenshot::size_input::Hit>)>,
+) {
+    present_shared(
+        generation,
+        id,
+        revision,
+        frames.map(|frames| frames.into_iter().map(Arc::new).collect()),
+        labels,
+    );
+}
+pub(super) fn present_shared(
+    generation: u64,
+    id: u64,
+    revision: u64,
+    frames: Option<Vec<Arc<tiny_skia::Pixmap>>>,
     labels: Vec<(u64, Option<screenshot::size_input::Hit>)>,
 ) {
     let mut failed = false;
@@ -216,7 +235,11 @@ pub(super) fn present(
                 return;
             }
             pin_editor::presented(pin, &r.document.session);
-            crate::pinned_screenshot::present_edit(pin, image, controls);
+            crate::pinned_screenshot::present_edit(
+                pin,
+                Arc::try_unwrap(image).unwrap_or_else(|image| image.as_ref().clone()),
+                Arc::try_unwrap(controls).unwrap_or_else(|controls| controls.as_ref().clone()),
+            );
             return;
         }
         if screenshot::long::image_editing() {
@@ -224,7 +247,17 @@ pub(super) fn present(
                 let mut frames = frames.into_iter();
                 if let (Some(base), Some(controls)) = (frames.next(), frames.next()) {
                     editing.presented = revision;
-                    let as_image = |p: tiny_skia::Pixmap| {
+                    let installed_at = Instant::now();
+                    let changed = editing
+                        .image_content
+                        .as_ref()
+                        .is_none_or(|old| !old.ptr_eq(&Arc::downgrade(&base)));
+                    if changed {
+                        editing.image_content = Some(Arc::downgrade(&base));
+                    }
+                    let content_bytes = base.data().len();
+                    let feedback_bytes = controls.data().len();
+                    let as_image = |p: Arc<tiny_skia::Pixmap>| {
                         slint::Image::from_rgba8_premultiplied(slint::SharedPixelBuffer::<
                             slint::Rgba8Pixel,
                         >::clone_from_slice(
@@ -240,8 +273,26 @@ pub(super) fn present(
                                 .image_scale
                                 != Default::default(),
                     );
-                    window.set_frame(as_image(base));
+                    if changed {
+                        // Drop the transfer raster as soon as Slint owns its pixels. Large
+                        // uncached content must not overlap the controls upload unnecessarily.
+                        window.set_frame(as_image(base));
+                    } else {
+                        drop(base);
+                    }
                     window.set_controls(as_image(controls));
+                    if changed {
+                        tracing::debug!(
+                            generation,
+                            session = id,
+                            revision,
+                            install_ms = installed_at.elapsed().as_secs_f64() * 1000.,
+                            content_bytes,
+                            feedback_bytes,
+                            "Frozen image installed (not compositor presentation)"
+                        );
+                        image_installed(generation, id, revision);
+                    }
                     image_transform::ready(r, revision);
                     if crop_transition {
                         image_crop::sync(r, true);
@@ -275,14 +326,17 @@ pub(super) fn present(
             r.canvas_state.canvases.iter_mut().zip(frames).zip(labels)
         {
             let window = layer.window.clone_strong();
-            if !layer.presented.submit(frame, |frame| {
-                (r.lifecycle.annotation_frame_presenter)(
-                    window.window(),
-                    frame.data(),
-                    frame.width(),
-                    frame.height(),
-                )
-            }) {
+            if !layer.presented.submit(
+                Arc::try_unwrap(frame).unwrap_or_else(|frame| frame.as_ref().clone()),
+                |frame| {
+                    (r.lifecycle.annotation_frame_presenter)(
+                        window.window(),
+                        frame.data(),
+                        frame.width(),
+                        frame.height(),
+                    )
+                },
+            ) {
                 failed = true;
             } else {
                 editing.size_input.presented.insert(canvas, label);
@@ -316,4 +370,33 @@ fn report_failure(id: u64) {
             error: crate::i18n::tr("Screenshot unavailable"),
         });
     }
+}
+
+thread_local! { static IMAGE_RENDER:RefCell<Option<(u64,u64,u64,Instant)>>=const {RefCell::new(None)}; }
+fn image_installed(generation: u64, session: u64, revision: u64) {
+    IMAGE_RENDER
+        .with(|slot| *slot.borrow_mut() = Some((generation, session, revision, Instant::now())));
+}
+/// Renderer callback completion is distinct from desktop compositor presentation.
+pub(super) fn image_rendered(generation: u64, session: u64) {
+    IMAGE_RENDER.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot
+            .as_ref()
+            .is_some_and(|p| p.0 == generation && p.1 == session)
+        {
+            let (_, _, revision, started) = slot.take().unwrap();
+            tracing::debug!(
+                generation,
+                session,
+                revision,
+                render_wait_ms = started.elapsed().as_secs_f64() * 1000.,
+                "Frozen image render returned (not compositor presentation)"
+            );
+        }
+    });
+}
+
+pub(super) fn clear_image_timing() {
+    IMAGE_RENDER.with(|slot| slot.borrow_mut().take());
 }

@@ -14,6 +14,7 @@ struct Pending {
 thread_local! { static NEXT: std::cell::Cell<u64> = const {std::cell::Cell::new(0)}; }
 thread_local! { static PENDING: RefCell<Option<Pending>> = const {RefCell::new(None)}; }
 pub(in crate::annotation) fn clear() {
+    super::frozen_editor::clear_image_timing();
     editor_ocr::clear();
     image_transform::clear();
     image_navigation::clear();
@@ -50,6 +51,12 @@ fn open_owned(
         let r = s.as_ref()?;
         let area = long::source_area()?;
         let window = crate::screen_interaction::create(&r.lifecycle, AnnotationCanvas::new).ok()?;
+        let generation = r.generation;
+        let _ = window.window().set_rendering_notifier(move |state, _| {
+            if matches!(state, slint::RenderingState::AfterRendering) {
+                super::frozen_editor::image_rendered(generation, session);
+            }
+        });
         window.set_image_view(true);
         crate::theme::apply(&window);
         window.set_frame(slint::Image::from_rgba8_premultiplied(

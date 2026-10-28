@@ -1596,7 +1596,7 @@ pub(crate) fn set_screenshot(value: bool) {
     });
 }
 
-#[cfg(debug_assertions)]
+#[cfg(any(test, debug_assertions))]
 pub(crate) fn diagnostic_visible() -> bool {
     STATE.with(|s| {
         s.borrow().as_ref().is_some_and(|r| {

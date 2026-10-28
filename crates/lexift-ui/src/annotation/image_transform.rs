@@ -221,6 +221,9 @@ pub(super) fn cancel_scale(r: &mut Registry) {
         if let Some(e) = r.screenshot.as_mut() {
             e.revision = e.revision.saturating_add(1);
             e.accepted_after = e.revision;
+            if let Some(preview) = &e.preview {
+                preview.retire_before(e.accepted_after);
+            }
         }
         if let Some(w) = r.toolbar_state.main.get() {
             w.set_output_busy(false);
