@@ -59,6 +59,7 @@ pub struct AppState {
     pub settings: Settings,
     pub desired_settings: Settings,
     pub runtime_config: RuntimeConfig,
+    pub registered_hotkeys: crate::domain::runtime_config::HotkeyRegistrations,
     pub source_text: String,
     pub translated_text: String,
     pub error_message: String,
@@ -108,6 +109,7 @@ impl AppState {
             phase: TranslationPhase::Idle,
             current_translation_task: None,
             runtime_config: settings.runtime_config(),
+            registered_hotkeys: Default::default(),
             desired_settings: settings.clone(),
             settings,
             source_text: String::new(),
@@ -671,6 +673,10 @@ impl AppState {
                         session.feedback_error = true;
                     }
                 }
+                Vec::new()
+            }
+            AppEvent::HotkeyRegistrationsChanged(registered) => {
+                self.registered_hotkeys = registered;
                 Vec::new()
             }
             AppEvent::MainWindowRequested => vec![AppCommand::ShowMainWindow],
@@ -3118,5 +3124,27 @@ mod tests {
                 }
             }]
         );
+    }
+}
+
+#[cfg(test)]
+mod registration_report_tests {
+    use super::*;
+    #[test]
+    fn registration_report_only_changes_confirmed_capabilities() {
+        let mut state = AppState::default();
+        state.desired_settings.hotkey = "Ctrl+Shift+F8".parse().unwrap();
+        let mut expected = state.clone();
+        let report = crate::domain::runtime_config::HotkeyRegistrations {
+            translation: Some(state.runtime_config.hotkey),
+            ..Default::default()
+        };
+        expected.registered_hotkeys = report;
+        assert!(
+            state
+                .reduce(AppEvent::HotkeyRegistrationsChanged(report))
+                .is_empty()
+        );
+        assert_eq!(state, expected);
     }
 }

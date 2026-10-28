@@ -26,6 +26,12 @@ pub(crate) struct RuntimeManager {
 }
 
 impl RuntimeManager {
+    pub(crate) fn hotkey_registrations(
+        &self,
+    ) -> lexift_core::domain::runtime_config::HotkeyRegistrations {
+        self.hotkey.registrations()
+    }
+
     pub(crate) fn start_ocr_hotkey(
         &self,
         handler: lexift_core::ports::hotkey::HotkeyHandler,

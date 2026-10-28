@@ -35,6 +35,8 @@
 
 ## 功能
 
+- [主页面使用指南](features/main-usage-guide.md) · [专项验证](releases/main-usage-guide.md)
+
 - [大模型服务与翻译设置](features/llm-providers.md)
 - [翻译 Popup 会话与窗口策略](features/translation-popup.md)
 - [长译文布局](features/translation-result-layout.md)

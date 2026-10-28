@@ -453,39 +453,4 @@ fn long_translation_grows_and_all_lines_remain_scrollable() {
             }
         }
     }
-    let main = crate::AppWindow::new().unwrap();
-    main.window().set_size(slint::LogicalSize::new(560., 520.));
-    main.set_translated_text("主窗口长译文\n".repeat(200).into());
-    assert!(main.get_translation_content_height() > main.get_translation_viewport_height());
-    let mut state = lexift_core::AppState::default();
-    state.phase = lexift_core::TranslationPhase::Translating;
-    state.translated_text = "主窗口长译文\n".repeat(200);
-    crate::binding::apply_main(&main, &crate::mapper::view_state(&state));
-    main.set_translation_scroll_y(-60.);
-    state.translated_text.push_str("增量正文\n");
-    crate::binding::apply_main(&main, &crate::mapper::view_state(&state));
-    assert_eq!(
-        main.get_translation_scroll_y(),
-        -60.,
-        "streaming preserves a user's scrolled position"
-    );
-    main.set_translation_scroll_y(
-        -(main.get_translation_content_height() - main.get_translation_viewport_height()),
-    );
-    state.translated_text.push_str("下一段\n");
-    crate::binding::apply_main(&main, &crate::mapper::view_state(&state));
-    assert!(
-        (main.get_translation_scroll_y() + main.get_translation_content_height()
-            - main.get_translation_viewport_height())
-        .abs()
-            < 1.,
-        "streaming follows the bottom only when already there"
-    );
-    state.translated_text.clear();
-    crate::binding::apply_main(&main, &crate::mapper::view_state(&state));
-    assert_eq!(
-        main.get_translation_scroll_y(),
-        0.,
-        "a new task resets scrolling"
-    );
 }

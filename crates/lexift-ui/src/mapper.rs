@@ -1,11 +1,7 @@
 use lexift_core::{AppState, TranslationPhase, state::PopupSessionState};
 
 pub(crate) struct UiState {
-    pub status: String,
-    pub busy: bool,
     pub target_language: String,
-    pub translated: String,
-    pub error: String,
     pub hotkey: String,
     pub annotation_hotkey: String,
     pub provider: String,
@@ -53,14 +49,7 @@ pub(crate) struct PopupUiState {
 
 pub(crate) fn view_state(state: &AppState) -> UiState {
     UiState {
-        status: crate::i18n::tr(phase_label(state.phase)),
-        busy: matches!(
-            state.phase,
-            TranslationPhase::Capturing | TranslationPhase::Translating
-        ),
         target_language: state.desired_settings.target_language.0.clone(),
-        translated: state.translated_text.clone(),
-        error: crate::i18n::error(&state.error_message),
         hotkey: state.desired_settings.hotkey.to_string(),
         annotation_hotkey: state.desired_settings.annotation_hotkey.to_string(),
         provider: state.settings.provider.id().into(),
@@ -237,7 +226,7 @@ mod tests {
     }
 
     #[test]
-    fn maps_translation_phases_and_content() {
+    fn labels_translation_phases() {
         let cases = [
             (TranslationPhase::Idle, "Idle", false),
             (TranslationPhase::NoSelection, "No selection", false),
@@ -248,16 +237,14 @@ mod tests {
         ];
 
         for (phase, expected_status, expected_busy) in cases {
-            let mut state = AppState::default();
-            state.phase = phase;
-            state.translated_text = "translated".into();
-            state.error_message = "error".into();
-
-            let mapped = view_state(&state);
-            assert_eq!(mapped.status, expected_status);
-            assert_eq!(mapped.busy, expected_busy);
-            assert_eq!(mapped.translated, "translated");
-            assert_eq!(mapped.error, "Operation failed: error");
+            assert_eq!(phase_label(phase), expected_status);
+            assert_eq!(
+                matches!(
+                    phase,
+                    TranslationPhase::Capturing | TranslationPhase::Translating
+                ),
+                expected_busy
+            );
         }
     }
 
@@ -280,6 +267,5 @@ mod tests {
             mapped.credential_error,
             "Operation failed: credential failed"
         );
-        assert!(mapped.error.is_empty());
     }
 }

@@ -100,3 +100,7 @@ Follow-up verification: UI 387 passed, 10 existing ignored; formatting, Slint co
 
 
 Follow-up Windows Release passed (3m44s), with SHA-256 `852fc33822e7dc13a318388eade23a9608334d7b9c095d0083f82952aa403b70`; build log: `target/selection-toolbar-near-release.log`. Started and verified PID 22892 at `D:/MyDocuments/Projects/lexift/target/release/lexift.exe`. Two Computer Use inventories again exposed only ChatGPT, so actual dual-monitor reverse selection, cross-DPI transitions, native focus and Shell identity remain unverified. The updated instance remains running for manual testing. Earlier uncommitted placement changes were preserved; no staging, commit or push was performed.
+
+## 主页面职责
+
+主页面现为[开始使用指南](main-usage-guide.md)，仅展示场景、操作及已注册快捷键，并提供 Settings 入口。翻译输入、流式结果和错误继续由 Popup 展示，不再回写主页面。

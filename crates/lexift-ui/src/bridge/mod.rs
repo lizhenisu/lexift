@@ -209,7 +209,6 @@ fn retry_app_window_icon<C: ComponentHandle + 'static>(
 impl Ui {
     pub fn new(
         initial_state: &AppState,
-        show_selection_demo: bool,
         prepare_passive_window: fn(&slint::Window) -> PassiveWindowPreparation,
         window_lifecycle: WindowLifecycleCallbacks,
     ) -> Result<Self, slint::PlatformError> {
@@ -278,7 +277,8 @@ impl Ui {
                 prepare_app_window: Rc::clone(&window_lifecycle.prepare_app_window),
                 open_about_link: Rc::clone(&window_lifecycle.open_about_link),
                 latest_state: initial_state.clone(),
-                show_selection_demo,
+                main_work_area: window_lifecycle.popup_work_area.clone(),
+                main_cursor_position: window_lifecycle.toolbar_cursor_position.clone(),
                 handler: None,
                 background_mode: Rc::clone(&background_mode),
                 credential_generation: Arc::clone(&credential_generation),
@@ -732,7 +732,7 @@ impl UiHandle {
                     }
                     registry.latest_state = state;
                     if let Some(main) = registry.main.as_ref() {
-                        binding::apply_main(main, &view_state);
+                        crate::usage_guide::apply(main, &registry.latest_state);
                     }
                     if let Some(settings) = registry.settings.as_ref() {
                         binding::apply_settings(settings, &view_state);

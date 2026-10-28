@@ -18,6 +18,7 @@ pub enum AppEvent {
     Ocr(crate::domain::ocr::OcrEvent),
     ClipboardHistory(crate::domain::clipboard_history::HistoryEvent),
     Started,
+    HotkeyRegistrationsChanged(crate::domain::runtime_config::HotkeyRegistrations),
     SelectionTranslationRequested,
     SelectionInteractionStarted,
     SelectionGestureCompleted {

@@ -2043,3 +2043,83 @@ msgstr "請輸入有效圖片尺寸（最多 4000 萬像素）"
 
 msgid "Image dimensions exceed the memory limit"
 msgstr "圖片尺寸超出記憶體限制"
+
+
+msgid "Get started"
+msgstr "開始使用"
+
+
+msgid "Translation, text recognition and screenshots for everyday work."
+msgstr "翻譯、文字辨識與截圖，融入日常工作。"
+
+
+msgid "Read in another language"
+msgstr "閱讀外文"
+
+
+msgid "Web pages and documents"
+msgstr "網頁與文件"
+
+
+msgid "Select text in another app, then press the shortcut. View or edit the translation in the popup."
+msgstr "在其他應用程式中選取文字，再按快捷鍵。在翻譯浮動視窗中查看或修改譯文。"
+
+
+msgid "Recognize text on screen"
+msgstr "辨識螢幕文字"
+
+
+msgid "Images, scanned pages and video subtitles"
+msgstr "圖片、掃描文件與影片字幕"
+
+
+msgid "Press the shortcut and select an area. Set up OCR resources and a translation service in Settings before first use."
+msgstr "按快捷鍵後框選區域。首次使用前，請在設定中準備 OCR 資源並設定翻譯服務。"
+
+
+msgid "Capture and annotate"
+msgstr "截圖與標註"
+
+
+msgid "Explain an issue or mark up a screen"
+msgstr "說明問題，標記螢幕內容"
+
+
+msgid "Open the annotation toolbar with the shortcut, choose Screenshot and select an area. Add annotations, then copy, save or pin the image."
+msgstr "按快捷鍵開啟標註工具列，選擇「截圖」並框選區域。加入標註後，可複製、儲存或釘選圖片。"
+
+
+msgid "Long captures and images"
+msgstr "長截圖與圖片處理"
+
+
+msgid "Scrolling content and image editing"
+msgstr "捲動內文與圖片編輯"
+
+
+msgid "Select scrolling content within one display, choose Long screenshot and scroll down manually. Edit the result to crop or resize it."
+msgstr "選取單一顯示器內可捲動的內文，選擇「長截圖」並手動向下捲動。完成後可編輯、裁切或調整尺寸。"
+
+
+msgid "From the tray menu, choose Open image or Image history to work with existing pictures."
+msgstr "也可從系統匣選單選擇「開啟圖片」或「圖片歷史」，處理現有圖片。"
+
+
+msgid "Shortcuts can be changed in Settings."
+msgstr "快捷鍵可以在設定中修改。"
+
+
+msgid "After successfully copying, saving or pinning a screenshot in this session, press R during the next selection to reuse its area."
+msgstr "本次執行中成功複製、儲存或釘選截圖後，可在下次首次框選時按 R 重用上次區域。"
+
+
+msgid "Shortcut unavailable. Check Settings."
+msgstr "快捷鍵暫時無法使用，請至設定檢查。"
+
+
+msgid "Shortcut change failed. The previous shortcut is still active."
+msgstr "快捷鍵修改失敗，原快捷鍵仍然有效。"
+
+
+msgid "OCR is disabled. Enable it in Settings."
+msgstr "OCR 已關閉，請在設定中啟用。"

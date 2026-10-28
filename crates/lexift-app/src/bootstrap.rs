@@ -4,9 +4,9 @@ use i_slint_backend_winit::{WinitWindowAccessor, winit::window::ResizeDirection}
 use lexift_core::ports::instance::InstanceStatus;
 use lexift_core::ports::tray::{TrayHandler, TrayPort};
 
-use crate::{StartupMode, controller::AppController, lifecycle, wiring::AppServices};
+use crate::{controller::AppController, lifecycle, wiring::AppServices};
 
-pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     lexift_observability::init();
     lifecycle::on_start();
 
@@ -18,7 +18,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
     if let Some(instance) = &instance
         && instance.acquire()? == InstanceStatus::AlreadyRunning
     {
-        tracing::info!("another Lexift instance was activated");
+        tracing::info!("another Lexift instance is already running");
         lifecycle::on_exit();
         return Ok(());
     }
@@ -89,7 +89,6 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
     let history_supported = history_runtime.is_some();
     let ui = lexift_ui::Ui::new(
         &initial_state,
-        cfg!(feature = "m1-demo"),
         |window| {
             // Keep Winit's Shell registration consistent with the native auxiliary policy
             // before the first show. This also covers every annotation-owned window.
@@ -462,11 +461,11 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         speech.set_event_handler(handler);
     }
     if let Some(instance) = &instance {
-        let controller_for_activation = Arc::clone(&controller);
-        if let Err(error) = instance.set_activation_handler(Arc::new(move || {
-            controller_for_activation.dispatch(lexift_core::AppEvent::MainWindowRequested);
+        // Drain second-launch notifications without opening a view or transferring focus.
+        if let Err(error) = instance.set_activation_handler(Arc::new(|| {
+            tracing::debug!("second launch kept the existing instance in the background");
         })) {
-            tracing::warn!(%error, "second-launch activation is unavailable");
+            tracing::warn!(%error, "second-launch notification handler is unavailable");
         }
     }
     ui.on_event(
@@ -547,6 +546,9 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
                 format!("Unavailable: {error}")
             }
         });
+    controller.dispatch(lexift_core::AppEvent::HotkeyRegistrationsChanged(
+        services.runtime_manager.hotkey_registrations(),
+    ));
     if let Some(tray) = &services.tray {
         let menu_ui = ui.handle();
         tray.set_menu_handler(Arc::new(move |request| {
@@ -568,9 +570,7 @@ pub(crate) fn run(startup_mode: StartupMode) -> Result<(), Box<dyn std::error::E
         None
     };
 
-    let result = ui
-        .run(startup_mode == StartupMode::Interactive)
-        .map_err(Into::into);
+    let result = ui.run(!tray_registered).map_err(Into::into);
 
     lexift_platform::stop_selection_monitor();
 
@@ -764,5 +764,5 @@ mod tests {
 #[test]
 #[ignore = "opens the real App; moves the pointer over owned pins; no clipboard output"]
 fn native_pin_roundtrip_exact_effects_sequence() {
-    run(StartupMode::Interactive).unwrap();
+    run().unwrap();
 }

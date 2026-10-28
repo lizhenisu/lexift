@@ -1268,6 +1268,11 @@ impl AppController {
                 Ok::<_, lexift_core::Error>(config)
             })
             .await;
+            if let Some(manager) = &controller.runtime_manager {
+                controller.dispatch(AppEvent::HotkeyRegistrationsChanged(
+                    manager.hotkey_registrations(),
+                ));
+            }
             match result {
                 Ok(Ok(config)) => {
                     if field == lexift_core::domain::settings::SettingsField::AnnotationHotkey {
@@ -1597,6 +1602,7 @@ fn event_name(event: &AppEvent) -> &'static str {
         AppEvent::AnnotationExport(_) => "annotation_export",
         AppEvent::Ocr(_) => "ocr",
         AppEvent::Started => "started",
+        AppEvent::HotkeyRegistrationsChanged(_) => "hotkey_registrations_changed",
         AppEvent::SelectionTranslationRequested => "selection_translation_requested",
         AppEvent::SelectionInteractionStarted => "selection_interaction_started",
         AppEvent::SelectionGestureCompleted { .. } => "selection_gesture_completed",

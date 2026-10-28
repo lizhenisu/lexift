@@ -12,6 +12,7 @@ mod bridge;
 mod i18n;
 mod llm_settings;
 mod mapper;
+mod usage_guide;
 pub use llm_settings::{LlmQueryCancellation, LlmQueryCompletion};
 #[cfg(test)]
 mod image_history_tests;

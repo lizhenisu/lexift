@@ -1,0 +1,203 @@
+import { ScrollView } from "std-widgets.slint";
+import { Colors } from "design/colors.slint";
+import { Spacing } from "design/spacing.slint";
+import { Typography } from "design/typography.slint";
+import { Metrics } from "design/metrics.slint";
+import { AppAssets } from "design/assets.slint";
+import { WindowHeaderMark } from "design/window-header.slint";
+import { AppVerticalScrollBar } from "design/scrollbar.slint";
+
+// The former main action button, now used only for opening Settings.
+component GuideSettingsButton inherits Rectangle {
+    callback clicked();
+    accessible-role: button; accessible-label: @tr("Settings");
+    min-width: label.preferred-width + 2 * Spacing.medium;
+    preferred-width: self.min-width;
+    max-width: self.min-width; horizontal-stretch: 0;
+    height: 36px;
+    border-radius: Metrics.settings-card-radius;
+    border-width: 1px; border-color: focus.has-focus ? Colors.primary : Colors.outline;
+    background: touch.pressed ? Colors.icon-button-pressed : touch.has-hover ? Colors.menu-hover : Colors.surface;
+    label := Text {
+        x: Spacing.medium; y: 0px; height: parent.height;
+        text: @tr("Settings"); color: Colors.foreground;
+        font-size: Typography.compact-size; font-weight: 600;
+        vertical-alignment: center;
+    }
+    focus := FocusScope {
+        key-pressed(event) => {
+            if !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta && (event.text == "\n" || event.text == " ") {
+                root.clicked(); return accept;
+            }
+            return reject;
+        }
+    }
+    touch := TouchArea { clicked => { focus.focus(); root.clicked(); } }
+}
+
+component GuideCard inherits Rectangle {
+    in property <image> icon;
+    in property <string> heading;
+    in property <string> scenario;
+    in property <string> instructions;
+    in property <string> additional;
+    in property <string> shortcut;
+    in property <string> status;
+    in property <bool> unavailable: false;
+    out property <length> intrinsic-height: content.preferred-height;
+    height: root.intrinsic-height;
+    border-radius: Metrics.settings-card-radius;
+    border-width: 1px; border-color: Colors.popup-outline;
+    background: Colors.surface;
+    accessible-role: groupbox; accessible-label: root.heading;
+    content := VerticalLayout {
+        padding: Metrics.settings-card-padding; spacing: Spacing.small;
+        alignment: start;
+        HorizontalLayout {
+            spacing: Spacing.small;
+            WindowHeaderMark { icon: root.icon; }
+            Text {
+                text: root.heading; wrap: word-wrap;
+                color: Colors.foreground; font-size: Typography.body-size; font-weight: 700;
+                vertical-alignment: center;
+            }
+        }
+        Text {
+            text: root.scenario; color: Colors.secondary-foreground;
+            font-size: Typography.caption-size; wrap: word-wrap;
+            height: self.preferred-height;
+        }
+        Text {
+            text: root.instructions; color: Colors.foreground;
+            font-size: Typography.compact-size; wrap: word-wrap;
+            height: self.preferred-height;
+        }
+        if root.additional != "": Text {
+            text: root.additional; color: Colors.secondary-foreground;
+            font-size: Typography.caption-size; wrap: word-wrap;
+            height: self.preferred-height;
+        }
+        if root.shortcut != "": HorizontalLayout {
+            alignment: start;
+            Rectangle {
+                min-width: min(key.preferred-width + 2 * Spacing.small, parent.width);
+                max-width: parent.width;
+                height: max(Metrics.compact-control-height, key.preferred-height + Spacing.small);
+                border-radius: Spacing.small;
+                background: Colors.popup-source;
+                key := Text {
+                    x: Spacing.small; y: 0px; height: parent.height;
+                    width: parent.width - 2 * Spacing.small; wrap: word-wrap;
+                    text: root.shortcut;
+                    color: root.unavailable ? Colors.secondary-foreground : Colors.primary;
+                    font-size: Typography.caption-size; font-weight: 600;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        if root.status != "": Text {
+            text: root.status; color: root.unavailable ? Colors.error : Colors.secondary-foreground;
+            font-size: Typography.caption-size; wrap: word-wrap;
+            height: self.preferred-height;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Lexift"; icon: AppAssets.app-icon;
+    preferred-width: 720px; preferred-height: 640px;
+    min-width: 320px; min-height: 280px;
+    background: Colors.background;
+    in property <string> translation-shortcut;
+    in property <string> ocr-shortcut;
+    in property <string> annotation-shortcut;
+    in property <string> translation-shortcut-status;
+    in property <string> ocr-shortcut-status;
+    in property <string> annotation-shortcut-status;
+    in property <bool> translation-shortcut-unavailable;
+    in property <bool> ocr-shortcut-unavailable;
+    in property <bool> annotation-shortcut-unavailable;
+    out property <string> guide-heading: @tr("Get started");
+    out property <bool> guide-two-columns: root.width >= Metrics.guide-two-column-breakpoint;
+    out property <length> guide-cards-bottom: cards.y + cards.height;
+    out property <length> guide-content-height: guide-body.height;
+    out property <length> guide-viewport-height: guide-scroll.visible-height;
+    in-out property <length> guide-scroll-y: 0px;
+    callback settings-window-requested();
+
+    VerticalLayout {
+        padding: Metrics.settings-page-padding; spacing: Spacing.medium;
+        HorizontalLayout {
+            spacing: Spacing.medium;
+            Image { width: 28px; height: 28px; source: AppAssets.app-icon; image-fit: contain; }
+            Text { text: "Lexift"; color: Colors.foreground; font-size: Typography.body-size + 4px; font-weight: 700; }
+            Rectangle { horizontal-stretch: 1; }
+            GuideSettingsButton { clicked => { root.settings-window-requested(); } }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            guide-scroll := ScrollView {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                content-width: self.visible-width;
+                content-height: guide-body.height;
+                content-y <=> root.guide-scroll-y;
+                horizontal-scrollbar-policy: always-off;
+                vertical-scrollbar-policy: always-off;
+                guide-body := Rectangle {
+                    x: 0px; y: 0px; width: guide-scroll.visible-width - Spacing.small;
+                    height: body.preferred-height;
+                    body := VerticalLayout {
+                        alignment: start; spacing: Spacing.medium;
+                        VerticalLayout {
+                            spacing: Spacing.small;
+                            Text { text: root.guide-heading; font-size: Typography.title-size; font-weight: 700; color: Colors.foreground; wrap: word-wrap; }
+                            Text { text: @tr("Translation, text recognition and screenshots for everyday work."); font-size: Typography.compact-size; color: Colors.secondary-foreground; wrap: word-wrap; }
+                        }
+                        cards := Rectangle {
+                            private property <length> card-width: root.guide-two-columns ? (self.width - Spacing.medium) / 2 : self.width;
+                            height: images.y + images.height;
+                            read := GuideCard {
+                                x: 0px; y: 0px; width: cards.card-width;
+                                height: root.guide-two-columns ? max(self.intrinsic-height, ocr.intrinsic-height) : self.intrinsic-height;
+                                icon: @image-url("assets/icons/translate.svg");
+                                heading: @tr("Read in another language"); scenario: @tr("Web pages and documents");
+                                instructions: @tr("Select text in another app, then press the shortcut. View or edit the translation in the popup.");
+                                shortcut: root.translation-shortcut; status: root.translation-shortcut-status; unavailable: root.translation-shortcut-unavailable;
+                            }
+                            ocr := GuideCard {
+                                x: root.guide-two-columns ? cards.card-width + Spacing.medium : 0px;
+                                y: root.guide-two-columns ? 0px : read.y + read.height + Spacing.medium;
+                                width: cards.card-width;
+                                height: root.guide-two-columns ? max(self.intrinsic-height, read.intrinsic-height) : self.intrinsic-height;
+                                icon: @image-url("assets/icons/recognize-text.svg");
+                                heading: @tr("Recognize text on screen"); scenario: @tr("Images, scanned pages and video subtitles");
+                                instructions: @tr("Press the shortcut and select an area. Set up OCR resources and a translation service in Settings before first use.");
+                                shortcut: root.ocr-shortcut; status: root.ocr-shortcut-status; unavailable: root.ocr-shortcut-unavailable;
+                            }
+                            capture := GuideCard {
+                                x: 0px; y: ocr.y + ocr.height + Spacing.medium;
+                                width: cards.card-width;
+                                height: root.guide-two-columns ? max(self.intrinsic-height, images.intrinsic-height) : self.intrinsic-height;
+                                icon: @image-url("assets/icons/screenshot.svg");
+                                heading: @tr("Capture and annotate"); scenario: @tr("Explain an issue or mark up a screen");
+                                instructions: @tr("Open the annotation toolbar with the shortcut, choose Screenshot and select an area. Add annotations, then copy, save or pin the image.");
+                                shortcut: root.annotation-shortcut; status: root.annotation-shortcut-status; unavailable: root.annotation-shortcut-unavailable;
+                            }
+                            images := GuideCard {
+                                x: root.guide-two-columns ? cards.card-width + Spacing.medium : 0px;
+                                y: root.guide-two-columns ? capture.y : capture.y + capture.height + Spacing.medium;
+                                width: cards.card-width;
+                                height: root.guide-two-columns ? max(self.intrinsic-height, capture.intrinsic-height) : self.intrinsic-height;
+                                icon: @image-url("assets/icons/long-screenshot.svg");
+                                heading: @tr("Long captures and images"); scenario: @tr("Scrolling content and image editing");
+                                instructions: @tr("Select scrolling content within one display, choose Long screenshot and scroll down manually. Edit the result to crop or resize it.");
+                                additional: @tr("From the tray menu, choose Open image or Image history to work with existing pictures.");
+                            }
+                        }
+                    }
+                }
+            }
+            AppVerticalScrollBar { x: parent.width - self.width; height: parent.height; viewport-height: guide-scroll.visible-height; content-height: guide-body.height; content-y <=> guide-scroll.content-y; }
+        }
+    }
+}

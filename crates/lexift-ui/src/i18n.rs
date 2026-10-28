@@ -1459,7 +1459,9 @@ mod tests {
                     260,
                 );
             }
-            main.set_translated_text("Unchanged result".into());
+            main.set_translation_shortcut("Alt + X".into());
+            main.set_ocr_shortcut("Alt + T".into());
+            main.set_annotation_shortcut("Alt + A".into());
             snapshot(
                 &main_adapter,
                 &format!("{}-main", language.code()),

@@ -2043,3 +2043,83 @@ msgstr "有効な画像サイズを入力してください（最大4000万画�
 
 msgid "Image dimensions exceed the memory limit"
 msgstr "画像サイズがメモリ上限を超えています"
+
+
+msgid "Get started"
+msgstr "使い方"
+
+
+msgid "Translation, text recognition and screenshots for everyday work."
+msgstr "翻訳、文字認識、スクリーンショットを日々の作業に。"
+
+
+msgid "Read in another language"
+msgstr "外国語の文章を読む"
+
+
+msgid "Web pages and documents"
+msgstr "ウェブページと文書"
+
+
+msgid "Select text in another app, then press the shortcut. View or edit the translation in the popup."
+msgstr "他のアプリで文字を選択し、ショートカットキーを押します。翻訳ポップアップで訳文を確認・編集できます。"
+
+
+msgid "Recognize text on screen"
+msgstr "画面の文字を認識"
+
+
+msgid "Images, scanned pages and video subtitles"
+msgstr "画像、スキャン文書、動画の字幕"
+
+
+msgid "Press the shortcut and select an area. Set up OCR resources and a translation service in Settings before first use."
+msgstr "ショートカットキーを押して範囲を選択します。初回は設定で OCR リソースと翻訳サービスを準備してください。"
+
+
+msgid "Capture and annotate"
+msgstr "撮影と注釈"
+
+
+msgid "Explain an issue or mark up a screen"
+msgstr "問題の説明や画面への書き込み"
+
+
+msgid "Open the annotation toolbar with the shortcut, choose Screenshot and select an area. Add annotations, then copy, save or pin the image."
+msgstr "ショートカットキーで注釈ツールバーを開き、スクリーンショットを選んで範囲を指定します。注釈を加え、コピー、保存、画像のピン留めを行えます。"
+
+
+msgid "Long captures and images"
+msgstr "長いスクリーンショットと画像"
+
+
+msgid "Scrolling content and image editing"
+msgstr "スクロールする内容と画像編集"
+
+
+msgid "Select scrolling content within one display, choose Long screenshot and scroll down manually. Edit the result to crop or resize it."
+msgstr "1 台の画面内でスクロールできる本文を選び、長いスクリーンショットを開始して手動で下へスクロールします。完了後は切り抜きやサイズ変更ができます。"
+
+
+msgid "From the tray menu, choose Open image or Image history to work with existing pictures."
+msgstr "既存の画像はトレイメニューの「画像を開く」や「画像履歴」から利用できます。"
+
+
+msgid "Shortcuts can be changed in Settings."
+msgstr "ショートカットキーは設定で変更できます。"
+
+
+msgid "After successfully copying, saving or pinning a screenshot in this session, press R during the next selection to reuse its area."
+msgstr "今回の起動中にスクリーンショットのコピー、保存、ピン留めが成功していれば、次の範囲選択時に R キーで前回の範囲を再利用できます。"
+
+
+msgid "Shortcut unavailable. Check Settings."
+msgstr "ショートカットキーを利用できません。設定を確認してください。"
+
+
+msgid "Shortcut change failed. The previous shortcut is still active."
+msgstr "変更できませんでした。以前のショートカットキーは有効です。"
+
+
+msgid "OCR is disabled. Enable it in Settings."
+msgstr "OCR は無効です。設定で有効にしてください。"

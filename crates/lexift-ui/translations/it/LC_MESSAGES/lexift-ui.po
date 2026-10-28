@@ -2043,3 +2043,83 @@ msgstr "Inserisci dimensioni valide (massimo 40 MP)"
 
 msgid "Image dimensions exceed the memory limit"
 msgstr "Le dimensioni superano il limite di memoria"
+
+
+msgid "Get started"
+msgstr "Per iniziare"
+
+
+msgid "Translation, text recognition and screenshots for everyday work."
+msgstr "Traduzione, riconoscimento del testo e schermate per ogni giorno."
+
+
+msgid "Read in another language"
+msgstr "Leggere in un’altra lingua"
+
+
+msgid "Web pages and documents"
+msgstr "Pagine web e documenti"
+
+
+msgid "Select text in another app, then press the shortcut. View or edit the translation in the popup."
+msgstr "Seleziona del testo in un’altra app e premi la scorciatoia. Leggi o modifica la traduzione nella finestra popup."
+
+
+msgid "Recognize text on screen"
+msgstr "Riconoscere il testo sullo schermo"
+
+
+msgid "Images, scanned pages and video subtitles"
+msgstr "Immagini, scansioni e sottotitoli video"
+
+
+msgid "Press the shortcut and select an area. Set up OCR resources and a translation service in Settings before first use."
+msgstr "Premi la scorciatoia e seleziona un’area. Prima dell’uso, prepara le risorse OCR e un servizio di traduzione nelle Impostazioni."
+
+
+msgid "Capture and annotate"
+msgstr "Acquisire e annotare"
+
+
+msgid "Explain an issue or mark up a screen"
+msgstr "Spiegare un problema o segnare lo schermo"
+
+
+msgid "Open the annotation toolbar with the shortcut, choose Screenshot and select an area. Add annotations, then copy, save or pin the image."
+msgstr "Apri la barra delle annotazioni con la scorciatoia, scegli Schermata e seleziona un’area. Aggiungi annotazioni, poi copia, salva o fissa l’immagine."
+
+
+msgid "Long captures and images"
+msgstr "Schermate lunghe e immagini"
+
+
+msgid "Scrolling content and image editing"
+msgstr "Contenuti scorrevoli e modifica delle immagini"
+
+
+msgid "Select scrolling content within one display, choose Long screenshot and scroll down manually. Edit the result to crop or resize it."
+msgstr "Seleziona contenuti scorrevoli su un solo monitor, avvia una schermata lunga e scorri manualmente verso il basso. Potrai poi ritagliare o ridimensionare il risultato."
+
+
+msgid "From the tray menu, choose Open image or Image history to work with existing pictures."
+msgstr "Dal menu nell’area di notifica, scegli Apri immagine o Cronologia immagini per usare immagini esistenti."
+
+
+msgid "Shortcuts can be changed in Settings."
+msgstr "Le scorciatoie si possono cambiare nelle Impostazioni."
+
+
+msgid "After successfully copying, saving or pinning a screenshot in this session, press R during the next selection to reuse its area."
+msgstr "Dopo aver copiato, salvato o fissato una schermata in questa sessione, premi R alla selezione successiva per riutilizzare l’ultima area."
+
+
+msgid "Shortcut unavailable. Check Settings."
+msgstr "Scorciatoia non disponibile. Controlla le Impostazioni."
+
+
+msgid "Shortcut change failed. The previous shortcut is still active."
+msgstr "Modifica non riuscita. La scorciatoia precedente resta attiva."
+
+
+msgid "OCR is disabled. Enable it in Settings."
+msgstr "OCR disattivato. Attivalo nelle Impostazioni."

@@ -2043,3 +2043,83 @@ msgstr "Introduce dimensiones válidas (máximo 40 MP)"
 
 msgid "Image dimensions exceed the memory limit"
 msgstr "Las dimensiones superan el límite de memoria"
+
+
+msgid "Get started"
+msgstr "Primeros pasos"
+
+
+msgid "Translation, text recognition and screenshots for everyday work."
+msgstr "Traducción, reconocimiento de texto y capturas para el día a día."
+
+
+msgid "Read in another language"
+msgstr "Leer en otro idioma"
+
+
+msgid "Web pages and documents"
+msgstr "Páginas web y documentos"
+
+
+msgid "Select text in another app, then press the shortcut. View or edit the translation in the popup."
+msgstr "Selecciona texto en otra aplicación y pulsa el atajo. Consulta o modifica la traducción en la ventana emergente."
+
+
+msgid "Recognize text on screen"
+msgstr "Reconocer texto en pantalla"
+
+
+msgid "Images, scanned pages and video subtitles"
+msgstr "Imágenes, documentos escaneados y subtítulos"
+
+
+msgid "Press the shortcut and select an area. Set up OCR resources and a translation service in Settings before first use."
+msgstr "Pulsa el atajo y selecciona un área. Antes del primer uso, prepara los recursos OCR y un servicio de traducción en Ajustes."
+
+
+msgid "Capture and annotate"
+msgstr "Capturar y anotar"
+
+
+msgid "Explain an issue or mark up a screen"
+msgstr "Explicar un problema o marcar la pantalla"
+
+
+msgid "Open the annotation toolbar with the shortcut, choose Screenshot and select an area. Add annotations, then copy, save or pin the image."
+msgstr "Abre la barra de anotación con el atajo, elige Captura de pantalla y selecciona un área. Añade anotaciones y copia, guarda o fija la imagen."
+
+
+msgid "Long captures and images"
+msgstr "Capturas largas e imágenes"
+
+
+msgid "Scrolling content and image editing"
+msgstr "Contenido desplazable y edición de imágenes"
+
+
+msgid "Select scrolling content within one display, choose Long screenshot and scroll down manually. Edit the result to crop or resize it."
+msgstr "Selecciona contenido desplazable dentro de una sola pantalla, inicia una captura larga y desplázate hacia abajo manualmente. Después podrás recortar o redimensionar el resultado."
+
+
+msgid "From the tray menu, choose Open image or Image history to work with existing pictures."
+msgstr "En el menú de la bandeja, elige Abrir imagen o Historial de imágenes para trabajar con imágenes existentes."
+
+
+msgid "Shortcuts can be changed in Settings."
+msgstr "Los atajos se pueden cambiar en Ajustes."
+
+
+msgid "After successfully copying, saving or pinning a screenshot in this session, press R during the next selection to reuse its area."
+msgstr "Tras copiar, guardar o fijar una captura en esta sesión, pulsa R en la siguiente selección para reutilizar la última área."
+
+
+msgid "Shortcut unavailable. Check Settings."
+msgstr "Atajo no disponible. Revisa Ajustes."
+
+
+msgid "Shortcut change failed. The previous shortcut is still active."
+msgstr "No se pudo cambiar el atajo. El anterior sigue activo."
+
+
+msgid "OCR is disabled. Enable it in Settings."
+msgstr "OCR desactivado. Actívalo en Ajustes."

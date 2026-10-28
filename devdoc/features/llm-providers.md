@@ -127,7 +127,7 @@ Ollama、LM Studio、DeepSeek 标识来自 [Cherry Studio Provider SVG](https://
 - 翻译设置在“模型参数”下提供流式开关，按 Provider／模型保存，默认开启；旧配置缺少 `streaming` 时默认为开启。应用保存当前模型参数，取消丢弃草稿；选择其他模型不提交未应用草稿。
 - Core 在既有翻译与生成 Port 上提供正文增量回调；完整结果接口和模型检测保持非流式。App 冻结请求配置，按任务合并增量，最多每 33ms 发布一次，最终结果立即覆盖缓冲尾部。
 - Translate 支持 Ollama NDJSON、LM Studio 原生 SSE、Chat Completions SSE、Responses SSE，排除思考内容、工具调用和异常结束。UTF-8 字符可以跨网络分块；必须收到合法终止状态才成功。不自动回退或重新发送请求，沿用 120 秒总超时。
-- 主窗口和 Popup 在生成中显示部分译文；译文复制、朗读及后续输入操作等待完整成功结果。新任务重置滚动，持续输出保留用户滚动位置，仅在底部时跟随。固定 Popup 的任务与其他窗口独立；关闭和任务替换会取消关联请求，过期增量不能更新新内容。
+- Popup 在生成中显示部分译文；译文复制、朗读及后续输入操作等待完整成功结果。新任务重置滚动，持续输出保留用户滚动位置，仅在底部时跟随。固定 Popup 的任务与其他窗口独立；关闭和任务替换会取消关联请求，过期增量不能更新新内容。
 - 协议参考：[Ollama Streaming](https://docs.ollama.com/api/streaming)、[LM Studio Streaming events](https://lmstudio.ai/docs/developer/rest/streaming-events)、[DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)。
 
 ### 验证记录

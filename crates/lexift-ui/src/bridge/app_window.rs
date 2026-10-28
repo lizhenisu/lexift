@@ -89,6 +89,9 @@ fn finish(
             let Some(main) = registry.main.as_ref() else {
                 return;
             };
+            if !main.window().is_visible() {
+                super::main_window::fit_main(main, registry);
+            }
             if main.window().is_minimized() {
                 main.window().set_minimized(false);
             }
@@ -173,7 +176,6 @@ mod tests {
         });
         let ui = Ui::new(
             &AppState::default(),
-            false,
             |_| PassiveWindowPreparation::Ready,
             lifecycle,
         )
@@ -243,7 +245,8 @@ pub(super) struct AppWindowRegistry {
     pub(super) prepare_app_window: PrepareAppWindow,
     pub(super) open_about_link: Rc<dyn Fn(crate::AboutLink) -> bool>,
     pub(super) latest_state: AppState,
-    pub(super) show_selection_demo: bool,
+    pub(super) main_work_area: PopupWorkArea,
+    pub(super) main_cursor_position: ToolbarCursorPosition,
     pub(super) handler: Option<Rc<dyn Fn(AppEvent)>>,
     pub(super) background_mode: Rc<Cell<bool>>,
     pub(super) credential_generation: Arc<AtomicU64>,

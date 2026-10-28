@@ -2043,3 +2043,83 @@ msgstr "Enter valid image dimensions (maximum 40 MP)"
 
 msgid "Image dimensions exceed the memory limit"
 msgstr "Image dimensions exceed the memory limit"
+
+
+msgid "Get started"
+msgstr "Get started"
+
+
+msgid "Translation, text recognition and screenshots for everyday work."
+msgstr "Translation, text recognition and screenshots for everyday work."
+
+
+msgid "Read in another language"
+msgstr "Read in another language"
+
+
+msgid "Web pages and documents"
+msgstr "Web pages and documents"
+
+
+msgid "Select text in another app, then press the shortcut. View or edit the translation in the popup."
+msgstr "Select text in another app, then press the shortcut. View or edit the translation in the popup."
+
+
+msgid "Recognize text on screen"
+msgstr "Recognize text on screen"
+
+
+msgid "Images, scanned pages and video subtitles"
+msgstr "Images, scanned pages and video subtitles"
+
+
+msgid "Press the shortcut and select an area. Set up OCR resources and a translation service in Settings before first use."
+msgstr "Press the shortcut and select an area. Set up OCR resources and a translation service in Settings before first use."
+
+
+msgid "Capture and annotate"
+msgstr "Capture and annotate"
+
+
+msgid "Explain an issue or mark up a screen"
+msgstr "Explain an issue or mark up a screen"
+
+
+msgid "Open the annotation toolbar with the shortcut, choose Screenshot and select an area. Add annotations, then copy, save or pin the image."
+msgstr "Open the annotation toolbar with the shortcut, choose Screenshot and select an area. Add annotations, then copy, save or pin the image."
+
+
+msgid "Long captures and images"
+msgstr "Long captures and images"
+
+
+msgid "Scrolling content and image editing"
+msgstr "Scrolling content and image editing"
+
+
+msgid "Select scrolling content within one display, choose Long screenshot and scroll down manually. Edit the result to crop or resize it."
+msgstr "Select scrolling content within one display, choose Long screenshot and scroll down manually. Edit the result to crop or resize it."
+
+
+msgid "From the tray menu, choose Open image or Image history to work with existing pictures."
+msgstr "From the tray menu, choose Open image or Image history to work with existing pictures."
+
+
+msgid "Shortcuts can be changed in Settings."
+msgstr "Shortcuts can be changed in Settings."
+
+
+msgid "After successfully copying, saving or pinning a screenshot in this session, press R during the next selection to reuse its area."
+msgstr "After successfully copying, saving or pinning a screenshot in this session, press R during the next selection to reuse its area."
+
+
+msgid "Shortcut unavailable. Check Settings."
+msgstr "Shortcut unavailable. Check Settings."
+
+
+msgid "Shortcut change failed. The previous shortcut is still active."
+msgstr "Shortcut change failed. The previous shortcut is still active."
+
+
+msgid "OCR is disabled. Enable it in Settings."
+msgstr "OCR is disabled. Enable it in Settings."

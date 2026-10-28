@@ -2043,3 +2043,83 @@ msgstr "유효한 이미지 크기를 입력하세요 (최대 4천만 화소)"
 
 msgid "Image dimensions exceed the memory limit"
 msgstr "이미지 크기가 메모리 한도를 초과합니다"
+
+
+msgid "Get started"
+msgstr "시작하기"
+
+
+msgid "Translation, text recognition and screenshots for everyday work."
+msgstr "번역, 문자 인식, 스크린샷을 일상 작업에 활용하세요."
+
+
+msgid "Read in another language"
+msgstr "외국어 읽기"
+
+
+msgid "Web pages and documents"
+msgstr "웹 페이지와 문서"
+
+
+msgid "Select text in another app, then press the shortcut. View or edit the translation in the popup."
+msgstr "다른 앱에서 텍스트를 선택한 다음 단축키를 누르세요. 번역 팝업에서 결과를 확인하거나 수정할 수 있습니다."
+
+
+msgid "Recognize text on screen"
+msgstr "화면의 텍스트 인식"
+
+
+msgid "Images, scanned pages and video subtitles"
+msgstr "이미지, 스캔 문서와 동영상 자막"
+
+
+msgid "Press the shortcut and select an area. Set up OCR resources and a translation service in Settings before first use."
+msgstr "단축키를 누르고 영역을 선택하세요. 처음 사용하기 전에 설정에서 OCR 리소스와 번역 서비스를 준비하세요."
+
+
+msgid "Capture and annotate"
+msgstr "캡처와 주석"
+
+
+msgid "Explain an issue or mark up a screen"
+msgstr "문제 설명 또는 화면에 표시하기"
+
+
+msgid "Open the annotation toolbar with the shortcut, choose Screenshot and select an area. Add annotations, then copy, save or pin the image."
+msgstr "단축키로 주석 도구 모음을 열고 스크린샷을 선택해 영역을 지정하세요. 주석을 추가한 뒤 이미지를 복사, 저장하거나 고정할 수 있습니다."
+
+
+msgid "Long captures and images"
+msgstr "긴 스크린샷과 이미지"
+
+
+msgid "Scrolling content and image editing"
+msgstr "스크롤 콘텐츠와 이미지 편집"
+
+
+msgid "Select scrolling content within one display, choose Long screenshot and scroll down manually. Edit the result to crop or resize it."
+msgstr "한 모니터 안의 스크롤 가능한 본문을 선택하고 긴 스크린샷을 시작해 수동으로 아래로 스크롤하세요. 완료 후 자르거나 크기를 조정할 수 있습니다."
+
+
+msgid "From the tray menu, choose Open image or Image history to work with existing pictures."
+msgstr "기존 이미지는 트레이 메뉴의 이미지 열기 또는 이미지 기록에서 사용할 수 있습니다."
+
+
+msgid "Shortcuts can be changed in Settings."
+msgstr "단축키는 설정에서 변경할 수 있습니다."
+
+
+msgid "After successfully copying, saving or pinning a screenshot in this session, press R during the next selection to reuse its area."
+msgstr "이번 실행 중 스크린샷 복사, 저장 또는 고정에 성공했다면 다음 영역 선택 시 R 키로 마지막 영역을 다시 사용할 수 있습니다."
+
+
+msgid "Shortcut unavailable. Check Settings."
+msgstr "단축키를 사용할 수 없습니다. 설정을 확인하세요."
+
+
+msgid "Shortcut change failed. The previous shortcut is still active."
+msgstr "변경하지 못했습니다. 이전 단축키는 계속 유효합니다."
+
+
+msgid "OCR is disabled. Enable it in Settings."
+msgstr "OCR이 꺼져 있습니다. 설정에서 켜세요."

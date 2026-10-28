@@ -22,6 +22,18 @@ struct HotkeyState {
 }
 
 impl HotkeyRuntimeManager {
+    pub(crate) fn registrations(&self) -> lexift_core::domain::runtime_config::HotkeyRegistrations {
+        if self.port.is_none() {
+            return Default::default();
+        }
+        let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        lexift_core::domain::runtime_config::HotkeyRegistrations {
+            translation: state.current,
+            annotation: state.annotation_current,
+            ocr: state.ocr_current,
+        }
+    }
+
     pub(crate) fn start_annotation(
         &self,
         config: HotkeyConfig,
@@ -301,9 +313,11 @@ mod tests {
                 .is_err()
         );
         assert_eq!(*port.active.lock().unwrap(), Some(initial));
+        assert_eq!(manager.registrations().translation, Some(initial));
         let replacement = "Ctrl + Shift + 7".parse().unwrap();
         manager.apply(replacement).unwrap();
         assert_eq!(*port.active.lock().unwrap(), Some(replacement));
+        assert_eq!(manager.registrations().translation, Some(replacement));
     }
 
     #[test]
@@ -329,6 +343,7 @@ mod tests {
         assert!(manager.apply(rejected).is_err());
         assert_eq!(*port.active.lock().unwrap(), Some(initial));
         assert_eq!(manager.state.lock().unwrap().current, Some(initial));
+        assert_eq!(manager.registrations().translation, Some(initial));
     }
 
     #[test]
@@ -383,5 +398,18 @@ mod tests {
         let annotation = HotkeyConfig::annotation_default();
         manager.apply_annotation(annotation).unwrap();
         assert_eq!(*port.annotation_active.lock().unwrap(), Some(annotation));
+    }
+}
+
+#[cfg(test)]
+mod availability_tests {
+    use super::*;
+    #[test]
+    fn unsupported_hotkeys_are_not_reported_as_registered() {
+        let manager = HotkeyRuntimeManager::new(None);
+        manager
+            .start(HotkeyConfig::default(), Arc::new(|| {}))
+            .unwrap();
+        assert_eq!(manager.registrations(), Default::default());
     }
 }

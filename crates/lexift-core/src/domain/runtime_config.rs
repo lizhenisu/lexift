@@ -242,6 +242,14 @@ impl FromStr for ProviderConfig {
     }
 }
 
+/// Confirmed native registrations, separate from saved settings and pending drafts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HotkeyRegistrations {
+    pub translation: Option<HotkeyConfig>,
+    pub annotation: Option<HotkeyConfig>,
+    pub ocr: Option<HotkeyConfig>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeConfig {
     pub hotkey: HotkeyConfig,

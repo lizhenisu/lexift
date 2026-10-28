@@ -2043,3 +2043,83 @@ msgstr "Gültige Bildmaße eingeben (höchstens 40 MP)"
 
 msgid "Image dimensions exceed the memory limit"
 msgstr "Die Bildabmessungen überschreiten das Speicherlimit"
+
+
+msgid "Get started"
+msgstr "Erste Schritte"
+
+
+msgid "Translation, text recognition and screenshots for everyday work."
+msgstr "Übersetzen, Text erkennen und Screenshots im Alltag nutzen."
+
+
+msgid "Read in another language"
+msgstr "Fremdsprachige Texte lesen"
+
+
+msgid "Web pages and documents"
+msgstr "Webseiten und Dokumente"
+
+
+msgid "Select text in another app, then press the shortcut. View or edit the translation in the popup."
+msgstr "Markieren Sie Text in einer anderen App und drücken Sie das Tastenkürzel. Im Übersetzungsfenster können Sie die Übersetzung lesen oder bearbeiten."
+
+
+msgid "Recognize text on screen"
+msgstr "Bildschirmtext erkennen"
+
+
+msgid "Images, scanned pages and video subtitles"
+msgstr "Bilder, Scans und Videountertitel"
+
+
+msgid "Press the shortcut and select an area. Set up OCR resources and a translation service in Settings before first use."
+msgstr "Drücken Sie das Tastenkürzel und wählen Sie einen Bereich. Richten Sie vor der ersten Nutzung OCR-Ressourcen und einen Übersetzungsdienst in den Einstellungen ein."
+
+
+msgid "Capture and annotate"
+msgstr "Aufnehmen und markieren"
+
+
+msgid "Explain an issue or mark up a screen"
+msgstr "Probleme erklären und Bildschirminhalte markieren"
+
+
+msgid "Open the annotation toolbar with the shortcut, choose Screenshot and select an area. Add annotations, then copy, save or pin the image."
+msgstr "Öffnen Sie die Anmerkungsleiste per Tastenkürzel, wählen Sie Screenshot und einen Bereich. Fügen Sie Anmerkungen hinzu und kopieren, speichern oder heften Sie das Bild an."
+
+
+msgid "Long captures and images"
+msgstr "Lange Screenshots und Bilder"
+
+
+msgid "Scrolling content and image editing"
+msgstr "Scrollbare Inhalte und Bildbearbeitung"
+
+
+msgid "Select scrolling content within one display, choose Long screenshot and scroll down manually. Edit the result to crop or resize it."
+msgstr "Wählen Sie scrollbaren Inhalt auf einem Monitor, starten Sie einen langen Screenshot und scrollen Sie manuell nach unten. Danach können Sie das Bild zuschneiden oder skalieren."
+
+
+msgid "From the tray menu, choose Open image or Image history to work with existing pictures."
+msgstr "Vorhandene Bilder öffnen Sie über Bild öffnen oder Bildverlauf im Infobereichmenü."
+
+
+msgid "Shortcuts can be changed in Settings."
+msgstr "Tastenkürzel lassen sich in den Einstellungen ändern."
+
+
+msgid "After successfully copying, saving or pinning a screenshot in this session, press R during the next selection to reuse its area."
+msgstr "Nach dem erfolgreichen Kopieren, Speichern oder Anheften eines Screenshots in dieser Sitzung können Sie bei der nächsten Bereichsauswahl mit R den letzten Bereich wiederverwenden."
+
+
+msgid "Shortcut unavailable. Check Settings."
+msgstr "Tastenkürzel nicht verfügbar. Prüfen Sie die Einstellungen."
+
+
+msgid "Shortcut change failed. The previous shortcut is still active."
+msgstr "Änderung fehlgeschlagen. Das bisherige Tastenkürzel bleibt aktiv."
+
+
+msgid "OCR is disabled. Enable it in Settings."
+msgstr "OCR ist deaktiviert. Aktivieren Sie es in den Einstellungen."
