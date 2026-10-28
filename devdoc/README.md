@@ -46,6 +46,7 @@
 - [图片尺寸调整](features/image-resize.md)
 - [屏幕区域选择基础](features/region-selection.md)
 - [共用屏幕交互宿主](features/screen-interaction.md)
+- [独立截图快捷键](features/screenshot-hotkey.md) · [专项验证](releases/screenshot-hotkey.md)
 - [截图模式与临时贴图](features/screenshot-mode.md)
 - [贴图交互、透明度与统一显隐](features/pin-interaction.md)
 - [截图／长图图片历史](features/image-history.md)

@@ -951,8 +951,7 @@ mod tests {
             let r = s.as_ref().unwrap();
             super::super::Recovery {
                 document: r.document.clone(),
-                position: slint::PhysicalPosition::new(10, 10),
-                collapsed: true,
+                toolbar: Some((slint::PhysicalPosition::new(10, 10), true)),
                 lifecycle: r.lifecycle.clone(),
             }
         });

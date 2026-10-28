@@ -157,6 +157,7 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) set_popup_dismissal: SetPopupDismissal,
     pub(crate) attach_tool_window: AttachToolWindow,
     pub(crate) annotation_displays: AnnotationDisplays,
+    pub(crate) screenshot_displays: Rc<dyn Fn() -> Vec<(Rect, f32)>>,
     pub(crate) configure_capture_feedback: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) configure_countdown_window: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) configure_hint_window: Rc<dyn Fn(&slint::Window) -> bool>,
@@ -233,6 +234,7 @@ impl WindowLifecycleCallbacks {
             set_popup_dismissal: Rc::new(set_popup_dismissal),
             attach_tool_window: Rc::new(attach_tool_window),
             annotation_displays: Rc::new(Vec::new),
+            screenshot_displays: Rc::new(Vec::new),
             configure_capture_feedback: Rc::new(|_| false),
             configure_countdown_window: Rc::new(|_| false),
             configure_hint_window: Rc::new(|_| false),
@@ -381,6 +383,14 @@ impl WindowLifecycleCallbacks {
     }
 
     /// Supplies native monitor bounds and canvas hit-testing without exposing platform APIs to UI.
+    pub fn with_screenshot_displays(
+        mut self,
+        query: impl Fn() -> Vec<(Rect, f32)> + 'static,
+    ) -> Self {
+        self.screenshot_displays = Rc::new(query);
+        self
+    }
+
     pub fn with_annotation_canvas(
         mut self,
         displays: impl Fn() -> Vec<Rect> + 'static,

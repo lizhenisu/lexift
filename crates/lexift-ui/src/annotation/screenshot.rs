@@ -32,8 +32,7 @@ pub(crate) mod delay;
 
 struct Recovery {
     document: editor_document::EditorDocument,
-    position: slint::PhysicalPosition,
-    collapsed: bool,
+    toolbar: Option<(slint::PhysicalPosition, bool)>,
     lifecycle: WindowLifecycleCallbacks,
 }
 struct OcrFeedbackContext {
@@ -44,6 +43,7 @@ struct OcrFeedbackContext {
 #[derive(Default)]
 struct Flow {
     activation: Option<Option<lexift_core::ports::magnifier::WindowToken>>,
+    shortcut_point: Option<lexift_core::domain::geometry::Point>,
     state: ScreenshotState,
     recovery: Option<Recovery>,
     frames: Option<Arc<Vec<CapturedRegion>>>,
@@ -64,6 +64,88 @@ pub(crate) fn emit(event: ScreenshotEvent) {
     let handler = EXPORT_HANDLER.with(|h| h.borrow().clone());
     if let Some(handler) = handler {
         handler(AppEvent::Screenshot(event));
+    }
+}
+/// Freeze the actual desktop document without constructing a toolbar or canvas.
+pub(crate) fn freeze_shortcut(id: u64, trigger: lexift_core::domain::screenshot::ShortcutTrigger) {
+    FLOW.with(|flow| {
+        let mut flow = flow.borrow_mut();
+        flow.activation = Some(trigger.foreground);
+        flow.shortcut_point = trigger.point;
+    });
+    let request = REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let r = slot.as_mut()?;
+        if r.export.pending()
+            || r.gesture.is_some()
+            || !r.pending_drawing.is_none()
+            || r.toolbar_state.toolbar_drag.is_some()
+            || r.toolbar_state.toolbar_press.is_some()
+            || pin_editor::active()
+            || history_editor::active()
+        {
+            tracing::debug!(
+                id,
+                exporting = r.export.pending(),
+                gesture = r.gesture.is_some(),
+                pending_drawing = !r.pending_drawing.is_none(),
+                toolbar_drag = r.toolbar_state.toolbar_drag.is_some(),
+                toolbar_press = r.toolbar_state.toolbar_press.is_some(),
+                pin_editor = pin_editor::active(),
+                image_editor = history_editor::active(),
+                "Screenshot shortcut snapshot blocked"
+            );
+            return None;
+        }
+        let origin = if r.toolbar_state.main.get().is_some() {
+            lexift_core::domain::screenshot::CaptureOrigin::Toolbar
+        } else {
+            lexift_core::domain::screenshot::CaptureOrigin::Background
+        };
+        let point = FLOW
+            .with(|s| s.borrow().shortcut_point)
+            .or_else(|| (r.lifecycle.toolbar_cursor_position)())?;
+        let displays = (r.lifecycle.screenshot_displays)();
+        let (monitor, scale) = displays
+            .iter()
+            .copied()
+            .find(|(b, _)| {
+                point.x >= b.left && point.x < b.right && point.y >= b.top && point.y < b.bottom
+            })
+            .or_else(|| displays.first().copied())?;
+        if origin == lexift_core::domain::screenshot::CaptureOrigin::Background {
+            r.generation = r
+                .generation
+                .checked_add(1)
+                .expect("annotation identity exhausted");
+        }
+        let retiring = retiring_foreground(r);
+        if r.editor.window().is_some() {
+            finish_text_edit_registry(r, true);
+        }
+        r.finish_style_edit();
+        r.close_panel();
+        if let Some((old, query)) = retiring {
+            retired_foreground(old, query());
+        }
+        r.document.session.finish_rectangle_erase();
+        let snapshot = export::snapshot_at(r, monitor, scale)?;
+        Some((
+            origin,
+            ExportRequest {
+                session: r.generation,
+                request: id,
+                snapshot: Arc::new(snapshot),
+            },
+        ))
+    });
+    match request {
+        Some((origin, request)) => emit(ScreenshotEvent::ShortcutFrozen {
+            id,
+            origin,
+            request,
+        }),
+        None => emit(ScreenshotEvent::ShortcutUnavailable { id }),
     }
 }
 pub(crate) fn sync(state: &ScreenshotState) {
@@ -169,6 +251,39 @@ pub(super) fn request_after(seconds: u8) {
         }
     }
 }
+type ForegroundRetirement = (
+    lexift_core::ports::magnifier::WindowToken,
+    Rc<dyn Fn() -> Option<lexift_core::ports::magnifier::WindowToken>>,
+);
+
+/// Keep authorization across synchronous teardown of an exact document-owned
+/// window, never across an already changed external foreground.
+fn retiring_foreground(r: &Registry) -> Option<ForegroundRetirement> {
+    let query = r.lifecycle.annotation_foreground.clone()?;
+    let old = query()?;
+    if !FLOW.with(|f| f.borrow().activation == Some(Some(old))) {
+        return None;
+    }
+    let owned = r
+        .canvas_state
+        .canvases
+        .iter()
+        .map(|c| c.window.window())
+        .chain(r.toolbar_state.main.get().map(ComponentHandle::window))
+        .chain(r.toolbar_state.panel.get().map(ComponentHandle::window))
+        .chain(r.editor.window().map(ComponentHandle::window))
+        .chain(r.toolbar_state.watermark.get().map(ComponentHandle::window))
+        .chain(
+            r.toolbar_state
+                .menus
+                .current
+                .as_ref()
+                .map(|m| m.window.window()),
+        )
+        .any(|w| (r.lifecycle.annotation_window_token)(w) == Some(old));
+    owned.then_some((old, query))
+}
+
 pub(crate) fn suspend(id: u64) {
     if !FLOW.with(|s| {
         let s = s.borrow();
@@ -184,15 +299,20 @@ pub(crate) fn suspend(id: u64) {
     let recovery = REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot.as_mut()?;
-        let main = r.toolbar_state.main.get()?;
-        let position = main.window().position();
-        let collapsed = main.get_collapsed();
+        let toolbar = r
+            .toolbar_state
+            .main
+            .get()
+            .map(|main| (main.window().position(), main.get_collapsed()));
+        let retiring = retiring_foreground(r);
         let document = std::mem::take(&mut r.document);
         r.close();
+        if let Some((old, query)) = retiring {
+            retired_foreground(old, query());
+        }
         Some(Recovery {
             document,
-            position,
-            collapsed,
+            toolbar,
             lifecycle: r.lifecycle.clone(),
         })
     });
@@ -208,13 +328,15 @@ pub(crate) fn suspend(id: u64) {
         });
     }
 }
-pub(crate) fn retired_history_foreground(
+pub(crate) fn retired_foreground(
     old: lexift_core::ports::magnifier::WindowToken,
     now: Option<lexift_core::ports::magnifier::WindowToken>,
 ) {
     FLOW.with(|flow| {
         let mut flow = flow.borrow_mut();
-        if flow.state.phase == ScreenshotPhase::Preparing && flow.activation == Some(Some(old)) {
+        if (flow.state.phase == ScreenshotPhase::Preparing || flow.state.shortcut_pending.is_some())
+            && flow.activation == Some(Some(old))
+        {
             flow.activation = Some(now);
         }
     });
@@ -371,6 +493,7 @@ pub(crate) fn restore(id: u64) {
     crate::pinned_screenshot::set_frozen(false);
     selection_host::close();
     selection_host::set_handler(Rc::new(|_| {}));
+    let had_toolbar = recovery.toolbar.is_some();
     REGISTRY.with(|slot| {
         if let Some(r) = slot.borrow_mut().as_mut() {
             r.screenshot = None;
@@ -378,10 +501,14 @@ pub(crate) fn restore(id: u64) {
             r.document = recovery.document;
             r.lifecycle = recovery.lifecycle;
             r.set_mode(InteractionMode::Mouse);
-            r.toolbar_state.resume = Some((recovery.position, recovery.collapsed));
+            r.toolbar_state.resume = recovery.toolbar;
         }
     });
-    toggle(Instant::now());
+    if had_toolbar {
+        toggle(Instant::now());
+    } else {
+        crate::bridge::schedule_idle_memory_trim();
+    }
     show_ocr_feedback(id);
 }
 pub(crate) fn shutdown() {

@@ -1832,3 +1832,107 @@ fn screenshot_ocr_toasts_render_all_locales_themes_and_dpi() {
         }
     }
 }
+
+#[test]
+fn shortcut_from_background_freezes_dpi_without_windows_and_cancel_stays_background() {
+    let adapters = Rc::new(RefCell::new(Vec::new()));
+    slint::platform::set_platform(Box::new(PositionPlatform(adapters.clone()))).unwrap();
+    let mut life = lifecycle();
+    let screen = Rect {
+        left: -300,
+        top: 0,
+        right: 0,
+        bottom: 200,
+    };
+    life.screenshot_displays = Rc::new(move || vec![(screen, 1.25)]);
+    life.toolbar_cursor_position =
+        Rc::new(|| Some(lexift_core::domain::geometry::Point { x: -100, y: 50 }));
+    super::super::init(|_| PassiveWindowPreparation::Ready, life);
+    let core = Rc::new(RefCell::new(lexift_core::AppState::default()));
+    let commands = Rc::new(RefCell::new(Vec::new()));
+    let state = core.clone();
+    let out = commands.clone();
+    super::super::set_handler(Rc::new(move |event| {
+        let (cmd, snap) = {
+            let mut s = state.borrow_mut();
+            let cmd = s.reduce(event);
+            (cmd, s.screenshot.clone())
+        };
+        out.borrow_mut().extend(cmd);
+        sync(&snap);
+    }));
+    for _ in 0..3 {
+        emit(ScreenshotEvent::ShortcutRequested(Default::default()));
+        let id = core.borrow().screenshot.shortcut_pending.unwrap();
+        freeze_shortcut(id, Default::default());
+        let session = core.borrow().screenshot.session;
+        assert_eq!(core.borrow().screenshot.phase, ScreenshotPhase::Preparing);
+        let cmd = commands.borrow();
+        let request = cmd
+            .iter()
+            .rev()
+            .find_map(|c| match c {
+                lexift_core::AppCommand::Screenshot(
+                    lexift_core::domain::screenshot::ScreenshotCommand::Prepare { request, .. },
+                ) => Some(request),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(request.snapshot.monitors, vec![(screen, 1.25)]);
+        assert!(request.snapshot.owner.is_none());
+        drop(cmd);
+        suspend(session);
+        assert!(FLOW.with(|s| s.borrow().recovery.as_ref().unwrap().toolbar.is_none()));
+        emit(ScreenshotEvent::Cancelled { session });
+        restore(session);
+        assert!(!super::super::is_open());
+        assert!(
+            adapters.borrow().is_empty(),
+            "no temporary toolbar or canvas HWND"
+        );
+    }
+    super::super::shutdown();
+}
+
+#[test]
+fn shortcut_suspension_retires_only_its_foreground_window() {
+    use lexift_core::ports::magnifier::WindowToken;
+    slint::platform::set_platform(Box::new(TestPlatform)).unwrap();
+    for (before, origin, expected) in [(17, 17, 23), (99, 17, 17), (17, 99, 99)] {
+        let queried = Rc::new(Cell::new(false));
+        let seen = queried.clone();
+        let mut life = lifecycle();
+        life.annotation_foreground = Some(Rc::new(move || {
+            Some(WindowToken(if seen.replace(true) { 23 } else { before }))
+        }));
+        life.annotation_window_token = Rc::new(|_| Some(WindowToken(17)));
+        super::super::init(|_| PassiveWindowPreparation::Ready, life);
+        REGISTRY.with(|r| {
+            r.borrow_mut()
+                .as_mut()
+                .unwrap()
+                .toolbar_state
+                .main
+                .open(AnnotationToolbar::new().unwrap())
+        });
+        FLOW.with(|flow| {
+            let mut flow = flow.borrow_mut();
+            flow.state.session = 1;
+            flow.state.phase = ScreenshotPhase::Preparing;
+            flow.activation = Some(Some(WindowToken(origin)));
+        });
+        suspend(1);
+        FLOW.with(|flow| assert_eq!(flow.borrow().activation, Some(Some(WindowToken(expected)))));
+        FLOW.with(|flow| flow.borrow_mut().state.phase = ScreenshotPhase::Idle);
+        retired_foreground(WindowToken(expected), Some(WindowToken(666)));
+        FLOW.with(|flow| {
+            assert_eq!(
+                flow.borrow().activation,
+                Some(Some(WindowToken(expected))),
+                "late retirement cannot authorize another screenshot"
+            )
+        });
+        super::super::shutdown();
+        FLOW.with(|flow| *flow.borrow_mut() = Default::default());
+    }
+}

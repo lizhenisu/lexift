@@ -60,13 +60,18 @@ pub(super) fn snapshot(r: &Registry) -> Option<Snapshot> {
 
 /// Freeze editor content independently of toolbar placement (including hidden startup).
 pub(super) fn snapshot_at(r: &Registry, monitor: Rect, scale: f32) -> Option<Snapshot> {
-    let main = r.toolbar_state.main.get()?;
-    let monitors = r
+    let main = r.toolbar_state.main.get();
+    let monitors: Vec<_> = r
         .canvas_state
         .canvases
         .iter()
         .map(|c| (c.bounds, c.window.window().scale_factor()))
         .collect();
+    let monitors = if monitors.is_empty() {
+        (r.lifecycle.screenshot_displays)()
+    } else {
+        monitors
+    };
     // Copy visible state, not the undo stack or parameter bindings.
     let mut session = Session::new();
     session.image_pixel_parameters = r.document.session.image_pixel_parameters;
@@ -117,7 +122,7 @@ pub(super) fn snapshot_at(r: &Registry, monitor: Rect, scale: f32) -> Option<Sna
         scale,
         monitors,
         excluded: super::capture_exclusions(r),
-        owner: (r.lifecycle.annotation_window_token)(main.window()),
+        owner: main.and_then(|main| (r.lifecycle.annotation_window_token)(main.window())),
         name: format!(
             "Lexift-{}.png",
             chrono::Local::now().format("%Y%m%d-%H%M%S")

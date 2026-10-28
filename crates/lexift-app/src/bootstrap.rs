@@ -276,6 +276,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .work_area_for_point(point)
                 .ok()
         })
+        .with_screenshot_displays(|| lexift_platform::screenshot_display_metrics().unwrap_or_default())
         .with_annotation_canvas(
             move || screen_for_annotation.as_ref().and_then(|screen| screen.displays().ok()).unwrap_or_default(),
             |window, enabled| match lexift_platform::set_annotation_click_through(&window.window_handle(), enabled) {
@@ -546,6 +547,34 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 format!("Unavailable: {error}")
             }
         });
+    let screenshot_controller = Arc::downgrade(&controller);
+    let screenshot_screen = services.screen.clone();
+    if let Err(error) = services
+        .runtime_manager
+        .start_screenshot_hotkey(Arc::new(move || {
+            if let Some(controller) = screenshot_controller.upgrade() {
+                let metadata = {
+                    let s = controller.state.lock().unwrap_or_else(|p| p.into_inner());
+                    (lexift_core::domain::screenshot::delay_available(&s), s.screenshot.phase,
+                        s.pinned_images.values().any(|p| p.busy), s.pinned_images.values().any(|p| p.editing.is_some()),
+                        s.annotation_export.request.is_some(), s.ocr.phase)
+                };
+                tracing::debug!(eligible=metadata.0, phase=?metadata.1, pin_busy=metadata.2, pin_editing=metadata.3,
+                    exporting=metadata.4, ocr=?metadata.5, "Screenshot shortcut input");
+                let trigger = lexift_core::domain::screenshot::ShortcutTrigger {
+                    foreground: lexift_platform::annotation_foreground_token(),
+                    point: screenshot_screen
+                        .as_ref()
+                        .and_then(|screen| screen.cursor_position().ok()),
+                };
+                controller.dispatch(lexift_core::AppEvent::Screenshot(
+                    lexift_core::domain::screenshot::ScreenshotEvent::ShortcutRequested(trigger),
+                ));
+            }
+        }))
+    {
+        tracing::warn!(%error, "screenshot shortcut registration failed");
+    }
     controller.dispatch(lexift_core::AppEvent::HotkeyRegistrationsChanged(
         services.runtime_manager.hotkey_registrations(),
     ));

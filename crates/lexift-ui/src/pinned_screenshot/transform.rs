@@ -68,7 +68,7 @@ fn request_color_action(id: u64, action: lexift_core::domain::image_color::Actio
         && STATE.with(|s| {
             s.borrow().as_ref().is_some_and(|r| {
                 r.windows.get(&id).is_some_and(|p| {
-                    !p.native_drag
+                    !p.gesture.native_drag.get()
                         && !p.gesture.pressed.get()
                         && p.window
                             .get()
@@ -93,7 +93,7 @@ pub(super) fn request(id: u64, index: i32) {
         && STATE.with(|s| {
             s.borrow().as_ref().is_some_and(|r| {
                 r.windows.get(&id).is_some_and(|p| {
-                    !p.native_drag
+                    !p.gesture.native_drag.get()
                         && !p.gesture.pressed.get()
                         && p.window.get().is_some_and(|w| {
                             w.get_transform_enabled() && !w.get_output_busy() && !w.get_locked()

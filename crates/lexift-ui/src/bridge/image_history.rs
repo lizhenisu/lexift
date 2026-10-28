@@ -118,7 +118,7 @@ fn suspend() {
     });
     close();
     if let Some((token, query)) = context {
-        crate::annotation::screenshot::retired_history_foreground(token, query());
+        crate::annotation::screenshot::retired_foreground(token, query());
     }
 }
 pub(super) fn close() {

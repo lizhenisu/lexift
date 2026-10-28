@@ -28,6 +28,7 @@ pub(crate) struct WindowsHotkeyPort {
     listener: Mutex<Option<HotkeyListener>>,
     annotation_listener: Mutex<Option<HotkeyListener>>,
     ocr_listener: Mutex<Option<HotkeyListener>>,
+    screenshot_listener: Mutex<Option<HotkeyListener>>,
 }
 
 impl WindowsHotkeyPort {
@@ -36,6 +37,7 @@ impl WindowsHotkeyPort {
             listener: Mutex::new(None),
             annotation_listener: Mutex::new(None),
             ocr_listener: Mutex::new(None),
+            screenshot_listener: Mutex::new(None),
         }
     }
 }
@@ -69,6 +71,57 @@ impl HotkeyPort for WindowsHotkeyPort {
     fn unregister_ocr_hotkey(&self) -> Result<()> {
         if let Some(listener) = self
             .ocr_listener
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+        {
+            listener.shutdown();
+        }
+        Ok(())
+    }
+
+    fn register_screenshot_hotkey(
+        &self,
+        config: HotkeyConfig,
+        handler: HotkeyHandler,
+    ) -> Result<()> {
+        let mut listener = self
+            .screenshot_listener
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if listener.is_some() {
+            return Err(Error::new("Screenshot shortcut is already registered"));
+        }
+        // Each listener owns its registration on a separate message-loop thread.
+        *listener = Some(start_listener(config, handler)?);
+        Ok(())
+    }
+
+    fn replace_screenshot_hotkey(
+        &self,
+        config: HotkeyConfig,
+        handler: HotkeyHandler,
+    ) -> Result<()> {
+        let mut listener = self
+            .screenshot_listener
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if listener
+            .as_ref()
+            .is_some_and(|current| current.config == config)
+        {
+            return Ok(());
+        }
+        let replacement = start_listener(config, handler)?;
+        if let Some(previous) = listener.replace(replacement) {
+            previous.shutdown();
+        }
+        Ok(())
+    }
+
+    fn unregister_screenshot_hotkey(&self) -> Result<()> {
+        if let Some(listener) = self
+            .screenshot_listener
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .take()

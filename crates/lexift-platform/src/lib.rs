@@ -890,3 +890,18 @@ pub fn configure_countdown_window(
         Err(lexift_core::Error::new("Countdown controls unavailable"))
     }
 }
+
+/// Native view metrics; independent of capture and document ownership.
+pub fn screenshot_display_metrics()
+-> lexift_core::Result<Vec<(lexift_core::domain::geometry::Rect, f32)>> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::screenshot_display_metrics()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err(lexift_core::Error::new(
+            "Screenshot monitor metrics are unavailable",
+        ))
+    }
+}

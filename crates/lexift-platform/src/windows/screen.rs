@@ -111,3 +111,30 @@ pub(super) fn cursor_position() -> Result<Point> {
         y: point.y,
     })
 }
+
+/// Physical monitor metrics for a screenshot that has no canvas HWND yet.
+pub(crate) fn display_metrics() -> Result<Vec<(Rect, f32)>> {
+    use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+    WindowsScreenPort::new()
+        .displays()?
+        .into_iter()
+        .map(|bounds| {
+            let monitor = unsafe {
+                MonitorFromPoint(
+                    POINT {
+                        x: bounds.left,
+                        y: bounds.top,
+                    },
+                    MONITOR_DEFAULTTONEAREST,
+                )
+            };
+            let (mut x, mut y) = (0, 0);
+            unsafe { GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut x, &mut y) }
+                .map_err(|_| Error::new("Could not read screenshot monitor DPI"))?;
+            if x == 0 || y == 0 {
+                return Err(Error::new("Invalid screenshot monitor DPI"));
+            }
+            Ok((bounds, x as f32 / 96.))
+        })
+        .collect()
+}

@@ -58,6 +58,12 @@ pub(crate) trait ViewPort: Send + Sync {
     ) {
     }
 
+    fn freeze_screenshot_shortcut(
+        &self,
+        _id: u64,
+        _trigger: lexift_core::domain::screenshot::ShortcutTrigger,
+    ) {
+    }
     fn update(&self, state: AppState);
     fn set_annotation_hotkey_status(&self, _status: String) {}
     fn show_popup(
@@ -171,6 +177,13 @@ pub(crate) trait ViewPort: Send + Sync {
 }
 
 impl ViewPort for lexift_ui::UiHandle {
+    fn freeze_screenshot_shortcut(
+        &self,
+        id: u64,
+        trigger: lexift_core::domain::screenshot::ShortcutTrigger,
+    ) {
+        lexift_ui::UiHandle::freeze_screenshot_shortcut(self, id, trigger);
+    }
     fn open_image_editor(
         &self,
         window: u64,
@@ -809,7 +822,7 @@ impl AppController {
                 previous_settings,
                 config,
                 change,
-            } => self.apply_runtime_config(settings, *previous_settings, config, change),
+            } => self.apply_runtime_config(settings, *previous_settings, *config, change),
             AppCommand::PersistCredential {
                 credential_id,
                 secret,

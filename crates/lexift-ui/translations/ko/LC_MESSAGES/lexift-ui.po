@@ -2123,3 +2123,9 @@ msgstr "변경하지 못했습니다. 이전 단축키는 계속 유효합니다
 
 msgid "OCR is disabled. Enable it in Settings."
 msgstr "OCR이 꺼져 있습니다. 설정에서 켜세요."
+
+msgid "Press the screenshot shortcut to select an area directly. Use the annotation shortcut to open the toolbar. Add annotations, then copy, save or pin the image."
+msgstr "스크린샷 단축키로 바로 영역을 선택하거나 주석 단축키로 도구 모음을 여세요. 주석을 추가한 후 이미지를 복사, 저장하거나 고정하세요."
+
+msgid "Translation, annotation, OCR and screenshot shortcuts must differ"
+msgstr "번역, 주석, OCR 및 스크린샷 단축키는 서로 달라야 합니다"

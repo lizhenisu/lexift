@@ -2123,3 +2123,9 @@ msgstr "Modifica non riuscita. La scorciatoia precedente resta attiva."
 
 msgid "OCR is disabled. Enable it in Settings."
 msgstr "OCR disattivato. Attivalo nelle Impostazioni."
+
+msgid "Press the screenshot shortcut to select an area directly. Use the annotation shortcut to open the toolbar. Add annotations, then copy, save or pin the image."
+msgstr "Usa la scorciatoia di cattura per selezionare un’area o quella di annotazione per aprire la barra. Aggiungi annotazioni, quindi copia, salva o fissa l’immagine."
+
+msgid "Translation, annotation, OCR and screenshot shortcuts must differ"
+msgstr "Le scorciatoie di traduzione, annotazione, OCR e cattura devono essere diverse"

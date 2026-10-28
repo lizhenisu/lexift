@@ -24,7 +24,7 @@ fn runtime_idle() -> bool {
             !r.frozen
                 && r.windows.values().all(|p| {
                     p.phase == Phase::Visible
-                        && !p.native_drag
+                        && !p.gesture.native_drag.get()
                         && !p.gesture.pressed.get()
                         && p.window.get().is_some_and(|w| {
                             !w.get_editing()
@@ -804,7 +804,9 @@ mod tests {
                 .windows
                 .get_mut(&b)
                 .unwrap()
-                .native_drag = true
+                .gesture
+                .native_drag
+                .set(true)
         });
         assert!(!available(true));
         finish_native_drag(b);

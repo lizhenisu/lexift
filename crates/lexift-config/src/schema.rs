@@ -255,6 +255,8 @@ pub(crate) struct SettingsFile {
     annotation_hotkey: HotkeyFile,
     #[serde(default = "default_ocr_hotkey")]
     ocr_hotkey: HotkeyFile,
+    #[serde(default = "default_screenshot_hotkey")]
+    screenshot_hotkey: HotkeyFile,
     #[serde(default)]
     ocr_language: Option<String>,
     #[serde(default = "default_true")]
@@ -325,6 +327,9 @@ impl Default for HotkeyFile {
 fn default_ocr_hotkey() -> HotkeyFile {
     HotkeyConfig::ocr_default().into()
 }
+fn default_screenshot_hotkey() -> HotkeyFile {
+    HotkeyConfig::screenshot_default().into()
+}
 
 fn default_annotation_hotkey() -> HotkeyFile {
     HotkeyFile::from(HotkeyConfig::annotation_default())
@@ -378,6 +383,7 @@ impl ConfigFile {
                 hotkey: settings.hotkey.into(),
                 annotation_hotkey: settings.annotation_hotkey.into(),
                 ocr_hotkey: settings.ocr_hotkey.into(),
+                screenshot_hotkey: settings.screenshot_hotkey.into(),
                 ocr_language: settings.ocr_language.clone(),
                 ocr_enabled: settings.ocr_enabled,
                 ocr_korean_auto: settings.ocr_korean_auto,
@@ -477,6 +483,15 @@ impl ConfigFile {
                     meta: self.settings.ocr_hotkey.meta,
                 },
                 self.settings.ocr_hotkey.key.parse()?,
+            )?,
+            screenshot_hotkey: HotkeyConfig::new(
+                lexift_core::domain::runtime_config::HotkeyModifiers {
+                    control: self.settings.screenshot_hotkey.control,
+                    alt: self.settings.screenshot_hotkey.alt,
+                    shift: self.settings.screenshot_hotkey.shift,
+                    meta: self.settings.screenshot_hotkey.meta,
+                },
+                self.settings.screenshot_hotkey.key.parse()?,
             )?,
             ocr_language: self.settings.ocr_language,
             ocr_enabled: self.settings.ocr_enabled,

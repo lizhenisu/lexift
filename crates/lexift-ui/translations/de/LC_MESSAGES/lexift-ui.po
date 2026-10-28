@@ -2123,3 +2123,9 @@ msgstr "Änderung fehlgeschlagen. Das bisherige Tastenkürzel bleibt aktiv."
 
 msgid "OCR is disabled. Enable it in Settings."
 msgstr "OCR ist deaktiviert. Aktivieren Sie es in den Einstellungen."
+
+msgid "Press the screenshot shortcut to select an area directly. Use the annotation shortcut to open the toolbar. Add annotations, then copy, save or pin the image."
+msgstr "Drücken Sie das Screenshot-Kürzel, um direkt einen Bereich auszuwählen. Das Anmerkungskürzel öffnet die Werkzeugleiste. Markieren Sie das Bild und kopieren, speichern oder heften Sie es an."
+
+msgid "Translation, annotation, OCR and screenshot shortcuts must differ"
+msgstr "Die Tastenkürzel für Übersetzung, Anmerkungen, OCR und Screenshots müssen verschieden sein"

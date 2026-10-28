@@ -94,6 +94,13 @@ pub struct HotkeyConfig {
 }
 
 impl HotkeyConfig {
+    pub const fn screenshot_default() -> Self {
+        Self {
+            modifiers: HotkeyModifiers::alt(),
+            key: HotkeyKey::Letter('S'),
+        }
+    }
+
     pub const fn ocr_default() -> Self {
         Self {
             modifiers: HotkeyModifiers::alt(),
@@ -248,6 +255,7 @@ pub struct HotkeyRegistrations {
     pub translation: Option<HotkeyConfig>,
     pub annotation: Option<HotkeyConfig>,
     pub ocr: Option<HotkeyConfig>,
+    pub screenshot: Option<HotkeyConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -255,6 +263,7 @@ pub struct RuntimeConfig {
     pub hotkey: HotkeyConfig,
     pub annotation_hotkey: HotkeyConfig,
     pub ocr_hotkey: HotkeyConfig,
+    pub screenshot_hotkey: HotkeyConfig,
     pub provider: ProviderConfig,
     pub ollama: super::ollama::OllamaConfig,
     pub llm: super::llm::LlmSettings,
@@ -267,6 +276,7 @@ impl Default for RuntimeConfig {
             hotkey: HotkeyConfig::default(),
             annotation_hotkey: HotkeyConfig::annotation_default(),
             ocr_hotkey: HotkeyConfig::ocr_default(),
+            screenshot_hotkey: HotkeyConfig::screenshot_default(),
             provider: ProviderConfig::default(),
             ollama: super::ollama::OllamaConfig::default(),
             llm: super::llm::LlmSettings::default(),

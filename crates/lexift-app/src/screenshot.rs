@@ -543,6 +543,9 @@ impl ScreenshotRuntime {
     }
     pub fn execute(self: &Arc<Self>, controller: &Arc<AppController>, command: ScreenshotCommand) {
         match command {
+            ScreenshotCommand::FreezeShortcut { id, trigger } => {
+                controller.ui.freeze_screenshot_shortcut(id, trigger)
+            }
             ScreenshotCommand::Long(command) => long::execute(self, controller, command),
             ScreenshotCommand::Recognize {
                 session,

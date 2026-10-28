@@ -112,7 +112,7 @@ fn request_policy(id: u64, policy: Policy) {
             r.interactive
                 && r.windows.get(&id).is_some_and(|p| {
                     p.phase == Phase::Visible
-                        && !p.native_drag
+                        && !p.gesture.native_drag.get()
                         && !p.gesture.pressed.get()
                         && p.window.get().is_some_and(|w| {
                             !w.get_output_busy()

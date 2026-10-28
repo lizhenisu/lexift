@@ -1244,13 +1244,18 @@ unsafe extern "system" fn popup_input_subclass(
             return LRESULT(0);
         }
         WM_LBUTTONUP => {
-            bridge.pending_move = None;
+            let move_cancelled = bridge.pending_move.take().is_some();
             let (x, y) = client_position(lparam.0);
             bridge.last_position = (x, y);
             (bridge.handler)(PopupPointerEvent::Moved { x, y });
             if bridge.pressed {
                 bridge.pressed = false;
                 (bridge.handler)(PopupPointerEvent::LeftReleased { x, y });
+            }
+            // A queued move can lose its press before BEGIN_MOVE_MESSAGE runs.
+            // Its consumer still needs completion even when ReleaseCapture consumed mouse-up.
+            if move_cancelled {
+                (bridge.handler)(PopupPointerEvent::NativeMoveFinished);
             }
             release_owned_capture(hwnd);
             return LRESULT(0);
@@ -2512,6 +2517,36 @@ mod passive_style_regression {
         }
         cancel_interaction(&window).unwrap();
         assert_eq!(events.borrow().len(), 2);
+    }
+    #[test]
+    fn mouse_up_cancels_pending_native_move_and_reports_completion_once() {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        let window = capture_window();
+        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let record = events.clone();
+        enable_passive_interaction(&window, Box::new(move |e| record.borrow_mut().push(e)))
+            .unwrap();
+        unsafe {
+            // ReleaseCapture already cancelled the local press during the native handoff.
+            (*bridge(&window)).pressed = false;
+            (*bridge(&window)).pending_move = Some(77);
+            SendMessageW(window.0, WM_LBUTTONUP, Some(WPARAM(0)), Some(LPARAM(0)));
+            SendMessageW(
+                window.0,
+                BEGIN_MOVE_MESSAGE,
+                Some(WPARAM(77)),
+                Some(LPARAM(0)),
+            );
+            SendMessageW(window.0, WM_LBUTTONUP, Some(WPARAM(0)), Some(LPARAM(0)));
+        }
+        assert_eq!(
+            events
+                .borrow()
+                .iter()
+                .filter(|e| matches!(e, PopupPointerEvent::NativeMoveFinished))
+                .count(),
+            1
+        );
     }
     #[test]
     fn hints_keep_disabled_input_through_backend_rewrites_without_layering() {

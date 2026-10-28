@@ -2123,3 +2123,9 @@ msgstr "変更できませんでした。以前のショートカットキーは
 
 msgid "OCR is disabled. Enable it in Settings."
 msgstr "OCR は無効です。設定で有効にしてください。"
+
+msgid "Press the screenshot shortcut to select an area directly. Use the annotation shortcut to open the toolbar. Add annotations, then copy, save or pin the image."
+msgstr "スクリーンショットのショートカットで直接範囲を選択できます。注釈のショートカットではツールバーが開きます。注釈を追加して、コピー、保存、ピン留めできます。"
+
+msgid "Translation, annotation, OCR and screenshot shortcuts must differ"
+msgstr "翻訳、注釈、OCR、スクリーンショットのショートカットはそれぞれ異なる必要があります"

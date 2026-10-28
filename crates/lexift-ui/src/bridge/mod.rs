@@ -522,6 +522,45 @@ impl UiHandle {
         let _ = slint::invoke_from_event_loop(move || image_history::present(rows));
     }
 
+    pub fn freeze_screenshot_shortcut(
+        &self,
+        id: u64,
+        trigger: lexift_core::domain::screenshot::ShortcutTrigger,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            let current = APP_WINDOW_REGISTRY.with(|slot| {
+                slot.borrow()
+                    .as_ref()
+                    .is_some_and(|r| r.latest_state.screenshot.shortcut_pending == Some(id))
+            });
+            if !current {
+                return;
+            }
+            let capture = APP_WINDOW_REGISTRY.with(|slot| {
+                let slot = slot.borrow();
+                let r = slot.as_ref()?;
+                Some((
+                    r.settings.as_ref()?.clone_strong(),
+                    r.latest_state.registered_hotkeys.screenshot?,
+                ))
+            });
+            if let Some((window, key)) = capture
+                && window.invoke_capture_registered_shortcut(key.to_string().into())
+            {
+                crate::annotation::screenshot::emit(
+                    lexift_core::domain::screenshot::ScreenshotEvent::ShortcutUnavailable { id },
+                );
+                return;
+            }
+            if crate::pinned_screenshot::capture_idle() {
+                crate::annotation::screenshot::freeze_shortcut(id, trigger);
+            } else {
+                crate::annotation::screenshot::emit(
+                    lexift_core::domain::screenshot::ScreenshotEvent::ShortcutUnavailable { id },
+                );
+            }
+        });
+    }
     pub fn request_ocr(&self) {
         let _ = slint::invoke_from_event_loop(crate::ocr::request);
     }

@@ -2123,3 +2123,9 @@ msgstr "快捷键修改失败，原快捷键仍然有效。"
 
 msgid "OCR is disabled. Enable it in Settings."
 msgstr "OCR 已关闭，请在设置中启用。"
+
+msgid "Press the screenshot shortcut to select an area directly. Use the annotation shortcut to open the toolbar. Add annotations, then copy, save or pin the image."
+msgstr "按截图快捷键直接框选，或按标注快捷键打开工具条。添加标注后，可复制、保存或贴图。"
+
+msgid "Translation, annotation, OCR and screenshot shortcuts must differ"
+msgstr "翻译、标注、OCR 和截图快捷键必须各不相同"

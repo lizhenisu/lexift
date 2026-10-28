@@ -220,7 +220,7 @@ fn allowed(id: u64) -> bool {
                 r.interactive
                     && r.windows.get(&id).is_some_and(|p| {
                         p.phase == Phase::Visible
-                            && !p.native_drag
+                            && !p.gesture.native_drag.get()
                             && !p.gesture.pressed.get()
                             && !p.interaction.applied.locked
                             && !p.interaction.applied.passthrough

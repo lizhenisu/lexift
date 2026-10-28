@@ -14,6 +14,7 @@ pub(crate) struct View {
     pub translation: Shortcut,
     pub annotation: Shortcut,
     pub ocr: Shortcut,
+    pub screenshot: Shortcut,
 }
 fn shortcut(active: Option<HotkeyConfig>, configured: HotkeyConfig, failed: bool) -> Shortcut {
     let unavailable = active.is_none();
@@ -52,11 +53,19 @@ pub(crate) fn view(state: &AppState) -> View {
             state.runtime_config.annotation_hotkey,
             failed(SettingsField::AnnotationHotkey),
         ),
+        screenshot: shortcut(
+            state.registered_hotkeys.screenshot,
+            state.runtime_config.screenshot_hotkey,
+            failed(SettingsField::ScreenshotHotkey),
+        ),
         ocr,
     }
 }
 pub(crate) fn apply(main: &crate::AppWindow, state: &AppState) {
     let view = view(state);
+    main.set_screenshot_shortcut(view.screenshot.label.into());
+    main.set_screenshot_shortcut_status(view.screenshot.status.into());
+    main.set_screenshot_shortcut_unavailable(view.screenshot.unavailable);
     main.set_translation_shortcut(view.translation.label.into());
     main.set_translation_shortcut_status(view.translation.status.into());
     main.set_translation_shortcut_unavailable(view.translation.unavailable);

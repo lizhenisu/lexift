@@ -19,6 +19,8 @@ struct HotkeyState {
     annotation_handler: Option<HotkeyHandler>,
     ocr_current: Option<HotkeyConfig>,
     ocr_handler: Option<HotkeyHandler>,
+    screenshot_current: Option<HotkeyConfig>,
+    screenshot_handler: Option<HotkeyHandler>,
 }
 
 impl HotkeyRuntimeManager {
@@ -31,6 +33,7 @@ impl HotkeyRuntimeManager {
             translation: state.current,
             annotation: state.annotation_current,
             ocr: state.ocr_current,
+            screenshot: state.screenshot_current,
         }
     }
 
@@ -41,7 +44,10 @@ impl HotkeyRuntimeManager {
     ) -> Result<()> {
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         state.annotation_handler = Some(Arc::clone(&handler));
-        if state.current == Some(config) || state.ocr_current == Some(config) {
+        if state.current == Some(config)
+            || state.ocr_current == Some(config)
+            || state.screenshot_current == Some(config)
+        {
             return Err(lexift_core::Error::new(
                 "Shortcut is already used by translation",
             ));
@@ -66,7 +72,10 @@ impl HotkeyRuntimeManager {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.handler = Some(Arc::clone(&handler));
-        if state.annotation_current == Some(config) || state.ocr_current == Some(config) {
+        if state.annotation_current == Some(config)
+            || state.ocr_current == Some(config)
+            || state.screenshot_current == Some(config)
+        {
             return Err(lexift_core::Error::new(
                 "Shortcut is already used by annotation",
             ));
@@ -86,7 +95,10 @@ impl HotkeyRuntimeManager {
         if state.current == Some(config) {
             return Ok(());
         }
-        if state.annotation_current == Some(config) || state.ocr_current == Some(config) {
+        if state.annotation_current == Some(config)
+            || state.ocr_current == Some(config)
+            || state.screenshot_current == Some(config)
+        {
             return Err(lexift_core::Error::new(
                 "Shortcut is already used by annotation",
             ));
@@ -108,7 +120,10 @@ impl HotkeyRuntimeManager {
         if state.annotation_current == Some(config) {
             return Ok(());
         }
-        if state.current == Some(config) || state.ocr_current == Some(config) {
+        if state.current == Some(config)
+            || state.ocr_current == Some(config)
+            || state.screenshot_current == Some(config)
+        {
             return Err(lexift_core::Error::new(
                 "Shortcut is already used by translation",
             ));
@@ -134,7 +149,10 @@ impl HotkeyRuntimeManager {
         if state.ocr_current == Some(config) {
             return Ok(());
         }
-        if state.current == Some(config) || state.annotation_current == Some(config) {
+        if state.current == Some(config)
+            || state.annotation_current == Some(config)
+            || state.screenshot_current == Some(config)
+        {
             return Err(lexift_core::Error::new(
                 "Shortcut is already used by translation",
             ));
@@ -162,6 +180,46 @@ impl HotkeyRuntimeManager {
         }
         self.apply_ocr(config)
     }
+    pub(crate) fn apply_screenshot(&self, config: HotkeyConfig) -> Result<()> {
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if state.screenshot_current == Some(config) {
+            return Ok(());
+        }
+        if state.current == Some(config)
+            || state.annotation_current == Some(config)
+            || state.ocr_current == Some(config)
+        {
+            return Err(lexift_core::Error::new(
+                "Shortcut is already used by translation",
+            ));
+        }
+        let Some(handler) = state.screenshot_handler.as_ref().map(Arc::clone) else {
+            state.screenshot_current = Some(config);
+            return Ok(());
+        };
+        let port = self
+            .port
+            .as_ref()
+            .ok_or_else(|| lexift_core::Error::new("Global shortcuts are unavailable"))?;
+        if state.screenshot_current.is_some() {
+            port.replace_screenshot_hotkey(config, handler)?;
+        } else {
+            port.register_screenshot_hotkey(config, handler)?;
+        }
+        state.screenshot_current = Some(config);
+        Ok(())
+    }
+    pub(crate) fn start_screenshot(
+        &self,
+        config: HotkeyConfig,
+        handler: HotkeyHandler,
+    ) -> Result<()> {
+        {
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            state.screenshot_handler = Some(handler);
+        }
+        self.apply_screenshot(config)
+    }
 }
 
 impl Drop for HotkeyRuntimeManager {
@@ -169,6 +227,7 @@ impl Drop for HotkeyRuntimeManager {
         if let Some(port) = &self.port {
             let _ = port.unregister_annotation_hotkey();
             let _ = port.unregister_ocr_hotkey();
+            let _ = port.unregister_screenshot_hotkey();
         }
         if let Some(port) = &self.port
             && let Err(error) = port.unregister_translate_hotkey()
@@ -189,6 +248,7 @@ mod tests {
     #[derive(Default)]
     struct FakeHotkeyPort {
         ocr_active: Mutex<Option<HotkeyConfig>>,
+        screenshot_active: Mutex<Option<HotkeyConfig>>,
         active: Mutex<Option<HotkeyConfig>>,
         rejected: Mutex<Option<HotkeyConfig>>,
         annotation_active: Mutex<Option<HotkeyConfig>>,
@@ -209,6 +269,28 @@ mod tests {
         }
         fn unregister_ocr_hotkey(&self) -> Result<()> {
             *self.ocr_active.lock().unwrap() = None;
+            Ok(())
+        }
+        fn register_screenshot_hotkey(
+            &self,
+            config: HotkeyConfig,
+            _handler: HotkeyHandler,
+        ) -> Result<()> {
+            if config.key == lexift_core::domain::runtime_config::HotkeyKey::Function(12) {
+                return Err(Error::new("fixture registration failure"));
+            }
+            *self.screenshot_active.lock().unwrap() = Some(config);
+            Ok(())
+        }
+        fn replace_screenshot_hotkey(
+            &self,
+            config: HotkeyConfig,
+            handler: HotkeyHandler,
+        ) -> Result<()> {
+            self.register_screenshot_hotkey(config, handler)
+        }
+        fn unregister_screenshot_hotkey(&self) -> Result<()> {
+            *self.screenshot_active.lock().unwrap() = None;
             Ok(())
         }
         fn register_annotation_hotkey(
@@ -268,6 +350,82 @@ mod tests {
         }
     }
 
+    #[test]
+    fn screenshot_registration_is_independent_and_failed_replacement_preserves_old_key() {
+        let port = Arc::new(FakeHotkeyPort::default());
+        *port.annotation_available.lock().unwrap() = true;
+        let manager = HotkeyRuntimeManager::new(Some(port.clone()));
+        manager
+            .start(HotkeyConfig::default(), Arc::new(|| {}))
+            .unwrap();
+        manager
+            .start_annotation(HotkeyConfig::annotation_default(), Arc::new(|| {}))
+            .unwrap();
+        manager
+            .start_ocr(HotkeyConfig::ocr_default(), Arc::new(|| {}))
+            .unwrap();
+        manager
+            .start_screenshot(HotkeyConfig::screenshot_default(), Arc::new(|| {}))
+            .unwrap();
+        for key in [
+            HotkeyConfig::default(),
+            HotkeyConfig::ocr_default(),
+            HotkeyConfig::annotation_default(),
+        ] {
+            assert!(manager.apply_screenshot(key).is_err());
+        }
+        assert!(manager.apply(HotkeyConfig::screenshot_default()).is_err());
+        assert!(
+            manager
+                .apply_ocr(HotkeyConfig::screenshot_default())
+                .is_err()
+        );
+        assert!(
+            manager
+                .apply_annotation(HotkeyConfig::screenshot_default())
+                .is_err()
+        );
+        assert!(
+            manager
+                .apply_screenshot("Ctrl+F12".parse().unwrap())
+                .is_err()
+        );
+        assert_eq!(
+            manager.registrations().screenshot,
+            Some(HotkeyConfig::screenshot_default())
+        );
+        assert_eq!(
+            *port.screenshot_active.lock().unwrap(),
+            Some(HotkeyConfig::screenshot_default())
+        );
+        manager
+            .apply_screenshot("Ctrl+F9".parse().unwrap())
+            .unwrap();
+        drop(manager);
+        assert!(port.screenshot_active.lock().unwrap().is_none());
+    }
+    #[test]
+    fn failed_screenshot_start_can_be_retried_without_disabling_other_keys() {
+        let port = Arc::new(FakeHotkeyPort::default());
+        let manager = HotkeyRuntimeManager::new(Some(port.clone()));
+        manager
+            .start(HotkeyConfig::default(), Arc::new(|| {}))
+            .unwrap();
+        assert!(
+            manager
+                .start_screenshot("Ctrl+F12".parse().unwrap(), Arc::new(|| {}))
+                .is_err()
+        );
+        assert!(manager.registrations().screenshot.is_none());
+        manager
+            .apply_screenshot(HotkeyConfig::screenshot_default())
+            .unwrap();
+        assert_eq!(
+            manager.registrations().translation,
+            Some(HotkeyConfig::default())
+        );
+        assert!(manager.registrations().screenshot.is_some());
+    }
     #[test]
     fn ocr_checks_both_shortcuts_and_failed_replacement_keeps_old_registration() {
         let port = Arc::new(FakeHotkeyPort::default());

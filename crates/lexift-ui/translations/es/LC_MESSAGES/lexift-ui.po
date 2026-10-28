@@ -2123,3 +2123,9 @@ msgstr "No se pudo cambiar el atajo. El anterior sigue activo."
 
 msgid "OCR is disabled. Enable it in Settings."
 msgstr "OCR desactivado. Actívalo en Ajustes."
+
+msgid "Press the screenshot shortcut to select an area directly. Use the annotation shortcut to open the toolbar. Add annotations, then copy, save or pin the image."
+msgstr "Usa el atajo de captura para seleccionar un área o el de anotación para abrir la barra. Añade anotaciones y copia, guarda o fija la imagen."
+
+msgid "Translation, annotation, OCR and screenshot shortcuts must differ"
+msgstr "Los atajos de traducción, anotación, OCR y captura deben ser distintos"

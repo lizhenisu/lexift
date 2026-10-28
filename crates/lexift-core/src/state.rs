@@ -723,7 +723,7 @@ impl AppState {
                 vec![AppCommand::ApplyRuntimeConfig {
                     previous_settings: Box::new(self.settings.clone()),
                     settings,
-                    config,
+                    config: Box::new(config),
                     change,
                 }]
             }
@@ -1059,6 +1059,7 @@ impl AppState {
                     .checked_add(1)
                     .expect("pin visibility exhausted");
                 self.pinned_images.clear();
+                self.screenshot.shortcut_pending = None;
                 self.screenshot.phase = crate::domain::screenshot::ScreenshotPhase::Idle;
                 let mut commands =
                     self.annotation_export
@@ -1156,7 +1157,9 @@ impl AppState {
             commands.extend(self.start_next_settings_change());
             return commands;
         }
-        if change.matches(&self.settings) {
+        let screenshot_retry = matches!(&change,
+            SettingsChange::ScreenshotHotkey(key) if self.registered_hotkeys.screenshot != Some(*key));
+        if change.matches(&self.settings) && !screenshot_retry {
             let mut commands = self.start_next_settings_change();
             if matches!(
                 &change,
@@ -1220,6 +1223,7 @@ impl AppState {
             SettingsField::OcrLanguage
             | SettingsField::OcrKoreanAuto
             | SettingsField::OcrHotkey
+            | SettingsField::ScreenshotHotkey
             | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
             | SettingsField::SelectionToolbar
@@ -1243,6 +1247,7 @@ impl AppState {
             SettingsField::OcrLanguage
             | SettingsField::OcrKoreanAuto
             | SettingsField::OcrHotkey
+            | SettingsField::ScreenshotHotkey
             | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
             | SettingsField::SelectionToolbar
@@ -1303,6 +1308,9 @@ impl AppState {
                 self.desired_settings.ocr_language = self.settings.ocr_language.clone()
             }
             SettingsField::OcrHotkey => self.desired_settings.ocr_hotkey = self.settings.ocr_hotkey,
+            SettingsField::ScreenshotHotkey => {
+                self.desired_settings.screenshot_hotkey = self.settings.screenshot_hotkey
+            }
             SettingsField::SelectionToolbar => {
                 self.desired_settings.selection_toolbar = self.settings.selection_toolbar;
             }
@@ -2991,7 +2999,7 @@ mod tests {
             vec![AppCommand::ApplyRuntimeConfig {
                 settings: requested.clone(),
                 previous_settings: Box::default(),
-                config: config.clone(),
+                config: Box::new(config.clone()),
                 change: change.clone(),
             }]
         );
@@ -3130,6 +3138,45 @@ mod tests {
 #[cfg(test)]
 mod registration_report_tests {
     use super::*;
+    #[test]
+    fn screenshot_same_key_retries_missing_registration_and_save_failure_preserves_old_key() {
+        let mut state = AppState::default();
+        let key = state.settings.screenshot_hotkey;
+        let change = SettingsChange::ScreenshotHotkey(key);
+        let commands = state.reduce(AppEvent::SettingsChangeRequested {
+            change: change.clone(),
+        });
+        assert!(
+            matches!(&commands[..], [AppCommand::PersistSettings { change: SettingsChange::ScreenshotHotkey(k), .. }] if *k == key)
+        );
+        state.reduce(AppEvent::SettingsSaveFailed {
+            change: change.clone(),
+            error: "write failed".into(),
+        });
+        assert_eq!(state.settings.screenshot_hotkey, key);
+        assert_eq!(state.desired_settings.screenshot_hotkey, key);
+        assert!(!state.settings_saving);
+        state.registered_hotkeys.screenshot = Some(key);
+        assert!(
+            state
+                .reduce(AppEvent::SettingsChangeRequested { change })
+                .is_empty(),
+            "registered unchanged shortcut remains a no-op"
+        );
+        let next = "Ctrl+F9".parse().unwrap();
+        let change = SettingsChange::ScreenshotHotkey(next);
+        state.reduce(AppEvent::SettingsChangeRequested {
+            change: change.clone(),
+        });
+        state.reduce(AppEvent::SettingsSaveFailed {
+            change,
+            error: "write failed".into(),
+        });
+        assert_eq!(state.registered_hotkeys.screenshot, Some(key));
+        assert_eq!(state.settings.screenshot_hotkey, key);
+        assert_eq!(state.desired_settings.screenshot_hotkey, key);
+    }
+
     #[test]
     fn registration_report_only_changes_confirmed_capabilities() {
         let mut state = AppState::default();

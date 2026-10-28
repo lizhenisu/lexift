@@ -2123,3 +2123,9 @@ msgstr "Shortcut change failed. The previous shortcut is still active."
 
 msgid "OCR is disabled. Enable it in Settings."
 msgstr "OCR is disabled. Enable it in Settings."
+
+msgid "Press the screenshot shortcut to select an area directly. Use the annotation shortcut to open the toolbar. Add annotations, then copy, save or pin the image."
+msgstr "Press the screenshot shortcut to select an area directly. Use the annotation shortcut to open the toolbar. Add annotations, then copy, save or pin the image."
+
+msgid "Translation, annotation, OCR and screenshot shortcuts must differ"
+msgstr "Translation, annotation, OCR and screenshot shortcuts must differ"

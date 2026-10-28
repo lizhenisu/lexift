@@ -74,7 +74,7 @@ pub enum AppCommand {
         settings: Settings,
         // Keep the rollback snapshot off the command queue's inline storage.
         previous_settings: Box<Settings>,
-        config: RuntimeConfig,
+        config: Box<RuntimeConfig>,
         change: SettingsChange,
     },
     PersistCredential {

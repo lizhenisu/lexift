@@ -40,8 +40,24 @@ pub struct LastRegion {
     pub bounds: Rect,
     pub layout: Vec<Rect>,
 }
+/// Native input context captured before the request can wait in the UI queue.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShortcutTrigger {
+    pub point: Option<Point>,
+    pub foreground: Option<crate::ports::magnifier::WindowToken>,
+}
+/// Distinguishes a windowless desktop snapshot from an existing toolbar document.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CaptureOrigin {
+    #[default]
+    Toolbar,
+    Background,
+}
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ScreenshotState {
+    pub shortcut_sequence: u64,
+    pub shortcut_pending: Option<u64>,
+    pub origin: CaptureOrigin,
     pub long: Option<super::long_capture::workflow::State>,
     pub session: u64,
     pub source_session: u64,
@@ -82,11 +98,20 @@ impl ScreenshotState {
         (normalize(&last.layout) == normalize(&self.layout)).then_some(last.bounds)
     }
     pub fn active(&self) -> bool {
-        self.phase != ScreenshotPhase::Idle
+        self.phase != ScreenshotPhase::Idle || self.shortcut_pending.is_some()
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotEvent {
+    ShortcutRequested(ShortcutTrigger),
+    ShortcutFrozen {
+        id: u64,
+        origin: CaptureOrigin,
+        request: ExportRequest,
+    },
+    ShortcutUnavailable {
+        id: u64,
+    },
     Delayed {
         request: ExportRequest,
         seconds: u8,
@@ -156,6 +181,10 @@ pub enum ScreenshotEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotCommand {
+    FreezeShortcut {
+        id: u64,
+        trigger: ShortcutTrigger,
+    },
     Countdown {
         session: u64,
         seconds: u8,
@@ -220,11 +249,78 @@ pub fn delay_available(state: &AppState) -> bool {
                 | super::ocr::OcrPhase::Translating
         )
 }
+fn start_capture(
+    state: &mut AppState,
+    request: ExportRequest,
+    origin: CaptureOrigin,
+) -> Vec<AppCommand> {
+    let s = &mut state.screenshot;
+    s.origin = origin;
+    s.session = s
+        .session
+        .checked_add(1)
+        .expect("screenshot identity exhausted");
+    s.source_session = request.session;
+    s.phase = ScreenshotPhase::Preparing;
+    s.element_sequence = 0;
+    s.element_pending = None;
+    s.operation = 0;
+    s.long = None;
+    s.layout.clear();
+    s.reuse_sequence = 0;
+    s.ocr_result = None;
+    s.bounds = None;
+    s.error = None;
+    s.color_pending = None;
+    s.color_result = None;
+    state.toolbar_selection = None;
+    vec![AppCommand::Screenshot(ScreenshotCommand::Prepare {
+        session: s.session,
+        request,
+    })]
+}
 pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCommand> {
     let command = |command| vec![AppCommand::Screenshot(command)];
     let delay_allowed = delay_available(state);
     let s = &mut state.screenshot;
     match event {
+        ScreenshotEvent::ShortcutRequested(trigger)
+            if delay_allowed
+                && state.editor_ocr.request.is_none()
+                && !state
+                    .pinned_images
+                    .values()
+                    .any(|p| p.recognition.is_some() || p.interaction.pending.is_some()) =>
+        {
+            s.shortcut_sequence = s
+                .shortcut_sequence
+                .checked_add(1)
+                .expect("screenshot shortcut identity exhausted");
+            let id = s.shortcut_sequence;
+            s.shortcut_pending = Some(id);
+            command(ScreenshotCommand::FreezeShortcut { id, trigger })
+        }
+        ScreenshotEvent::ShortcutUnavailable { id } if s.shortcut_pending == Some(id) => {
+            s.shortcut_pending = None;
+            vec![]
+        }
+        ScreenshotEvent::ShortcutFrozen {
+            id,
+            origin,
+            request,
+        } if s.shortcut_pending == Some(id)
+            && (origin == CaptureOrigin::Background
+                || state.annotation_export.session == Some(request.session)) =>
+        {
+            s.shortcut_pending = None;
+            start_capture(state, request, origin)
+        }
+
+        ScreenshotEvent::ShortcutFrozen { id, .. } if s.shortcut_pending == Some(id) => {
+            s.shortcut_pending = None;
+            vec![]
+        }
+
         ScreenshotEvent::Delayed { request, seconds }
             if matches!(seconds, 3 | 5 | 10)
                 && delay_allowed
@@ -235,6 +331,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 .checked_add(1)
                 .expect("screenshot identity exhausted");
             s.source_session = request.session;
+            s.origin = CaptureOrigin::Toolbar;
             s.phase = ScreenshotPhase::CountingDown;
             s.reuse_sequence = 0;
             s.element_sequence = 0;
@@ -363,29 +460,9 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 && state.annotation_export.session == Some(request.session)
                 && state.annotation_export.request.is_none() =>
         {
-            s.session = s
-                .session
-                .checked_add(1)
-                .expect("screenshot identity exhausted");
-            s.source_session = request.session;
-            s.phase = ScreenshotPhase::Preparing;
-            s.element_sequence = 0;
-            s.element_pending = None;
-            s.operation = 0;
-            s.long = None;
-            s.layout.clear();
-            s.reuse_sequence = 0;
-            s.ocr_result = None;
-            s.bounds = None;
-            s.error = None;
-            s.color_pending = None;
-            s.color_result = None;
-            state.toolbar_selection = None;
-            command(ScreenshotCommand::Prepare {
-                session: s.session,
-                request,
-            })
+            start_capture(state, request, CaptureOrigin::Toolbar)
         }
+
         ScreenshotEvent::QueryElements(query)
             if query.session == s.session
                 && s.phase == ScreenshotPhase::Selecting
@@ -521,6 +598,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             if let ScreenshotEvent::Failed { error, .. } = event {
                 s.error = Some(error);
             }
+            s.shortcut_pending = None;
             s.phase = ScreenshotPhase::Idle;
             s.element_pending = None;
             s.long = None;
@@ -584,6 +662,135 @@ mod tests {
         ));
         s
     }
+    #[test]
+    fn windowless_shortcut_requires_its_current_freeze_and_deduplicates() {
+        let mut s = AppState::default();
+        let cmd = s.reduce(AppEvent::Screenshot(ScreenshotEvent::ShortcutRequested(
+            ShortcutTrigger::default(),
+        )));
+        assert_eq!(
+            cmd,
+            vec![AppCommand::Screenshot(ScreenshotCommand::FreezeShortcut {
+                id: 1,
+                trigger: ShortcutTrigger::default()
+            })]
+        );
+        assert!(s.screenshot.active());
+        assert!(s.annotation_export.session.is_none());
+        assert!(
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::ShortcutRequested(
+                ShortcutTrigger::default()
+            )))
+            .is_empty()
+        );
+        assert!(
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::ShortcutFrozen {
+                id: 2,
+                origin: CaptureOrigin::Background,
+                request: request(90, 1, bounds()),
+            }))
+            .is_empty()
+        );
+        let cmd = s.reduce(AppEvent::Screenshot(ScreenshotEvent::ShortcutFrozen {
+            id: 1,
+            origin: CaptureOrigin::Background,
+            request: request(90, 1, bounds()),
+        }));
+        assert!(matches!(
+            cmd.as_slice(),
+            [AppCommand::Screenshot(ScreenshotCommand::Prepare {
+                session: 1,
+                ..
+            })]
+        ));
+        assert_eq!(s.screenshot.origin, CaptureOrigin::Background);
+        assert!(
+            s.annotation_export.session.is_none(),
+            "no fake toolbar-opened event"
+        );
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::Cancelled {
+            session: 1,
+        }));
+        assert!(!s.screenshot.active());
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::ShortcutRequested(
+            ShortcutTrigger::default(),
+        )));
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::ShortcutUnavailable {
+            id: 1,
+        }));
+        assert_eq!(s.screenshot.shortcut_pending, Some(2));
+        s.reduce(AppEvent::ExitRequested);
+        assert!(
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::ShortcutFrozen {
+                id: 2,
+                origin: CaptureOrigin::Background,
+                request: request(90, 2, bounds()),
+            }))
+            .is_empty()
+        );
+    }
+    #[test]
+    fn rejected_toolbar_freeze_releases_only_its_pending_shortcut() {
+        let mut s = AppState::default();
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::ShortcutRequested(
+            Default::default(),
+        )));
+        assert!(
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::ShortcutFrozen {
+                id: 1,
+                origin: CaptureOrigin::Toolbar,
+                request: request(77, 1, bounds()),
+            }))
+            .is_empty()
+        );
+        assert!(!s.screenshot.active());
+        assert!(
+            !s.reduce(AppEvent::Screenshot(ScreenshotEvent::ShortcutRequested(
+                Default::default()
+            )))
+            .is_empty()
+        );
+        s.reduce(AppEvent::Screenshot(ScreenshotEvent::ShortcutFrozen {
+            id: 1,
+            origin: CaptureOrigin::Toolbar,
+            request: request(77, 1, bounds()),
+        }));
+        assert_eq!(s.screenshot.shortcut_pending, Some(2));
+    }
+
+    #[test]
+    fn shortcut_never_cancels_an_existing_pin_editor_or_ocr() {
+        let mut s = AppState::default();
+        let pin = super::super::pinned_image::State {
+            editing: Some(8),
+            ..Default::default()
+        };
+        s.pinned_images.insert(1, pin);
+        let old = s.clone();
+        assert!(
+            s.reduce(AppEvent::Screenshot(ScreenshotEvent::ShortcutRequested(
+                ShortcutTrigger::default()
+            )))
+            .is_empty()
+        );
+        assert_eq!(s, old);
+        s.pinned_images.clear();
+        for phase in [
+            super::super::ocr::OcrPhase::Capturing,
+            super::super::ocr::OcrPhase::Recognizing,
+        ] {
+            s.ocr.phase = phase;
+            let old = s.clone();
+            assert!(
+                s.reduce(AppEvent::Screenshot(ScreenshotEvent::ShortcutRequested(
+                    ShortcutTrigger::default()
+                )))
+                .is_empty()
+            );
+            assert_eq!(s, old);
+        }
+    }
+
     #[test]
     fn delay_starts_without_capture_and_only_current_deadline_can_prepare() {
         for seconds in [3, 5, 10] {

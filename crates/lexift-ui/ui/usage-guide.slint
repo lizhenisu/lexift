@@ -43,6 +43,9 @@ component GuideCard inherits Rectangle {
     in property <string> additional;
     in property <string> shortcut;
     in property <string> status;
+    in property <string> second-shortcut;
+    in property <string> second-status;
+    in property <bool> second-unavailable;
     in property <bool> unavailable: false;
     out property <length> intrinsic-height: content.preferred-height;
     height: root.intrinsic-height;
@@ -95,6 +98,14 @@ component GuideCard inherits Rectangle {
                 }
             }
         }
+        if root.second-shortcut != "": Text {
+            text: root.second-shortcut; color: root.second-unavailable ? Colors.secondary-foreground : Colors.primary;
+            font-size: Typography.caption-size; font-weight: 600; wrap: word-wrap; height: self.preferred-height;
+        }
+        if root.second-status != "": Text {
+            text: root.second-status; color: root.second-unavailable ? Colors.error : Colors.secondary-foreground;
+            font-size: Typography.caption-size; wrap: word-wrap; height: self.preferred-height;
+        }
         if root.status != "": Text {
             text: root.status; color: root.unavailable ? Colors.error : Colors.secondary-foreground;
             font-size: Typography.caption-size; wrap: word-wrap;
@@ -111,6 +122,9 @@ export component AppWindow inherits Window {
     in property <string> translation-shortcut;
     in property <string> ocr-shortcut;
     in property <string> annotation-shortcut;
+    in property <string> screenshot-shortcut;
+    in property <string> screenshot-shortcut-status;
+    in property <bool> screenshot-shortcut-unavailable;
     in property <string> translation-shortcut-status;
     in property <string> ocr-shortcut-status;
     in property <string> annotation-shortcut-status;
@@ -180,8 +194,11 @@ export component AppWindow inherits Window {
                                 height: root.guide-two-columns ? max(self.intrinsic-height, images.intrinsic-height) : self.intrinsic-height;
                                 icon: @image-url("assets/icons/screenshot.svg");
                                 heading: @tr("Capture and annotate"); scenario: @tr("Explain an issue or mark up a screen");
-                                instructions: @tr("Open the annotation toolbar with the shortcut, choose Screenshot and select an area. Add annotations, then copy, save or pin the image.");
-                                shortcut: root.annotation-shortcut; status: root.annotation-shortcut-status; unavailable: root.annotation-shortcut-unavailable;
+                                instructions: @tr("Press the screenshot shortcut to select an area directly. Use the annotation shortcut to open the toolbar. Add annotations, then copy, save or pin the image.");
+                                shortcut: @tr("Screenshot") + " · " + root.screenshot-shortcut;
+                                status: root.screenshot-shortcut-status; unavailable: root.screenshot-shortcut-unavailable;
+                                second-shortcut: @tr("Annotation") + " · " + root.annotation-shortcut;
+                                second-status: root.annotation-shortcut-status; second-unavailable: root.annotation-shortcut-unavailable;
                             }
                             images := GuideCard {
                                 x: root.guide-two-columns ? cards.card-width + Spacing.medium : 0px;

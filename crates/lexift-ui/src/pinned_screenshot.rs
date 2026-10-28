@@ -30,6 +30,7 @@ enum Phase {
 struct Gesture {
     serial: Cell<u64>,
     pressed: Cell<bool>,
+    native_drag: Cell<bool>,
     queued: Cell<Option<u64>>,
     closed: Cell<bool>,
     menu_epoch: Cell<u64>,
@@ -180,7 +181,6 @@ struct Pin {
     output_error: Option<String>,
     ocr_result: Option<(u64, lexift_core::domain::ocr::OcrOutcome)>,
     restore_interaction: Option<bool>,
-    native_drag: bool,
     feedback: Slot<crate::ScreenshotToastWindow>,
     feedback_timer: slint::Timer,
     feedback_measurement: Option<(u64, slint::PhysicalSize)>,
@@ -471,7 +471,7 @@ fn restore_recognition_input(id: u64) {
         let mut s = s.borrow_mut();
         let p = s.as_mut()?.windows.get_mut(&id)?;
         let w = p.window.get()?.clone_strong();
-        if w.get_recognizing() || p.native_drag {
+        if w.get_recognizing() || p.gesture.native_drag.get() {
             return None;
         }
         let allowed = p.restore_interaction.take()?;
@@ -821,6 +821,26 @@ pub(crate) fn diagnostic_visible_count() -> usize {
         })
     })
 }
+pub(crate) fn capture_idle() -> bool {
+    STATE.with(|s| {
+        s.borrow().as_ref().is_none_or(|r| {
+            r.windows.values().all(|p| {
+                let idle = !p.gesture.native_drag.get()
+                    && !p.gesture.pressed.get()
+                    && p.visibility_pending.is_none();
+                if !idle {
+                    tracing::debug!(
+                        native_drag = p.gesture.native_drag.get(),
+                        pressed = p.gesture.pressed.get(),
+                        visibility_pending = p.visibility_pending.is_some(),
+                        "Screenshot shortcut blocked by pin input"
+                    );
+                }
+                idle
+            })
+        })
+    })
+}
 pub(crate) fn active() -> bool {
     STATE.with(|s| s.borrow().as_ref().is_some_and(|s| !s.windows.is_empty()))
 }
@@ -921,7 +941,7 @@ pub(crate) fn edit_window(id: u64, editing: bool) -> Option<PinnedScreenshotWind
             return None;
         }
         p.gesture.cancel();
-        p.native_drag = false;
+        p.gesture.native_drag.set(false);
         p.restore_interaction = None;
         Some((p.window.get()?.clone_strong(), r.lifecycle.clone()))
     });
@@ -1336,7 +1356,6 @@ fn show_from(
                 output_error: None,
                 ocr_result: None,
                 restore_interaction: None,
-                native_drag: false,
                 feedback: Slot::default(),
                 feedback_timer: slint::Timer::default(),
                 feedback_measurement: None,
@@ -1376,7 +1395,9 @@ fn show_from(
 fn finish_native_drag(id: u64) {
     STATE.with(|s| {
         if let Some(p) = s.borrow_mut().as_mut().and_then(|r| r.windows.get_mut(&id)) {
-            p.native_drag = false;
+            p.gesture.native_drag.set(false);
+            // A native move loop may consume mouse-up; retire its Slint press gate as well.
+            p.gesture.cancel();
         }
     });
     restore_recognition_input(id);
@@ -1411,7 +1432,7 @@ fn begin_drag(id: u64, serial: u64) {
         (lifecycle.activate_user_requested_window)(window.window());
         STATE.with(|s| {
             if let Some(p) = s.borrow_mut().as_mut().and_then(|r| r.windows.get_mut(&id)) {
-                p.native_drag = true;
+                p.gesture.native_drag.set(true);
             }
         });
         if !(lifecycle.begin_window_drag)(window.window()) {
@@ -1464,6 +1485,10 @@ fn prepare(id: u64, attempt: u8) {
                     return;
                 }
                 if matches!(event, crate::PopupPointerInput::NativeMoveFinished) {
+                    // Publish native completion immediately; registry cleanup remains deferred
+                    // because this callback may reenter while a view borrow is held.
+                    gesture.native_drag.set(false);
+                    gesture.cancel();
                     deferred.post(move || finish_native_drag(id));
                     return;
                 }
@@ -1471,6 +1496,7 @@ fn prepare(id: u64, attempt: u8) {
                     return;
                 }
                 if matches!(event, crate::PopupPointerInput::LeftReleased { .. }) {
+                    gesture.native_drag.set(false);
                     deferred.post(move || finish_native_drag(id));
                 }
                 if matches!(
@@ -2027,6 +2053,18 @@ mod tests {
         );
         slint::platform::update_timers_and_animations();
         assert_eq!(DRAGS.get(), 1);
+        STATE.with(|s| {
+            let mut s = s.borrow_mut();
+            let p = s.as_mut().unwrap().windows.get_mut(&1).unwrap();
+            p.gesture.press();
+            p.gesture.native_drag.set(true);
+        });
+        assert!(!capture_idle());
+        finish_native_drag(1);
+        assert!(
+            capture_idle(),
+            "native completion releases the press gate without a local mouse-up"
+        );
         window.invoke_press_changed(true);
         window.invoke_drag_requested();
         close(1);

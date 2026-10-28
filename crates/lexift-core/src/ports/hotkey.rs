@@ -17,6 +17,26 @@ pub trait HotkeyPort: Send + Sync {
         Ok(())
     }
 
+    fn register_screenshot_hotkey(
+        &self,
+        _config: HotkeyConfig,
+        _handler: HotkeyHandler,
+    ) -> Result<()> {
+        Err(crate::Error::new(
+            "Screenshot shortcut is unavailable on this platform",
+        ))
+    }
+    fn replace_screenshot_hotkey(
+        &self,
+        config: HotkeyConfig,
+        handler: HotkeyHandler,
+    ) -> Result<()> {
+        self.register_screenshot_hotkey(config, handler)
+    }
+    fn unregister_screenshot_hotkey(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Registers the independent annotation toolbar shortcut.
     fn register_annotation_hotkey(
         &self,

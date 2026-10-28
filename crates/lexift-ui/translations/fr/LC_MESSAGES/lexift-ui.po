@@ -2123,3 +2123,9 @@ msgstr "Modification impossible. Le raccourci précédent reste actif."
 
 msgid "OCR is disabled. Enable it in Settings."
 msgstr "L’OCR est désactivé. Activez-le dans les paramètres."
+
+msgid "Press the screenshot shortcut to select an area directly. Use the annotation shortcut to open the toolbar. Add annotations, then copy, save or pin the image."
+msgstr "Utilisez le raccourci de capture pour sélectionner une zone, ou celui des annotations pour ouvrir la barre. Annotez, puis copiez, enregistrez ou épinglez l’image."
+
+msgid "Translation, annotation, OCR and screenshot shortcuts must differ"
+msgstr "Les raccourcis de traduction, annotation, OCR et capture doivent être différents"

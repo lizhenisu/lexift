@@ -136,11 +136,11 @@ mod tests {
     }
 
     #[test]
-    fn save_creates_parent_and_v10_file() {
+    fn save_creates_parent_and_v11_file() {
         let (_directory, store) = fixture();
         store.save(&settings("ja")).unwrap();
         let contents = fs::read_to_string(store.path()).unwrap();
-        assert!(contents.contains("schema_version = 10"));
+        assert!(contents.contains("schema_version = 11"));
         assert!(contents.contains("target_language = \"ja\""));
         assert!(contents.contains("provider = \"deepl\""));
         assert!(contents.contains("key = \"X\""));
@@ -241,7 +241,7 @@ mod tests {
         assert!(
             fs::read_to_string(store.path())
                 .unwrap()
-                .contains("schema_version = 10")
+                .contains("schema_version = 11")
         );
     }
 
@@ -314,6 +314,30 @@ mod tests {
     }
 
     #[test]
+    fn old_schemas_add_screenshot_shortcut_without_changing_existing_settings() {
+        let (_directory, store) = fixture();
+        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+        for version in 1..=10 {
+            fs::write(
+                store.path(),
+                format!("schema_version = {version}\n[settings]\ntarget_language = 'de'\n"),
+            )
+            .unwrap();
+            let mut settings = store.load().unwrap();
+            assert_eq!(settings.screenshot_hotkey.to_string(), "Alt + S");
+            assert_eq!(settings.target_language.0.as_str(), "de");
+            settings.screenshot_hotkey = "Ctrl+Shift+F9".parse().unwrap();
+            store.save(&settings).unwrap();
+            assert_eq!(store.load().unwrap(), settings);
+            assert!(
+                fs::read_to_string(store.path())
+                    .unwrap()
+                    .contains("schema_version = 11")
+            );
+        }
+    }
+
+    #[test]
     fn credential_reference_round_trips_without_a_secret() {
         let (_directory, store) = fixture();
         let settings = Settings {
@@ -323,7 +347,7 @@ mod tests {
         };
         store.save(&settings).unwrap();
         let contents = fs::read_to_string(store.path()).unwrap();
-        assert!(contents.contains("schema_version = 10"));
+        assert!(contents.contains("schema_version = 11"));
         assert!(contents.contains("[credentials]"));
         assert!(contents.contains("deepl = \"deepl-primary\""));
         assert!(!contents.contains("api_key"));

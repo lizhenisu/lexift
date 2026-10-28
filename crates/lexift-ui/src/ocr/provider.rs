@@ -69,6 +69,26 @@ pub(crate) fn wire_settings(settings: &crate::SettingsWindow, handler: Rc<dyn Fn
 pub(crate) fn apply_settings(window: &crate::SettingsWindow, state: &lexift_core::AppState) {
     let o = &state.ocr;
     window.set_draft_ocr_hotkey_label(state.desired_settings.ocr_hotkey.to_string().into());
+    window.set_draft_screenshot_hotkey_label(
+        state.desired_settings.screenshot_hotkey.to_string().into(),
+    );
+    window.set_screenshot_hotkey_status(
+        crate::i18n::tr(if state.registered_hotkeys.screenshot.is_some() {
+            "Registered"
+        } else {
+            "Unavailable"
+        })
+        .into(),
+    );
+    window.set_screenshot_hotkey_error_text(
+        if state.settings_error_field
+            == Some(lexift_core::domain::settings::SettingsField::ScreenshotHotkey)
+        {
+            crate::i18n::tr(&state.settings_error_message).into()
+        } else {
+            "".into()
+        },
+    );
     window.set_ocr_language_index(lexift_core::domain::ocr::language_index(
         state.desired_settings.ocr_language.as_deref(),
     ));

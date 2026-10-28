@@ -321,6 +321,14 @@ pub(super) fn wire_settings_callbacks(
             });
         }
     });
+    let h = handler.clone();
+    settings.on_screenshot_hotkey_change_requested(move |value| {
+        if let Ok(hotkey) = value.to_string().parse::<HotkeyConfig>() {
+            h(AppEvent::SettingsChangeRequested {
+                change: SettingsChange::ScreenshotHotkey(hotkey),
+            });
+        }
+    });
     crate::ocr::provider::wire_settings(settings, handler.clone());
     let annotation_settings_handler = Rc::clone(&handler);
     settings.on_annotation_hotkey_change_requested(move |hotkey| {
@@ -663,9 +671,9 @@ pub(super) fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static
         SettingsFeedback::SettingsSaved(SettingsField::TargetLanguage) => {
             ("Target language saved", false)
         }
-        SettingsFeedback::SettingsSaved(SettingsField::OcrHotkey | SettingsField::Hotkey) => {
-            ("Shortcut saved", false)
-        }
+        SettingsFeedback::SettingsSaved(
+            SettingsField::OcrHotkey | SettingsField::Hotkey | SettingsField::ScreenshotHotkey,
+        ) => ("Shortcut saved", false),
         SettingsFeedback::SettingsSaved(SettingsField::AnnotationHotkey) => {
             ("Shortcut saved", false)
         }
@@ -689,9 +697,9 @@ pub(super) fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static
         SettingsFeedback::SettingsSaveFailed(SettingsField::TargetLanguage) => {
             ("Target language wasn't saved", true)
         }
-        SettingsFeedback::SettingsSaveFailed(SettingsField::OcrHotkey | SettingsField::Hotkey) => {
-            ("Shortcut wasn't saved", true)
-        }
+        SettingsFeedback::SettingsSaveFailed(
+            SettingsField::OcrHotkey | SettingsField::Hotkey | SettingsField::ScreenshotHotkey,
+        ) => ("Shortcut wasn't saved", true),
         SettingsFeedback::SettingsSaveFailed(SettingsField::AnnotationHotkey) => {
             ("Shortcut wasn't saved", true)
         }
