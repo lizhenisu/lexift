@@ -764,6 +764,20 @@ pub fn set_clipboard_history_dismissal(
     Ok(())
 }
 
+/// Wait for the same already-prepared refresh canvases to reach the desktop together.
+pub fn complete_screenshot_refresh(
+    windows: &[lexift_core::ports::magnifier::WindowToken],
+    presented: bool,
+) -> lexift_core::Result<bool> {
+    #[cfg(target_os = "windows")]
+    return self::windows::screen_interaction_window::complete_refresh(windows, presented);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (windows, presented);
+        Ok(false)
+    }
+}
+
 /// Queue the first-frame handoff only after the caller has returned from rendering.
 pub fn complete_screen_interaction_frame(
     window: &impl raw_window_handle::HasWindowHandle,

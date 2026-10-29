@@ -360,6 +360,42 @@ pub(super) fn frozen(frozen: bool) {
     crate::tray_menu::refresh_pin_recovery();
 }
 
+/// Reveal live pin pixels for one-shot capture, retaining the frozen input gate.
+pub(crate) fn capture_visibility(visible: bool) -> bool {
+    let ids = STATE.with(|s| {
+        s.borrow()
+            .as_ref()
+            .filter(|r| r.frozen)
+            .map(|r| {
+                r.windows
+                    .iter()
+                    .filter_map(|(&id, p)| {
+                        (!p.user_hidden && p.phase == Phase::Visible).then_some(id)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    });
+    let mut ready = true;
+    for id in ids {
+        if visible {
+            ready = show(id) && ready;
+        } else {
+            STATE.with(|s| {
+                if let Some(w) = s
+                    .borrow()
+                    .as_ref()
+                    .and_then(|r| r.windows.get(&id))
+                    .and_then(|p| p.window.get())
+                {
+                    let _ = w.hide();
+                }
+            });
+        }
+    }
+    ready
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -834,6 +870,23 @@ mod tests {
         assert!(!first.window().is_visible() && !second.window().is_visible());
         let (c, third) = create(33);
         assert!(third.window().is_visible() && !core.borrow().pinned_images[&c].user_hidden);
+        set_frozen(true);
+        assert!(!third.window().is_visible());
+        assert!(capture_visibility(true));
+        assert!(third.window().is_visible());
+        assert!(
+            !first.window().is_visible() && !second.window().is_visible(),
+            "user-hidden pins never appear during refresh capture"
+        );
+        third.invoke_escape_requested();
+        assert!(
+            STATE.with(|s| s.borrow().as_ref().unwrap().windows.contains_key(&c)),
+            "temporary pixels do not reopen local input"
+        );
+        assert!(capture_visibility(false));
+        assert!(!third.window().is_visible());
+        set_frozen(false);
+        assert!(third.window().is_visible() && !first.window().is_visible());
         fail.set(true);
         intent(false);
         pump(&core);

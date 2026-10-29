@@ -2129,3 +2129,15 @@ msgstr "Drücken Sie das Screenshot-Kürzel, um direkt einen Bereich auszuwähle
 
 msgid "Translation, annotation, OCR and screenshot shortcuts must differ"
 msgstr "Die Tastenkürzel für Übersetzung, Anmerkungen, OCR und Screenshots müssen verschieden sein"
+
+msgid "Refresh screenshot"
+msgstr "Screenshot aktualisieren"
+
+msgid "Screenshot refresh failed"
+msgstr "Screenshot konnte nicht aktualisiert werden"
+
+msgid "Display layout changed. Start a new screenshot."
+msgstr "Die Bildschirmanordnung wurde geändert. Erstellen Sie einen neuen Screenshot."
+
+msgid "Image exceeds the processing memory limit"
+msgstr "Das Bild überschreitet das Speicherlimit für die Verarbeitung"

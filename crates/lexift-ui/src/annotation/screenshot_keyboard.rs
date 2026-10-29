@@ -185,9 +185,26 @@ fn handle(
                             })
                         })
                     });
-                current(r, generation, owner) && foreground && super::picker_feedback(r).is_some()
+                let current = current(r, generation, owner);
+                let feedback = super::picker_feedback(r).is_some();
+                if down && !repeat {
+                    tracing::debug!(
+                        generation,
+                        current,
+                        foreground,
+                        feedback,
+                        mouse = r.document.mode.is_mouse(),
+                        panel = r.toolbar_state.panel.get().is_some(),
+                        editor = r.editor.window().is_some(),
+                        "Screenshot color input guards"
+                    );
+                }
+                current && foreground && feedback
             })
         });
+        if down && !repeat {
+            tracing::debug!(generation,eligible,point=?crate::screen_interaction::pixel_picker::location(),"Screenshot color key eligibility");
+        }
         if eligible && down && !repeat {
             crate::screen_interaction::pixel_picker::copy();
         }

@@ -1061,6 +1061,7 @@ impl AppState {
                 self.pinned_images.clear();
                 self.screenshot.shortcut_pending = None;
                 self.screenshot.phase = crate::domain::screenshot::ScreenshotPhase::Idle;
+                self.screenshot.refresh = None;
                 let mut commands =
                     self.annotation_export
                         .session

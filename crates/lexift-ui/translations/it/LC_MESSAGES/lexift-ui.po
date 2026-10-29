@@ -2129,3 +2129,15 @@ msgstr "Usa la scorciatoia di cattura per selezionare un’area o quella di anno
 
 msgid "Translation, annotation, OCR and screenshot shortcuts must differ"
 msgstr "Le scorciatoie di traduzione, annotazione, OCR e cattura devono essere diverse"
+
+msgid "Refresh screenshot"
+msgstr "Aggiorna cattura"
+
+msgid "Screenshot refresh failed"
+msgstr "Aggiornamento della cattura non riuscito"
+
+msgid "Display layout changed. Start a new screenshot."
+msgstr "La disposizione degli schermi è cambiata. Acquisisci una nuova schermata."
+
+msgid "Image exceeds the processing memory limit"
+msgstr "L’immagine supera il limite di memoria di elaborazione"

@@ -26,7 +26,10 @@ pub enum ScreenshotPhase {
     Editing,
     Output,
     Recognizing,
+    Refreshing,
 }
+#[path = "screenshot_refresh.rs"]
+pub mod refresh;
 pub use super::ocr::OcrOutcome;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScreenshotOutput {
@@ -55,6 +58,8 @@ pub enum CaptureOrigin {
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ScreenshotState {
+    pub frame_version: u64,
+    pub refresh: Option<refresh::State>,
     pub shortcut_sequence: u64,
     pub shortcut_pending: Option<u64>,
     pub origin: CaptureOrigin,
@@ -103,6 +108,7 @@ impl ScreenshotState {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotEvent {
+    Refresh(refresh::Event),
     ShortcutRequested(ShortcutTrigger),
     ShortcutFrozen {
         id: u64,
@@ -181,6 +187,7 @@ pub enum ScreenshotEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotCommand {
+    Refresh(refresh::Command),
     FreezeShortcut {
         id: u64,
         trigger: ShortcutTrigger,
@@ -256,6 +263,8 @@ fn start_capture(
 ) -> Vec<AppCommand> {
     let s = &mut state.screenshot;
     s.origin = origin;
+    s.refresh = None;
+    s.frame_version = 0;
     s.session = s
         .session
         .checked_add(1)
@@ -284,6 +293,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
     let delay_allowed = delay_available(state);
     let s = &mut state.screenshot;
     match event {
+        ScreenshotEvent::Refresh(event) => refresh::reduce(s, event),
         ScreenshotEvent::ShortcutRequested(trigger)
             if delay_allowed
                 && state.editor_ocr.request.is_none()
@@ -599,6 +609,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 s.error = Some(error);
             }
             s.shortcut_pending = None;
+            s.refresh = None;
             s.phase = ScreenshotPhase::Idle;
             s.element_pending = None;
             s.long = None;

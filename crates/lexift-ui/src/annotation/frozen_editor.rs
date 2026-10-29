@@ -115,6 +115,9 @@ pub(super) fn frame(r: &Registry, index: usize) -> Option<tiny_skia::Pixmap> {
     screenshot_preview::paint(&input(r, index)?, &AtomicBool::new(false))
 }
 pub(super) fn render(r: &mut Registry) {
+    if !screenshot::refresh::render_allowed() {
+        return;
+    }
     if screenshot::long::busy()
         || screenshot::long::image_editing() && screenshot::long::editor().is_none()
     {
@@ -185,6 +188,7 @@ pub(super) fn present_shared(
     labels: Vec<(u64, Option<screenshot::size_input::Hit>)>,
 ) {
     let mut failed = false;
+    let mut installed = false;
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let Some(r) = slot.as_mut().filter(|r| r.generation == generation) else {
@@ -322,6 +326,7 @@ pub(super) fn present_shared(
             return;
         }
         editing.presented = revision;
+        installed = true;
         for ((layer, frame), (canvas, label)) in
             r.canvas_state.canvases.iter_mut().zip(frames).zip(labels)
         {
@@ -343,11 +348,17 @@ pub(super) fn present_shared(
             }
         }
     });
+    if (installed || failed) && screenshot::refresh::presented(generation, id, revision, !failed) {
+        return;
+    }
     if failed {
         report_failure(id);
     }
 }
 fn report_failure(id: u64) {
+    if screenshot::refresh::render_failed(id) {
+        return;
+    }
     tracing::debug!(session = id, "Frozen editor presentation failed");
     if let Some((window, editor)) = history_editor::identity().filter(|(_, editor)| *editor == id) {
         history_editor::unavailable(window, editor);

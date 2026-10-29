@@ -7,6 +7,9 @@ pub(super) struct PresentedFrame {
 }
 
 impl PresentedFrame {
+    pub fn replay(&self, present: impl FnOnce(&Pixmap) -> bool) -> bool {
+        self.last.as_ref().is_none_or(present)
+    }
     /// A failed native presentation is never cached, so the same pixels can retry.
     pub fn submit(&mut self, frame: Pixmap, present: impl FnOnce(&Pixmap) -> bool) -> bool {
         if self.last.as_ref().is_some_and(|last| {

@@ -300,6 +300,7 @@ fn unavailable(state: &AppState) -> bool {
             | ScreenshotPhase::Preparing
             | ScreenshotPhase::Selecting
             | ScreenshotPhase::Recognizing
+            | ScreenshotPhase::Refreshing
             | ScreenshotPhase::Output
     ) || state
         .screenshot

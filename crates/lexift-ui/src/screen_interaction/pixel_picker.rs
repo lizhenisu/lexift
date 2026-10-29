@@ -47,6 +47,16 @@ pub(crate) fn begin(id: u64, frames: Arc<Vec<CapturedRegion>>, refresh: Rc<dyn F
         s.refresh = Some(refresh);
     });
 }
+pub(crate) fn replace_frames(id: u64, frames: Arc<Vec<CapturedRegion>>) {
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        if s.id == id {
+            s.frames = Some(frames);
+            s.timer.stop();
+            s.result_at = None;
+        }
+    });
+}
 pub(crate) fn clear() {
     STATE.with(|s| *s.borrow_mut() = State::default());
     ASSETS.with(|s| s.borrow_mut().clear());

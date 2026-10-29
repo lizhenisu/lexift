@@ -366,6 +366,10 @@ pub(crate) fn toggle(requested_at: Instant) {
             })
         });
         let input = r.toolbar_state.main.input();
+        main.on_refresh_requested(move || {
+            later_main(&input, generation, revision, screenshot::refresh::request)
+        });
+        let input = r.toolbar_state.main.input();
         main.on_recognize_text_requested(move || {
             later_main(&input, generation, revision, screenshot::recognize_text)
         });

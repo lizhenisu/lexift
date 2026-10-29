@@ -29,6 +29,7 @@
 - [架构决策](architecture/architecture.md)
 - [Cargo Workspace 设计](architecture/workspace.md)
 - [功能能力与路线图](planning/capabilities-roadmap.md)
+- [PixPin 刷新底图研究](planning/pixpin-refresh-research.md)
 - [PixPin 长截图链路与交互研究](planning/pixpin-long-screenshot-research.md)
 - [PixPin 长图结果编辑器研究](planning/pixpin-image-editor-research.md)
 - [阶段实施计划与阶段验收记录](planning/implementation-plan.md)：M2／M3／M4 的阶段背景，不能单独作为当前功能清单。
@@ -47,7 +48,7 @@
 - [屏幕区域选择基础](features/region-selection.md)
 - [共用屏幕交互宿主](features/screen-interaction.md)
 - [独立截图快捷键](features/screenshot-hotkey.md) · [专项验证](releases/screenshot-hotkey.md)
-- [截图模式与临时贴图](features/screenshot-mode.md)
+- [截图模式与临时贴图](features/screenshot-mode.md) · [刷新底图验证](releases/screenshot-refresh.md)
 - [贴图交互、透明度与统一显隐](features/pin-interaction.md)
 - [截图／长图图片历史](features/image-history.md)
 - [图片历史验证](releases/screenshot-image-history.md)

@@ -101,6 +101,8 @@ pub(super) type PrepareScreenWindow = Rc<
     ) -> PassiveWindowPreparation,
 >;
 pub(super) type CompleteRegionFrame = Rc<dyn Fn(&slint::Window) -> bool>;
+pub(super) type CompleteScreenshotRefresh =
+    Rc<dyn Fn(&[lexift_core::ports::magnifier::WindowToken], bool) -> bool>;
 pub(super) type SetPopupDismissal = Rc<dyn Fn(&slint::Window, bool) -> bool>;
 pub(super) type AttachToolWindow = Rc<dyn Fn(&slint::Window, &slint::Window) -> bool>;
 pub(super) type BeginWindowResize = Rc<dyn Fn(&slint::Window, PopupResizeEdge, bool) -> bool>;
@@ -142,6 +144,7 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) screen_creation: ScreenCreation,
     pub(crate) prepare_screen_window: PrepareScreenWindow,
     pub(crate) complete_region_frame: CompleteRegionFrame,
+    pub(crate) complete_screenshot_refresh: CompleteScreenshotRefresh,
     pub(crate) complete_passive_window_show: CompletePassiveWindowShow,
     pub(crate) complete_toolbar_show: CompletePassiveWindowShow,
     pub(super) toolbar_target_current:
@@ -220,6 +223,7 @@ impl WindowLifecycleCallbacks {
             screen_creation: Rc::new(|factory| factory()),
             prepare_screen_window: Rc::new(|_, _, _| PassiveWindowPreparation::Ready),
             complete_region_frame: Rc::new(|_| false),
+            complete_screenshot_refresh: Rc::new(|_, _| false),
             complete_passive_window_show: Rc::new(complete_passive_window_show),
             complete_toolbar_show: Rc::new(|_, _| true),
             toolbar_target_current: Rc::new(|_| false),
@@ -383,6 +387,15 @@ impl WindowLifecycleCallbacks {
     }
 
     /// Supplies native monitor bounds and canvas hit-testing without exposing platform APIs to UI.
+    /// Complete one refresh group after all existing canvas HWNDs have received new pixels.
+    pub fn with_screenshot_refresh_presentation(
+        mut self,
+        callback: impl Fn(&[lexift_core::ports::magnifier::WindowToken], bool) -> bool + 'static,
+    ) -> Self {
+        self.complete_screenshot_refresh = Rc::new(callback);
+        self
+    }
+
     pub fn with_screenshot_displays(
         mut self,
         query: impl Fn() -> Vec<(Rect, f32)> + 'static,

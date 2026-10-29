@@ -28,6 +28,8 @@ mod history;
 mod import;
 #[path = "screenshot_long.rs"]
 mod long;
+#[path = "screenshot_refresh.rs"]
+mod refresh;
 type CaptureFactory = fn() -> Option<Arc<dyn ScreenCapturePort>>;
 struct PreparedScreenshot {
     frames: Vec<CapturedRegion>,
@@ -35,6 +37,7 @@ struct PreparedScreenshot {
 }
 struct Session {
     id: u64,
+    source: ExportRequest,
     cancelled: Arc<AtomicBool>,
     frames: Option<Arc<Vec<CapturedRegion>>>,
     long_source_frames: Option<Arc<Vec<CapturedRegion>>>,
@@ -56,6 +59,7 @@ mod image_ocr;
 pub(crate) struct ScreenshotRuntime {
     imports: Mutex<BTreeMap<u64, import::Job>>,
     delay: Mutex<Option<(u64, tokio::task::JoinHandle<()>)>>,
+    refresh: Mutex<Option<refresh::Job>>,
     history: Mutex<history::Cache>,
     long: Mutex<Option<long::Job>>,
     capture: CaptureFactory,
@@ -83,6 +87,7 @@ impl ScreenshotRuntime {
         Self {
             imports: Default::default(),
             delay: Default::default(),
+            refresh: Default::default(),
             history: Default::default(),
             long: Default::default(),
             capture,
@@ -152,6 +157,7 @@ impl ScreenshotRuntime {
                 task.abort();
             }
         }
+        refresh::sync(self, state, quitting);
         long::sync(self, state, quitting);
         let mut color = self.color_job.lock().unwrap_or_else(|p| p.into_inner());
         if color.as_ref().is_some_and(|(s, id, _)| {
@@ -543,6 +549,7 @@ impl ScreenshotRuntime {
     }
     pub fn execute(self: &Arc<Self>, controller: &Arc<AppController>, command: ScreenshotCommand) {
         match command {
+            ScreenshotCommand::Refresh(command) => refresh::execute(self, controller, command),
             ScreenshotCommand::FreezeShortcut { id, trigger } => {
                 controller.ui.freeze_screenshot_shortcut(id, trigger)
             }
@@ -703,6 +710,7 @@ impl ScreenshotRuntime {
                     .lock()
                     .unwrap_or_else(|p| p.into_inner())
                     .replace(Session {
+                        source: request.clone(),
                         id: session,
                         cancelled: cancelled.clone(),
                         frames: None,

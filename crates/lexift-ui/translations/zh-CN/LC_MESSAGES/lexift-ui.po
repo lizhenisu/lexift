@@ -2129,3 +2129,15 @@ msgstr "按截图快捷键直接框选，或按标注快捷键打开工具条。
 
 msgid "Translation, annotation, OCR and screenshot shortcuts must differ"
 msgstr "翻译、标注、OCR 和截图快捷键必须各不相同"
+
+msgid "Refresh screenshot"
+msgstr "刷新截图"
+
+msgid "Screenshot refresh failed"
+msgstr "截图刷新失败"
+
+msgid "Display layout changed. Start a new screenshot."
+msgstr "显示器布局已变化，请重新截图。"
+
+msgid "Image exceeds the processing memory limit"
+msgstr "图片超出处理内存限制"

@@ -317,9 +317,14 @@ fn preparation_blocks_window_but_active_edit_allows_browsing_only() {
     );
     s.reduce(AppEvent::ImageHistory(Event::Delete { ticket }));
     assert!(s.image_history.cache.entries().is_empty());
-    s.screenshot.phase = ScreenshotPhase::Selecting;
-    s.reduce(AppEvent::ImageHistory(Event::Open {
-        anchor: Default::default(),
-    }));
-    assert!(s.image_history.window.is_none());
+    for phase in [ScreenshotPhase::Selecting, ScreenshotPhase::Refreshing] {
+        s.screenshot.phase = phase;
+        s.reduce(AppEvent::ImageHistory(Event::Open {
+            anchor: Default::default(),
+        }));
+        assert!(
+            s.image_history.window.is_none(),
+            "capture and refresh both retire the history browser"
+        );
+    }
 }

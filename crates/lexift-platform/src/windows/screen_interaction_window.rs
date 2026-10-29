@@ -327,6 +327,59 @@ fn prepare_surface_native(
 }
 /// Called in an event-loop turn after the renderer returns, not inside its notifier.
 /// WM_PAINT must also have occurred while visible; hidden pre-rendering alone is insufficient.
+/// Prepare only the owned refresh HWNDs, retire hidden bootstrap pixels, then
+/// acknowledge the installed group through one compositor barrier.
+pub(crate) fn complete_refresh(
+    windows: &[lexift_core::ports::magnifier::WindowToken],
+    presented: bool,
+) -> Result<bool> {
+    let surfaces = windows
+        .iter()
+        .map(|w| {
+            let hwnd = HWND(w.0 as *mut _);
+            reference(hwnd).map(|p| (hwnd, unsafe { (*p).instance }))
+        })
+        .collect::<Option<Vec<_>>>();
+    let Some(surfaces) = surfaces.filter(|s| !s.is_empty()) else {
+        return Ok(false);
+    };
+    let valid = || {
+        surfaces.iter().all(|(hwnd, instance)| {
+            (!presented || unsafe { IsWindowVisible(*hwnd).as_bool() })
+                && reference(*hwnd).is_some_and(|p| unsafe { (*p).instance == *instance })
+        })
+    };
+    if !valid() {
+        return Ok(false);
+    }
+    if !presented {
+        // A hidden HWND may still be fading on the desktop. Disable the window-local
+        // show/hide transition BEFORE suspension; DwmFlush alone does not finish animation.
+        let disabled = 1_i32;
+        for (hwnd, _) in surfaces {
+            unsafe {
+                windows::Win32::Graphics::Dwm::DwmSetWindowAttribute(
+                    hwnd,
+                    windows::Win32::Graphics::Dwm::DWMWA_TRANSITIONS_FORCEDISABLED,
+                    &disabled as *const _ as _,
+                    std::mem::size_of_val(&disabled) as u32,
+                )
+            }
+            .map_err(|_| Error::new("Screenshot refresh failed"))?;
+            if !unsafe { IsWindowVisible(hwnd).as_bool() }
+                && let Some(p) = reference(hwnd)
+            {
+                unsafe {
+                    (*p).bootstrap.take();
+                }
+            }
+        }
+        return Ok(true);
+    }
+    unsafe { DwmFlush() }.map_err(|_| Error::new("Screenshot refresh failed"))?;
+    Ok(valid())
+}
+
 pub(crate) fn complete(window: &impl raw_window_handle::HasWindowHandle) -> Result<bool> {
     let hwnd = super::popup::required_hwnd(window)?;
     let Some(data) = reference(hwnd) else {
@@ -632,8 +685,37 @@ mod tests {
         assert!(complete_group(b.0, pb, true));
         assert!(unsafe { (*pa).feedback_notified && (*pb).feedback_notified });
         assert!(!complete_group(a.0, pa, true));
+        let tokens = [
+            lexift_core::ports::magnifier::WindowToken(a.0.0 as isize),
+            lexift_core::ports::magnifier::WindowToken(b.0.0 as isize),
+        ];
+        assert!(
+            !complete_refresh(&tokens, true).unwrap(),
+            "hidden group cannot acknowledge a refreshed desktop"
+        );
+        assert!(
+            complete_refresh(&tokens, false).unwrap(),
+            "only a hidden owned group can retire its bootstrap"
+        );
+        unsafe {
+            let _ = ShowWindow(a.0, SW_SHOWNOACTIVATE);
+            let _ = ShowWindow(b.0, SW_SHOWNOACTIVATE);
+        }
+        assert!(
+            complete_refresh(&tokens, true).unwrap(),
+            "refresh uses its own barrier after bootstrap already completed"
+        );
+        unsafe {
+            let _ = ShowWindow(b.0, SW_HIDE);
+        }
+        assert!(!complete_refresh(&tokens, true).unwrap());
+        assert!(!complete_refresh(&[], true).unwrap());
         drop(a);
         drop(b);
+        assert!(
+            !complete_refresh(&tokens, true).unwrap(),
+            "destroyed windows cannot acknowledge an old version"
+        );
         assert!(!GROUPS.with(|g| g.borrow().contains_key(&700)));
         prepare_pixels(701, &frames, &AtomicBool::new(false)).unwrap();
         clear_pixels(701);

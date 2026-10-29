@@ -16,6 +16,9 @@ use std::sync::atomic::AtomicBool;
 
 pub(super) use super::frozen_editor::{Editing, frame, render};
 
+#[path = "screenshot_refresh.rs"]
+pub(crate) mod refresh;
+
 #[path = "screenshot_focus.rs"]
 pub(super) mod handoff;
 #[path = "screenshot_keyboard.rs"]
@@ -51,6 +54,7 @@ struct Flow {
     toast_timer: slint::Timer,
     toast_measurement: Option<(u64, slint::PhysicalSize)>,
     toast_operation: Option<u64>,
+    refresh_feedback: Option<(u64, u64)>,
     ocr_context: Option<OcrFeedbackContext>,
 }
 thread_local! { static FLOW:RefCell<Flow>=RefCell::new(Flow::default()); }
@@ -160,17 +164,29 @@ pub(crate) fn sync(state: &ScreenshotState) {
         }
         let changed = slot.state.error != state.error
             || slot.state.session != state.session
-            || slot.state.operation != state.operation;
+            || slot.state.operation != state.operation
+            || (slot.state.refresh.is_some() && state.refresh.is_none());
         if slot.state.session != state.session || slot.state.phase != state.phase {
             tracing::debug!(session=state.session, operation=state.operation,
                 previous=?slot.state.phase, phase=?state.phase,
                 history=state.last_region.is_some(), reusable=state.reusable_region().is_some(),
                 "Screenshot view phase changed");
         }
+        if slot.state.phase == ScreenshotPhase::Refreshing
+            && state.phase == ScreenshotPhase::Editing
+            && state.error.is_some()
+        {
+            slot.refresh_feedback = Some((state.session, state.operation));
+        } else if slot.state.session != state.session
+            || slot.state.operation != state.operation
+            || state.error.is_none()
+        {
+            slot.refresh_feedback = None;
+        }
         slot.state = state.clone();
         changed && state.error.is_some()
     });
-    if feedback && state.long.is_none() {
+    if feedback && state.long.is_none() && state.phase != ScreenshotPhase::Refreshing {
         let state = state.clone();
         slint::Timer::single_shot(Duration::ZERO, move || show_feedback(&state));
     }
@@ -179,10 +195,14 @@ pub(crate) fn sync(state: &ScreenshotState) {
             if let Some(main) = r.toolbar_state.main.get() {
                 main.set_output_busy(matches!(
                     state.phase,
-                    ScreenshotPhase::Output | ScreenshotPhase::Recognizing
+                    ScreenshotPhase::Output
+                        | ScreenshotPhase::Recognizing
+                        | ScreenshotPhase::Refreshing
                 ));
                 main.set_feedback(crate::i18n::tr(state.error.as_deref().unwrap_or("")).into());
                 main.set_long_capture_available(long::available(r));
+                main.set_refresh_available(refresh::available(r));
+                main.set_refresh_busy(state.phase == ScreenshotPhase::Refreshing);
             }
             if r.screenshot.is_some() {
                 if state.phase != ScreenshotPhase::Editing {
@@ -190,7 +210,9 @@ pub(crate) fn sync(state: &ScreenshotState) {
                     // Only an actual output for this editor revokes its pending focus request.
                     if matches!(
                         state.phase,
-                        ScreenshotPhase::Output | ScreenshotPhase::Recognizing
+                        ScreenshotPhase::Output
+                            | ScreenshotPhase::Recognizing
+                            | ScreenshotPhase::Refreshing
                     ) && r.screenshot.as_ref().is_some_and(|e| e.id == state.session)
                     {
                         handoff::cancel(r);
@@ -487,6 +509,7 @@ pub(crate) fn restore(id: u64) {
         s.recovery.take()
     });
     let Some(recovery) = recovery else { return };
+    refresh::clear();
     crate::screen_interaction::pixel_picker::clear();
     crate::screen_interaction::size_label::clear();
     crate::screen_interaction::screenshot_help::clear();
@@ -512,6 +535,7 @@ pub(crate) fn restore(id: u64) {
     show_ocr_feedback(id);
 }
 pub(crate) fn shutdown() {
+    refresh::clear();
     delay::clear();
     long::clear();
     crate::screen_interaction::pixel_picker::clear();
@@ -540,7 +564,12 @@ pub(super) fn recognizing() -> bool {
         || image_transform::busy()
         || editor_ocr::busy()
         || long::busy()
-        || FLOW.with(|s| s.borrow().state.phase == ScreenshotPhase::Recognizing)
+        || FLOW.with(|s| {
+            matches!(
+                s.borrow().state.phase,
+                ScreenshotPhase::Recognizing | ScreenshotPhase::Refreshing
+            )
+        })
 }
 /// Freeze only crop identity here; OCR pixels are owned by the App capture session.
 pub(super) fn recognize_text() {
@@ -1056,6 +1085,20 @@ fn show_ocr_feedback(id: u64) {
 }
 
 fn show_feedback(state: &ScreenshotState) {
+    if !FLOW.with(|f| {
+        let f = f.borrow();
+        f.state.session == state.session
+            && f.state.operation == state.operation
+            && f.state.phase == state.phase
+            && f.state.error == state.error
+    }) {
+        return;
+    }
+    if state.phase == ScreenshotPhase::Refreshing {
+        return;
+    }
+    let passive =
+        FLOW.with(|f| f.borrow().refresh_feedback == Some((state.session, state.operation)));
     let Some(message) = state.error.as_ref() else {
         return;
     };
@@ -1092,6 +1135,8 @@ fn show_feedback(state: &ScreenshotState) {
         };
         crate::theme::apply(&toast);
         toast.set_message(crate::i18n::error(message).into());
+        toast.set_passive(passive);
+        toast.set_error(true);
         toast.on_dismissed(|| {
             slint::Timer::single_shot(Duration::ZERO, || {
                 FLOW.with(|s| s.borrow_mut().toast.clear())
@@ -1106,7 +1151,7 @@ fn show_feedback(state: &ScreenshotState) {
         bounds,
         prepare,
         lifecycle,
-        false,
+        passive,
         revision,
         0,
     );

@@ -576,6 +576,34 @@ impl UiHandle {
             crate::annotation::screenshot::delay::begin(session, seconds, ready);
         });
     }
+    pub fn suspend_screenshot_refresh(
+        &self,
+        session: u64,
+        operation: u64,
+        ready: Box<dyn FnOnce(lexift_core::Result<()>) + Send>,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            ready(crate::annotation::screenshot::refresh::suspend(
+                session, operation,
+            ))
+        });
+    }
+    pub fn present_screenshot_refresh(
+        &self,
+        session: u64,
+        operation: u64,
+        frames: Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>,
+        rollback: bool,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::annotation::screenshot::refresh::install(session, operation, frames, rollback)
+        });
+    }
+    pub fn finish_screenshot_refresh(&self, session: u64, operation: u64, success: bool) {
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::annotation::screenshot::refresh::finish(session, operation, success)
+        });
+    }
     pub fn suspend_for_screenshot(
         &self,
         session: u64,

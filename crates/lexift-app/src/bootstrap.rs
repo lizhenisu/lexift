@@ -277,6 +277,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .ok()
         })
         .with_screenshot_displays(|| lexift_platform::screenshot_display_metrics().unwrap_or_default())
+        .with_screenshot_refresh_presentation(|windows,presented| lexift_platform::complete_screenshot_refresh(windows,presented).unwrap_or(false))
         .with_annotation_canvas(
             move || screen_for_annotation.as_ref().and_then(|screen| screen.displays().ok()).unwrap_or_default(),
             |window, enabled| match lexift_platform::set_annotation_click_through(&window.window_handle(), enabled) {

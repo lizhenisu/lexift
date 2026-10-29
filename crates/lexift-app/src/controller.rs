@@ -81,6 +81,25 @@ pub(crate) trait ViewPort: Send + Sync {
     ) {
         ready(Err(lexift_core::Error::new("Countdown unavailable")));
     }
+    fn suspend_screenshot_refresh(
+        &self,
+        _session: u64,
+        _operation: u64,
+        ready: Box<dyn FnOnce(lexift_core::Result<()>) + Send>,
+    ) {
+        ready(Err(lexift_core::Error::new(
+            "Screenshot refresh unavailable",
+        )));
+    }
+    fn present_screenshot_refresh(
+        &self,
+        _session: u64,
+        _operation: u64,
+        _frames: Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>,
+        _rollback: bool,
+    ) {
+    }
+    fn finish_screenshot_refresh(&self, _session: u64, _operation: u64, _success: bool) {}
     fn suspend_for_screenshot(
         &self,
         _session: u64,
@@ -260,6 +279,26 @@ impl ViewPort for lexift_ui::UiHandle {
         ready: Box<dyn FnOnce(lexift_core::Result<std::time::Instant>) + Send>,
     ) {
         self.begin_screenshot_delay(session, seconds, ready);
+    }
+    fn suspend_screenshot_refresh(
+        &self,
+        session: u64,
+        operation: u64,
+        ready: Box<dyn FnOnce(lexift_core::Result<()>) + Send>,
+    ) {
+        self.suspend_screenshot_refresh(session, operation, ready);
+    }
+    fn present_screenshot_refresh(
+        &self,
+        session: u64,
+        operation: u64,
+        frames: Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>,
+        rollback: bool,
+    ) {
+        self.present_screenshot_refresh(session, operation, frames, rollback);
+    }
+    fn finish_screenshot_refresh(&self, session: u64, operation: u64, success: bool) {
+        self.finish_screenshot_refresh(session, operation, success);
     }
     fn suspend_for_screenshot(
         &self,

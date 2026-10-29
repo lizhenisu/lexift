@@ -2129,3 +2129,15 @@ msgstr "スクリーンショットのショートカットで直接範囲を選
 
 msgid "Translation, annotation, OCR and screenshot shortcuts must differ"
 msgstr "翻訳、注釈、OCR、スクリーンショットのショートカットはそれぞれ異なる必要があります"
+
+msgid "Refresh screenshot"
+msgstr "スクリーンショットを更新"
+
+msgid "Screenshot refresh failed"
+msgstr "スクリーンショットの更新に失敗しました"
+
+msgid "Display layout changed. Start a new screenshot."
+msgstr "ディスプレイの配置が変更されました。新しく撮影してください。"
+
+msgid "Image exceeds the processing memory limit"
+msgstr "画像が処理メモリの上限を超えています"

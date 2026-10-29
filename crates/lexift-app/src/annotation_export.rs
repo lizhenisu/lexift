@@ -203,28 +203,8 @@ pub(crate) fn capture_screenshot_frame(
         .screenshot_windows(&excluded_windows)
         .unwrap_or_default();
     let window_ms = started.elapsed().as_millis();
-    let request = ScreenCaptureRequest {
-        revision: 1,
-        regions: regions.clone(),
-        paused_regions: vec![],
-        excluded_windows: excluded_windows.clone(),
-    };
-    let fast = port
-        .try_freeze_screenshot(&request, cancelled)
-        .ok()
-        .flatten();
-    let fast_path = fast.is_some();
-    let frame = if let Some(frame) = fast {
-        Some(frame)
-    } else {
-        capture_port(
-            port.clone(),
-            regions,
-            excluded_windows.clone(),
-            cancelled,
-            Duration::from_secs(5),
-        )?
-    };
+    let (frame, fast_path) =
+        capture_frozen_pixels(port.clone(), regions, excluded_windows.clone(), cancelled)?;
     let after = port
         .screenshot_windows(&excluded_windows)
         .unwrap_or_default();
@@ -256,6 +236,38 @@ pub(crate) fn capture_screenshot(
         capture_screenshot_frame(factory, regions, excluded, cancelled, None)?
             .map(|prepared| prepared.capture),
     )
+}
+
+/// Fresh one-shot pixels only; refresh must not enumerate window/UIA candidates.
+pub(crate) fn capture_frozen_pixels(
+    port: Arc<dyn ScreenCapturePort>,
+    regions: Vec<Rect>,
+    excluded_windows: Vec<WindowToken>,
+    cancelled: &AtomicBool,
+) -> Result<(Option<Arc<ScreenCaptureFrame>>, bool)> {
+    let request = ScreenCaptureRequest {
+        revision: 1,
+        regions: regions.clone(),
+        paused_regions: vec![],
+        excluded_windows: excluded_windows.clone(),
+    };
+    if let Some(frame) = port
+        .try_freeze_screenshot(&request, cancelled)
+        .ok()
+        .flatten()
+    {
+        return Ok((Some(frame), true));
+    }
+    Ok((
+        capture_port(
+            port,
+            regions,
+            excluded_windows,
+            cancelled,
+            Duration::from_secs(5),
+        )?,
+        false,
+    ))
 }
 
 fn capture_port(

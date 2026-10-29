@@ -807,6 +807,9 @@ fn show_feedback_details(
 
 /// The frozen screenshot already contains existing pins. Hide their live windows
 /// during editing so only the snapshot receives gestures; restore without activation.
+pub(crate) fn capture_visibility(visible: bool) -> bool {
+    visibility::capture_visibility(visible)
+}
 pub(crate) fn set_frozen(frozen: bool) {
     visibility::frozen(frozen);
 }

@@ -2129,3 +2129,15 @@ msgstr "Use o atalho de captura para selecionar uma área ou o de anotação par
 
 msgid "Translation, annotation, OCR and screenshot shortcuts must differ"
 msgstr "Os atalhos de tradução, anotação, OCR e captura devem ser diferentes"
+
+msgid "Refresh screenshot"
+msgstr "Atualizar captura"
+
+msgid "Screenshot refresh failed"
+msgstr "Falha ao atualizar a captura"
+
+msgid "Display layout changed. Start a new screenshot."
+msgstr "A disposição das telas mudou. Faça uma nova captura."
+
+msgid "Image exceeds the processing memory limit"
+msgstr "A imagem excede o limite de memória de processamento"

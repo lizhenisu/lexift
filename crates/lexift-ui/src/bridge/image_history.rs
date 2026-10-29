@@ -204,6 +204,7 @@ pub(super) fn sync(state: &AppState) {
             state.screenshot.phase,
             lexift_core::domain::screenshot::ScreenshotPhase::CountingDown
                 | lexift_core::domain::screenshot::ScreenshotPhase::Preparing
+                | lexift_core::domain::screenshot::ScreenshotPhase::Refreshing
         ) {
             suspend();
         } else {
@@ -244,6 +245,7 @@ fn notification(state: &AppState) {
             state.screenshot.phase,
             lexift_core::domain::screenshot::ScreenshotPhase::CountingDown
                 | lexift_core::domain::screenshot::ScreenshotPhase::Preparing
+                | lexift_core::domain::screenshot::ScreenshotPhase::Refreshing
         ) {
             r.toast_timer.stop();
             r.toast.clear();
