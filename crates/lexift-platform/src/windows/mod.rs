@@ -24,6 +24,8 @@ mod instance;
 pub(crate) mod memory;
 mod ocr_capture;
 pub(super) mod pinned_image;
+#[cfg(test)]
+mod recording_gate;
 pub(crate) mod renderer;
 pub(super) mod resize_background;
 mod screen;

@@ -37,3 +37,4 @@ pub mod image_color;
 pub mod image_import;
 pub mod image_resize;
 pub mod image_transform;
+pub mod recording_clock;
