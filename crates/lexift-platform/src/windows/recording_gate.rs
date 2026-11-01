@@ -3,9 +3,10 @@
 mod capture;
 mod encoder;
 mod fault;
-mod fixture;
+pub(super) mod fixture;
 mod hardware;
-mod resources;
+mod layers;
+pub(super) mod resources;
 mod run;
 
 use lexift_core::domain::geometry::Rect;

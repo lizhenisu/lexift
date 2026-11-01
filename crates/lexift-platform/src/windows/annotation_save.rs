@@ -1,5 +1,5 @@
 //! A job-owned STA dialog and WIC encoder. No COM interface leaves its apartment.
-mod dialog;
+pub(super) mod dialog;
 pub(super) mod import;
 
 use lexift_core::{

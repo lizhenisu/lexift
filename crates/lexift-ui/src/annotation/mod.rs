@@ -5,6 +5,8 @@ mod frozen_editor;
 pub(crate) mod history_editor;
 pub(crate) mod image_import;
 pub(crate) mod pin_editor;
+mod recording_placement;
+mod recording_scene;
 pub(crate) mod screenshot;
 mod screenshot_preview;
 use crate::bridge::dispatch_pointer_input as dispatch;
@@ -321,6 +323,7 @@ use canvas_input::*;
 mod render_workflow;
 use render_workflow::*;
 
+mod recording_chrome;
 mod toolbar_workflow;
 use toolbar_workflow::*;
 

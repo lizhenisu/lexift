@@ -45,8 +45,14 @@ pub(crate) use speech::WindowsSpeechPort;
 pub(crate) use tray::WindowsTrayPort;
 
 pub(super) mod popup;
+pub(crate) mod recording_window;
 pub(crate) mod window_shell_policy;
 pub(crate) use clipboard::WindowsClipboardPort;
 
 #[cfg(debug_assertions)]
 pub(crate) mod pin_diagnostic;
+
+pub(crate) mod recording_capture;
+pub(crate) mod recording_pixels;
+
+pub(crate) mod screen_recording;

@@ -1,0 +1,219 @@
+//! STA MP4 selection and bounded, atomic publishing of an already sealed file.
+use lexift_core::{
+    Error, Result,
+    ports::{annotation_save::SaveOutcome, screen_recording::SaveRequest},
+};
+use std::{
+    io::{Read, Write},
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    time::Duration,
+};
+use windows::{
+    Win32::{
+        Foundation::*,
+        Storage::FileSystem::*,
+        System::{Com::*, Threading::GetCurrentThreadId},
+        UI::{Shell::*, WindowsAndMessaging::*},
+    },
+    core::*,
+};
+fn error(e: impl std::fmt::Display) -> Error {
+    Error::new(e.to_string())
+}
+fn wide(s: &std::ffi::OsStr) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    s.encode_wide().chain([0]).collect()
+}
+struct Apartment;
+impl Drop for Apartment {
+    fn drop(&mut self) {
+        unsafe { CoUninitialize() }
+    }
+}
+unsafe extern "system" fn close(hwnd: HWND, _: LPARAM) -> BOOL {
+    unsafe {
+        if IsWindowVisible(hwnd).as_bool() {
+            let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+        }
+    }
+    BOOL(1)
+}
+
+pub fn save(source: &Path, request: SaveRequest, cancel: Arc<AtomicBool>) -> Result<SaveOutcome> {
+    if cancel.load(Ordering::Acquire) {
+        return Ok(SaveOutcome::Cancelled);
+    }
+    let _shell = super::super::window_shell_policy::ThreadGuard::new()?;
+    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok() }.map_err(error)?;
+    let _apartment = Apartment;
+    let dialog: IFileSaveDialog =
+        unsafe { CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER) }.map_err(error)?;
+    let name = Path::new(&request.default_name).with_extension("");
+    let name = wide(name.as_os_str());
+    let title = wide(request.title.as_ref());
+    unsafe {
+        dialog
+            .SetOptions(
+                dialog.GetOptions().map_err(error)?
+                    | FOS_FORCEFILESYSTEM
+                    | FOS_OVERWRITEPROMPT
+                    | FOS_PATHMUSTEXIST
+                    | FOS_STRICTFILETYPES,
+            )
+            .map_err(error)?;
+        dialog.SetTitle(PCWSTR(title.as_ptr())).map_err(error)?;
+        dialog.SetFileName(PCWSTR(name.as_ptr())).map_err(error)?;
+    }
+    let _events = super::super::annotation_save::dialog::configure_mp4(
+        &dialog,
+        request.extension_mismatch_message,
+    )?;
+    let thread = unsafe { GetCurrentThreadId() };
+    let done = AtomicBool::new(false);
+    let shown = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            while !done.load(Ordering::Acquire) {
+                if cancel.load(Ordering::Acquire) {
+                    unsafe {
+                        let _ = EnumThreadWindows(thread, Some(close), LPARAM(0));
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+        let result = if cancel.load(Ordering::Acquire) {
+            Err(windows::core::Error::from_hresult(HRESULT::from_win32(
+                ERROR_CANCELLED.0,
+            )))
+        } else {
+            unsafe { dialog.Show(request.owner.map(|t| HWND(t.0 as *mut _))) }
+        };
+        done.store(true, Ordering::Release);
+        result
+    });
+    if cancel.load(Ordering::Acquire)
+        || shown
+            .as_ref()
+            .is_err_and(|e| e.code() == HRESULT::from_win32(ERROR_CANCELLED.0))
+    {
+        return Ok(SaveOutcome::Cancelled);
+    }
+    shown.map_err(error)?;
+    let item = unsafe { dialog.GetResult() }.map_err(error)?;
+    let raw = unsafe { item.GetDisplayName(SIGDN_FILESYSPATH) }.map_err(error)?;
+    let path = unsafe { raw.to_string() };
+    unsafe {
+        CoTaskMemFree(Some(raw.0.cast()));
+    }
+    let path = PathBuf::from(path.map_err(error)?);
+    if !path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("mp4"))
+    {
+        return Err(Error::new("Video extension must be MP4"));
+    }
+    publish(source, &path, &cancel)
+}
+
+pub fn publish(source: &Path, destination: &Path, cancel: &AtomicBool) -> Result<SaveOutcome> {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let temp = destination.with_file_name(format!(
+        ".lexift-{}-{}.video.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    struct Temporary(PathBuf);
+    impl Drop for Temporary {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    if cancel.load(Ordering::Acquire) {
+        return Ok(SaveOutcome::Cancelled);
+    }
+    let input = std::fs::File::open(source).map_err(error)?;
+    let output = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temp)
+        .map_err(error)?;
+    let _temp = Temporary(temp.clone());
+    {
+        let mut input = input;
+        let mut output = output;
+        let mut buffer = [0u8; 65536];
+        loop {
+            if cancel.load(Ordering::Acquire) {
+                return Ok(SaveOutcome::Cancelled);
+            }
+            let n = input.read(&mut buffer).map_err(error)?;
+            if n == 0 {
+                break;
+            }
+            output.write_all(&buffer[..n]).map_err(error)?;
+        }
+        output.sync_all().map_err(error)?;
+    }
+    if cancel.load(Ordering::Acquire) {
+        return Ok(SaveOutcome::Cancelled);
+    }
+    let from = wide(temp.as_os_str());
+    let to = wide(destination.as_os_str());
+    unsafe {
+        MoveFileExW(
+            PCWSTR(from.as_ptr()),
+            PCWSTR(to.as_ptr()),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    }
+    .map_err(error)?;
+    Ok(SaveOutcome::Saved)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn publishing_is_atomic_cancellable_and_preserves_the_sealed_source() {
+        let directory = std::env::temp_dir().join(format!(
+            "lexift-video-publish-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let source = directory.join("source.mp4");
+        let output = directory.join("output.mp4");
+        let data = vec![37; 200_000];
+        std::fs::write(&source, &data).unwrap();
+        std::fs::write(&output, b"original").unwrap();
+        assert_eq!(
+            publish(&source, &output, &AtomicBool::new(true)).unwrap(),
+            SaveOutcome::Cancelled
+        );
+        assert_eq!(std::fs::read(&output).unwrap(), b"original");
+        assert!(
+            publish(
+                &directory.join("missing.mp4"),
+                &output,
+                &AtomicBool::new(false)
+            )
+            .is_err()
+        );
+        assert_eq!(std::fs::read(&output).unwrap(), b"original");
+        assert_eq!(
+            publish(&source, &output, &AtomicBool::new(false)).unwrap(),
+            SaveOutcome::Saved
+        );
+        assert_eq!(std::fs::read(&output).unwrap(), data);
+        assert_eq!(std::fs::read(&source).unwrap(), data);
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 2);
+        std::fs::remove_file(source).unwrap();
+        std::fs::remove_file(output).unwrap();
+        std::fs::remove_dir(directory).unwrap();
+    }
+}

@@ -87,6 +87,11 @@ fn matches(r: &Registry, key: Opening) -> bool {
 pub(crate) fn close(return_focus: bool) {
     close_with_reason(return_focus, "external_close");
 }
+pub(crate) fn shutdown() {
+    close(false);
+    let retired = REGISTRY.with(|s| s.borrow_mut().take());
+    drop(retired);
+}
 fn close_with_reason(return_focus: bool, reason: &'static str) {
     let restore = REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();

@@ -62,7 +62,7 @@ fn name_for_format(name: &str, format: ImageFormat) -> Option<PathBuf> {
     }
 }
 
-pub(super) struct Subscription {
+pub(in crate::windows) struct Subscription {
     dialog: IFileSaveDialog,
     cookie: u32,
 }
@@ -123,13 +123,53 @@ pub(super) fn configure(
         })
     }
 }
+/// The same validation sink also serves sealed MP4 files, without treating
+/// a video as an image codec or changing the image-save Port contract.
+pub(in crate::windows) fn configure_mp4(
+    dialog: &IFileSaveDialog,
+    message: String,
+) -> Result<Subscription> {
+    unsafe {
+        dialog
+            .SetFileTypes(&[COMDLG_FILTERSPEC {
+                pszName: windows::core::w!("MP4 (*.mp4)"),
+                pszSpec: windows::core::w!("*.mp4"),
+            }])
+            .map_err(native_error)?;
+        dialog.SetFileTypeIndex(1).map_err(native_error)?;
+        dialog
+            .SetDefaultExtension(windows::core::w!("mp4"))
+            .map_err(native_error)?;
+        let custom: IFileDialogCustomize = dialog.cast().map_err(native_error)?;
+        custom
+            .AddText(ERROR_CONTROL, windows::core::w!(""))
+            .map_err(native_error)?;
+        custom
+            .SetControlState(ERROR_CONTROL, CDCS_ENABLED)
+            .map_err(native_error)?;
+        let object = Box::new(DialogEvents {
+            vtable: &EVENTS_VTABLE,
+            references: AtomicU32::new(1),
+            options: None,
+            video_message: message,
+            updating_name: Cell::new(false),
+        });
+        let handler = IFileDialogEvents::from_raw(Box::into_raw(object).cast());
+        let cookie = dialog.Advise(&handler).map_err(native_error)?;
+        Ok(Subscription {
+            dialog: dialog.clone(),
+            cookie,
+        })
+    }
+}
 // A small STA-owned COM sink avoids introducing a windows-core dependency solely
 // for the implementation macro. Advise holds a reference until Unadvise.
 #[repr(C)]
 struct DialogEvents {
     vtable: &'static IFileDialogEvents_Vtbl,
     references: AtomicU32,
-    options: ImageSaveOptions,
+    options: Option<ImageSaveOptions>,
+    video_message: String,
     updating_name: Cell<bool>,
 }
 impl DialogEvents {
@@ -137,7 +177,8 @@ impl DialogEvents {
         let object = Box::new(Self {
             vtable: &EVENTS_VTABLE,
             references: AtomicU32::new(1),
-            options,
+            options: Some(options),
+            video_message: String::new(),
             updating_name: Cell::new(false),
         });
         unsafe { IFileDialogEvents::from_raw(Box::into_raw(object).cast()) }
@@ -155,12 +196,29 @@ impl DialogEvents {
             let path = raw.to_string();
             CoTaskMemFree(Some(raw.0.cast()));
             let path = path?;
-            let format = selected_format(dialog, &self.options)?;
-            if !typed_extension_matches(Path::new(&typed_name), format)
-                || !extension_matches(Path::new(&path), format)
-            {
+            let (valid, message) = if let Some(options) = &self.options {
+                let format = selected_format(dialog, options)?;
+                (
+                    typed_extension_matches(Path::new(&typed_name), format)
+                        && extension_matches(Path::new(&path), format),
+                    options.extension_mismatch_message.as_str(),
+                )
+            } else {
+                let matches = |p: &Path| {
+                    p.extension()
+                        .and_then(|e| e.to_str())
+                        .is_some_and(|e| e.eq_ignore_ascii_case("mp4"))
+                };
+                (
+                    (Path::new(&typed_name).extension().is_none()
+                        || matches(Path::new(&typed_name)))
+                        && matches(Path::new(&path)),
+                    self.video_message.as_str(),
+                )
+            };
+            if !valid {
                 let custom: IFileDialogCustomize = dialog.cast()?;
-                let message = wide(self.options.extension_mismatch_message.as_ref());
+                let message = wide(message.as_ref());
                 custom.SetControlLabel(ERROR_CONTROL, PCWSTR(message.as_ptr()))?;
                 custom.SetControlState(ERROR_CONTROL, CDCS_ENABLED | CDCS_VISIBLE)?;
                 return Err(windows::core::Error::from_hresult(S_FALSE));
@@ -182,7 +240,13 @@ impl DialogEvents {
             }
         }
         let _reset = Reset(&self.updating_name);
-        let format = selected_format(dialog, &self.options)?;
+        let Some(options) = &self.options else {
+            unsafe {
+                dialog.SetDefaultExtension(windows::core::w!("mp4"))?;
+            }
+            return Ok(());
+        };
+        let format = selected_format(dialog, options)?;
         unsafe {
             let extension = wide(format.extension().as_ref());
             dialog.SetDefaultExtension(PCWSTR(extension.as_ptr()))?;

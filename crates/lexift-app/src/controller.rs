@@ -31,6 +31,7 @@ use tokio::{runtime::Handle, sync::Notify};
 use crate::runtime::RuntimeManager;
 
 pub(crate) trait ViewPort: Send + Sync {
+    fn screen_recording(&self, _command: lexift_core::domain::screenshot::recording::Command) {}
     fn open_image_editor(
         &self,
         _window: u64,
@@ -322,6 +323,9 @@ impl ViewPort for lexift_ui::UiHandle {
     fn long_screenshot(&self, command: lexift_core::domain::long_capture::workflow::Command) {
         self.long_screenshot(command);
     }
+    fn screen_recording(&self, command: lexift_core::domain::screenshot::recording::Command) {
+        self.screen_recording(command);
+    }
     fn show_screenshot_capture(
         &self,
         session: u64,
@@ -555,6 +559,53 @@ impl AppController {
                 .store(false, Ordering::Release);
         }
         let quitting = matches!(event, AppEvent::ExitRequested);
+        if let AppEvent::Screenshot(lexift_core::domain::screenshot::ScreenshotEvent::Recording(
+            ref recording,
+        )) = event
+        {
+            use lexift_core::domain::screenshot::recording::Event as RecordingEvent;
+            match recording {
+                RecordingEvent::Input { identity, event } => {
+                    tracing::debug!(?identity, ?event, "Recording input event")
+                }
+                RecordingEvent::ViewReady { identity, result } => tracing::debug!(
+                    ?identity,
+                    success = result.is_ok(),
+                    "Recording view ready event"
+                ),
+                RecordingEvent::Failed { identity, error } => {
+                    tracing::warn!(?identity,%error,"Recording failed event")
+                }
+                RecordingEvent::Native(notice)
+                    if !matches!(
+                        notice,
+                        lexift_core::ports::screen_recording::Notice::Progress(_)
+                    ) =>
+                {
+                    tracing::debug!(?notice, "Recording native event")
+                }
+                _ => {}
+            }
+        }
+        if let AppEvent::Screenshot(ref screenshot) = event
+            && matches!(
+                screenshot,
+                lexift_core::domain::screenshot::ScreenshotEvent::Cancelled { .. }
+                    | lexift_core::domain::screenshot::ScreenshotEvent::Failed { .. }
+                    | lexift_core::domain::screenshot::ScreenshotEvent::Recording(_)
+            )
+            && !matches!(
+                screenshot,
+                lexift_core::domain::screenshot::ScreenshotEvent::Recording(
+                    lexift_core::domain::screenshot::recording::Event::Progress(_)
+                        | lexift_core::domain::screenshot::recording::Event::Native(
+                            lexift_core::ports::screen_recording::Notice::Progress(_)
+                        )
+                )
+            )
+        {
+            tracing::debug!(kind=?std::mem::discriminant(screenshot),"Screenshot event kind");
+        }
         let progress_event = matches!(
             event,
             AppEvent::TranslationProgress { .. } | AppEvent::PopupTranslationProgress { .. }
@@ -889,15 +940,18 @@ impl AppController {
                 if let Some(ocr) = &self.ocr {
                     ocr.shutdown();
                 }
-                if let Some(h) = self.history.clone() {
-                    let ui = self.ui.clone();
-                    self.runtime.spawn_blocking(move || {
-                        h.shutdown();
-                        ui.quit();
-                    });
-                } else {
-                    self.ui.quit();
-                }
+                let history = self.history.clone();
+                let screenshot = self.screenshot.clone();
+                let ui = self.ui.clone();
+                self.runtime.spawn(async move {
+                    if let Some(screenshot) = screenshot {
+                        screenshot.wait_for_recording_shutdown().await;
+                    }
+                    if let Some(history) = history {
+                        let _ = tokio::task::spawn_blocking(move || history.shutdown()).await;
+                    }
+                    ui.quit();
+                });
             }
         }
     }

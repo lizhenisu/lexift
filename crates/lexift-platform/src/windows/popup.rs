@@ -1771,6 +1771,19 @@ pub(super) fn configure_capture_feedback_hwnd(
     })
 }
 const HINT_INPUT_SUBCLASS: usize = 0x4c584849;
+/// Undo the passive subclass before an existing window becomes an input surface.
+pub(super) fn configure_recording_interaction_hwnd(
+    hwnd: windows::Win32::Foundation::HWND,
+) -> lexift_core::Result<()> {
+    use windows::Win32::UI::{Shell::RemoveWindowSubclass, WindowsAndMessaging::*};
+    unsafe {
+        let _ = RemoveWindowSubclass(hwnd, Some(hint_input_proc), HINT_INPUT_SUBCLASS);
+        let _ = windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(hwnd, true);
+    }
+    configure_hwnd_extended_style(hwnd, |style| {
+        interactive_extended_style(style) & !(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE).0 as isize
+    })
+}
 unsafe extern "system" fn hint_input_proc(
     hwnd: windows::Win32::Foundation::HWND,
     message: u32,
@@ -1823,6 +1836,7 @@ pub(crate) fn set_click_through(
             "Could not register annotation canvas order: {error}"
         ))
     })?;
+    super::recording_window::update_input(hwnd, enabled)?;
     if enabled {
         configure_hwnd_extended_style(hwnd, |style| style | WS_EX_TRANSPARENT.0 as isize)
     } else {
@@ -1837,6 +1851,34 @@ pub(crate) fn present_annotation_frame(
     rgba: &[u8],
     width: u32,
     height: u32,
+) -> lexift_core::Result<()> {
+    present_layered_frame(required_hwnd(window)?, rgba, width, height, true)
+}
+
+pub(crate) fn present_recording_content(
+    window: &impl raw_window_handle::HasWindowHandle,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+) -> lexift_core::Result<()> {
+    present_recording_content_hwnd(required_hwnd(window)?, rgba, width, height)
+}
+
+pub(super) fn present_recording_content_hwnd(
+    hwnd: windows::Win32::Foundation::HWND,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+) -> lexift_core::Result<()> {
+    present_layered_frame(hwnd, rgba, width, height, false)
+}
+
+fn present_layered_frame(
+    hwnd: windows::Win32::Foundation::HWND,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    hittable_transparent: bool,
 ) -> lexift_core::Result<()> {
     use windows::Win32::{
         Foundation::{COLORREF, POINT, RECT, SIZE},
@@ -1858,7 +1900,6 @@ pub(crate) fn present_annotation_frame(
     if width == 0 || height == 0 || rgba.len() != expected {
         return Err(lexift_core::Error::new("Annotation frame size is invalid"));
     }
-    let hwnd = required_hwnd(window)?;
     let style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
     if style & WS_EX_LAYERED.0 as isize == 0 {
         configure_hwnd_extended_style(hwnd, |style| style | WS_EX_LAYERED.0 as isize)?;
@@ -1899,7 +1940,11 @@ pub(crate) fn present_annotation_frame(
         output[1] = source[1];
         output[2] = source[0];
         // A visually transparent pixel still needs to receive mouse input in edit mode.
-        output[3] = source[3].max(1);
+        output[3] = if hittable_transparent {
+            source[3].max(1)
+        } else {
+            source[3]
+        };
     }
     let origin = POINT {
         x: bounds.left,

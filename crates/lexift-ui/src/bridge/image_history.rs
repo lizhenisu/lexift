@@ -121,6 +121,11 @@ fn suspend() {
         crate::annotation::screenshot::retired_foreground(token, query());
     }
 }
+pub(super) fn shutdown() {
+    close();
+    let retired = REGISTRY.with(|s| s.borrow_mut().take());
+    drop(retired);
+}
 pub(super) fn close() {
     let closed = REGISTRY.with(|r| {
         if let Some(r) = r.borrow_mut().as_mut() {
@@ -205,6 +210,7 @@ pub(super) fn sync(state: &AppState) {
             lexift_core::domain::screenshot::ScreenshotPhase::CountingDown
                 | lexift_core::domain::screenshot::ScreenshotPhase::Preparing
                 | lexift_core::domain::screenshot::ScreenshotPhase::Refreshing
+                | lexift_core::domain::screenshot::ScreenshotPhase::Recording
         ) {
             suspend();
         } else {
@@ -246,6 +252,7 @@ fn notification(state: &AppState) {
             lexift_core::domain::screenshot::ScreenshotPhase::CountingDown
                 | lexift_core::domain::screenshot::ScreenshotPhase::Preparing
                 | lexift_core::domain::screenshot::ScreenshotPhase::Refreshing
+                | lexift_core::domain::screenshot::ScreenshotPhase::Recording
         ) {
             r.toast_timer.stop();
             r.toast.clear();

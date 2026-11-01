@@ -343,6 +343,58 @@ pub fn configure_capture_feedback(
     }
 }
 
+/// View-only roles: live ink is capturable; input and controls never are.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecordingWindowRole {
+    Content,
+    Interaction,
+    Feedback,
+    Control,
+}
+
+/// Present ink without the alpha-one hit surface used by interactive canvases.
+pub fn present_recording_content(
+    window: &impl raw_window_handle::HasWindowHandle,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::popup::present_recording_content(window, rgba, width, height)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, rgba, width, height);
+        Err(lexift_core::Error::new("Recording content is unavailable"))
+    }
+}
+
+pub fn configure_recording_window(
+    window: &impl raw_window_handle::HasWindowHandle,
+    role: RecordingWindowRole,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        use raw_window_handle::RawWindowHandle;
+        let handle = window
+            .window_handle()
+            .map_err(|e| lexift_core::Error::new(e.to_string()))?;
+        let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+            return Err(lexift_core::Error::new("Recording requires a Win32 window"));
+        };
+        windows::recording_window::configure(
+            ::windows::Win32::Foundation::HWND(handle.hwnd.get() as *mut _),
+            role,
+        )
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, role);
+        Err(lexift_core::Error::new("Recording windows are unavailable"))
+    }
+}
+
 /// Lets the annotation canvas pass mouse input to the live desktop in operate mode.
 pub fn set_annotation_click_through(
     window: &impl raw_window_handle::HasWindowHandle,
@@ -925,3 +977,21 @@ pub fn screenshot_display_metrics()
 extern crate self as windows_core;
 #[cfg(all(test, target_os = "windows"))]
 pub use ::windows::core::*;
+
+/// Independent video service. It never shares a live instance with screenshot sampling.
+pub fn screen_recording_port() -> lexift_core::Result<
+    std::sync::Arc<dyn lexift_core::ports::screen_recording::ScreenRecordingPort>,
+> {
+    #[cfg(target_os = "windows")]
+    {
+        Ok(std::sync::Arc::new(
+            windows::screen_recording::WindowsScreenRecordingPort::new()?,
+        ))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err(lexift_core::Error::new(
+            "Screen recording is unavailable on this platform",
+        ))
+    }
+}

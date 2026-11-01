@@ -1022,13 +1022,15 @@ impl Registry {
                 }
                 if !(self.lifecycle.annotation_click_through)(
                     layer.host.window.window(),
-                    mode.is_mouse() && self.screenshot.is_none(),
+                    mode.is_mouse()
+                        && (self.screenshot.is_none() || screenshot::recording::active()),
                 ) {
                     for index in changed {
                         let layer: &CanvasLayer = &self.canvas_state.canvases[index];
                         (self.lifecycle.annotation_click_through)(
                             layer.host.window.window(),
-                            self.document.mode.is_mouse() && self.screenshot.is_none(),
+                            self.document.mode.is_mouse()
+                                && (self.screenshot.is_none() || screenshot::recording::active()),
                         );
                     }
                     return false;

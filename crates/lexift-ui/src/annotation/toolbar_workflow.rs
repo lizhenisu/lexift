@@ -244,6 +244,10 @@ pub(super) fn refresh_magnifiers() {
 }
 
 pub(super) fn check_display_layout() {
+    if screenshot::recording::active() {
+        screenshot::recording::check_layout();
+        return;
+    }
     if pin_editor::active() || screenshot::long::busy() || screenshot::long::image_editing() {
         return;
     }
@@ -1606,6 +1610,7 @@ impl Registry {
             );
             main.set_operate(self.document.mode.is_mouse());
             main.set_long_capture_available(screenshot::long::available(self));
+            main.set_recording_available(screenshot::recording::available(self));
             main.set_active_group(self.document.mode.selected_group());
         }
     }

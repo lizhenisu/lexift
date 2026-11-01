@@ -15,7 +15,7 @@ fn border(p: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, t: f32, c: slint::Colo
     fill(p, x, y, t, h, c);
     fill(p, x + w - t, y, t, h, c);
 }
-pub(super) fn range(
+pub(in crate::annotation::screenshot) fn range(
     screen: Rect,
     source: Rect,
     dpi: f32,

@@ -2141,3 +2141,15 @@ msgstr "Die Bildschirmanordnung wurde geändert. Erstellen Sie einen neuen Scree
 
 msgid "Image exceeds the processing memory limit"
 msgstr "Das Bild überschreitet das Speicherlimit für die Verarbeitung"
+
+msgid "Screen recording"
+msgstr "Bildschirmaufnahme"
+
+msgid "Save video"
+msgstr "Video speichern"
+
+msgid "Recording interrupted"
+msgstr "Aufnahme unterbrochen"
+
+msgid "Use the .mp4 file extension."
+msgstr "Verwenden Sie die Dateiendung .mp4."

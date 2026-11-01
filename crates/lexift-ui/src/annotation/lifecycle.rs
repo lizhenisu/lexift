@@ -16,6 +16,10 @@ pub(crate) fn shutdown() {
     EXPORT_HANDLER.with(|h| h.borrow_mut().take());
 }
 pub(crate) fn close() {
+    if screenshot::recording::active() {
+        screenshot::recording::cancel();
+        return;
+    }
     if history_editor::active() {
         history_editor::close();
         return;
@@ -285,6 +289,10 @@ pub(crate) fn toggle(requested_at: Instant) {
         ));
         main.on_operate_requested(move || {
             later_main(&input, generation, revision, activate_mouse_mode)
+        });
+        let input = r.toolbar_state.main.input();
+        main.on_recording_requested(move || {
+            later_main(&input, generation, revision, screenshot::recording::request)
         });
         let input = r.toolbar_state.main.input();
         main.on_undo_requested(move || later_main(&input, generation, revision, undo));

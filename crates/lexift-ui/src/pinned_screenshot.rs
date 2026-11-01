@@ -867,6 +867,11 @@ pub(crate) fn close_all() {
         }
     }
 }
+pub(crate) fn shutdown() {
+    close_all();
+    let retired = STATE.with(|s| s.borrow_mut().take());
+    drop(retired);
+}
 pub(crate) fn request_close(id: u64) {
     let window = STATE.with(|s| {
         let mut s = s.borrow_mut();

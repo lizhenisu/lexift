@@ -1,0 +1,50 @@
+import { CaptureButton, CaptureSeparator } from "long-capture.slint";
+import { AnnotationHintTarget } from "annotation-hint.slint";
+import { Colors } from "design/colors.slint";
+import { Metrics } from "design/metrics.slint";
+
+// Recording and annotation have separate bars. Only this window owns video actions.
+export component RecordingControl inherits Window {
+    title: @tr("Screen recording"); no-frame: true; always-on-top: true; background: transparent;
+    preferred-width: 380px; preferred-height: Metrics.long-capture-control-height;
+    min-width: 380px; max-width: 380px;
+    min-height: Metrics.long-capture-control-height; max-height: Metrics.long-capture-control-height;
+    // 0 preparing, 1 ready, 2 recording, 3 paused, 4 finishing, 5 sealed, 6 saving.
+    in property <int> phase: 0;
+    in property <string> dimensions;
+    in property <string> elapsed: "00:00";
+    in property <bool> interrupted: false;
+    callback action(int);
+    callback drag-requested();
+    forward-focus: keys;
+    keys := FocusScope { key-pressed(event) => {
+        if event.text == Key.Escape { root.action(4); return accept; }
+        return reject;
+    } }
+    Rectangle { x:0px; y:0px; width:100%; height:100%; background:Colors.surface;
+        border-width:1px; border-color:Colors.outline; border-radius:8px;
+        HorizontalLayout { padding:4px; spacing:3px;
+            Rectangle { width:16px;
+                Image { width:12px; height:20px; source:@image-url("assets/icons/capture-grip.svg"); colorize:Colors.secondary-foreground; }
+                grip := TouchArea { mouse-cursor:move; pointer-event(event)=>{
+                    if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.drag-requested(); }
+                } }
+                AnnotationHintTarget {text:@tr("Move toolbar");hovered:grip.has-hover;pressed:grip.pressed;}
+            }
+            Rectangle { horizontal-stretch:1;
+                VerticalLayout { spacing:0px;
+                    Text { text:root.dimensions + "   " + root.elapsed; color:Colors.foreground; font-size:12px; vertical-alignment:center; }
+                    Text { text:root.interrupted ? @tr("Recording interrupted") : root.phase == 3 ? @tr("Recording paused") : root.phase == 2 ? @tr("Recording") : @tr("Screen recording"); color:Colors.secondary-foreground; font-size:10px; vertical-alignment:center; }
+                }
+            }
+            CaptureSeparator {}
+            CaptureButton { icon:root.phase == 2 ? @image-url("assets/icons/capture-pause.svg") : @image-url("assets/icons/capture-play.svg");
+                label:root.phase == 1 ? @tr("Start") : root.phase == 3 ? @tr("Continue") : @tr("Pause");
+                selected:root.phase == 3; enabled:root.phase >= 1 && root.phase <= 3; busy:root.phase == 0;
+                clicked=>{root.action(0);} }
+            CaptureButton { icon:@image-url("assets/icons/recording-stop.svg");label:@tr("Finish");enabled:root.phase == 2 || root.phase == 3;busy:root.phase == 4;clicked=>{root.action(1);} }
+            CaptureButton { icon:@image-url("assets/icons/capture-save.svg");label:@tr("Save video");enabled:root.phase == 5;busy:root.phase == 6;clicked=>{root.action(2);} }
+            CaptureButton { icon:@image-url("assets/icons/screenshot-close.svg");label:@tr("Cancel");clicked=>{root.action(4);} }
+        }
+    }
+}

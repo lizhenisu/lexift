@@ -419,10 +419,12 @@ impl Ui {
             })?;
         }
         slint::run_event_loop_until_quit()?;
-        crate::tray_menu::close(false);
+        crate::tray_menu::shutdown();
         crate::annotation::shutdown();
-        crate::pinned_screenshot::close_all();
-        crate::ocr::close();
+        crate::pinned_screenshot::shutdown();
+        crate::ocr::shutdown();
+        crate::screen_interaction::selection::shutdown();
+        image_history::shutdown();
         HISTORY.with(|s| {
             s.borrow_mut().take();
         });
@@ -646,6 +648,11 @@ impl UiHandle {
     pub fn long_screenshot(&self, command: lexift_core::domain::long_capture::workflow::Command) {
         let _ = slint::invoke_from_event_loop(move || {
             crate::annotation::screenshot::long::execute(command)
+        });
+    }
+    pub fn screen_recording(&self, command: lexift_core::domain::screenshot::recording::Command) {
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::annotation::screenshot::recording::execute(command)
         });
     }
     pub fn show_screenshot_capture(
@@ -928,7 +935,7 @@ mod callbacks;
 use callbacks::*;
 pub use callbacks::{
     PassiveWindowPreparation, PopupDismissCause, PopupPointerInput, PopupPointerSink,
-    PopupResizeEdge, WindowLifecycleCallbacks,
+    PopupResizeEdge, RecordingWindowRole, WindowLifecycleCallbacks,
 };
 
 mod popup;

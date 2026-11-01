@@ -605,3 +605,53 @@ fn maps_canonical_languages_to_selector_indices() {
         assert_eq!(language_index(&Language(code.into())), index as i32);
     }
 }
+#[test]
+fn final_ui_shutdown_releases_services_retained_by_closed_registries() {
+    use std::rc::Rc;
+    struct Backend;
+    impl slint::platform::Platform for Backend {
+        fn create_window_adapter(
+            &self,
+        ) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
+            Err("shutdown of empty registries must not create a window".into())
+        }
+    }
+    slint::platform::set_platform(Box::new(Backend)).unwrap();
+    let service = Rc::new(());
+    let retired = Rc::downgrade(&service);
+    let lifecycle = super::WindowLifecycleCallbacks::new(
+        move |_, _| {
+            let _ = &service;
+            true
+        },
+        |_| false,
+        |_| false,
+        |_, _, _| false,
+        |_, _| false,
+        |_, _| false,
+        || false,
+    );
+    let prepare: fn(&slint::Window) -> super::PassiveWindowPreparation =
+        |_| super::PassiveWindowPreparation::Ready;
+    crate::tray_menu::init(prepare, lifecycle.clone());
+    crate::pinned_screenshot::init(prepare, lifecycle.clone());
+    crate::screen_interaction::selection::init(prepare, lifecycle.clone());
+    super::image_history::init(prepare, lifecycle.clone());
+    drop(lifecycle);
+    crate::tray_menu::close(false);
+    crate::pinned_screenshot::close_all();
+    crate::screen_interaction::selection::close();
+    super::image_history::close();
+    assert!(
+        retired.upgrade().is_some(),
+        "ordinary window closing keeps runtime callbacks"
+    );
+    crate::tray_menu::shutdown();
+    crate::pinned_screenshot::shutdown();
+    crate::screen_interaction::selection::shutdown();
+    super::image_history::shutdown();
+    assert!(
+        retired.upgrade().is_none(),
+        "services must retire before process TLS teardown"
+    );
+}

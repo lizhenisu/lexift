@@ -134,9 +134,17 @@ pub enum PassiveWindowPreparation {
 
 type PinnedPassthroughFrame = Rc<dyn Fn(&slint::Window, Option<(u32, u32, &[u8])>) -> bool>;
 type ConfigurePinnedImage = Rc<dyn Fn(&slint::Window, bool, bool, i32) -> bool>;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecordingWindowRole {
+    Interaction,
+    Feedback,
+    Control,
+}
+type RecordingWindowPolicy = Rc<dyn Fn(&slint::Window, RecordingWindowRole) -> bool>;
 
 #[derive(Clone)]
 pub struct WindowLifecycleCallbacks {
+    pub(crate) recording_window: Option<RecordingWindowPolicy>,
     pub(super) llm_query: Option<crate::llm_settings::LlmQuery>,
     pub(super) clipboard_history_supported: bool,
     pub(crate) history_dismissal: SetPopupDismissal,
@@ -193,6 +201,13 @@ pub struct WindowLifecycleCallbacks {
 }
 
 impl WindowLifecycleCallbacks {
+    pub fn with_recording_windows(
+        mut self,
+        configure: impl Fn(&slint::Window, RecordingWindowRole) -> bool + 'static,
+    ) -> Self {
+        self.recording_window = Some(Rc::new(configure));
+        self
+    }
     pub fn with_llm_query(
         mut self,
         query: impl Fn(
@@ -248,6 +263,7 @@ impl WindowLifecycleCallbacks {
             image_pan_cursor: Rc::new(|_, _| false),
             pin_window_budget: None,
             annotation_frame_presenter: Rc::new(|_, _, _, _| false),
+            recording_window: None,
             annotation_magnifier_sync: Rc::new(|_, _| false),
             annotation_magnifier_refresh: Rc::new(|| false),
             annotation_screen_capture: None,

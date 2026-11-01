@@ -16,6 +16,8 @@ use std::sync::atomic::AtomicBool;
 
 pub(super) use super::frozen_editor::{Editing, frame, render};
 
+#[path = "screenshot_recording.rs"]
+pub(crate) mod recording;
 #[path = "screenshot_refresh.rs"]
 pub(crate) mod refresh;
 
@@ -202,6 +204,7 @@ pub(crate) fn sync(state: &ScreenshotState) {
                 main.set_feedback(crate::i18n::tr(state.error.as_deref().unwrap_or("")).into());
                 main.set_long_capture_available(long::available(r));
                 main.set_refresh_available(refresh::available(r));
+                main.set_recording_available(recording::available(r));
                 main.set_refresh_busy(state.phase == ScreenshotPhase::Refreshing);
             }
             if r.screenshot.is_some() {
@@ -219,11 +222,14 @@ pub(crate) fn sync(state: &ScreenshotState) {
                     }
                     size_input::close(r);
                 }
-                r.queue_render();
+                if state.phase != ScreenshotPhase::Recording {
+                    r.queue_render();
+                }
             }
         }
     });
     long::sync();
+    recording::sync(state);
 }
 pub(super) fn request() {
     request_after(0);
@@ -490,6 +496,10 @@ pub(crate) fn show(
     selection_host::show_screenshot_with_candidates(id, frames, origin, windows, reusable);
 }
 pub(crate) fn cancel() {
+    if recording::active() {
+        recording::cancel();
+        return;
+    }
     if history_editor::active() {
         history_editor::close();
         return;
@@ -498,6 +508,7 @@ pub(crate) fn cancel() {
     emit(ScreenshotEvent::Cancelled { session: id });
 }
 pub(crate) fn restore(id: u64) {
+    recording::clear();
     delay::clear();
     long::clear();
     let recovery = FLOW.with(|s| {
@@ -535,6 +546,7 @@ pub(crate) fn restore(id: u64) {
     show_ocr_feedback(id);
 }
 pub(crate) fn shutdown() {
+    recording::clear();
     refresh::clear();
     delay::clear();
     long::clear();
@@ -560,7 +572,8 @@ pub(super) fn editor_ocr_owner() -> Option<lexift_core::domain::editor_ocr::Owne
     })
 }
 pub(super) fn recognizing() -> bool {
-    image_resize::busy()
+    (recording::active() && !recording::can_annotate())
+        || image_resize::busy()
         || image_transform::busy()
         || editor_ocr::busy()
         || long::busy()
@@ -708,6 +721,9 @@ pub(super) fn output(kind: ScreenshotOutput) {
     }
 }
 pub(super) fn pointer(r: &mut Registry, index: usize, event: i32, x: f32, y: f32) -> bool {
+    if recording::active() {
+        return !recording::can_annotate() || r.document.mode.is_mouse();
+    }
     if recognizing() {
         return true;
     }
@@ -1097,8 +1113,8 @@ fn show_feedback(state: &ScreenshotState) {
     if state.phase == ScreenshotPhase::Refreshing {
         return;
     }
-    let passive =
-        FLOW.with(|f| f.borrow().refresh_feedback == Some((state.session, state.operation)));
+    let passive = state.phase == ScreenshotPhase::Recording
+        || FLOW.with(|f| f.borrow().refresh_feedback == Some((state.session, state.operation)));
     let Some(message) = state.error.as_ref() else {
         return;
     };

@@ -12,6 +12,7 @@ pub mod ocr;
 pub mod ollama;
 pub mod screen;
 pub mod screen_capture;
+pub mod screen_recording;
 pub mod selection;
 pub mod settings;
 pub mod speech;

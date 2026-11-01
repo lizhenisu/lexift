@@ -2141,3 +2141,15 @@ msgstr "La disposizione degli schermi è cambiata. Acquisisci una nuova schermat
 
 msgid "Image exceeds the processing memory limit"
 msgstr "L’immagine supera il limite di memoria di elaborazione"
+
+msgid "Screen recording"
+msgstr "Registrazione dello schermo"
+
+msgid "Save video"
+msgstr "Salva video"
+
+msgid "Recording interrupted"
+msgstr "Registrazione interrotta"
+
+msgid "Use the .mp4 file extension."
+msgstr "Usa l’estensione del file .mp4."

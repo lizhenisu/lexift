@@ -28,6 +28,8 @@ mod history;
 mod import;
 #[path = "screenshot_long.rs"]
 mod long;
+#[path = "screenshot_recording.rs"]
+mod recording;
 #[path = "screenshot_refresh.rs"]
 mod refresh;
 type CaptureFactory = fn() -> Option<Arc<dyn ScreenCapturePort>>;
@@ -57,6 +59,7 @@ impl Session {
 #[path = "image_ocr.rs"]
 mod image_ocr;
 pub(crate) struct ScreenshotRuntime {
+    recording: Mutex<recording::Runtime>,
     imports: Mutex<BTreeMap<u64, import::Job>>,
     delay: Mutex<Option<(u64, tokio::task::JoinHandle<()>)>>,
     refresh: Mutex<Option<refresh::Job>>,
@@ -78,6 +81,9 @@ pub(crate) struct ScreenshotRuntime {
     image_ocr: Mutex<image_ocr::Queue>,
 }
 impl ScreenshotRuntime {
+    pub async fn wait_for_recording_shutdown(&self) {
+        recording::wait_for_shutdown(self).await;
+    }
     pub fn new(
         capture: CaptureFactory,
         save: Arc<dyn ImageFilePort>,
@@ -85,6 +91,7 @@ impl ScreenshotRuntime {
         clipboard: Arc<dyn ClipboardPort>,
     ) -> Self {
         Self {
+            recording: Default::default(),
             imports: Default::default(),
             delay: Default::default(),
             refresh: Default::default(),
@@ -158,6 +165,7 @@ impl ScreenshotRuntime {
             }
         }
         refresh::sync(self, state, quitting);
+        recording::sync(self, quitting);
         long::sync(self, state, quitting);
         let mut color = self.color_job.lock().unwrap_or_else(|p| p.into_inner());
         if color.as_ref().is_some_and(|(s, id, _)| {
@@ -549,6 +557,7 @@ impl ScreenshotRuntime {
     }
     pub fn execute(self: &Arc<Self>, controller: &Arc<AppController>, command: ScreenshotCommand) {
         match command {
+            ScreenshotCommand::Recording(command) => recording::execute(self, controller, command),
             ScreenshotCommand::Refresh(command) => refresh::execute(self, controller, command),
             ScreenshotCommand::FreezeShortcut { id, trigger } => {
                 controller.ui.freeze_screenshot_shortcut(id, trigger)

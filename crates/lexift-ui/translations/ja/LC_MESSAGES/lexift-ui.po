@@ -2141,3 +2141,15 @@ msgstr "ディスプレイの配置が変更されました。新しく撮影し
 
 msgid "Image exceeds the processing memory limit"
 msgstr "画像が処理メモリの上限を超えています"
+
+msgid "Screen recording"
+msgstr "画面録画"
+
+msgid "Save video"
+msgstr "動画を保存"
+
+msgid "Recording interrupted"
+msgstr "録画が中断されました"
+
+msgid "Use the .mp4 file extension."
+msgstr ".mp4 のファイル拡張子を使用してください。"

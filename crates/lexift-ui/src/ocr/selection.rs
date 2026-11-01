@@ -51,6 +51,10 @@ pub(crate) fn close() {
         host::close();
     }
 }
+pub(crate) fn shutdown() {
+    close();
+    STATE.with(|s| *s.borrow_mut() = (0, OcrPhase::Idle, false, None));
+}
 pub(crate) fn sync(generation: u64, phase: OcrPhase) {
     if STATE.with(|s| {
         let s = s.borrow();

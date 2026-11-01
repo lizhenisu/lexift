@@ -2,7 +2,7 @@ import { Colors } from "design/colors.slint";
 import { Metrics } from "design/metrics.slint";
 import { AnnotationHintTarget } from "annotation-hint.slint";
 
-component CaptureButton inherits Rectangle {
+export component CaptureButton inherits Rectangle {
     in property <image> icon;
     in property <string> label;
     in property <bool> enabled: true;
@@ -22,7 +22,7 @@ component CaptureButton inherits Rectangle {
     area := TouchArea { clicked => { if root.enabled { root.clicked(); } } }
     AnnotationHintTarget { width: parent.width; height: parent.height; text: root.label; hovered: area.has-hover; pressed: area.pressed; }
 }
-component CaptureSeparator inherits Rectangle {
+export component CaptureSeparator inherits Rectangle {
     width: 9px; height: Metrics.long-capture-button-size;
     Rectangle { x: 4px; y: 7px; width: 1px; height: parent.height - 14px; background: Colors.outline; }
 }

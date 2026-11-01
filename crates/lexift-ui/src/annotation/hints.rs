@@ -5,6 +5,11 @@ use crate::{AnnotationHintWindow, AnnotationHints};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Owner {
+    RecordingControl {
+        session: u64,
+        operation: u64,
+        revision: u64,
+    },
     Toolbar(u64),
     Panel(u64),
     SizeInput(u64),
@@ -79,6 +84,11 @@ fn with_owner_window<T>(
     f: impl FnOnce(&slint::Window) -> T,
 ) -> Option<T> {
     match owner {
+        Owner::RecordingControl {
+            session,
+            operation,
+            revision,
+        } => screenshot::recording::with_hint_window(session, operation, revision, f),
         Owner::Toolbar(id) if id == r.toolbar_state.main.revision() => {
             r.toolbar_state.main.get().map(|v| f(v.window()))
         }
@@ -126,6 +136,7 @@ bind!(bind_toolbar, AnnotationToolbar);
 bind!(bind_panel, AnnotationPanel);
 bind!(bind_size_input, crate::ScreenshotSizeInput);
 bind!(bind_long_control, crate::LongCaptureControl);
+bind!(bind_recording_control, crate::RecordingControl);
 bind!(bind_image_editor, crate::AnnotationCanvas);
 fn request(generation: u64, owner: Owner, text: slint::SharedString, anchor: [f32; 4]) {
     REGISTRY.with(|slot| {
@@ -279,7 +290,10 @@ fn show(generation: u64, revision: u64, attempt: u8) {
                 .unwrap_or(false)
                     || !(r.lifecycle.complete_toolbar_show)(hint.window(), Rc::new(|_| {}))
                     || !(r.lifecycle.configure_hint_window)(hint.window())
-                    || if matches!(request.owner, Owner::LongControl { .. }) {
+                    || if matches!(
+                        request.owner,
+                        Owner::LongControl { .. } | Owner::RecordingControl { .. }
+                    ) {
                         !show_capture_feedback(&r.lifecycle, hint.window())
                     } else {
                         hint.show().is_err()

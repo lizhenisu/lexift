@@ -379,6 +379,12 @@ fn emit(event: SelectionEvent) {
         h(event);
     }
 }
+/// Release callback-owned native services before Windows begins TLS teardown.
+pub(crate) fn shutdown() {
+    close();
+    let retired = STATE.with(|s| s.borrow_mut().take());
+    drop(retired);
+}
 pub(crate) fn close() {
     STATE.with(|s| {
         if let Some(r) = s

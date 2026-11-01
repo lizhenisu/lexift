@@ -115,6 +115,10 @@ pub(super) fn frame(r: &Registry, index: usize) -> Option<tiny_skia::Pixmap> {
     screenshot_preview::paint(&input(r, index)?, &AtomicBool::new(false))
 }
 pub(super) fn render(r: &mut Registry) {
+    if screenshot::recording::active() {
+        screenshot::recording::render(r);
+        return;
+    }
     if !screenshot::refresh::render_allowed() {
         return;
     }
@@ -325,6 +329,7 @@ pub(super) fn present_shared(
         {
             return;
         }
+        let first_feedback = editing.presented == 0;
         editing.presented = revision;
         installed = true;
         for ((layer, frame), (canvas, label)) in
@@ -346,6 +351,17 @@ pub(super) fn present_shared(
             } else {
                 editing.size_input.presented.insert(canvas, label);
             }
+        }
+        if let Some(toolbar) = r.toolbar_state.main.get() {
+            toolbar.set_recording_available(screenshot::recording::available(r));
+        }
+        if first_feedback && !failed {
+            tracing::debug!(
+                generation,
+                session = id,
+                revision,
+                "Frozen screenshot feedback installed"
+            );
         }
     });
     if (installed || failed) && screenshot::refresh::presented(generation, id, revision, !failed) {

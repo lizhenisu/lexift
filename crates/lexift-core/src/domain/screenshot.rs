@@ -27,7 +27,10 @@ pub enum ScreenshotPhase {
     Output,
     Recognizing,
     Refreshing,
+    Recording,
 }
+#[path = "screenshot_recording.rs"]
+pub mod recording;
 #[path = "screenshot_refresh.rs"]
 pub mod refresh;
 pub use super::ocr::OcrOutcome;
@@ -58,6 +61,7 @@ pub enum CaptureOrigin {
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ScreenshotState {
+    pub recording: Option<recording::Session>,
     pub frame_version: u64,
     pub refresh: Option<refresh::State>,
     pub shortcut_sequence: u64,
@@ -108,6 +112,7 @@ impl ScreenshotState {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotEvent {
+    Recording(recording::Event),
     Refresh(refresh::Event),
     ShortcutRequested(ShortcutTrigger),
     ShortcutFrozen {
@@ -187,6 +192,7 @@ pub enum ScreenshotEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotCommand {
+    Recording(recording::Command),
     Refresh(refresh::Command),
     FreezeShortcut {
         id: u64,
@@ -264,6 +270,7 @@ fn start_capture(
     let s = &mut state.screenshot;
     s.origin = origin;
     s.refresh = None;
+    s.recording = None;
     s.frame_version = 0;
     s.session = s
         .session
@@ -293,6 +300,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
     let delay_allowed = delay_available(state);
     let s = &mut state.screenshot;
     match event {
+        ScreenshotEvent::Recording(event) => recording::reduce(s, event),
         ScreenshotEvent::Refresh(event) => refresh::reduce(s, event),
         ScreenshotEvent::ShortcutRequested(trigger)
             if delay_allowed
@@ -605,6 +613,15 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         ScreenshotEvent::Cancelled { session } | ScreenshotEvent::Failed { session, .. }
             if s.session == session && s.active() =>
         {
+            if let Some(recording) = &s.recording {
+                return recording::reduce(
+                    s,
+                    recording::Event::Input {
+                        identity: recording.lifecycle.identity,
+                        event: super::screen_recording::Event::Cancel,
+                    },
+                );
+            }
             if let ScreenshotEvent::Failed { error, .. } = event {
                 s.error = Some(error);
             }

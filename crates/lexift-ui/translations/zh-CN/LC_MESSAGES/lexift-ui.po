@@ -2141,3 +2141,15 @@ msgstr "显示器布局已变化，请重新截图。"
 
 msgid "Image exceeds the processing memory limit"
 msgstr "图片超出处理内存限制"
+
+msgid "Screen recording"
+msgstr "屏幕录制"
+
+msgid "Save video"
+msgstr "保存视频"
+
+msgid "Recording interrupted"
+msgstr "录制已中断"
+
+msgid "Use the .mp4 file extension."
+msgstr "请使用 .mp4 文件扩展名。"

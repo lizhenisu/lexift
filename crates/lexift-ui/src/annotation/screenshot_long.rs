@@ -1,5 +1,5 @@
 #[path = "screenshot_long_feedback.rs"]
-mod feedback;
+pub(super) mod feedback;
 // Session-owned live range, bounded preview and controls. Capture and matching stay outside UI.
 use super::*;
 use crate::{LongCaptureConfirmation, LongCaptureControl, LongCapturePreview, LongCaptureRange};

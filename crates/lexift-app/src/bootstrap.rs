@@ -374,6 +374,11 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         })
         .with_capture_feedback(|window| lexift_platform::configure_capture_feedback(&window.window_handle()).is_ok())
+        .with_recording_windows(|window,role|lexift_platform::configure_recording_window(&window.window_handle(),match role {
+            lexift_ui::RecordingWindowRole::Interaction=>lexift_platform::RecordingWindowRole::Interaction,
+            lexift_ui::RecordingWindowRole::Feedback=>lexift_platform::RecordingWindowRole::Feedback,
+            lexift_ui::RecordingWindowRole::Control=>lexift_platform::RecordingWindowRole::Control,
+        }).is_ok())
         .with_window_paint_repair(move |window, repair| {
             if !software_renderer {
                 return true;
