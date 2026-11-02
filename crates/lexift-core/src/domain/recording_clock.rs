@@ -1,6 +1,19 @@
 //! Pure recording time: paused wall time never advances the video timeline.
 use std::time::Duration;
 
+/// Signed age in nanoseconds. Some delivered WGC frames have a small compositor
+/// clock lead; accept at most one output frame into the future.
+pub fn capture_offset(received_qpc: i64, source_qpc: i64, fps: u32) -> Option<i64> {
+    if fps == 0 {
+        return None;
+    }
+    let ticks = received_qpc.checked_sub(source_qpc)?;
+    if ticks < -(10_000_000 / i64::from(fps)) {
+        return None;
+    }
+    ticks.checked_mul(100)
+}
+
 #[derive(Debug, Clone)]
 pub struct Clock {
     fps: u32,
@@ -8,9 +21,15 @@ pub struct Clock {
     paused_at: Option<Duration>,
     paused: Duration,
     end: Option<Duration>,
+    floor: Duration,
 }
 
 impl Clock {
+    /// Derive audio indices from the same active duration and pause boundaries
+    /// as video, without accumulating rounded per-packet durations.
+    pub fn audio_sample(&self, now: Duration) -> crate::Result<u64> {
+        super::recording_audio::frames_for(self.active(now))
+    }
     pub fn new(fps: u32, origin: Duration) -> Option<Self> {
         (1..=60).contains(&fps).then_some(Self {
             fps,
@@ -18,6 +37,7 @@ impl Clock {
             paused_at: None,
             paused: Duration::ZERO,
             end: None,
+            floor: Duration::ZERO,
         })
     }
 
@@ -25,7 +45,7 @@ impl Clock {
         if self.end.is_some() || self.paused_at.is_some() {
             return false;
         }
-        self.paused_at = Some(now.max(self.origin + self.paused));
+        self.paused_at = Some(now.max(self.origin + self.paused + self.floor));
         true
     }
 
@@ -36,6 +56,10 @@ impl Clock {
         let Some(at) = self.paused_at.take() else {
             return false;
         };
+        self.floor = at
+            .saturating_sub(self.origin)
+            .saturating_sub(self.paused)
+            .max(self.floor);
         self.paused += now.saturating_sub(at);
         true
     }
@@ -53,6 +77,7 @@ impl Clock {
                 .unwrap_or(now)
                 .saturating_sub(self.origin)
                 .saturating_sub(self.paused)
+                .max(self.floor)
         })
     }
 
@@ -78,6 +103,28 @@ impl Clock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn presentation_clock_lead_is_bounded_and_resume_cannot_move_media_backwards() {
+        assert_eq!(capture_offset(1_000_000, 930_000, 30), Some(7_000_000));
+        assert_eq!(capture_offset(1_000_000, 1_070_000, 30), Some(-7_000_000));
+        assert_eq!(capture_offset(1_000_000, 1_400_000, 30), None);
+        assert_eq!(capture_offset(i64::MAX, 0, 30), None);
+        let mut clock = Clock::new(30, Duration::ZERO).unwrap();
+        clock.pause(Duration::from_secs(1));
+        clock.resume(Duration::from_millis(1407));
+        assert_eq!(
+            clock.active(Duration::from_millis(1400)),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            clock.audio_sample(Duration::from_millis(1400)).unwrap(),
+            48000
+        );
+        assert_eq!(
+            clock.active(Duration::from_millis(1417)),
+            Duration::from_millis(1010)
+        );
+    }
     fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
     }

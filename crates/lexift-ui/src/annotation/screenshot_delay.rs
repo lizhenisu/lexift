@@ -5,6 +5,7 @@ use crate::{AnnotationChoiceWindow, ScreenshotCountdownWindow};
 type Ready = Box<dyn FnOnce(lexift_core::Result<std::time::Instant>) + Send>;
 #[derive(Default)]
 struct Views {
+    recording: Option<(lexift_core::domain::screen_recording::Identity, u64)>,
     menu_kind: u8,
     sequence: u64,
     menu: Option<AnnotationChoiceWindow>,
@@ -41,8 +42,16 @@ pub(crate) fn sync(state: &ScreenshotState) {
                     ScreenshotPhase::CountingDown | ScreenshotPhase::Preparing
                 ))
     });
-    let menu_stale =
-        VIEWS.with(|s| s.borrow().menu.is_some() && s.borrow().menu_kind != 2) && state.active();
+    let menu_stale = VIEWS.with(|s| {
+        let s = s.borrow();
+        if s.menu_kind == 3 {
+            s.menu.is_some()
+                && super::recording::audio_selection().map(|(id, revision, _)| (id, revision))
+                    != s.recording
+        } else {
+            s.menu.is_some() && s.menu_kind != 2 && state.active()
+        }
+    });
     if stale || menu_stale {
         clear();
     }
@@ -72,7 +81,14 @@ fn choose(sequence: u64, index: Option<i32>) {
             return;
         }
         let kind = VIEWS.with(|s| s.borrow().menu_kind);
+        let recording = VIEWS.with(|s| s.borrow().recording);
         clear();
+        if kind == 3 {
+            if let (Some((identity, revision)), Some(index)) = (recording, index) {
+                super::recording::configure_audio(identity, revision, index);
+            }
+            return;
+        }
         if kind == 2 {
             if let Some(index) = index {
                 super::super::image_transform::apply(index);
@@ -106,8 +122,15 @@ pub(crate) fn import_menu() {
 pub(in crate::annotation) fn transform_menu() {
     menu_kind(2);
 }
+pub(super) fn audio_menu() {
+    menu_kind(3);
+}
 fn menu_kind(kind: u8) {
-    if kind == 2 {
+    if kind == 3 {
+        if super::recording::audio_selection().is_none() {
+            return;
+        }
+    } else if kind == 2 {
         if !super::super::image_transform::available() {
             return;
         }
@@ -129,7 +152,14 @@ fn menu_kind(kind: u8) {
         return;
     };
     crate::theme::apply(&w);
-    let labels: &[&str] = if kind == 2 {
+    let labels: &[&str] = if kind == 3 {
+        &[
+            "No audio",
+            "System audio",
+            "Microphone",
+            "System audio and microphone",
+        ]
+    } else if kind == 2 {
         &[
             "Rotate left 90°",
             "Rotate right 90°",
@@ -152,7 +182,10 @@ fn menu_kind(kind: u8) {
             .map(|s| crate::i18n::tr(s).into())
             .collect::<Vec<_>>(),
     )));
-    w.set_selected(0);
+    let selection = (kind == 3)
+        .then(super::recording::audio_selection)
+        .flatten();
+    w.set_selected(selection.map(|(_, _, index)| index as i32).unwrap_or(0));
     w.set_option_measurement(
         labels
             .iter()
@@ -165,6 +198,7 @@ fn menu_kind(kind: u8) {
         let mut s = s.borrow_mut();
         s.sequence += 1;
         s.menu_kind = kind;
+        s.recording = selection.map(|(identity, revision, _)| (identity, revision));
         s.menu = Some(w.clone_strong());
         s.sequence
     });

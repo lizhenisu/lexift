@@ -33,6 +33,7 @@
 - [PixPin 屏幕录制链路、性能与交互研究](planning/pixpin-screen-recording-research.md)
 - [屏幕录制技术验证与重复执行](releases/screen-recording-gate.md)
 - [无声 MP4 与实时标注实施及验收状态](releases/screen-recording-mp4.md)
+- [录屏系统声音与麦克风实施及验收状态](releases/screen-recording-audio.md)
 - [PixPin 长截图链路与交互研究](planning/pixpin-long-screenshot-research.md)
 - [PixPin 长图结果编辑器研究](planning/pixpin-image-editor-research.md)
 - [阶段实施计划与阶段验收记录](planning/implementation-plan.md)：M2／M3／M4 的阶段背景，不能单独作为当前功能清单。

@@ -2153,3 +2153,51 @@ msgstr "Recording interrupted"
 
 msgid "Use the .mp4 file extension."
 msgstr "Use the .mp4 file extension."
+
+
+msgid "No audio"
+msgstr "No audio"
+
+
+msgid "System audio"
+msgstr "System audio"
+
+
+msgid "Microphone"
+msgstr "Microphone"
+
+
+msgid "System audio and microphone"
+msgstr "System audio and microphone"
+
+
+msgid "Preparing audio"
+msgstr "Preparing audio"
+
+
+msgid "Recording audio permission denied"
+msgstr "Recording audio permission denied"
+
+
+msgid "Recording audio device changed"
+msgstr "Recording audio device changed"
+
+
+msgid "Recording audio service unavailable"
+msgstr "Recording audio service unavailable"
+
+
+msgid "Recording audio format unsupported"
+msgstr "Recording audio format unsupported"
+
+
+msgid "Recording audio queue is full"
+msgstr "Recording audio queue is full"
+
+
+msgid "Recording audio unavailable"
+msgstr "Recording audio unavailable"
+
+
+msgid "Recording audio timing failed"
+msgstr "Recording audio timing failed"

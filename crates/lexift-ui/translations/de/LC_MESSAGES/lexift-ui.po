@@ -2153,3 +2153,51 @@ msgstr "Aufnahme unterbrochen"
 
 msgid "Use the .mp4 file extension."
 msgstr "Verwenden Sie die Dateiendung .mp4."
+
+
+msgid "No audio"
+msgstr "Ohne Ton"
+
+
+msgid "System audio"
+msgstr "Systemaudio"
+
+
+msgid "Microphone"
+msgstr "Mikrofon"
+
+
+msgid "System audio and microphone"
+msgstr "Systemaudio und Mikrofon"
+
+
+msgid "Preparing audio"
+msgstr "Audio wird vorbereitet"
+
+
+msgid "Recording audio permission denied"
+msgstr "Keine Berechtigung zur Audioaufnahme"
+
+
+msgid "Recording audio device changed"
+msgstr "Aufnahmegerät wurde geändert"
+
+
+msgid "Recording audio service unavailable"
+msgstr "Audiodienst nicht verfügbar"
+
+
+msgid "Recording audio format unsupported"
+msgstr "Audioaufnahmeformat nicht unterstützt"
+
+
+msgid "Recording audio queue is full"
+msgstr "Audiopuffer ist voll"
+
+
+msgid "Recording audio unavailable"
+msgstr "Audioaufnahme nicht verfügbar"
+
+
+msgid "Recording audio timing failed"
+msgstr "Fehler im Audiozeitstempel"

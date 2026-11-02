@@ -2153,3 +2153,51 @@ msgstr "录制已中断"
 
 msgid "Use the .mp4 file extension."
 msgstr "请使用 .mp4 文件扩展名。"
+
+
+msgid "No audio"
+msgstr "不录声音"
+
+
+msgid "System audio"
+msgstr "系统声音"
+
+
+msgid "Microphone"
+msgstr "麦克风"
+
+
+msgid "System audio and microphone"
+msgstr "系统声音与麦克风"
+
+
+msgid "Preparing audio"
+msgstr "正在准备声音"
+
+
+msgid "Recording audio permission denied"
+msgstr "未获准录制声音，请检查麦克风权限"
+
+
+msgid "Recording audio device changed"
+msgstr "录音设备已变更"
+
+
+msgid "Recording audio service unavailable"
+msgstr "系统音频服务不可用"
+
+
+msgid "Recording audio format unsupported"
+msgstr "不支持此录音格式"
+
+
+msgid "Recording audio queue is full"
+msgstr "录音缓冲已满"
+
+
+msgid "Recording audio unavailable"
+msgstr "录音设备不可用"
+
+
+msgid "Recording audio timing failed"
+msgstr "录音时间戳异常"

@@ -135,12 +135,43 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
                 | Notice::Interrupted { identity: id, .. }
                 | Notice::Finished { identity: id, .. }
                 | Notice::Failed { identity: id, .. } => *id,
+                Notice::AudioConfigured { identity, .. }
+                | Notice::StartRejected { identity, .. } => *identity,
             };
             if recording.backend_request != Some(identity) {
                 return vec![];
             }
             let current = recording.lifecycle.identity;
             match notice {
+                Notice::StartRejected { error, .. } => {
+                    s.error = Some(error.to_string());
+                    Event::Input {
+                        identity: current,
+                        event: lifecycle::Event::StartRejected,
+                    }
+                }
+                Notice::AudioConfigured {
+                    result, devices, ..
+                } => {
+                    if recording.lifecycle.phase != lifecycle::Phase::PreparingAudio {
+                        return vec![];
+                    }
+                    let event = match result {
+                        Ok(mode) if Some(mode) == recording.lifecycle.pending_audio => {
+                            recording.lifecycle.audio_devices = devices;
+                            lifecycle::Event::AudioConfigured
+                        }
+                        Ok(_) => return vec![],
+                        Err(error) => {
+                            s.error = Some(error.to_string());
+                            lifecycle::Event::AudioConfigurationFailed
+                        }
+                    };
+                    Event::Input {
+                        identity: current,
+                        event,
+                    }
+                }
                 Notice::Prepared(_) => Event::Input {
                     identity: current,
                     event: lifecycle::Event::BackendReady,
@@ -228,7 +259,16 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
             }
         }
         Event::Input { identity, event } if event != lifecycle::Event::Save => {
-            recording.lifecycle.apply(identity, event)
+            let command = recording.lifecycle.apply(identity, event);
+            if command.as_ref().is_some_and(|c| {
+                matches!(
+                    c.action,
+                    lifecycle::Action::ConfigureAudio(_) | lifecycle::Action::Start
+                )
+            }) {
+                s.error = None;
+            }
+            command
         }
         Event::Finalized { identity, artifact }
             if identity == recording.lifecycle.identity
@@ -278,6 +318,7 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
     if matches!(
         command.action,
         lifecycle::Action::PrepareBackend
+            | lifecycle::Action::ConfigureAudio(_)
             | lifecycle::Action::Start
             | lifecycle::Action::Pause
             | lifecycle::Action::Resume
@@ -379,6 +420,66 @@ mod tests {
             },
         );
         emit(s, Event::Native(Notice::Prepared(id(s))));
+    }
+    #[test]
+    fn audio_preparation_is_versioned_and_cancellation_rejects_late_confirmation() {
+        use crate::domain::recording_audio::{Devices, Mode};
+        let mut s = begin();
+        ready(&mut s);
+        let old = id(&s);
+        let commands = input(&mut s, lifecycle::Event::ConfigureAudio(Mode::Mixed));
+        assert!(
+            matches!(&commands[0], AppCommand::Screenshot(ScreenshotCommand::Recording(Command::Execute(c))) if c.action == lifecycle::Action::ConfigureAudio(Mode::Mixed))
+        );
+        let pending = id(&s);
+        assert!(input(&mut s, lifecycle::Event::Start).is_empty());
+        let devices = Devices {
+            system: Some(11),
+            microphone: Some(12),
+        };
+        emit(
+            &mut s,
+            Event::Native(Notice::AudioConfigured {
+                identity: old,
+                result: Ok(Mode::Mixed),
+                devices,
+            }),
+        );
+        assert_eq!(
+            s.screenshot.recording.as_ref().unwrap().lifecycle.phase,
+            lifecycle::Phase::PreparingAudio
+        );
+        emit(
+            &mut s,
+            Event::Native(Notice::AudioConfigured {
+                identity: pending,
+                result: Ok(Mode::Mixed),
+                devices,
+            }),
+        );
+        let state = &s.screenshot.recording.as_ref().unwrap().lifecycle;
+        assert_eq!(state.audio, Mode::Mixed);
+        assert_eq!(state.audio_devices, devices);
+        input(&mut s, lifecycle::Event::ConfigureAudio(Mode::System));
+        let pending = id(&s);
+        input(&mut s, lifecycle::Event::Cancel);
+        emit(
+            &mut s,
+            Event::Native(Notice::AudioConfigured {
+                identity: pending,
+                result: Ok(Mode::System),
+                devices: Devices {
+                    system: Some(11),
+                    microphone: None,
+                },
+            }),
+        );
+        assert_eq!(
+            s.screenshot.recording.as_ref().unwrap().lifecycle.phase,
+            lifecycle::Phase::Retiring
+        );
+        retire(&mut s);
+        assert_eq!(s.screenshot.phase, ScreenshotPhase::Editing);
     }
     fn running(s: &mut AppState) {
         ready(s);

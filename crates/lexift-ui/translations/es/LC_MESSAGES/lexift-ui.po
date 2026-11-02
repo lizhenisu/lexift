@@ -2153,3 +2153,51 @@ msgstr "Grabación interrumpida"
 
 msgid "Use the .mp4 file extension."
 msgstr "Utiliza la extensión de archivo .mp4."
+
+
+msgid "No audio"
+msgstr "Sin audio"
+
+
+msgid "System audio"
+msgstr "Audio del sistema"
+
+
+msgid "Microphone"
+msgstr "Micrófono"
+
+
+msgid "System audio and microphone"
+msgstr "Audio del sistema y micrófono"
+
+
+msgid "Preparing audio"
+msgstr "Preparando audio"
+
+
+msgid "Recording audio permission denied"
+msgstr "Permiso de audio denegado"
+
+
+msgid "Recording audio device changed"
+msgstr "El dispositivo de audio ha cambiado"
+
+
+msgid "Recording audio service unavailable"
+msgstr "Servicio de audio no disponible"
+
+
+msgid "Recording audio format unsupported"
+msgstr "Formato de grabación no compatible"
+
+
+msgid "Recording audio queue is full"
+msgstr "El búfer de audio está lleno"
+
+
+msgid "Recording audio unavailable"
+msgstr "Grabación de audio no disponible"
+
+
+msgid "Recording audio timing failed"
+msgstr "Error de tiempo del audio"

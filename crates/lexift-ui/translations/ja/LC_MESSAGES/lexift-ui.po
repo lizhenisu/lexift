@@ -2153,3 +2153,51 @@ msgstr "録画が中断されました"
 
 msgid "Use the .mp4 file extension."
 msgstr ".mp4 のファイル拡張子を使用してください。"
+
+
+msgid "No audio"
+msgstr "音声なし"
+
+
+msgid "System audio"
+msgstr "システム音声"
+
+
+msgid "Microphone"
+msgstr "マイク"
+
+
+msgid "System audio and microphone"
+msgstr "システム音声とマイク"
+
+
+msgid "Preparing audio"
+msgstr "音声を準備中"
+
+
+msgid "Recording audio permission denied"
+msgstr "音声の録音が許可されていません"
+
+
+msgid "Recording audio device changed"
+msgstr "録音デバイスが変更されました"
+
+
+msgid "Recording audio service unavailable"
+msgstr "音声サービスを利用できません"
+
+
+msgid "Recording audio format unsupported"
+msgstr "この録音形式はサポートされていません"
+
+
+msgid "Recording audio queue is full"
+msgstr "音声バッファーがいっぱいです"
+
+
+msgid "Recording audio unavailable"
+msgstr "音声を録音できません"
+
+
+msgid "Recording audio timing failed"
+msgstr "音声タイムスタンプのエラー"

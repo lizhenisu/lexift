@@ -1,4 +1,4 @@
-//! Asynchronous silent-video capability. Native objects and artifact paths stay
+//! Asynchronous video and optional audio capability. Native objects and paths stay
 //! in the adapter; view preparation and annotation rendering are separate bridges.
 use crate::{
     Result,
@@ -53,6 +53,15 @@ pub struct ArtifactInfo {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Notice {
+    StartRejected {
+        identity: Identity,
+        error: crate::Error,
+    },
+    AudioConfigured {
+        identity: Identity,
+        result: crate::Result<crate::domain::recording_audio::Mode>,
+        devices: crate::domain::recording_audio::Devices,
+    },
     Prepared(Identity),
     Started(Identity),
     Paused(Identity),
@@ -76,6 +85,7 @@ pub type Listener = Arc<dyn Fn(Notice) + Send + Sync>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Control {
+    ConfigureAudio(crate::domain::recording_audio::Mode),
     Start,
     Pause,
     Resume,

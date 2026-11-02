@@ -200,11 +200,14 @@ fn recording_controls_render_all_languages_themes_dpis_and_phases() {
                 adapter
                     .window()
                     .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
-                let (width, height) = ((380. * dpi) as u32, (40. * dpi) as u32);
+                let (width, height) = ((420. * dpi) as u32, (40. * dpi) as u32);
                 adapter.set_size(slint::PhysicalSize::new(width, height));
                 for phase in 0..7 {
                     control.set_phase(phase);
                     control.set_interrupted(phase == 5);
+                    control.set_audio_preparing(phase == 0);
+                    control.set_audio_enabled(phase > 0);
+                    control.set_audio_label(crate::i18n::tr("System audio and microphone").into());
                     let mut pixels = vec![slint::Rgb8Pixel::default(); (width * height) as usize];
                     adapter.request_redraw();
                     adapter.draw_if_needed(|r| {

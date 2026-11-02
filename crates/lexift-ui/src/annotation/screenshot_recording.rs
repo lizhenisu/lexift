@@ -99,6 +99,50 @@ fn input(event: Input) {
         });
     }
 }
+pub(super) fn audio_selection() -> Option<(Identity, u64, usize)> {
+    let state = current()?;
+    if state.lifecycle.phase != Phase::Ready {
+        return None;
+    }
+    use lexift_core::domain::recording_audio::Mode;
+    let selected = match state.lifecycle.audio {
+        Mode::Silent => 0,
+        Mode::System => 1,
+        Mode::Microphone => 2,
+        Mode::Mixed => 3,
+    };
+    VIEW.with(|v| {
+        let v = v.borrow();
+        (v.control.get().is_some()
+            && v.identity.is_some_and(|id| {
+                id.session == state.lifecycle.identity.session
+                    && id.operation == state.lifecycle.identity.operation
+            }))
+        .then_some((state.lifecycle.identity, v.control.revision(), selected))
+    })
+}
+pub(super) fn configure_audio(identity: Identity, revision: u64, index: i32) {
+    if audio_selection().is_none_or(|(current, current_revision, _)| {
+        current != identity || current_revision != revision
+    }) {
+        return;
+    }
+    use lexift_core::domain::recording_audio::Mode;
+    if let Some(mode) =
+        [Mode::Silent, Mode::System, Mode::Microphone, Mode::Mixed].get(index as usize)
+    {
+        input(Input::ConfigureAudio(*mode));
+    }
+}
+fn audio_label(mode: lexift_core::domain::recording_audio::Mode) -> &'static str {
+    use lexift_core::domain::recording_audio::Mode;
+    match mode {
+        Mode::Silent => "No audio",
+        Mode::System => "System audio",
+        Mode::Microphone => "Microphone",
+        Mode::Mixed => "System audio and microphone",
+    }
+}
 #[track_caller]
 pub(in crate::annotation) fn cancel() {
     tracing::debug!(caller=%std::panic::Location::caller(),"Recording view cancellation requested");
@@ -409,7 +453,7 @@ fn prepare_windows(identity: Identity, bounds: Rect, attempt: u8) {
             range.set_selection_y((bounds.top - monitor.top) as f32 / scale);
             range.set_selection_width((bounds.right - bounds.left) as f32 / scale);
             range.set_selection_height((bounds.bottom - bounds.top) as f32 / scale);
-            let width = (380. * scale) as i32;
+            let width = (420. * scale) as i32;
             let height = (40. * scale) as i32;
             w.window()
                 .set_size(slint::PhysicalSize::new(width as u32, height as u32));
@@ -719,6 +763,11 @@ fn choose(session: u64, operation: u64, revision: u64, action: i32) {
                 }));
             }
         }
+        3 => {
+            if state.lifecycle.phase == Phase::Ready {
+                super::delay::audio_menu();
+            }
+        }
         _ => cancel(),
     }
 }
@@ -962,6 +1011,11 @@ pub(crate) fn sync(state: &ScreenshotState) {
             Phase::Saving => 6,
             _ => 0,
         });
+        let mode = recording.lifecycle.audio;
+        w.set_audio_enabled(mode != lexift_core::domain::recording_audio::Mode::Silent);
+        w.set_audio_preparing(recording.lifecycle.phase == Phase::PreparingAudio);
+        w.set_start_enabled(recording.lifecycle.audio_ready);
+        w.set_audio_label(crate::i18n::tr(audio_label(mode)).into());
         w.set_interrupted(matches!(
             recording.lifecycle.finish_reason,
             lexift_core::domain::screen_recording::FinishReason::Interrupted(_)

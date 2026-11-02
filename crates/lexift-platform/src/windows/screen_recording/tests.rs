@@ -9,7 +9,206 @@ use windows::{
     },
     core::*,
 };
+#[test]
+#[ignore = "writes synthetic audio/video to LEXIFT_RECORDING_NATIVE_DIR"]
+fn aac_mux_synthetic_stereo() {
+    let folder = PathBuf::from(
+        std::env::var_os("LEXIFT_RECORDING_NATIVE_DIR").expect("owned evidence directory"),
+    );
+    std::fs::create_dir_all(&folder).unwrap();
+    let _apartment = super::super::screen_capture::capture::Apartment::new().unwrap();
+    let _media = encoder::Media::new().unwrap();
+    let encoder =
+        encoder::Encoder::new_av(&folder.join("synthetic-aac.mp4"), 320, 180, true).unwrap();
+    let pixels = vec![128; 320 * 180 * 3 / 2];
+    for frame in 0..60u64 {
+        let pcm: Vec<[f32; 2]> = (frame * 1600..(frame + 1) * 1600)
+            .map(|i| {
+                let t = i as f32 / 48000.;
+                [
+                    (t * 440. * std::f32::consts::TAU).sin() * 0.25,
+                    (t * 880. * std::f32::consts::TAU).sin() * 0.125,
+                ]
+            })
+            .collect();
+        encoder.write_audio(&pcm, frame * 1600).unwrap();
+        let start = (frame * 10_000_000 / 30) as i64;
+        let end = ((frame + 1) * 10_000_000 / 30) as i64;
+        encoder.write(&pixels, start, end - start).unwrap();
+    }
+    encoder.finish().unwrap();
+}
+#[test]
+#[ignore = "opens actual default audio endpoints without persisting microphone PCM"]
+fn audio_endpoints_prepare_start_stop() {
+    for system in [true, false] {
+        let source = audio_source::Source::prepare(system).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !source.status().unwrap().0 {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!source.status().unwrap().1, "preparation must not record");
+        assert!(source.drain().unwrap().is_empty());
+        source.start();
+        while !source.status().unwrap().1 {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(5));
+        }
+        let end = Instant::now() + Duration::from_millis(200);
+        let mut frames = 0;
+        while Instant::now() < end {
+            frames += source
+                .drain()
+                .unwrap()
+                .iter()
+                .map(|p| p.frames.len())
+                .sum::<usize>();
+            thread::sleep(Duration::from_millis(5));
+        }
+        source.stop();
+        while source.status().unwrap().1 {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(5));
+        }
+        eprintln!("endpoint system={system} copied_frames={frames}; PCM discarded");
+    }
+}
 struct Source(HWND);
+#[test]
+fn missing_audio_source_cannot_silently_turn_into_a_silent_recording() {
+    use lexift_core::domain::recording_audio::Mode;
+    let mut sources = audio::Sources::default();
+    for mode in [Mode::System, Mode::Microphone, Mode::Mixed] {
+        assert!(sources.prepared(mode).is_err());
+        sources.mode = mode;
+        assert!(sources.running().is_err());
+    }
+    sources.mode = Mode::Silent;
+    assert!(sources.prepared(Mode::Silent).unwrap());
+    assert!(sources.running().unwrap());
+}
+#[test]
+#[ignore = "native WGC/QPC metadata only; never writes captured pixels"]
+fn capture_video_clock_anchor_diagnostics() {
+    let b = lexift_core::domain::geometry::Rect {
+        left: 320,
+        top: 200,
+        right: 2240,
+        bottom: 1280,
+    };
+    let fresh = qpc_100ns().unwrap();
+    let capture =
+        Capture::new(b, super::super::screen_capture::arrival::Notice::new(|| {})).unwrap();
+    let mut pixels = vec![0; 1920 * 1080 * 4];
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut seen = 0;
+    while Instant::now() < deadline && seen < 10 {
+        if let Some(timing) = capture.read(&mut pixels, fresh).unwrap() {
+            let now = qpc_100ns().unwrap();
+            eprintln!(
+                "video clock source={} received={} difference_100ns={}",
+                timing.source_100ns,
+                now,
+                now - timing.source_100ns
+            );
+            seen += 1;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(seen > 0);
+}
+#[test]
+#[ignore = "native Media Foundation resampler; synthetic PCM only"]
+fn audio_resampler_native_rates_and_drain() {
+    let _apartment = super::super::screen_capture::capture::Apartment::new().unwrap();
+    let _media = encoder::Media::new().unwrap();
+    for rate in [16000u32, 44100, 48000, 96000] {
+        for channels in [1u16, 2] {
+            let format = windows::Win32::Media::Audio::WAVEFORMATEX {
+                wFormatTag: 1,
+                nChannels: channels,
+                nSamplesPerSec: rate,
+                nAvgBytesPerSec: rate * u32::from(channels) * 2,
+                nBlockAlign: channels * 2,
+                wBitsPerSample: 16,
+                cbSize: 0,
+            };
+            let converter = unsafe { audio_convert::Converter::new(&format) }.unwrap();
+            let mut result = Vec::new();
+            for start in (0..rate).step_by((rate / 100) as usize) {
+                let end = (start + rate / 100).min(rate);
+                let bytes: Vec<u8> = (start..end)
+                    .flat_map(|_| (0..channels).flat_map(|_| 8192i16.to_le_bytes()))
+                    .collect();
+                for (_, frames) in converter
+                    .input(
+                        &bytes,
+                        end - start,
+                        10_000_000 + u64::from(start) * 10_000_000 / u64::from(rate),
+                    )
+                    .unwrap()
+                {
+                    result.extend(frames);
+                }
+            }
+            for (_, frames) in converter.finish().unwrap() {
+                result.extend(frames);
+            }
+            // MF's interpolation tail can end before the nominal interval by
+            // fewer than one input sample. The recording writer zero-pads that
+            // bounded remainder to the final video coverage, never shifts PCM.
+            assert!(
+                result.len() <= 48000 && 48000 - result.len() < 48000u32.div_ceil(rate) as usize,
+                "rate={rate} channels={channels} frames={}",
+                result.len()
+            );
+            for frame in &result[100..result.len() - 100] {
+                assert!(
+                    (frame[0] - 0.25).abs() < 0.001 && (frame[1] - 0.25).abs() < 0.001,
+                    "rate={rate} channels={channels} frame={frame:?}"
+                );
+            }
+            eprintln!(
+                "resampler rate={rate} channels={channels} frames={}",
+                result.len()
+            );
+        }
+    }
+}
+#[test]
+#[ignore = "synthetic pulse/flash MP4 for independent AAC latency measurement"]
+fn aac_mux_pulse_flash_sync() {
+    let folder = PathBuf::from(
+        std::env::var_os("LEXIFT_RECORDING_NATIVE_DIR").expect("owned evidence directory"),
+    );
+    std::fs::create_dir_all(&folder).unwrap();
+    let _apartment = super::super::screen_capture::capture::Apartment::new().unwrap();
+    let _media = encoder::Media::new().unwrap();
+    let encoder = encoder::Encoder::new_av(&folder.join("pulse-aac.mp4"), 320, 180, true).unwrap();
+    for frame in 0..180u64 {
+        let pulse = [15, 75, 135]
+            .iter()
+            .any(|&start| (start..start + 3).contains(&frame));
+        let pcm: Vec<[f32; 2]> = (frame * 1600..(frame + 1) * 1600)
+            .map(|i| {
+                let value = if pulse {
+                    (i as f32 / 48000. * 1000. * std::f32::consts::TAU).sin() * 0.5
+                } else {
+                    0.
+                };
+                [value; 2]
+            })
+            .collect();
+        encoder.write_audio(&pcm, frame * 1600).unwrap();
+        let mut pixels = vec![128; 320 * 180 * 3 / 2];
+        pixels[..320 * 180].fill(if pulse { 235 } else { 16 });
+        let start = (frame * 10_000_000 / 30) as i64;
+        let end = ((frame + 1) * 10_000_000 / 30) as i64;
+        encoder.write(&pixels, start, end - start).unwrap();
+    }
+    encoder.finish().unwrap();
+}
 impl Drop for Source {
     fn drop(&mut self) {
         unsafe {
@@ -42,8 +241,12 @@ fn wait(receiver: &Receiver<Notice>, accept: impl Fn(&Notice) -> bool) -> Notice
         pump();
         match receiver.recv_timeout(Duration::from_millis(5)) {
             Ok(n) => {
+                eprintln!("native fixture notice: {n:?}");
                 if let Notice::Failed { error, .. } = &n {
                     panic!("native service failed: {error}");
+                }
+                if let Notice::StartRejected { error, .. } = &n {
+                    panic!("native start rejected: {error}");
                 }
                 if accept(&n) {
                     return n;
@@ -152,6 +355,28 @@ fn production_port_static_pause_resume_and_final_presented_frame() {
         )
         .unwrap();
         wait(&rx, |n| matches!(n, Notice::Prepared(_)));
+        assert_eq!(
+            super::super::recording_gate::resources::ENCODER.load(Ordering::Acquire),
+            0,
+            "preparation must not create an encoding file"
+        );
+        if let Ok(mode) = std::env::var("LEXIFT_RECORDING_AUDIO_MODE") {
+            use lexift_core::domain::recording_audio::Mode;
+            let mode = match mode.as_str() {
+                "system" => Mode::System,
+                "microphone" => Mode::Microphone,
+                "mixed" => Mode::Mixed,
+                _ => panic!("invalid native fixture audio mode"),
+            };
+            id.request += 1;
+            port.control(id, Control::ConfigureAudio(mode)).unwrap();
+            let Notice::AudioConfigured { result, .. } =
+                wait(&rx, |n| matches!(n, Notice::AudioConfigured { .. }))
+            else {
+                unreachable!()
+            };
+            assert_eq!(result.unwrap(), mode);
+        }
         id.request += 1;
         port.control(id, Control::Start).unwrap();
         wait(&rx, |n| matches!(n, Notice::Started(_)));

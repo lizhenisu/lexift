@@ -2153,3 +2153,51 @@ msgstr "錄製已中斷"
 
 msgid "Use the .mp4 file extension."
 msgstr "請使用 .mp4 檔案副檔名。"
+
+
+msgid "No audio"
+msgstr "不錄聲音"
+
+
+msgid "System audio"
+msgstr "系統聲音"
+
+
+msgid "Microphone"
+msgstr "麥克風"
+
+
+msgid "System audio and microphone"
+msgstr "系統聲音與麥克風"
+
+
+msgid "Preparing audio"
+msgstr "正在準備聲音"
+
+
+msgid "Recording audio permission denied"
+msgstr "未獲准錄製聲音，請檢查麥克風權限"
+
+
+msgid "Recording audio device changed"
+msgstr "錄音裝置已變更"
+
+
+msgid "Recording audio service unavailable"
+msgstr "系統音訊服務無法使用"
+
+
+msgid "Recording audio format unsupported"
+msgstr "不支援此錄音格式"
+
+
+msgid "Recording audio queue is full"
+msgstr "錄音緩衝區已滿"
+
+
+msgid "Recording audio unavailable"
+msgstr "錄音裝置無法使用"
+
+
+msgid "Recording audio timing failed"
+msgstr "錄音時間戳記異常"

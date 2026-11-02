@@ -71,6 +71,7 @@ pub enum Phase {
     PreparingView,
     PreparingBackend,
     Ready,
+    PreparingAudio,
     Starting,
     Recording,
     Pausing,
@@ -85,6 +86,7 @@ pub enum Phase {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Interruption {
+    AudioUnavailable,
     LayoutChanged,
     CaptureClosed,
     CaptureUnavailable,
@@ -96,6 +98,10 @@ pub enum FinishReason {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    StartRejected,
+    ConfigureAudio(super::recording_audio::Mode),
+    AudioConfigured,
+    AudioConfigurationFailed,
     ViewReady,
     BackendReady,
     Start,
@@ -118,6 +124,7 @@ pub enum Event {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
+    ConfigureAudio(super::recording_audio::Mode),
     PrepareBackend,
     Start,
     Pause,
@@ -137,6 +144,10 @@ pub struct Command {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct State {
+    pub audio_devices: super::recording_audio::Devices,
+    pub audio_ready: bool,
+    pub audio: super::recording_audio::Mode,
+    pub pending_audio: Option<super::recording_audio::Mode>,
     pub identity: Identity,
     pub source: Rect,
     pub phase: Phase,
@@ -148,6 +159,10 @@ pub struct State {
 impl State {
     pub fn new(session: u64, operation: u64, source: Rect, monitor: Rect) -> Result<Self> {
         Ok(Self {
+            audio_devices: Default::default(),
+            audio_ready: true,
+            audio: Default::default(),
+            pending_audio: None,
             identity: Identity {
                 session,
                 operation,
@@ -197,11 +212,32 @@ impl State {
             return None;
         }
         let (phase, action) = match (self.phase, event) {
+            (Phase::Ready, Event::ConfigureAudio(mode))
+                if mode != self.audio || !self.audio_ready =>
+            {
+                self.pending_audio = Some(mode);
+                (Phase::PreparingAudio, Some(Action::ConfigureAudio(mode)))
+            }
+            (Phase::PreparingAudio, Event::AudioConfigured) => {
+                self.audio = self.pending_audio.take()?;
+                self.audio_ready = true;
+                (Phase::Ready, None)
+            }
+            (Phase::PreparingAudio, Event::AudioConfigurationFailed) => {
+                self.pending_audio = None;
+                (Phase::Ready, None)
+            }
             (Phase::PreparingView, Event::ViewReady) => {
                 (Phase::PreparingBackend, Some(Action::PrepareBackend))
             }
             (Phase::PreparingBackend, Event::BackendReady) => (Phase::Ready, None),
-            (Phase::Ready, Event::Start) => (Phase::Starting, Some(Action::Start)),
+            (Phase::Ready, Event::Start) if self.audio_ready => {
+                (Phase::Starting, Some(Action::Start))
+            }
+            (Phase::Starting, Event::StartRejected) => {
+                self.audio_ready = false;
+                (Phase::Ready, None)
+            }
             (Phase::Starting, Event::Started) => (Phase::Recording, None),
             (Phase::Recording, Event::Pause) => (Phase::Pausing, Some(Action::Pause)),
             (Phase::Pausing, Event::Paused) => (Phase::Paused, None),
@@ -224,7 +260,10 @@ impl State {
                 return None;
             }
             (
-                Phase::PreparingView | Phase::PreparingBackend | Phase::Ready,
+                Phase::PreparingView
+                | Phase::PreparingBackend
+                | Phase::Ready
+                | Phase::PreparingAudio,
                 Event::Interrupted(reason),
             ) => {
                 self.finish_reason = FinishReason::Interrupted(reason);
@@ -287,6 +326,35 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rejected_start_preserves_preparation_and_requires_explicit_reprepare() {
+        let b = Rect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        };
+        let mut state = State::new(1, 2, b, b).unwrap();
+        send(&mut state, Event::ViewReady);
+        send(&mut state, Event::BackendReady);
+        send(&mut state, Event::Start);
+        let old = state.identity;
+        send(&mut state, Event::StartRejected);
+        assert_eq!(state.phase, Phase::Ready);
+        assert!(!state.audio_ready);
+        assert!(send(&mut state, Event::Start).is_none());
+        assert!(state.apply(old, Event::Started).is_none());
+        assert!(
+            send(
+                &mut state,
+                Event::ConfigureAudio(super::super::recording_audio::Mode::Silent)
+            )
+            .is_some()
+        );
+        send(&mut state, Event::AudioConfigured);
+        assert!(state.audio_ready);
+        assert!(send(&mut state, Event::Start).is_some());
+    }
     fn rect(l: i32, t: i32, r: i32, b: i32) -> Rect {
         Rect {
             left: l,
@@ -323,6 +391,36 @@ mod tests {
         );
         assert!(recording_bounds(rect(0, 0, 101, 101), rect(0, 0, 101, 101)).is_err());
         assert!(recording_bounds(rect(-1, 0, 100, 100), rect(0, 0, 1920, 1080)).is_err());
+    }
+    #[test]
+    fn audio_configuration_is_serial_and_failed_changes_keep_the_confirmed_mode() {
+        use super::super::recording_audio::Mode;
+        let mut s = state();
+        send(&mut s, Event::ViewReady);
+        send(&mut s, Event::BackendReady);
+        assert_eq!(s.audio, Mode::Silent);
+        assert_eq!(send(&mut s, Event::ConfigureAudio(Mode::Silent)), None);
+        let before = s.identity;
+        assert_eq!(
+            send(&mut s, Event::ConfigureAudio(Mode::Mixed)),
+            Some(Action::ConfigureAudio(Mode::Mixed))
+        );
+        assert!(!s.can_annotate());
+        assert_eq!(send(&mut s, Event::Start), None);
+        assert_eq!(send(&mut s, Event::ConfigureAudio(Mode::System)), None);
+        assert!(s.apply(before, Event::AudioConfigured).is_none());
+        send(&mut s, Event::AudioConfigurationFailed);
+        assert_eq!(s.audio, Mode::Silent);
+        assert_eq!(s.phase, Phase::Ready);
+        send(&mut s, Event::ConfigureAudio(Mode::System));
+        send(&mut s, Event::AudioConfigured);
+        assert_eq!(s.audio, Mode::System);
+        send(&mut s, Event::Start);
+        send(&mut s, Event::Started);
+        assert!(send(&mut s, Event::ConfigureAudio(Mode::Silent)).is_none());
+        send(&mut s, Event::Pause);
+        send(&mut s, Event::Paused);
+        assert!(send(&mut s, Event::ConfigureAudio(Mode::Silent)).is_none());
     }
     #[test]
     fn capture_budget_checks_before_allocation() {

@@ -160,6 +160,9 @@ pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, comman
             }
             let result = match port {
                 Some(port) => match command.action {
+                    Action::ConfigureAudio(mode) => {
+                        port.control(identity, Control::ConfigureAudio(mode))
+                    }
                     Action::Start => port.control(identity, Control::Start),
                     Action::Pause => port.control(identity, Control::Pause),
                     Action::Resume => port.control(identity, Control::Resume),
@@ -170,7 +173,20 @@ pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, comman
                 None => Err(Error::new("Recording service unavailable")),
             };
             if let Err(error) = result {
-                failed(c, identity, error);
+                match command.action {
+                    Action::ConfigureAudio(_) => emit(
+                        c,
+                        Event::Native(Notice::AudioConfigured {
+                            identity,
+                            result: Err(error),
+                            devices: Default::default(),
+                        }),
+                    ),
+                    Action::Start => {
+                        emit(c, Event::Native(Notice::StartRejected { identity, error }))
+                    }
+                    _ => failed(c, identity, error),
+                }
             }
         }
         Command::Save(request) => {

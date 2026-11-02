@@ -1,4 +1,10 @@
 //! A bounded, software-only native recording service. UI callers only enqueue work.
+mod audio;
+mod audio_capture;
+mod audio_convert;
+#[cfg(test)]
+mod audio_fixture;
+mod audio_source;
 mod diagnostics;
 mod encoder;
 mod save;
@@ -210,6 +216,7 @@ enum Phase {
     Ready,
     Starting,
     Recording,
+    Pausing,
     Paused,
     Resuming,
     Finishing,
@@ -217,6 +224,12 @@ enum Phase {
     Failed,
 }
 struct Job {
+    audio: audio::Sources,
+    audio_configuration: Option<(
+        lexift_core::domain::recording_audio::Mode,
+        Identity,
+        Instant,
+    )>,
     diagnostics: diagnostics::Diagnostics,
     encoder: Option<encoder::Encoder>,
     capture: Option<Capture>,
@@ -244,6 +257,8 @@ struct Job {
 impl Job {
     fn prepare(request: PrepareRequest, listener: Listener) -> Self {
         Self {
+            audio: audio::Sources::default(),
+            audio_configuration: None,
             diagnostics: diagnostics::Diagnostics::default(),
             encoder: None,
             capture: None,
@@ -286,9 +301,6 @@ impl Job {
         }
         let b = self.request.bounds;
         let (w, h) = ((b.right - b.left) as u32, (b.bottom - b.top) as u32);
-        self.file = Some(FileArtifact::new()?);
-        self.encoder =
-            Some(encoder::Encoder::new(&self.file.as_ref().unwrap().path, w, h).map_err(err)?);
         self.current = vec![0; w as usize * h as usize * 4];
         self.next = vec![0; self.current.len()];
         self.pixels = vec![0; w as usize * h as usize * 3 / 2];
@@ -301,6 +313,7 @@ impl Job {
         tracing::warn!(session=self.request.identity.session,operation=self.request.identity.operation,%error,"Recording native operation failed");
         self.phase = Phase::Failed;
         self.capture.take();
+        self.audio = audio::Sources::default();
         self.encoder.take();
         self.current = Vec::new();
         self.next = Vec::new();
@@ -344,11 +357,55 @@ impl Job {
             return Ok(());
         }
         match (self.phase, action) {
+            (Phase::Ready, Control::ConfigureAudio(mode)) => {
+                if self.audio_configuration.is_some() {
+                    return Err(Error::new("Recording audio preparation is pending"));
+                }
+                match self.audio.prepare(mode) {
+                    Ok(()) => self.audio_configuration = Some((mode, id, Instant::now())),
+                    Err(error) => {
+                        self.audio.retain(self.audio.mode);
+                        (self.listener)(Notice::AudioConfigured {
+                            devices: self.audio.devices(),
+                            identity: id,
+                            result: Err(error),
+                        });
+                    }
+                }
+            }
             (Phase::Ready, Control::Start) => {
                 self.diagnostics.started = Some(Instant::now());
+                if self.audio_configuration.is_some() {
+                    return Err(Error::new("Recording audio preparation is pending"));
+                }
+                let b = self.request.bounds;
+                let started = (|| -> Result<()> {
+                    self.audio.prepared(self.audio.mode)?;
+                    self.file = Some(FileArtifact::new()?);
+                    self.encoder = Some(
+                        encoder::Encoder::new_av(
+                            &self.file.as_ref().unwrap().path,
+                            (b.right - b.left) as u32,
+                            (b.bottom - b.top) as u32,
+                            self.audio.mode != lexift_core::domain::recording_audio::Mode::Silent,
+                        )
+                        .map_err(err)?,
+                    );
+                    Ok(())
+                })();
+                if let Err(error) = started {
+                    self.encoder.take();
+                    self.file.take();
+                    (self.listener)(Notice::StartRejected {
+                        identity: id,
+                        error,
+                    });
+                    return Ok(());
+                }
                 self.fresh = qpc_100ns().map_err(err)?;
                 let notice = super::screen_capture::arrival::Notice::new(|| {});
                 self.capture = Some(Capture::new(self.request.bounds, notice).map_err(err)?);
+                self.audio.start();
                 tracing::debug!(
                     session = id.session,
                     operation = id.operation,
@@ -359,13 +416,13 @@ impl Job {
                 self.start_deadline = Instant::now() + Duration::from_secs(5);
             }
             (Phase::Recording, Control::Pause) => {
+                self.audio.stop();
                 self.clock.as_mut().unwrap().pause(self.origin.elapsed());
                 self.capture.take();
-                self.phase = Phase::Paused;
-                self.progress();
-                (self.listener)(Notice::Paused(id));
+                self.phase = Phase::Pausing;
             }
             (Phase::Paused, Control::Resume) => {
+                self.audio.clear_segment();
                 self.fresh = qpc_100ns().map_err(err)?;
                 self.capture = Some(
                     Capture::new(
@@ -374,6 +431,7 @@ impl Job {
                     )
                     .map_err(err)?,
                 );
+                self.audio.start();
                 self.phase = Phase::Resuming;
                 self.start_deadline = Instant::now() + Duration::from_secs(5);
             }
@@ -388,6 +446,7 @@ impl Job {
                 // The final presentation fence precedes this command. Waiting
                 // for a fresh WGC tail must not extend the recorded duration.
                 self.clock.as_mut().unwrap().stop(self.origin.elapsed());
+                self.audio.stop();
                 self.capture.take();
                 self.fresh = qpc_100ns().map_err(err)?;
                 match Capture::new(
@@ -410,6 +469,7 @@ impl Job {
     }
     fn seal(&mut self, interrupted: Option<Interruption>) -> Result<()> {
         self.capture.take();
+        self.audio.stop();
         if self.frames == 0 {
             return Err(Error::new("Recording has no accepted frames"));
         }
@@ -428,6 +488,10 @@ impl Job {
             .map_err(err)?;
         self.observe_encoded();
         self.encoder.take();
+        let audio_mode = self.audio.mode;
+        let audio_devices = self.audio.devices();
+        let audio_samples = self.audio.written;
+        self.audio = audio::Sources::default();
         let file = Arc::get_mut(self.file.as_mut().unwrap())
             .ok_or_else(|| Error::new("Recording artifact is already borrowed"))?;
         let sealed = file.folder.join("capture.mp4");
@@ -453,6 +517,9 @@ impl Job {
         tracing::info!(
             session = self.request.identity.session,
             operation = self.request.identity.operation,
+            ?audio_mode,
+            ?audio_devices,
+            audio_samples,
             frames = info.frames,
             active_ms = info.duration.as_secs_f64() * 1000.,
             source_frames = self.diagnostics.source_frames,
@@ -485,6 +552,106 @@ impl Job {
         Ok(())
     }
     fn tick(&mut self) -> Result<()> {
+        if let Some((mode, identity, since)) = self.audio_configuration {
+            let result = self.audio.prepared(mode).and_then(|ready| {
+                if ready {
+                    Ok(Some(mode))
+                } else if since.elapsed() > Duration::from_secs(5) {
+                    tracing::warn!(
+                        preparation_ms = since.elapsed().as_millis(),
+                        "Recording audio preparation timed out"
+                    );
+                    Err(Error::new("Recording audio unavailable"))
+                } else {
+                    Ok(None)
+                }
+            });
+            match result {
+                Ok(None) => return Ok(()),
+                Ok(Some(mode)) => {
+                    self.audio.mode = mode;
+                    self.audio.retain(mode);
+                    self.audio_configuration = None;
+                    (self.listener)(Notice::AudioConfigured {
+                        devices: self.audio.devices(),
+                        identity,
+                        result: Ok(mode),
+                    });
+                }
+                Err(error) => {
+                    self.audio.retain(self.audio.mode);
+                    self.audio_configuration = None;
+                    (self.listener)(Notice::AudioConfigured {
+                        devices: self.audio.devices(),
+                        identity,
+                        result: Err(error),
+                    });
+                }
+            }
+        }
+        if matches!(
+            self.phase,
+            Phase::Starting
+                | Phase::Recording
+                | Phase::Pausing
+                | Phase::Paused
+                | Phase::Resuming
+                | Phase::Finishing
+        ) && let Err(error) = self.audio.collect()
+        {
+            return self.audio_interrupted(error);
+        }
+        if self.phase == Phase::Pausing {
+            if self.audio.stopped()? {
+                self.audio.collect()?;
+                self.write_audio_to(self.frames * 1600)?;
+                self.phase = Phase::Paused;
+                self.progress();
+                (self.listener)(Notice::Paused(self.request.identity));
+            }
+            return Ok(());
+        }
+        if self.phase == Phase::Finishing && !self.audio.stopped()? {
+            return Ok(());
+        }
+        if matches!(
+            self.phase,
+            Phase::Starting | Phase::Resuming | Phase::Recording
+        ) {
+            match self.audio.running() {
+                Ok(false) if self.phase == Phase::Starting || self.phase == Phase::Resuming => {
+                    return Ok(());
+                }
+                Err(error) if self.phase == Phase::Starting => {
+                    self.audio.stop();
+                    self.capture.take();
+                    self.encoder.take();
+                    self.file.take();
+                    self.phase = Phase::Ready;
+                    (self.listener)(Notice::StartRejected {
+                        identity: self.request.identity,
+                        error,
+                    });
+                    return Ok(());
+                }
+                Err(_) => {
+                    self.audio.stop();
+                    self.audio.retire_sources();
+                    self.capture.take();
+                    self.interrupted = Some(Interruption::AudioUnavailable);
+                    if let Some(clock) = &mut self.clock {
+                        clock.stop(self.origin.elapsed());
+                    }
+                    self.phase = Phase::Paused;
+                    (self.listener)(Notice::Interrupted {
+                        identity: self.request.identity,
+                        reason: Interruption::AudioUnavailable,
+                    });
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
         if !matches!(
             self.phase,
             Phase::Starting | Phase::Recording | Phase::Resuming | Phase::Finishing
@@ -525,12 +692,42 @@ impl Job {
                     return self.seal(None);
                 }
                 if self.phase == Phase::Starting {
-                    self.origin = Instant::now();
+                    // Media time zero is the WGC sample's QPC, not the later
+                    // moment GPU readback/initialization happened to finish.
+                    let offset = lexift_core::domain::recording_clock::capture_offset(
+                        qpc_100ns().map_err(err)?,
+                        timing.source_100ns,
+                        FPS,
+                    )
+                    .ok_or_else(|| Error::new("Invalid recording capture timestamp"))?;
+                    let observed = Instant::now();
+                    self.origin = if offset >= 0 {
+                        observed.checked_sub(Duration::from_nanos(offset as u64))
+                    } else {
+                        observed.checked_add(Duration::from_nanos(offset.unsigned_abs()))
+                    }
+                    .ok_or_else(|| Error::new("Recording capture timestamp overflow"))?;
                     self.clock = Clock::new(FPS, Duration::ZERO);
+                    self.audio.segment(timing.source_100ns, 0);
                     self.phase = Phase::Recording;
                     (self.listener)(Notice::Started(self.request.identity));
                 } else if self.phase == Phase::Resuming {
-                    self.clock.as_mut().unwrap().resume(self.origin.elapsed());
+                    let offset = lexift_core::domain::recording_clock::capture_offset(
+                        qpc_100ns().map_err(err)?,
+                        timing.source_100ns,
+                        FPS,
+                    )
+                    .ok_or_else(|| Error::new("Invalid recording capture timestamp"))?;
+                    let now = self.origin.elapsed();
+                    let at = if offset >= 0 {
+                        now.checked_sub(Duration::from_nanos(offset as u64))
+                    } else {
+                        now.checked_add(Duration::from_nanos(offset.unsigned_abs()))
+                    }
+                    .ok_or_else(|| Error::new("Recording capture predates media origin"))?;
+                    self.clock.as_mut().unwrap().resume(at);
+                    let sample = self.clock.as_ref().unwrap().audio_sample(at)?;
+                    self.audio.segment(timing.source_100ns, sample);
                     self.phase = Phase::Recording;
                     (self.listener)(Notice::Resumed(self.request.identity));
                 }
@@ -620,6 +817,8 @@ impl Job {
         Ok(())
     }
     fn submit_pending(&mut self, pts: i64, duration: i64) -> Result<()> {
+        let end = ((pts + duration) as u128 * 48_000).div_ceil(10_000_000) as u64;
+        self.write_audio_to(end)?;
         let started = Instant::now();
         self.encoder
             .as_ref()
@@ -631,6 +830,60 @@ impl Job {
             self.diagnostics.first_submitted = self.diagnostics.started.map(|s| s.elapsed());
         }
         self.observe_encoded();
+        Ok(())
+    }
+    fn write_audio_to(&mut self, target: u64) -> Result<()> {
+        if self.audio.mode == lexift_core::domain::recording_audio::Mode::Silent {
+            return Ok(());
+        }
+        // The tick/stop boundary collects once. Rendering never calls back into
+        // a source that could fail midway through submitting an accepted frame.
+        while self.audio.written < target {
+            let count = (target - self.audio.written).min(480) as usize;
+            let samples = self.audio.render(count)?;
+            self.encoder
+                .as_ref()
+                .unwrap()
+                .write_audio(&samples, self.audio.written)
+                .map_err(err)?;
+            self.audio.written += count as u64;
+        }
+        Ok(())
+    }
+    fn audio_interrupted(&mut self, error: Error) -> Result<()> {
+        tracing::warn!(session=self.request.identity.session, operation=self.request.identity.operation, %error, "Recording audio interrupted");
+        self.audio.stop();
+        self.audio.retire_sources();
+        self.capture.take();
+        if self.phase == Phase::Starting {
+            self.encoder.take();
+            self.file.take();
+            self.phase = Phase::Ready;
+            let error = if error.to_string().starts_with("Recording audio") {
+                error
+            } else if error.to_string().contains("500ms") {
+                Error::new("Recording audio queue is full")
+            } else {
+                Error::new("Recording audio timing failed")
+            };
+            (self.listener)(Notice::StartRejected {
+                identity: self.request.identity,
+                error,
+            });
+            return Ok(());
+        }
+        if let Some(clock) = &mut self.clock {
+            clock.stop(self.origin.elapsed());
+        }
+        if self.phase == Phase::Finishing {
+            return self.seal(Some(Interruption::AudioUnavailable));
+        }
+        self.interrupted = Some(Interruption::AudioUnavailable);
+        self.phase = Phase::Paused;
+        (self.listener)(Notice::Interrupted {
+            identity: self.request.identity,
+            reason: Interruption::AudioUnavailable,
+        });
         Ok(())
     }
     fn observe_encoded(&mut self) {
@@ -662,10 +915,15 @@ fn service(receiver: Receiver<Message>, sender: SyncSender<Message>, shared: Arc
     let mut quitting = false;
     loop {
         let ticking = job.as_ref().is_some_and(|j| {
-            matches!(
-                j.phase,
-                Phase::Starting | Phase::Recording | Phase::Resuming | Phase::Finishing
-            )
+            j.audio_configuration.is_some()
+                || matches!(
+                    j.phase,
+                    Phase::Starting
+                        | Phase::Recording
+                        | Phase::Pausing
+                        | Phase::Resuming
+                        | Phase::Finishing
+                )
         });
         match receiver.recv_timeout(Duration::from_millis(if ticking { 5 } else { 250 })) {
             Ok(Message::Prepare(request, listener)) => {

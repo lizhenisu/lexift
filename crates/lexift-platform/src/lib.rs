@@ -972,10 +972,10 @@ pub fn screenshot_display_metrics()
     }
 }
 // The COM implementation macro resolves its support types through an absolute
-// crate name. Re-export the already bundled types only for native test objects.
-#[cfg(all(test, target_os = "windows"))]
+// crate name. Re-export the already bundled types for native COM callbacks.
+#[cfg(target_os = "windows")]
 extern crate self as windows_core;
-#[cfg(all(test, target_os = "windows"))]
+#[cfg(target_os = "windows")]
 pub use ::windows::core::*;
 
 /// Independent video service. It never shares a live instance with screenshot sampling.
