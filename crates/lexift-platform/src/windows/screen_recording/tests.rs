@@ -10,6 +10,69 @@ use windows::{
     core::*,
 };
 #[test]
+#[ignore = "synthetic delayed-audio interruption; writes owned partial MP4"]
+fn audio_backlog_can_seal_a_marked_partial_without_reentering_wait() {
+    let folder = PathBuf::from(std::env::var_os("LEXIFT_RECORDING_NATIVE_DIR").unwrap());
+    std::fs::create_dir_all(&folder).unwrap();
+    let _apartment = super::super::screen_capture::capture::Apartment::new().unwrap();
+    let _media = encoder::Media::new().unwrap();
+    let bounds = lexift_core::domain::geometry::Rect {
+        left: 0,
+        top: 0,
+        right: 320,
+        bottom: 180,
+    };
+    let id = Identity {
+        session: 95,
+        operation: 1,
+        request: 1,
+    };
+    let (tx, rx) = mpsc::channel();
+    let mut job = Job::prepare(
+        PrepareRequest {
+            identity: id,
+            bounds,
+            monitor_bounds: bounds,
+            excluded_windows: vec![],
+        },
+        Arc::new(move |n| tx.send(n).unwrap()),
+    );
+    job.file = Some(FileArtifact::new().unwrap());
+    job.encoder =
+        Some(encoder::Encoder::new_av(&job.file.as_ref().unwrap().path, 320, 180, true).unwrap());
+    job.clock = Clock::new(FPS, Duration::ZERO);
+    job.origin = Instant::now() - Duration::from_secs(1);
+    job.pending = vec![128; 320 * 180 * 3 / 2];
+    job.pending[..320 * 180].fill(16);
+    job.pixels = job.pending.clone();
+    // Inject accepted video slots while audio is stalled. This is an internal
+    // backlog fixture, not a claim that the real microphone was disconnected.
+    for _ in 0..30 {
+        job.write_pixels().unwrap();
+    }
+    job.phase = Phase::Recording;
+    job.audio.mode = lexift_core::domain::recording_audio::Mode::Microphone;
+    let error = job.write_ready_audio().unwrap_err();
+    assert!(std::mem::take(&mut job.audio_wait_failed));
+    job.audio_interrupted(error).unwrap();
+    assert!(matches!(rx.recv().unwrap(), Notice::Interrupted { .. }));
+    job.control(Identity { request: 2, ..id }, Control::Finish)
+        .unwrap();
+    assert!(matches!(job.phase, Phase::Finishing));
+    job.tick().unwrap();
+    assert!(
+        matches!(rx.recv().unwrap(), Notice::Finished { artifact, .. }
+        if artifact.frames == 30 && artifact.interrupted == Some(Interruption::AudioUnavailable))
+    );
+    assert_eq!(job.audio.written, 0, "sealed job releases audio state");
+    assert!(job.encoder.is_none());
+    std::fs::copy(
+        &job.file.as_ref().unwrap().path,
+        folder.join("backlog-partial.mp4"),
+    )
+    .unwrap();
+}
+#[test]
 #[ignore = "writes synthetic audio/video to LEXIFT_RECORDING_NATIVE_DIR"]
 fn aac_mux_synthetic_stereo() {
     let folder = PathBuf::from(

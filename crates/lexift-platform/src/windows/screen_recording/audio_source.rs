@@ -292,6 +292,141 @@ fn run(shared: Arc<Shared>, system: bool) {
 mod tests {
     use super::*;
     #[test]
+    fn non_silent_packets_cannot_rewrite_committed_idle_silence() {
+        use lexift_core::domain::recording_audio::Mode;
+        fn queued(value: f32) -> Source {
+            Source {
+                token: 0,
+                thread: None,
+                shared: Arc::new(Shared {
+                    event: Mutex::new(None),
+                    changed: AtomicBool::new(false),
+                    state: Mutex::new(State {
+                        ready: true,
+                        running: true,
+                        frames: 480,
+                        packets: VecDeque::from([Packet {
+                            silence_gap: false,
+                            qpc: 0,
+                            position: 0,
+                            frames: vec![[value; 2]; 480],
+                            discontinuity: false,
+                        }]),
+                        ..Default::default()
+                    }),
+                }),
+            }
+        }
+        for value in [0., 0.5] {
+            let mut sources = super::super::audio::Sources::default();
+            sources.mode = Mode::System;
+            sources.segment(0, 0);
+            assert_eq!(sources.ready_count(480, 1_100_000), 480);
+            assert_eq!(sources.render(480).unwrap(), vec![[0.; 2]; 480]);
+            sources.written = 480;
+            sources.system = Some(queued(value));
+            assert_eq!(sources.collect().is_ok(), value == 0.);
+        }
+    }
+    #[test]
+    fn injected_native_failures_keep_localized_result_categories() {
+        use windows::Win32::Media::Audio::*;
+        for (code, expected) in [
+            (E_ACCESSDENIED, "Recording audio permission denied"),
+            (
+                AUDCLNT_E_SERVICE_NOT_RUNNING,
+                "Recording audio service unavailable",
+            ),
+            (
+                AUDCLNT_E_DEVICE_INVALIDATED,
+                "Recording audio device changed",
+            ),
+            (
+                AUDCLNT_E_UNSUPPORTED_FORMAT,
+                "Recording audio format unsupported",
+            ),
+        ] {
+            let shared = Shared {
+                state: Mutex::new(State::default()),
+                changed: AtomicBool::new(false),
+                event: Mutex::new(None),
+            };
+            shared.fail(windows::core::Error::from_hresult(code), false);
+            assert_eq!(
+                shared.state.lock().unwrap().error.as_deref(),
+                Some(expected)
+            );
+        }
+    }
+    /// Exercise real apartment ownership, including cancellation and a queued
+    /// notification. Only counters are retained; captured PCM is discarded.
+    #[test]
+    #[ignore = "real default endpoints, serial lifecycle validation"]
+    fn native_source_lifecycle_releases_callbacks_and_handles() {
+        use std::time::{Duration, Instant};
+        fn until(mut ready: impl FnMut() -> bool) {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !ready() {
+                assert!(
+                    Instant::now() < deadline,
+                    "native source retirement timed out"
+                );
+                thread::sleep(Duration::from_millis(2));
+            }
+        }
+        fn handles() -> u32 {
+            let mut count = 0;
+            unsafe {
+                GetProcessHandleCount(GetCurrentProcess(), &mut count).unwrap();
+            }
+            count
+        }
+        let mut baseline = 0;
+        for round in 0..22 {
+            let system = Source::prepare(true).unwrap();
+            let microphone = Source::prepare(false).unwrap();
+            until(|| system.status().unwrap().0 && microphone.status().unwrap().0);
+            let weak = [
+                Arc::downgrade(&system.shared),
+                Arc::downgrade(&microphone.shared),
+            ];
+            system.start();
+            microphone.start();
+            until(|| system.status().unwrap().1 && microphone.status().unwrap().1);
+            let deadline = Instant::now() + Duration::from_millis(150);
+            while Instant::now() < deadline {
+                let _ = system.drain().unwrap();
+                let _ = microphone.drain().unwrap();
+                thread::sleep(Duration::from_millis(5));
+            }
+            if round % 3 == 0 {
+                system.stop();
+                microphone.stop();
+                until(|| !system.status().unwrap().1 && !microphone.status().unwrap().1);
+            } else if round % 3 == 1 {
+                // An injected callback exercises error retirement, not a claim
+                // that a physical device was disconnected.
+                microphone.shared.changed.store(true, Ordering::Release);
+                microphone.shared.signal();
+                until(|| microphone.status().is_err());
+            }
+            drop(system);
+            drop(microphone);
+            until(|| weak.iter().all(|w| w.upgrade().is_none()));
+            let count = handles();
+            if round == 1 {
+                baseline = count;
+            }
+            if round > 1 {
+                assert!(
+                    count <= baseline + 2,
+                    "owned handles grew: {baseline} -> {count}"
+                );
+            }
+            eprintln!("source lifecycle round={round} handles={count} shared_owners=0");
+        }
+    }
+    #[test]
     fn retired_notification_cannot_signal_a_reused_handle_or_retain_pcm() {
         let event = unsafe { CreateEventW(None, false, false, None).unwrap() };
         let mut state = State {

@@ -37,9 +37,44 @@ impl Drop for Playing {
     }
 }
 #[test]
+#[ignore = "real microphone startup/resume timing; PCM discarded, metadata only"]
+fn microphone_repeated_startup_clock() {
+    let _apartment = super::super::screen_capture::capture::Apartment::new().unwrap();
+    for round in 0..40 {
+        let mut endpoint = super::audio_capture::Endpoint::prepare(false).unwrap();
+        for segment in 0..3 {
+            endpoint.start().unwrap();
+            let deadline = Instant::now() + Duration::from_millis(500);
+            let mut frames = 0;
+            while frames < 2400 {
+                match endpoint.read() {
+                    Ok(Some(packet)) => frames += packet.frames.len(),
+                    Ok(None) => unsafe {
+                        let _ = WaitForSingleObject(endpoint.event(), 10);
+                    },
+                    Err(error) => panic!("round={round} segment={segment}: {error}"),
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "microphone did not produce fresh PCM"
+                );
+            }
+            endpoint.stop().unwrap();
+        }
+        eprintln!("microphone startup round={round} passed");
+    }
+}
+#[test]
 #[ignore = "raw loopback timing, bypassing MFT/mixer/encoder; owned fixture required"]
 fn raw_loopback_playback_clock_diagnostics() {
+    use std::io::Write;
     unsafe {
+        let microphone = std::env::var("LEXIFT_AUDIO_RAW_MICROPHONE").as_deref() == Ok("1");
+        let threshold: f32 = std::env::var("LEXIFT_AUDIO_RAW_THRESHOLD")
+            .unwrap_or_else(|_| "0.01".into())
+            .parse()
+            .unwrap();
+        assert!(threshold.is_finite() && threshold > 0. && threshold <= 1.);
         let _apartment = super::super::screen_capture::capture::Apartment::new().unwrap();
         let name = HSTRING::from(
             std::env::var("LEXIFT_AUDIO_FIXTURE_SHARED").expect("owned shared mapping"),
@@ -51,7 +86,7 @@ fn raw_loopback_playback_clock_diagnostics() {
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).unwrap();
         let device = enumerator
-            .GetDefaultAudioEndpoint(eRender, eConsole)
+            .GetDefaultAudioEndpoint(if microphone { eCapture } else { eRender }, eConsole)
             .unwrap();
         let client: IAudioClient = device.Activate(CLSCTX_ALL, None).unwrap();
         let format = client.GetMixFormat().unwrap();
@@ -63,7 +98,12 @@ fn raw_loopback_playback_clock_diagnostics() {
         assert_eq!(bits, 32);
         let initialized = client.Initialize(
             AUDCLNT_SHAREMODE_SHARED,
-            AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_LOOPBACK,
+            AUDCLNT_STREAMFLAGS_EVENTCALLBACK
+                | if microphone {
+                    0
+                } else {
+                    AUDCLNT_STREAMFLAGS_LOOPBACK
+                },
             0,
             0,
             format,
@@ -80,7 +120,18 @@ fn raw_loopback_playback_clock_diagnostics() {
         );
         client.Start().unwrap();
         let _playing = Playing(client.clone());
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let seconds: u64 = std::env::var("LEXIFT_AUDIO_RAW_PROBE_SECONDS")
+            .unwrap_or_else(|_| "5".into())
+            .parse()
+            .unwrap();
+        assert!((1..=2700).contains(&seconds));
+        let mut profile = std::env::var_os("LEXIFT_AUDIO_RAW_PROBE_DIR").map(|folder| {
+            std::io::BufWriter::new(
+                std::fs::File::create(std::path::PathBuf::from(folder).join("raw-packets.jsonl"))
+                    .unwrap(),
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(seconds);
         let mut active = false;
         while Instant::now() < deadline {
             while capture.GetNextPacketSize().unwrap() > 0 {
@@ -105,11 +156,41 @@ fn raw_loopback_playback_clock_diagnostics() {
                                 .cast::<f32>()
                                 .read_unaligned()
                                 .abs()
-                                > 0.01
+                                > threshold
                         })
                     })
                 };
+                // Controlled-source envelope metadata distinguishes input
+                // underruns from gaps introduced by conversion/muxing. Copy
+                // these bounded aggregates before releasing the system buffer;
+                // perform file IO only after ReleaseBuffer.
+                let envelope = profile.as_ref().map(|_| {
+                    (0..count as usize)
+                        .step_by(48)
+                        .map(|start| {
+                            if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 {
+                                return 0.;
+                            }
+                            let end = (start + 48).min(count as usize);
+                            let mut energy = 0.;
+                            for i in start..end {
+                                for channel in 0..2 {
+                                    let sample = pointer
+                                        .add((i * 2 + channel) * 4)
+                                        .cast::<f32>()
+                                        .read_unaligned()
+                                        as f64;
+                                    energy += sample * sample;
+                                }
+                            }
+                            (energy / ((end - start) * 2) as f64).sqrt()
+                        })
+                        .collect::<Vec<_>>()
+                });
                 capture.ReleaseBuffer(count).unwrap();
+                if let (Some(writer), Some(envelope)) = (&mut profile, envelope) {
+                    writeln!(writer, "{}", serde_json::json!({"qpc":qpc,"frames":count,"flags":flags,"rms_1ms":envelope})).unwrap();
+                }
                 if let Some(index) = first
                     && !active
                 {

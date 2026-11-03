@@ -49,6 +49,7 @@ pub(super) struct Endpoint {
     priming_packets: u8,
     previous_count: u32,
     priming_at: std::time::Instant,
+    priming_trace: VecDeque<(u32, u64, u64, u32)>,
 }
 fn device_id(device: &IMMDevice) -> Result<String> {
     unsafe {
@@ -124,6 +125,7 @@ impl Endpoint {
                 priming_packets: 0,
                 previous_count: 0,
                 priming_at: std::time::Instant::now(),
+                priming_trace: VecDeque::new(),
             })
         }
     }
@@ -194,6 +196,7 @@ impl Endpoint {
             self.clock_correction = 0.;
             self.pending_gap = false;
             self.priming_packets = 0;
+            self.priming_trace.clear();
             self.previous_count = 0;
         }
         Ok(())
@@ -275,6 +278,10 @@ impl Endpoint {
             // packet boundaries within the traversal budget, then keep the
             // ordinary discontinuity checks for the rest of this epoch.
             if self.priming_packets < 3 {
+                if self.priming_trace.len() == 12 {
+                    self.priming_trace.pop_front();
+                }
+                self.priming_trace.push_back((count, position, qpc, flags));
                 if self.native_previous.is_none() {
                     self.priming_at = std::time::Instant::now();
                 }
@@ -295,7 +302,12 @@ impl Endpoint {
                     if self.priming_at.elapsed() > std::time::Duration::from_millis(80) {
                         return Err(Error::new(
                             E_FAIL,
-                            "Recording audio startup clock did not stabilize",
+                            format!(
+                                "Recording audio startup clock did not stabilize: rate={}, elapsed_ms={}, packets={:?}",
+                                self.native_rate,
+                                self.priming_at.elapsed().as_millis(),
+                                self.priming_trace
+                            ),
                         ));
                     }
                     return Ok(None);

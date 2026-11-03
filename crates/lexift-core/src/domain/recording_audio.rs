@@ -170,6 +170,11 @@ pub struct Stream {
     period: f64,
 }
 impl Stream {
+    /// Exclusive QPC boundary covered by accepted source PCM. Adapters must
+    /// distinguish an unreceived packet from confirmed silence before writing.
+    pub fn covered_until(&self) -> Option<f64> {
+        self.next_position.map(|_| self.end)
+    }
     pub fn clear(&mut self) {
         *self = Self::default();
     }

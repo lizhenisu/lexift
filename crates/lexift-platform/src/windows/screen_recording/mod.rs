@@ -5,6 +5,8 @@ mod audio_convert;
 #[cfg(test)]
 mod audio_fixture;
 mod audio_source;
+#[cfg(test)]
+mod audio_visual_fixture;
 mod diagnostics;
 mod encoder;
 mod save;
@@ -240,6 +242,8 @@ struct Job {
     origin: Instant,
     fresh: i64,
     frames: u64,
+    audio_target: u64,
+    audio_wait_failed: bool,
     sequence: u64,
     current: Vec<u8>,
     next: Vec<u8>,
@@ -269,6 +273,8 @@ impl Job {
             origin: Instant::now(),
             fresh: 0,
             frames: 0,
+            audio_target: 0,
+            audio_wait_failed: false,
             sequence: 0,
             current: Vec::new(),
             next: Vec::new(),
@@ -348,7 +354,10 @@ impl Job {
         self.request.identity = id;
         if let Some(reason) = self.interrupted {
             if action == Control::Finish {
-                return self.seal(Some(reason));
+                self.audio.stop();
+                self.capture.take();
+                self.phase = Phase::Finishing;
+                return Ok(());
             }
             (self.listener)(Notice::Interrupted {
                 identity: id,
@@ -455,7 +464,8 @@ impl Job {
                 ) {
                     Ok(capture) => self.capture = Some(capture),
                     Err(_) => {
-                        self.seal(Some(Interruption::CaptureUnavailable))?;
+                        self.interrupted = Some(Interruption::CaptureUnavailable);
+                        self.phase = Phase::Finishing;
                         return Ok(());
                     }
                 }
@@ -479,7 +489,7 @@ impl Job {
             .unwrap()
             .sample(self.frames - 1)
             .unwrap();
-        self.submit_pending(pts, duration)?;
+        self.submit_pending(pts, duration, true)?;
         let finalize_started = Instant::now();
         self.encoder
             .as_ref()
@@ -602,7 +612,11 @@ impl Job {
             return self.audio_interrupted(error);
         }
         if self.phase == Phase::Pausing {
-            if self.audio.stopped()? {
+            let stopped = match self.audio.stopped() {
+                Ok(stopped) => stopped,
+                Err(error) => return self.audio_interrupted(error),
+            };
+            if stopped {
                 self.audio.collect()?;
                 self.write_audio_to(self.frames * 1600)?;
                 self.phase = Phase::Paused;
@@ -611,8 +625,24 @@ impl Job {
             }
             return Ok(());
         }
-        if self.phase == Phase::Finishing && !self.audio.stopped()? {
-            return Ok(());
+        if self.phase == Phase::Finishing {
+            match self.audio.stopped() {
+                Ok(false) => return Ok(()),
+                Err(error) => return self.audio_interrupted(error),
+                Ok(true) => {
+                    // Stop publishes tail PCM before its stopped flag. Drain
+                    // again after observing that flag, closing the queue race.
+                    if let Err(error) = self.audio.collect() {
+                        return self.audio_interrupted(error);
+                    }
+                }
+            }
+        }
+        if self.phase == Phase::Finishing && self.capture.is_none() {
+            return self.seal(self.interrupted);
+        }
+        if self.phase == Phase::Recording {
+            self.write_ready_audio()?;
         }
         if matches!(
             self.phase,
@@ -623,16 +653,7 @@ impl Job {
                     return Ok(());
                 }
                 Err(error) if self.phase == Phase::Starting => {
-                    self.audio.stop();
-                    self.capture.take();
-                    self.encoder.take();
-                    self.file.take();
-                    self.phase = Phase::Ready;
-                    (self.listener)(Notice::StartRejected {
-                        identity: self.request.identity,
-                        error,
-                    });
-                    return Ok(());
+                    return self.audio_interrupted(error);
                 }
                 Err(_) => {
                     self.audio.stop();
@@ -656,6 +677,14 @@ impl Job {
             self.phase,
             Phase::Starting | Phase::Recording | Phase::Resuming | Phase::Finishing
         ) {
+            return Ok(());
+        }
+        if matches!(self.phase, Phase::Starting | Phase::Resuming) && !self.audio.media_ready() {
+            if Instant::now() >= self.start_deadline {
+                return self.audio_interrupted(Error::new(
+                    "Recording microphone has no valid startup samples",
+                ));
+            }
             return Ok(());
         }
         let capture = self
@@ -810,15 +839,22 @@ impl Job {
                 .unwrap()
                 .sample(self.frames - 1)
                 .ok_or_else(|| Error::new("Recording timeline overflow"))?;
-            self.submit_pending(pts, duration)?;
+            self.submit_pending(pts, duration, false)?;
         }
         self.pending.copy_from_slice(&self.pixels);
         self.frames += 1;
         Ok(())
     }
-    fn submit_pending(&mut self, pts: i64, duration: i64) -> Result<()> {
+    fn submit_pending(&mut self, pts: i64, duration: i64, final_audio: bool) -> Result<()> {
         let end = ((pts + duration) as u128 * 48_000).div_ceil(10_000_000) as u64;
-        self.write_audio_to(end)?;
+        self.audio_target = end;
+        if final_audio {
+            // The stop/drain fence has completed. Apply the explicit tail
+            // padding rule without re-entering the running backlog guard.
+            self.write_audio_to(end)?;
+        } else {
+            self.write_ready_audio()?;
+        }
         let started = Instant::now();
         self.encoder
             .as_ref()
@@ -850,18 +886,51 @@ impl Job {
         }
         Ok(())
     }
+    fn write_ready_audio(&mut self) -> Result<()> {
+        if self.audio.mode == lexift_core::domain::recording_audio::Mode::Silent {
+            return Ok(());
+        }
+        if self.audio_target.saturating_sub(self.audio.written) > 24_000 {
+            self.audio_wait_failed = true;
+            return Err(Error::new("Recording audio backlog exceeded 500ms"));
+        }
+        let now = qpc_100ns().map_err(err)?;
+        while self.audio.written < self.audio_target {
+            let requested = (self.audio_target - self.audio.written).min(480) as usize;
+            let count = self.audio.ready_count(requested, now);
+            if count == 0 {
+                break;
+            }
+            self.write_audio_to(self.audio.written + count as u64)?;
+        }
+        Ok(())
+    }
     fn audio_interrupted(&mut self, error: Error) -> Result<()> {
         tracing::warn!(session=self.request.identity.session, operation=self.request.identity.operation, %error, "Recording audio interrupted");
         self.audio.stop();
         self.audio.retire_sources();
         self.capture.take();
         if self.phase == Phase::Starting {
+            // A rejected start must not let a later retry reuse validated PCM
+            // from the retired endpoint as its new readiness acknowledgement.
+            self.audio.clear_segment();
             self.encoder.take();
             self.file.take();
             self.phase = Phase::Ready;
-            let error = if error.to_string().starts_with("Recording audio") {
+            let message = error.to_string();
+            let error = if [
+                "Recording audio unavailable",
+                "Recording audio permission denied",
+                "Recording audio device changed",
+                "Recording audio service unavailable",
+                "Recording audio format unsupported",
+                "Recording audio queue is full",
+                "Recording audio timing failed",
+            ]
+            .contains(&message.as_str())
+            {
                 error
-            } else if error.to_string().contains("500ms") {
+            } else if message.contains("500ms") {
                 Error::new("Recording audio queue is full")
             } else {
                 Error::new("Recording audio timing failed")
@@ -1037,7 +1106,13 @@ fn service(receiver: Receiver<Message>, sender: SyncSender<Message>, shared: Arc
         } else if let Some(j) = job.as_mut()
             && let Err(e) = j.tick()
         {
-            j.fail(e);
+            if std::mem::take(&mut j.audio_wait_failed) {
+                if let Err(error) = j.audio_interrupted(e) {
+                    j.fail(error);
+                }
+            } else {
+                j.fail(e);
+            }
         }
         if quitting && job.is_none() && saving.is_none() && !shared.active.load(Ordering::Acquire) {
             break;

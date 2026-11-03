@@ -15,8 +15,15 @@ pub(super) struct Sources {
     origin: f64,
     segment_sample: u64,
     pub written: u64,
+    system_silence_committed: Option<f64>,
 }
+
 impl Sources {
+    /// Microphone Start acknowledges a running client before its clock has
+    /// necessarily stabilized. Media may begin only after validated PCM exists.
+    pub fn media_ready(&self) -> bool {
+        !self.mode.microphone() || self.streams[1].covered_until().is_some()
+    }
     pub fn devices(&self) -> lexift_core::domain::recording_audio::Devices {
         lexift_core::domain::recording_audio::Devices {
             system: self.system.as_ref().map(|s| s.token),
@@ -79,6 +86,7 @@ impl Sources {
         for stream in &mut self.streams {
             stream.clear();
         }
+        self.system_silence_committed = None;
     }
     pub fn retire_sources(&mut self) {
         self.system.take();
@@ -113,12 +121,31 @@ impl Sources {
         self.segment_sample = sample;
     }
     pub fn collect(&mut self) -> Result<()> {
-        for (source, stream) in [&self.system, &self.microphone]
+        for (index, (source, stream)) in [&self.system, &self.microphone]
             .into_iter()
             .zip(&mut self.streams)
+            .enumerate()
         {
             if let Some(source) = source {
                 for packet in source.drain()? {
+                    if index == 0
+                        && let Some(committed) = self.system_silence_committed
+                    {
+                        let late = ((committed - packet.qpc as f64) * f64::from(SAMPLE_RATE)
+                            / 10_000_000.)
+                            .ceil()
+                            .max(0.) as usize;
+                        if packet
+                            .frames
+                            .iter()
+                            .take(late)
+                            .any(|s| s.iter().any(|v| v.abs() > f32::EPSILON))
+                        {
+                            return Err(Error::new(
+                                "Recording audio arrived after its committed silence interval",
+                            ));
+                        }
+                    }
                     if packet.silence_gap {
                         stream.push_after_silence(packet.position, packet.qpc, packet.frames)?;
                         continue;
@@ -134,6 +161,49 @@ impl Sources {
         }
         Ok(())
     }
+    /// Admit received PCM immediately. A valid idle loopback has no packets;
+    /// keep a bounded 100ms reorder horizon before committing that silence.
+    /// Microphone data must arrive, or the native watchdog interrupts capture.
+    pub fn ready_count(&mut self, requested: usize, now_qpc: i64) -> usize {
+        let mut target = self.written.saturating_add(requested as u64);
+        for index in 0..2 {
+            if !(if index == 0 {
+                self.mode.system()
+            } else {
+                self.mode.microphone()
+            }) {
+                continue;
+            }
+            let coverage = self.streams[index]
+                .covered_until()
+                .unwrap_or(f64::NEG_INFINITY);
+            let through = if index == 0 {
+                coverage.max(now_qpc as f64 - 1_000_000.)
+            } else {
+                coverage
+            };
+            let samples = ((through - self.origin) * f64::from(SAMPLE_RATE) / 10_000_000.
+                + self.segment_sample as f64
+                - 1e-6)
+                .ceil()
+                .max(0.) as u64;
+            target = target.min(samples);
+        }
+        let count = target.saturating_sub(self.written).min(requested as u64) as usize;
+        if self.mode.system() && count > 0 {
+            let last = self.origin
+                + (self.written as f64 + count as f64 - 1. - self.segment_sample as f64)
+                    * 10_000_000.
+                    / f64::from(SAMPLE_RATE);
+            if self.streams[0]
+                .covered_until()
+                .is_none_or(|end| last >= end)
+            {
+                self.system_silence_committed = Some(last);
+            }
+        }
+        count
+    }
     pub fn render(&mut self, count: usize) -> Result<Vec<[f32; 2]>> {
         let mut output = Vec::with_capacity(count);
         for sample in self.written..self.written + count as u64 {
@@ -147,5 +217,94 @@ impl Sources {
             ));
         }
         Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod readiness_tests {
+    use super::*;
+    #[test]
+    fn rejected_start_retires_old_pcm_before_retry_and_never_reports_started() {
+        use lexift_core::{
+            domain::{geometry::Rect, screen_recording::Identity},
+            ports::screen_recording::{Notice, PrepareRequest},
+        };
+        let identity = Identity {
+            session: 31,
+            operation: 2,
+            request: 4,
+        };
+        let bounds = Rect {
+            left: 0,
+            top: 0,
+            right: 2,
+            bottom: 2,
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut job = super::super::Job::prepare(
+            PrepareRequest {
+                identity,
+                bounds,
+                monitor_bounds: bounds,
+                excluded_windows: vec![],
+            },
+            std::sync::Arc::new(move |n| tx.send(n).unwrap()),
+        );
+        job.phase = super::super::Phase::Starting;
+        job.audio.mode = Mode::Microphone;
+        job.audio.streams[1]
+            .push(0, 0, vec![[0.5; 2]; 480], false)
+            .unwrap();
+        assert!(job.audio.media_ready());
+        job.audio_interrupted(Error::new("Injected startup clock failure"))
+            .unwrap();
+        assert!(matches!(job.phase, super::super::Phase::Ready));
+        assert!(!job.audio.media_ready());
+        assert!(job.encoder.is_none() && job.file.is_none());
+        assert!(
+            matches!(rx.recv().unwrap(), Notice::StartRejected { identity: got, .. } if got == identity)
+        );
+        assert!(rx.try_recv().is_err());
+    }
+    #[test]
+    fn delayed_pcm_is_not_committed_as_silence() {
+        let mut sources = Sources {
+            mode: Mode::Microphone,
+            ..Default::default()
+        };
+        let origin = 5_000_000_000_000;
+        sources.segment(origin, 0);
+        assert!(!sources.media_ready());
+        assert_eq!(sources.ready_count(480, origin + 200_000), 0);
+        sources.streams[1]
+            .push(0, origin as u64, vec![[0.25; 2]; 480], false)
+            .unwrap();
+        assert!(sources.media_ready());
+        assert_eq!(sources.ready_count(481, origin + 200_000), 480);
+        assert_eq!(sources.render(480).unwrap(), vec![[0.25; 2]; 480]);
+        sources.written = 480;
+        assert_eq!(sources.ready_count(480, origin + 300_000), 0);
+        sources.streams[1]
+            .push(480, origin as u64 + 100_000, vec![[0.75; 2]; 480], false)
+            .unwrap();
+        assert_eq!(sources.ready_count(480, origin + 300_000), 480);
+        assert_eq!(sources.render(480).unwrap(), vec![[0.75; 2]; 480]);
+        sources.clear_segment();
+        assert!(!sources.media_ready());
+    }
+    #[test]
+    fn idle_loopback_has_bounded_reorder_horizon_and_microphone_does_not_fall_back() {
+        let mut sources = Sources {
+            mode: Mode::System,
+            ..Default::default()
+        };
+        sources.segment(0, 0);
+        assert_eq!(sources.ready_count(480, 999_999), 0);
+        assert_eq!(sources.ready_count(480, 1_100_000), 480);
+        assert!(sources.system_silence_committed.is_some());
+        sources.mode = Mode::Mixed;
+        assert_eq!(sources.ready_count(480, 100_000_000), 0);
+        sources.clear_segment();
+        assert!(sources.system_silence_committed.is_none());
     }
 }
