@@ -403,3 +403,127 @@ mod tests {
         assert!(resample_at(&[[0.; 2]], f64::NAN).is_err());
     }
 }
+
+/// Device sample positions and 100ns timestamps for adjacent native PCM packets.
+#[derive(Clone, Copy, Debug)]
+pub struct PacketClock {
+    pub position: u64,
+    pub frames: u32,
+    pub timestamp: u64,
+}
+/// Locate one timestamp outlier using continuous sample positions and a recovered
+/// neighbor. PCM is unchanged. Persistent offsets, gaps and long packets are not repaired.
+pub fn isolated_timestamp(
+    before: PacketClock,
+    suspect: PacketClock,
+    after: PacketClock,
+    rate: u32,
+) -> Option<u64> {
+    if rate == 0
+        || before.frames == 0
+        || suspect.frames == 0
+        || before.frames > rate / 50
+        || suspect.frames > rate / 50
+        || before.position.checked_add(u64::from(before.frames))? != suspect.position
+        || suspect.position.checked_add(u64::from(suspect.frames))? != after.position
+        || !(before.timestamp < suspect.timestamp && suspect.timestamp < after.timestamp)
+    {
+        return None;
+    }
+    let expected = |position: u64| -> Option<u64> {
+        let offset =
+            u128::from(position.checked_sub(before.position)?) * 10_000_000 / u128::from(rate);
+        before.timestamp.checked_add(u64::try_from(offset).ok()?)
+    };
+    // Keep the existing 5ms rejection threshold. A strict 1ms recovery confirms
+    // an isolated observation rather than accepting a shifted device timeline.
+    if suspect.timestamp.abs_diff(expected(suspect.position)?) <= 50_000
+        || after.timestamp.abs_diff(expected(after.position)?) > 10_000
+    {
+        return None;
+    }
+    let offset = u128::from(after.timestamp - before.timestamp)
+        * u128::from(suspect.position - before.position)
+        / u128::from(after.position - before.position);
+    before.timestamp.checked_add(u64::try_from(offset).ok()?)
+}
+#[cfg(test)]
+mod isolated_clock_tests {
+    use super::*;
+    #[test]
+    fn only_a_contiguous_recovered_unflagged_timestamp_is_locatable() {
+        let before = PacketClock {
+            position: 0,
+            frames: 480,
+            timestamp: 1_000_000,
+        };
+        let mut suspect = PacketClock {
+            position: 480,
+            frames: 480,
+            timestamp: 1_154_344,
+        };
+        let after = PacketClock {
+            position: 960,
+            frames: 480,
+            timestamp: 1_200_233,
+        };
+        assert_eq!(
+            isolated_timestamp(before, suspect, after, 48000),
+            Some(1_100_116)
+        );
+        suspect.timestamp = 1_045_889;
+        assert_eq!(
+            isolated_timestamp(before, suspect, after, 48000),
+            Some(1_100_116)
+        );
+        assert!(
+            isolated_timestamp(
+                before,
+                suspect,
+                PacketClock {
+                    timestamp: 1_145_889,
+                    ..after
+                },
+                48000
+            )
+            .is_none()
+        );
+        assert!(
+            isolated_timestamp(
+                before,
+                suspect,
+                PacketClock {
+                    position: 961,
+                    ..after
+                },
+                48000
+            )
+            .is_none()
+        );
+        assert!(
+            isolated_timestamp(
+                before,
+                suspect,
+                PacketClock {
+                    timestamp: 1_040_000,
+                    ..after
+                },
+                48000
+            )
+            .is_none()
+        );
+        assert!(isolated_timestamp(before, suspect, after, 0).is_none());
+        assert!(
+            isolated_timestamp(
+                before,
+                PacketClock {
+                    frames: 24000,
+                    ..suspect
+                },
+                after,
+                48000
+            )
+            .is_none()
+        );
+    }
+}

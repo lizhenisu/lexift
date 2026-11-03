@@ -418,6 +418,13 @@ impl Scene {
                 tx.send(Ok(handles)).unwrap();
                 let start = Instant::now();
                 let mut last = u32::MAX;
+                // Present the complete marker in one blit: sixteen separate
+                // screen writes can expose mixed binary digits to WGC.
+                let marker_dc = CreateCompatibleDC(None);
+                let source_dc = GetDC(Some(source.0));
+                let marker_bitmap = CreateCompatibleBitmap(source_dc, 512, 32);
+                ReleaseDC(Some(source.0), source_dc);
+                let previous_bitmap = SelectObject(marker_dc, marker_bitmap.into());
                 while !s.load(Ordering::Acquire) {
                     let mut msg = MSG::default();
                     while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
@@ -446,21 +453,25 @@ impl Scene {
                         for bit in 0..16 {
                             let v = if counter & (1 << bit) != 0 { 255 } else { 0 };
                             fill(
-                                dc,
+                                marker_dc,
                                 RECT {
-                                    left: 64 + bit * 32,
-                                    top: 64,
-                                    right: 96 + bit * 32,
-                                    bottom: 96,
+                                    left: bit * 32,
+                                    top: 0,
+                                    right: 32 + bit * 32,
+                                    bottom: 32,
                                 },
                                 color(v, v, v),
                             );
                         }
+                        BitBlt(dc, 64, 64, 512, 32, Some(marker_dc), 0, 0, SRCCOPY)?;
                         ReleaseDC(Some(source.0), dc);
                         last = counter;
                     }
                     thread::sleep(Duration::from_millis(4));
                 }
+                SelectObject(marker_dc, previous_bitmap);
+                let _ = DeleteObject(marker_bitmap.into());
+                let _ = DeleteDC(marker_dc);
                 drop(borders);
                 drop(hint);
                 drop(control);

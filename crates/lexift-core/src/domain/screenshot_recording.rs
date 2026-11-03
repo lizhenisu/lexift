@@ -135,7 +135,8 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
                 | Notice::Interrupted { identity: id, .. }
                 | Notice::Finished { identity: id, .. }
                 | Notice::Failed { identity: id, .. } => *id,
-                Notice::AudioConfigured { identity, .. }
+                Notice::VideoConfigured { identity, .. }
+                | Notice::AudioConfigured { identity, .. }
                 | Notice::StartRejected { identity, .. } => *identity,
             };
             if recording.backend_request != Some(identity) {
@@ -148,6 +149,25 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
                     Event::Input {
                         identity: current,
                         event: lifecycle::Event::StartRejected,
+                    }
+                }
+                Notice::VideoConfigured { result, .. } => {
+                    if recording.lifecycle.phase != lifecycle::Phase::PreparingVideo {
+                        return vec![];
+                    }
+                    let event = match result {
+                        Ok(video) if Some(video) == recording.lifecycle.pending_video => {
+                            lifecycle::Event::VideoConfigured
+                        }
+                        Ok(_) => return vec![],
+                        Err(error) => {
+                            s.error = Some(error.to_string());
+                            lifecycle::Event::VideoConfigurationFailed
+                        }
+                    };
+                    Event::Input {
+                        identity: current,
+                        event,
                     }
                 }
                 Notice::AudioConfigured {
@@ -263,7 +283,9 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
             if command.as_ref().is_some_and(|c| {
                 matches!(
                     c.action,
-                    lifecycle::Action::ConfigureAudio(_) | lifecycle::Action::Start
+                    lifecycle::Action::ConfigureVideo(_)
+                        | lifecycle::Action::ConfigureAudio(_)
+                        | lifecycle::Action::Start
                 )
             }) {
                 s.error = None;
@@ -318,6 +340,7 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
     if matches!(
         command.action,
         lifecycle::Action::PrepareBackend
+            | lifecycle::Action::ConfigureVideo(_)
             | lifecycle::Action::ConfigureAudio(_)
             | lifecycle::Action::Start
             | lifecycle::Action::Pause
@@ -329,6 +352,7 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
     }
     match command.action {
         lifecycle::Action::PrepareBackend => wrap(Command::PrepareBackend(PrepareRequest {
+            video: recording.lifecycle.video,
             identity: command.identity,
             bounds: recording.lifecycle.source,
             monitor_bounds: recording.monitor,
@@ -422,6 +446,83 @@ mod tests {
         emit(s, Event::Native(Notice::Prepared(id(s))));
     }
     #[test]
+    fn video_confirmation_checks_backend_identity_value_and_retirement() {
+        use lifecycle::{FrameRate, Quality, Video};
+        let mut s = begin();
+        ready(&mut s);
+        let before = id(&s);
+        let video = Video {
+            frame_rate: FrameRate::Fps60,
+            quality: Quality::Standard,
+        };
+        input(&mut s, lifecycle::Event::ConfigureVideo(video));
+        let pending = id(&s);
+        assert!(input(&mut s, lifecycle::Event::Start).is_empty());
+        assert!(
+            input(
+                &mut s,
+                lifecycle::Event::ConfigureAudio(crate::domain::recording_audio::Mode::System)
+            )
+            .is_empty()
+        );
+        emit(
+            &mut s,
+            Event::Native(Notice::VideoConfigured {
+                identity: before,
+                result: Ok(video),
+            }),
+        );
+        emit(
+            &mut s,
+            Event::Native(Notice::VideoConfigured {
+                identity: pending,
+                result: Ok(Video::default()),
+            }),
+        );
+        assert_eq!(
+            s.screenshot.recording.as_ref().unwrap().lifecycle.phase,
+            lifecycle::Phase::PreparingVideo
+        );
+        emit(
+            &mut s,
+            Event::Native(Notice::VideoConfigured {
+                identity: pending,
+                result: Ok(video),
+            }),
+        );
+        assert_eq!(
+            s.screenshot.recording.as_ref().unwrap().lifecycle.video,
+            video
+        );
+        input(&mut s, lifecycle::Event::ConfigureVideo(Video::default()));
+        let pending = id(&s);
+        emit(
+            &mut s,
+            Event::Native(Notice::VideoConfigured {
+                identity: pending,
+                result: Err(Error::new("unsupported")),
+            }),
+        );
+        assert_eq!(
+            s.screenshot.recording.as_ref().unwrap().lifecycle.video,
+            video
+        );
+        input(&mut s, lifecycle::Event::ConfigureVideo(Video::default()));
+        let pending = id(&s);
+        input(&mut s, lifecycle::Event::Cancel);
+        emit(
+            &mut s,
+            Event::Native(Notice::VideoConfigured {
+                identity: pending,
+                result: Ok(Video::default()),
+            }),
+        );
+        assert_eq!(
+            s.screenshot.recording.as_ref().unwrap().lifecycle.phase,
+            lifecycle::Phase::Retiring
+        );
+    }
+    #[test]
     fn audio_preparation_is_versioned_and_cancellation_rejects_late_confirmation() {
         use crate::domain::recording_audio::{Devices, Mode};
         let mut s = begin();
@@ -490,6 +591,7 @@ mod tests {
         input(s, lifecycle::Event::Finish);
         input(s, lifecycle::Event::FinalContentPresented);
         let artifact = ArtifactInfo {
+            video: Default::default(),
             artifact: lifecycle::Artifact(9),
             width: 1920,
             height: 1080,

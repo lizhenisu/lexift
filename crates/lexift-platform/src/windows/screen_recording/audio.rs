@@ -243,6 +243,7 @@ mod readiness_tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let mut job = super::super::Job::prepare(
             PrepareRequest {
+                video: Default::default(),
                 identity,
                 bounds,
                 monitor_bounds: bounds,

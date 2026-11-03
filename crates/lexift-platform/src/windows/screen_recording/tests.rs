@@ -30,6 +30,7 @@ fn audio_backlog_can_seal_a_marked_partial_without_reentering_wait() {
     let (tx, rx) = mpsc::channel();
     let mut job = Job::prepare(
         PrepareRequest {
+            video: Default::default(),
             identity: id,
             bounds,
             monitor_bounds: bounds,
@@ -38,9 +39,17 @@ fn audio_backlog_can_seal_a_marked_partial_without_reentering_wait() {
         Arc::new(move |n| tx.send(n).unwrap()),
     );
     job.file = Some(FileArtifact::new().unwrap());
-    job.encoder =
-        Some(encoder::Encoder::new_av(&job.file.as_ref().unwrap().path, 320, 180, true).unwrap());
-    job.clock = Clock::new(FPS, Duration::ZERO);
+    job.encoder = Some(
+        encoder::Encoder::new_av(
+            &job.file.as_ref().unwrap().path,
+            320,
+            180,
+            true,
+            Default::default(),
+        )
+        .unwrap(),
+    );
+    job.clock = Clock::new(30, Duration::ZERO);
     job.origin = Instant::now() - Duration::from_secs(1);
     job.pending = vec![128; 320 * 180 * 3 / 2];
     job.pending[..320 * 180].fill(16);
@@ -81,8 +90,14 @@ fn aac_mux_synthetic_stereo() {
     std::fs::create_dir_all(&folder).unwrap();
     let _apartment = super::super::screen_capture::capture::Apartment::new().unwrap();
     let _media = encoder::Media::new().unwrap();
-    let encoder =
-        encoder::Encoder::new_av(&folder.join("synthetic-aac.mp4"), 320, 180, true).unwrap();
+    let encoder = encoder::Encoder::new_av(
+        &folder.join("synthetic-aac.mp4"),
+        320,
+        180,
+        true,
+        Default::default(),
+    )
+    .unwrap();
     let pixels = vec![128; 320 * 180 * 3 / 2];
     for frame in 0..60u64 {
         let pcm: Vec<[f32; 2]> = (frame * 1600..(frame + 1) * 1600)
@@ -248,7 +263,14 @@ fn aac_mux_pulse_flash_sync() {
     std::fs::create_dir_all(&folder).unwrap();
     let _apartment = super::super::screen_capture::capture::Apartment::new().unwrap();
     let _media = encoder::Media::new().unwrap();
-    let encoder = encoder::Encoder::new_av(&folder.join("pulse-aac.mp4"), 320, 180, true).unwrap();
+    let encoder = encoder::Encoder::new_av(
+        &folder.join("pulse-aac.mp4"),
+        320,
+        180,
+        true,
+        Default::default(),
+    )
+    .unwrap();
     for frame in 0..180u64 {
         let pulse = [15, 75, 135]
             .iter()
@@ -407,6 +429,7 @@ fn production_port_static_pause_resume_and_final_presented_frame() {
         paint(hwnd, [32, 52, 76]);
         port.prepare(
             PrepareRequest {
+                video: Default::default(),
                 identity: id,
                 bounds: roi,
                 monitor_bounds,
@@ -505,6 +528,114 @@ fn production_port_static_pause_resume_and_final_presented_frame() {
         .expect("native service and its apartment must retire before exit");
     drop(port);
     drop(source);
+    drop(scene);
+    unsafe {
+        SetThreadDpiAwarenessContext(old);
+    }
+    super::super::recording_gate::resources::assert_retired();
+}
+
+/// Uses the production service and an actual 60Hz native source; decode markers independently.
+#[test]
+#[ignore = "native dynamic 1080p video configuration gate; owns visible test windows"]
+fn production_video_configuration_dynamic_gate() {
+    let delay: u64 = std::env::var("LEXIFT_RECORDING_TEST_SUBMIT_DELAY_MS")
+        .unwrap_or_else(|_| "0".into())
+        .parse()
+        .unwrap();
+    use lexift_core::domain::screen_recording::{FrameRate, Quality, Video};
+    let folder = PathBuf::from(std::env::var_os("LEXIFT_RECORDING_NATIVE_DIR").unwrap());
+    std::fs::create_dir_all(&folder).unwrap();
+    let old = unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+    let roi = lexift_core::domain::geometry::Rect {
+        left: 320,
+        top: 200,
+        right: 2240,
+        bottom: 1280,
+    };
+    let scene = super::super::recording_gate::fixture::Scene::start(roi, true);
+    let port = WindowsScreenRecordingPort::new().unwrap();
+    for (round, (rate, quality)) in [
+        (FrameRate::Fps30, Quality::High),
+        (FrameRate::Fps60, Quality::High),
+        (FrameRate::Fps30, Quality::Standard),
+        (FrameRate::Fps60, Quality::Standard),
+    ]
+    .into_iter()
+    .filter(|(_, quality)| delay == 0 || *quality == Quality::High)
+    .enumerate()
+    {
+        let (tx, rx) = mpsc::channel();
+        let mut id = Identity {
+            session: 92,
+            operation: round as u64 + 1,
+            request: 1,
+        };
+        let video = Video {
+            frame_rate: rate,
+            quality,
+        };
+        port.prepare(
+            PrepareRequest {
+                identity: id,
+                bounds: roi,
+                monitor_bounds: roi,
+                excluded_windows: vec![],
+                video: Default::default(),
+            },
+            Arc::new(move |n| {
+                let _ = tx.send(n);
+            }),
+        )
+        .unwrap();
+        wait(&rx, |n| matches!(n, Notice::Prepared(_)));
+        if video != Video::default() {
+            id.request += 1;
+            port.control(id, Control::ConfigureVideo(video)).unwrap();
+            let Notice::VideoConfigured { result, .. } =
+                wait(&rx, |n| matches!(n, Notice::VideoConfigured { .. }))
+            else {
+                unreachable!()
+            };
+            assert_eq!(result.unwrap(), video);
+        }
+        id.request += 1;
+        port.control(id, Control::Start).unwrap();
+        wait(&rx, |n| matches!(n, Notice::Started(_)));
+        dwell(6000);
+        id.request += 1;
+        port.control(id, Control::Finish).unwrap();
+        let Notice::Finished { artifact, .. } = wait(&rx, |n| matches!(n, Notice::Finished { .. }))
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            artifact.interrupted.is_some(),
+            delay >= 50 || (delay >= 20 && rate == FrameRate::Fps60)
+        );
+        assert_eq!(artifact.video, video);
+        let (tx, result) = mpsc::channel();
+        port.send(Message::ExportForTest(
+            folder.join(format!("video-{round}.mp4")),
+            tx,
+        ))
+        .unwrap();
+        result
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        std::fs::write(folder.join(format!("video-{round}.json")), serde_json::to_vec_pretty(&serde_json::json!({"fps":rate.get(),"quality":format!("{quality:?}"),"frames":artifact.frames,"duration_ms":artifact.duration.as_secs_f64()*1000.})).unwrap()).unwrap();
+        id.request += 1;
+        port.release(id).unwrap();
+        wait(&rx, |n| matches!(n, Notice::Retired(_)));
+    }
+    let (tx, rx) = mpsc::channel();
+    port.shutdown(Box::new(move || {
+        let _ = tx.send(());
+    }))
+    .unwrap();
+    rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    drop(port);
     drop(scene);
     unsafe {
         SetThreadDpiAwarenessContext(old);

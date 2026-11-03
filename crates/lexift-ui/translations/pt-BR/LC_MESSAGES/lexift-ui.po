@@ -2201,3 +2201,24 @@ msgstr "Gravação de áudio indisponível"
 
 msgid "Recording audio timing failed"
 msgstr "Falha no tempo do áudio"
+
+msgid "Video options"
+msgstr "Opções de vídeo"
+
+msgid "Frame rate"
+msgstr "Taxa de quadros"
+
+msgid "Video quality"
+msgstr "Qualidade do vídeo"
+
+msgid "High quality"
+msgstr "Alta qualidade"
+
+msgid "Preparing video"
+msgstr "Preparando vídeo"
+
+msgid "30fps"
+msgstr "30fps"
+
+msgid "60fps"
+msgstr "60fps"

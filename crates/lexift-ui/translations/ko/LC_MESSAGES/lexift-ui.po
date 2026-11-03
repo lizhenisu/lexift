@@ -2201,3 +2201,24 @@ msgstr "오디오를 녹음할 수 없습니다"
 
 msgid "Recording audio timing failed"
 msgstr "오디오 타임스탬프 오류"
+
+msgid "Video options"
+msgstr "동영상 옵션"
+
+msgid "Frame rate"
+msgstr "프레임 속도"
+
+msgid "Video quality"
+msgstr "화질"
+
+msgid "High quality"
+msgstr "고화질"
+
+msgid "Preparing video"
+msgstr "동영상 준비 중"
+
+msgid "30fps"
+msgstr "30fps"
+
+msgid "60fps"
+msgstr "60fps"

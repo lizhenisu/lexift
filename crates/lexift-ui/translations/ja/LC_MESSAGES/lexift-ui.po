@@ -2201,3 +2201,24 @@ msgstr "音声を録音できません"
 
 msgid "Recording audio timing failed"
 msgstr "音声タイムスタンプのエラー"
+
+msgid "Video options"
+msgstr "動画オプション"
+
+msgid "Frame rate"
+msgstr "フレームレート"
+
+msgid "Video quality"
+msgstr "画質"
+
+msgid "High quality"
+msgstr "高画質"
+
+msgid "Preparing video"
+msgstr "動画を準備中"
+
+msgid "30fps"
+msgstr "30fps"
+
+msgid "60fps"
+msgstr "60fps"

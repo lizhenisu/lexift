@@ -2201,3 +2201,24 @@ msgstr "Enregistrement audio indisponible"
 
 msgid "Recording audio timing failed"
 msgstr "Erreur d’horodatage audio"
+
+msgid "Video options"
+msgstr "Options vidéo"
+
+msgid "Frame rate"
+msgstr "Fréquence d’images"
+
+msgid "Video quality"
+msgstr "Qualité vidéo"
+
+msgid "High quality"
+msgstr "Haute qualité"
+
+msgid "Preparing video"
+msgstr "Préparation de la vidéo"
+
+msgid "30fps"
+msgstr "30fps"
+
+msgid "60fps"
+msgstr "60fps"

@@ -1,7 +1,48 @@
 //! Recording lifecycle and physical geometry, independent of native windows and codecs.
 use crate::{Error, Result, domain::geometry::Rect};
 
-pub const FPS: u32 = 30;
+/// Restricted recording rates keep timeline and codec negotiation in agreement.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FrameRate {
+    #[default]
+    Fps30,
+    Fps60,
+}
+impl FrameRate {
+    pub const fn get(self) -> u32 {
+        match self {
+            Self::Fps30 => 30,
+            Self::Fps60 => 60,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Quality {
+    Standard,
+    #[default]
+    High,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Video {
+    pub frame_rate: FrameRate,
+    pub quality: Quality,
+}
+impl Video {
+    /// Derive the target without intermediate rounding or overflowing codec fields.
+    pub fn bitrate(self, width: u32, height: u32) -> Result<u32> {
+        let base = match self.quality {
+            Quality::Standard => 8_000_000u64,
+            Quality::High => 12_000_000,
+        };
+        base.checked_mul(u64::from(width))
+            .and_then(|v| v.checked_mul(u64::from(height)))
+            .and_then(|v| v.checked_mul(u64::from(self.frame_rate.get())))
+            .map(|v| v / (1920 * 1080 * 30))
+            .and_then(|v| u32::try_from(v).ok())
+            .filter(|v| *v > 0)
+            .ok_or_else(|| Error::new("Recording bitrate is unsupported"))
+    }
+}
 pub const MAX_CAPTURE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Expand odd dimensions without moving either edge outside the owning monitor.
@@ -72,6 +113,7 @@ pub enum Phase {
     PreparingBackend,
     Ready,
     PreparingAudio,
+    PreparingVideo,
     Starting,
     Recording,
     Pausing,
@@ -99,7 +141,10 @@ pub enum FinishReason {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     StartRejected,
+    ConfigureVideo(Video),
     ConfigureAudio(super::recording_audio::Mode),
+    VideoConfigured,
+    VideoConfigurationFailed,
     AudioConfigured,
     AudioConfigurationFailed,
     ViewReady,
@@ -124,6 +169,7 @@ pub enum Event {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
+    ConfigureVideo(Video),
     ConfigureAudio(super::recording_audio::Mode),
     PrepareBackend,
     Start,
@@ -144,6 +190,8 @@ pub struct Command {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct State {
+    pub video: Video,
+    pub pending_video: Option<Video>,
     pub audio_devices: super::recording_audio::Devices,
     pub audio_ready: bool,
     pub audio: super::recording_audio::Mode,
@@ -159,6 +207,8 @@ pub struct State {
 impl State {
     pub fn new(session: u64, operation: u64, source: Rect, monitor: Rect) -> Result<Self> {
         Ok(Self {
+            video: Video::default(),
+            pending_video: None,
             audio_devices: Default::default(),
             audio_ready: true,
             audio: Default::default(),
@@ -212,6 +262,18 @@ impl State {
             return None;
         }
         let (phase, action) = match (self.phase, event) {
+            (Phase::Ready, Event::ConfigureVideo(video)) if video != self.video => {
+                self.pending_video = Some(video);
+                (Phase::PreparingVideo, Some(Action::ConfigureVideo(video)))
+            }
+            (Phase::PreparingVideo, Event::VideoConfigured) => {
+                self.video = self.pending_video.take()?;
+                (Phase::Ready, None)
+            }
+            (Phase::PreparingVideo, Event::VideoConfigurationFailed) => {
+                self.pending_video = None;
+                (Phase::Ready, None)
+            }
             (Phase::Ready, Event::ConfigureAudio(mode))
                 if mode != self.audio || !self.audio_ready =>
             {
@@ -263,7 +325,8 @@ impl State {
                 Phase::PreparingView
                 | Phase::PreparingBackend
                 | Phase::Ready
-                | Phase::PreparingAudio,
+                | Phase::PreparingAudio
+                | Phase::PreparingVideo,
                 Event::Interrupted(reason),
             ) => {
                 self.finish_reason = FinishReason::Interrupted(reason);
@@ -326,6 +389,60 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn video_bitrate_and_configuration_are_atomic_and_mutually_exclusive() {
+        let mut s = State::new(1, 2, rect(0, 0, 1920, 1080), rect(0, 0, 1920, 1080)).unwrap();
+        send(&mut s, Event::ViewReady);
+        send(&mut s, Event::BackendReady);
+        assert_eq!(s.video, Video::default());
+        let initial = s.video;
+        assert!(send(&mut s, Event::ConfigureVideo(initial)).is_none());
+        for (rate, quality, expected) in [
+            (FrameRate::Fps30, Quality::Standard, 8_000_000),
+            (FrameRate::Fps30, Quality::High, 12_000_000),
+            (FrameRate::Fps60, Quality::Standard, 16_000_000),
+            (FrameRate::Fps60, Quality::High, 24_000_000),
+        ] {
+            let video = Video {
+                frame_rate: rate,
+                quality,
+            };
+            assert_eq!(video.bitrate(1920, 1080).unwrap(), expected);
+            assert_eq!(video.bitrate(960, 540).unwrap(), expected / 4);
+        }
+        assert!(Video::default().bitrate(u32::MAX, u32::MAX).is_err());
+        let video = Video {
+            frame_rate: FrameRate::Fps60,
+            quality: Quality::Standard,
+        };
+        let old = s.identity;
+        assert_eq!(
+            send(&mut s, Event::ConfigureVideo(video)),
+            Some(Action::ConfigureVideo(video))
+        );
+        assert!(s.apply(old, Event::VideoConfigured).is_none());
+        assert!(send(&mut s, Event::Start).is_none());
+        assert!(
+            send(
+                &mut s,
+                Event::ConfigureAudio(super::super::recording_audio::Mode::System)
+            )
+            .is_none()
+        );
+        send(&mut s, Event::VideoConfigurationFailed);
+        assert_eq!(s.video, Video::default());
+        send(&mut s, Event::ConfigureVideo(video));
+        send(&mut s, Event::VideoConfigured);
+        assert_eq!(s.video, video);
+        send(
+            &mut s,
+            Event::ConfigureAudio(super::super::recording_audio::Mode::System),
+        );
+        assert!(send(&mut s, Event::ConfigureVideo(Video::default())).is_none());
+        send(&mut s, Event::AudioConfigured);
+        send(&mut s, Event::Start);
+        assert!(send(&mut s, Event::ConfigureVideo(Video::default())).is_none());
+    }
     #[test]
     fn rejected_start_preserves_preparation_and_requires_explicit_reprepare() {
         let b = Rect {

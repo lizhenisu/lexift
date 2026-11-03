@@ -188,7 +188,7 @@ fn recording_controls_render_all_languages_themes_dpis_and_phases() {
     slint::platform::set_platform(Box::new(Backend(windows.clone()))).unwrap();
     let control = RecordingControl::new().unwrap();
     let adapter = windows.borrow().last().unwrap().clone();
-    control.set_dimensions("1920 × 1080 px".into());
+    control.set_dimensions("1920 × 1080 px · 60fps".into());
     control.set_elapsed("10:59".into());
     for language in lexift_core::domain::ui_language::UiLanguage::ALL {
         crate::i18n::select(language);
@@ -200,12 +200,21 @@ fn recording_controls_render_all_languages_themes_dpis_and_phases() {
                 adapter
                     .window()
                     .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
-                let (width, height) = ((420. * dpi) as u32, (40. * dpi) as u32);
+                let (width, height) = ((455. * dpi) as u32, (40. * dpi) as u32);
                 adapter.set_size(slint::PhysicalSize::new(width, height));
                 for phase in 0..7 {
                     control.set_phase(phase);
                     control.set_interrupted(phase == 5);
                     control.set_audio_preparing(phase == 0);
+                    control.set_video_preparing(phase == 0);
+                    control.set_video_label(
+                        format!(
+                            "{} · 60fps · {}",
+                            crate::i18n::tr("Video options"),
+                            crate::i18n::tr("High quality")
+                        )
+                        .into(),
+                    );
                     control.set_audio_enabled(phase > 0);
                     control.set_audio_label(crate::i18n::tr("System audio and microphone").into());
                     let mut pixels = vec![slint::Rgb8Pixel::default(); (width * height) as usize];
@@ -234,4 +243,54 @@ fn recording_controls_render_all_languages_themes_dpis_and_phases() {
     assert!(toolbar.get_toolbar_width() < original);
     toolbar.set_recording_mode(false);
     assert_eq!(toolbar.get_toolbar_width(), original);
+}
+
+#[test]
+fn video_radio_groups_render_confirmed_values_without_changing_keyboard_selection() {
+    let windows = Rc::new(RefCell::new(Vec::new()));
+    slint::platform::set_platform(Box::new(Backend(windows.clone()))).unwrap();
+    let menu = crate::AnnotationChoiceWindow::new().unwrap();
+    let adapter = windows.borrow().last().unwrap().clone();
+    menu.set_two_choice_groups(true);
+    menu.set_checked_first(1);
+    menu.set_checked_second(3);
+    menu.set_selected(0);
+    assert_eq!(menu.get_checked_first(), 1);
+    assert_eq!(menu.get_checked_second(), 3);
+    for language in lexift_core::domain::ui_language::UiLanguage::ALL {
+        crate::i18n::select(language);
+        menu.set_options(slint::ModelRc::new(slint::VecModel::from(
+            ["30fps", "60fps", "Standard", "High quality"]
+                .map(|s| crate::i18n::tr(s).into())
+                .to_vec(),
+        )));
+        menu.set_first_group_label(crate::i18n::tr("Frame rate").into());
+        menu.set_second_group_label(crate::i18n::tr("Video quality").into());
+        for dark in [false, true] {
+            menu.global::<crate::Colors>()
+                .set_preference(i32::from(dark));
+            for dpi in [1., 1.25] {
+                adapter
+                    .window()
+                    .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
+                let (width, height) = ((280. * dpi) as u32, (menu.get_menu_height() * dpi) as u32);
+                adapter.set_size(slint::PhysicalSize::new(width, height));
+                let mut pixels = vec![slint::Rgb8Pixel::default(); (width * height) as usize];
+                adapter.request_redraw();
+                adapter.draw_if_needed(|r| {
+                    r.render(&mut pixels, width as usize);
+                });
+                assert!(pixels.windows(2).any(|p| p[0] != p[1]));
+                if let Ok(directory) = std::env::var("LEXIFT_RECORDING_RENDER_DIR") {
+                    crate::i18n::write_test_bitmap(
+                        &directory,
+                        &format!("video-menu-{}-{dark}-{dpi}", language.code()),
+                        width,
+                        height,
+                        pixels.iter().map(|p| [p.r, p.g, p.b, 255]),
+                    );
+                }
+            }
+        }
+    }
 }

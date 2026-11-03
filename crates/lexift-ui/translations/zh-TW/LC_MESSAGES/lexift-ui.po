@@ -2201,3 +2201,24 @@ msgstr "錄音裝置無法使用"
 
 msgid "Recording audio timing failed"
 msgstr "錄音時間戳記異常"
+
+msgid "Video options"
+msgstr "影片選項"
+
+msgid "Frame rate"
+msgstr "影格率"
+
+msgid "Video quality"
+msgstr "畫質"
+
+msgid "High quality"
+msgstr "高畫質"
+
+msgid "Preparing video"
+msgstr "正在準備影片"
+
+msgid "30fps"
+msgstr "30fps"
+
+msgid "60fps"
+msgstr "60fps"

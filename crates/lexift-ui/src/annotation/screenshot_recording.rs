@@ -134,6 +134,28 @@ pub(super) fn configure_audio(identity: Identity, revision: u64, index: i32) {
         input(Input::ConfigureAudio(*mode));
     }
 }
+pub(super) fn video_selection()
+-> Option<(Identity, u64, lexift_core::domain::screen_recording::Video)> {
+    let (id, revision, _) = audio_selection()?;
+    Some((id, revision, current()?.lifecycle.video))
+}
+pub(super) fn configure_video(identity: Identity, revision: u64, index: i32) {
+    let Some((id, current_revision, mut video)) = video_selection() else {
+        return;
+    };
+    if id != identity || current_revision != revision {
+        return;
+    }
+    use lexift_core::domain::screen_recording::{FrameRate, Quality};
+    match index {
+        0 => video.frame_rate = FrameRate::Fps30,
+        1 => video.frame_rate = FrameRate::Fps60,
+        2 => video.quality = Quality::Standard,
+        3 => video.quality = Quality::High,
+        _ => return,
+    }
+    input(Input::ConfigureVideo(video));
+}
 fn audio_label(mode: lexift_core::domain::recording_audio::Mode) -> &'static str {
     use lexift_core::domain::recording_audio::Mode;
     match mode {
@@ -453,7 +475,7 @@ fn prepare_windows(identity: Identity, bounds: Rect, attempt: u8) {
             range.set_selection_y((bounds.top - monitor.top) as f32 / scale);
             range.set_selection_width((bounds.right - bounds.left) as f32 / scale);
             range.set_selection_height((bounds.bottom - bounds.top) as f32 / scale);
-            let width = (420. * scale) as i32;
+            let width = (455. * scale) as i32;
             let height = (40. * scale) as i32;
             w.window()
                 .set_size(slint::PhysicalSize::new(width as u32, height as u32));
@@ -768,6 +790,7 @@ fn choose(session: u64, operation: u64, revision: u64, action: i32) {
                 super::delay::audio_menu();
             }
         }
+        5 => super::delay::video_menu(),
         _ => cancel(),
     }
 }
@@ -1011,6 +1034,30 @@ pub(crate) fn sync(state: &ScreenshotState) {
             Phase::Saving => 6,
             _ => 0,
         });
+        let video = recording.lifecycle.video;
+        w.set_dimensions(
+            format!(
+                "{} \u{00d7} {} px \u{00b7} {}fps",
+                recording.lifecycle.source.right - recording.lifecycle.source.left,
+                recording.lifecycle.source.bottom - recording.lifecycle.source.top,
+                video.frame_rate.get()
+            )
+            .into(),
+        );
+        let quality = match video.quality {
+            lexift_core::domain::screen_recording::Quality::Standard => "Standard",
+            _ => "High quality",
+        };
+        w.set_video_label(
+            format!(
+                "{} \u{00b7} {}fps \u{00b7} {}",
+                crate::i18n::tr("Video options"),
+                video.frame_rate.get(),
+                crate::i18n::tr(quality)
+            )
+            .into(),
+        );
+        w.set_video_preparing(recording.lifecycle.phase == Phase::PreparingVideo);
         let mode = recording.lifecycle.audio;
         w.set_audio_enabled(mode != lexift_core::domain::recording_audio::Mode::Silent);
         w.set_audio_preparing(recording.lifecycle.phase == Phase::PreparingAudio);

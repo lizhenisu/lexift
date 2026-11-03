@@ -6,8 +6,8 @@ import { Metrics } from "design/metrics.slint";
 // Recording and annotation have separate bars. Only this window owns video actions.
 export component RecordingControl inherits Window {
     title: @tr("Screen recording"); no-frame: true; always-on-top: true; background: transparent;
-    preferred-width: 420px; preferred-height: Metrics.long-capture-control-height;
-    min-width: 420px; max-width: 420px;
+    preferred-width: 455px; preferred-height: Metrics.long-capture-control-height;
+    min-width: 455px; max-width: 455px;
     min-height: Metrics.long-capture-control-height; max-height: Metrics.long-capture-control-height;
     // 0 preparing, 1 ready, 2 recording, 3 paused, 4 finishing, 5 sealed, 6 saving.
     in property <int> phase: 0;
@@ -15,6 +15,8 @@ export component RecordingControl inherits Window {
     in property <string> elapsed: "00:00";
     in property <bool> interrupted: false;
     in property <bool> audio-enabled: false;
+    in property <bool> video-preparing: false;
+    in property <string> video-label: @tr("Video options");
     in property <bool> audio-preparing: false;
     in property <bool> start-enabled: true;
     in property <string> audio-label: @tr("No audio");
@@ -38,10 +40,13 @@ export component RecordingControl inherits Window {
             Rectangle { horizontal-stretch:1;
                 VerticalLayout { spacing:0px;
                     Text { text:root.dimensions + "   " + root.elapsed; color:Colors.foreground; font-size:12px; vertical-alignment:center; }
-                    Text { text:root.audio-preparing ? @tr("Preparing audio") : root.interrupted ? @tr("Recording interrupted") : root.phase == 3 ? @tr("Recording paused") : root.phase == 2 ? @tr("Recording") : @tr("Screen recording"); color:Colors.secondary-foreground; font-size:10px; vertical-alignment:center; }
+                    Text { text:root.video-preparing ? @tr("Preparing video") : root.audio-preparing ? @tr("Preparing audio") : root.interrupted ? @tr("Recording interrupted") : root.phase == 3 ? @tr("Recording paused") : root.phase == 2 ? @tr("Recording") : @tr("Screen recording"); color:Colors.secondary-foreground; font-size:10px; vertical-alignment:center; }
                 }
             }
             CaptureSeparator {}
+            CaptureButton { icon:@image-url("assets/icons/recording-video.svg");
+                label:root.video-label; enabled:root.phase == 1;busy:root.video-preparing;
+                clicked=>{root.action(5);} }
             CaptureButton { icon:@image-url("assets/icons/recording-audio.svg");
                 label:root.audio-label; selected:root.audio-enabled;
                 enabled:root.phase == 1; busy:root.audio-preparing;

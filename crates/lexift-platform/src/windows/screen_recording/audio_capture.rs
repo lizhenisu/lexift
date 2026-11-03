@@ -25,7 +25,15 @@ const _: () = assert!(
     2 * (2 * MAX_NATIVE_PACKET_BYTES as usize + 5 * MAX_QUEUE_FRAMES * 8) + MAX_QUEUE_FRAMES * 4
         <= lexift_core::domain::recording_audio::MAX_BUFFER_BYTES
 );
+struct NativePacket {
+    bytes: Vec<u8>,
+    count: u32,
+    position: u64,
+    qpc: u64,
+    discontinuity: bool,
+}
 pub(super) struct Endpoint {
+    pending_native: Option<(NativePacket, std::time::Instant)>,
     enumerator: IMMDeviceEnumerator,
     device: IMMDevice,
     client: IAudioClient,
@@ -113,6 +121,7 @@ impl Endpoint {
                 watch: None,
                 converter,
                 block_align,
+                pending_native: None,
                 native_previous: None,
                 converted_position: 0,
                 packets: VecDeque::new(),
@@ -135,6 +144,13 @@ impl Endpoint {
     /// A bounded idle watchdog validates the native stream without polling for
     /// data. Healthy loopback silence is allowed to have no packets at all.
     pub fn check_health(&self) -> Result<()> {
+        if self
+            .pending_native
+            .as_ref()
+            .is_some_and(|(_, since)| since.elapsed() > std::time::Duration::from_millis(50))
+        {
+            return Err(Error::new(E_FAIL, "Unconfirmed recording audio timestamp"));
+        }
         unsafe {
             self.client.GetCurrentPadding()?;
         }
@@ -189,6 +205,7 @@ impl Endpoint {
             self.started = false;
             self.converter.reset()?;
             self.native_previous = None;
+            self.pending_native = None;
             self.converted_position = 0;
             self.packets.clear();
             self.input_frames = 0;
@@ -209,8 +226,20 @@ impl Endpoint {
             self.client.Stop()?;
         }
         let mut packets = Vec::new();
-        while let Some(packet) = self.read()? {
-            packets.push(packet);
+        loop {
+            if let Some(packet) = self.read()? {
+                packets.push(packet);
+                continue;
+            }
+            if unsafe { self.capture.GetNextPacketSize()? } == 0 {
+                break;
+            }
+        }
+        if self.pending_native.is_some() {
+            return Err(Error::new(
+                E_FAIL,
+                "Unconfirmed recording audio timestamp at stop",
+            ));
         }
         for (_, frames) in self.converter.finish()? {
             if frames.is_empty() {
@@ -238,6 +267,7 @@ impl Endpoint {
                 return Ok(Some(packet));
             }
             if self.capture.GetNextPacketSize()? == 0 {
+                self.check_health()?;
                 return Ok(None);
             }
             let mut data = std::ptr::null_mut();
@@ -314,65 +344,160 @@ impl Endpoint {
                 }
                 self.native_previous = None;
             }
-            let had_previous = self.native_previous.is_some();
-            if let Some((previous_position, previous_qpc)) = self.native_previous
-                && (position <= previous_position
-                    || qpc <= previous_qpc
-                    || (discontinuity && !self.system))
-            {
-                return Err(Error::new(
-                    E_FAIL,
-                    format!(
-                        "Native audio discontinuity: previous={previous_position}, actual={position}, flagged={discontinuity}"
-                    ),
-                ));
-            }
-            self.native_previous = Some((position, qpc));
-            let first = *self.first_qpc.get_or_insert(qpc);
-            let correction = qpc as f64
-                - first as f64
-                - self.input_frames as f64 * 10_000_000. / f64::from(self.native_rate);
-            let jump = correction - self.clock_correction;
-            if had_previous && discontinuity && jump <= 50_000. {
-                return Err(Error::new(
-                    E_FAIL,
-                    "Unlocated recording audio discontinuity",
-                ));
-            }
-            if self.system && jump > 50_000. {
-                self.pending_gap = true;
-            } else if jump.abs() > 50_000. {
-                return Err(Error::new(
-                    E_FAIL,
-                    "Recording audio timestamp jumped by more than 5ms",
-                ));
-            }
-            self.clock_correction = correction;
-            self.input_frames += u64::from(count);
-            for (_, frames) in self.converter.input(&bytes, count, qpc)? {
-                if frames.len() > MAX_QUEUE_FRAMES {
-                    return Err(Error::new(E_FAIL, "Converted audio backlog exceeded 500ms"));
-                }
-                let position = self.converted_position;
-                // Preserve the device's measured QPC drift: an MFT is allowed
-                // to synthesize nominal-rate output timestamps from its first
-                // input, which alone would hide a drifting hardware clock.
-                let qpc =
-                    (first as f64 + position as f64 * 10_000_000. / 48_000. + correction).round();
-                if qpc < 0. || qpc > u64::MAX as f64 {
-                    return Err(Error::from_hresult(E_INVALIDARG));
-                }
-                self.converted_position += frames.len() as u64;
-                self.packets.push_back(Packet {
-                    silence_gap: std::mem::take(&mut self.pending_gap),
-                    qpc: qpc as u64,
-                    position,
-                    discontinuity: false,
-                    frames,
-                });
-            }
+            self.process_native(NativePacket {
+                bytes,
+                count,
+                position,
+                qpc,
+                discontinuity,
+            })?;
             Ok(self.packets.pop_front())
         }
+    }
+    fn accept_native(&mut self, packet: NativePacket) -> Result<()> {
+        let NativePacket {
+            bytes,
+            count,
+            position,
+            qpc,
+            discontinuity,
+        } = packet;
+        let had_previous = self.native_previous.is_some();
+        if let Some((previous_position, previous_qpc)) = self.native_previous
+            && (position <= previous_position
+                || qpc <= previous_qpc
+                || (discontinuity && !self.system))
+        {
+            return Err(Error::new(
+                E_FAIL,
+                format!(
+                    "Native audio discontinuity: previous={previous_position}, actual={position}, flagged={discontinuity}"
+                ),
+            ));
+        }
+        self.native_previous = Some((position, qpc));
+        self.previous_count = count;
+        let first = *self.first_qpc.get_or_insert(qpc);
+        let correction = qpc as f64
+            - first as f64
+            - self.input_frames as f64 * 10_000_000. / f64::from(self.native_rate);
+        let jump = correction - self.clock_correction;
+        if had_previous && discontinuity && jump <= 50_000. {
+            return Err(Error::new(
+                E_FAIL,
+                "Unlocated recording audio discontinuity",
+            ));
+        }
+        if self.system && jump > 50_000. {
+            self.pending_gap = true;
+        } else if jump.abs() > 50_000. {
+            return Err(Error::new(
+                E_FAIL,
+                "Recording audio timestamp jumped by more than 5ms",
+            ));
+        }
+        self.clock_correction = correction;
+        self.input_frames += u64::from(count);
+        for (_, frames) in self.converter.input(&bytes, count, qpc)? {
+            if frames.len() > MAX_QUEUE_FRAMES {
+                return Err(Error::new(E_FAIL, "Converted audio backlog exceeded 500ms"));
+            }
+            let position = self.converted_position;
+            // Preserve the device's measured QPC drift: an MFT is allowed
+            // to synthesize nominal-rate output timestamps from its first
+            // input, which alone would hide a drifting hardware clock.
+            let qpc = (first as f64 + position as f64 * 10_000_000. / 48_000. + correction).round();
+            if qpc < 0. || qpc > u64::MAX as f64 {
+                return Err(Error::from_hresult(E_INVALIDARG));
+            }
+            self.converted_position += frames.len() as u64;
+            self.packets.push_back(Packet {
+                silence_gap: std::mem::take(&mut self.pending_gap),
+                qpc: qpc as u64,
+                position,
+                discontinuity: false,
+                frames,
+            });
+        }
+
+        Ok(())
+    }
+    fn process_native(&mut self, packet: NativePacket) -> Result<()> {
+        use lexift_core::domain::recording_audio::{PacketClock, isolated_timestamp};
+        if let Some((mut pending, since)) = self.pending_native.take() {
+            if since.elapsed() > std::time::Duration::from_millis(50) {
+                return Err(Error::new(E_FAIL, "Unconfirmed recording audio timestamp"));
+            }
+            let (position, qpc) = self
+                .native_previous
+                .ok_or_else(|| Error::from_hresult(E_FAIL))?;
+            let before = PacketClock {
+                position,
+                frames: self.previous_count,
+                timestamp: qpc,
+            };
+            let suspect = PacketClock {
+                position: pending.position,
+                frames: pending.count,
+                timestamp: pending.qpc,
+            };
+            let after = PacketClock {
+                position: packet.position,
+                frames: packet.count,
+                timestamp: packet.qpc,
+            };
+            if !packet.discontinuity
+                && let Some(corrected) =
+                    isolated_timestamp(before, suspect, after, self.native_rate)
+            {
+                tracing::warn!(
+                    system = self.system,
+                    position = pending.position,
+                    original_qpc = pending.qpc,
+                    corrected_qpc = corrected,
+                    "Recording isolated timestamp recovered from adjacent sample positions"
+                );
+                pending.qpc = corrected;
+            } else {
+                // A confirmed positive loopback idle interval retains the
+                // existing silence-gap path. Negative/persistent errors fail.
+                let expected_next = pending.qpc as f64
+                    + f64::from(pending.count) * 10_000_000. / f64::from(self.native_rate);
+                let original_jump = pending.qpc as f64
+                    - qpc as f64
+                    - f64::from(self.previous_count) * 10_000_000. / f64::from(self.native_rate);
+                if !self.system
+                    || original_jump <= 50_000.
+                    || packet.discontinuity
+                    || pending.position.checked_add(u64::from(pending.count))
+                        != Some(packet.position)
+                    || (packet.qpc as f64 - expected_next).abs() > 10_000.
+                {
+                    return Err(Error::new(
+                        E_FAIL,
+                        "Unlocated recording audio timestamp discontinuity",
+                    ));
+                }
+            }
+            self.accept_native(pending)?;
+            return self.accept_native(packet);
+        }
+        if let Some((position, qpc)) = self.native_previous {
+            let jump = packet.qpc as f64
+                - qpc as f64
+                - f64::from(self.previous_count) * 10_000_000. / f64::from(self.native_rate);
+            if !packet.discontinuity
+                && packet.qpc > qpc
+                && position.checked_add(u64::from(self.previous_count)) == Some(packet.position)
+                && packet.count <= self.native_rate / 50
+                && self.previous_count <= self.native_rate / 50
+                && jump.abs() > 50_000.
+            {
+                self.pending_native = Some((packet, std::time::Instant::now()));
+                return Ok(());
+            }
+        }
+        self.accept_native(packet)
     }
 }
 impl Drop for Endpoint {
@@ -439,5 +564,64 @@ impl IMMNotificationClient_Impl for Watcher_Impl {
             (self.changed)();
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod timestamp_replay_tests {
+    use super::*;
+    #[test]
+    #[ignore = "real endpoint format / synthetic PCM metadata replay; never starts recording"]
+    fn isolated_qpc_observation_preserves_all_pcm_and_rejects_sustained_negative_offset() {
+        let _apartment = super::super::super::screen_capture::capture::Apartment::new().unwrap();
+        let _media = super::super::encoder::Media::new().unwrap();
+        for recovered in [true, false] {
+            let mut endpoint = Endpoint::prepare(true).unwrap();
+            assert_eq!(
+                endpoint.native_rate, 48000,
+                "fixture requires this endpoint's 48kHz mix format"
+            );
+            let mut frames = 0;
+            for (position, qpc) in [
+                (0, 1_000_000),
+                (480, 1_045_889),
+                (960, if recovered { 1_200_233 } else { 1_145_889 }),
+            ] {
+                let result = endpoint.process_native(NativePacket {
+                    bytes: vec![0; 480 * endpoint.block_align as usize],
+                    count: 480,
+                    position,
+                    qpc,
+                    discontinuity: false,
+                });
+                if !recovered && position == 960 {
+                    assert!(result.is_err());
+                    break;
+                }
+                result.unwrap();
+                for packet in endpoint.packets.drain(..) {
+                    assert!(
+                        packet
+                            .frames
+                            .iter()
+                            .all(|s| s[0].abs() < 0.000001 && s[1].abs() < 0.000001)
+                    );
+                    frames += packet.frames.len();
+                }
+                if position == 480 {
+                    assert!(endpoint.pending_native.is_some());
+                }
+            }
+            if recovered {
+                assert!(endpoint.pending_native.is_none());
+                for (_, tail) in endpoint.converter.finish().unwrap() {
+                    frames += tail.len();
+                }
+                assert_eq!(
+                    frames, 1440,
+                    "metadata repair must not delete or duplicate PCM samples"
+                );
+            }
+        }
     }
 }

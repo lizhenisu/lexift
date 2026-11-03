@@ -44,7 +44,7 @@ pub(crate) fn sync(state: &ScreenshotState) {
     });
     let menu_stale = VIEWS.with(|s| {
         let s = s.borrow();
-        if s.menu_kind == 3 {
+        if matches!(s.menu_kind, 3 | 4) {
             s.menu.is_some()
                 && super::recording::audio_selection().map(|(id, revision, _)| (id, revision))
                     != s.recording
@@ -83,6 +83,12 @@ fn choose(sequence: u64, index: Option<i32>) {
         let kind = VIEWS.with(|s| s.borrow().menu_kind);
         let recording = VIEWS.with(|s| s.borrow().recording);
         clear();
+        if kind == 4 {
+            if let (Some((identity, revision)), Some(index)) = (recording, index) {
+                super::recording::configure_video(identity, revision, index);
+            }
+            return;
+        }
         if kind == 3 {
             if let (Some((identity, revision)), Some(index)) = (recording, index) {
                 super::recording::configure_audio(identity, revision, index);
@@ -122,11 +128,14 @@ pub(crate) fn import_menu() {
 pub(in crate::annotation) fn transform_menu() {
     menu_kind(2);
 }
+pub(super) fn video_menu() {
+    menu_kind(4);
+}
 pub(super) fn audio_menu() {
     menu_kind(3);
 }
 fn menu_kind(kind: u8) {
-    if kind == 3 {
+    if matches!(kind, 3 | 4) {
         if super::recording::audio_selection().is_none() {
             return;
         }
@@ -152,7 +161,9 @@ fn menu_kind(kind: u8) {
         return;
     };
     crate::theme::apply(&w);
-    let labels: &[&str] = if kind == 3 {
+    let labels: &[&str] = if kind == 4 {
+        &["30fps", "60fps", "Standard", "High quality"]
+    } else if kind == 3 {
         &[
             "No audio",
             "System audio",
@@ -182,10 +193,36 @@ fn menu_kind(kind: u8) {
             .map(|s| crate::i18n::tr(s).into())
             .collect::<Vec<_>>(),
     )));
-    let selection = (kind == 3)
+    let selection = matches!(kind, 3 | 4)
         .then(super::recording::audio_selection)
         .flatten();
-    w.set_selected(selection.map(|(_, _, index)| index as i32).unwrap_or(0));
+    if kind == 4 {
+        let Some((_, _, video)) = super::recording::video_selection() else {
+            return;
+        };
+        w.set_two_choice_groups(true);
+        w.set_first_group_label(crate::i18n::tr("Frame rate").into());
+        w.set_second_group_label(crate::i18n::tr("Video quality").into());
+        w.set_checked_first(
+            if video.frame_rate == lexift_core::domain::screen_recording::FrameRate::Fps30 {
+                0
+            } else {
+                1
+            },
+        );
+        w.set_checked_second(
+            if video.quality == lexift_core::domain::screen_recording::Quality::Standard {
+                2
+            } else {
+                3
+            },
+        );
+    }
+    w.set_selected(if kind == 4 {
+        w.get_checked_first()
+    } else {
+        selection.map(|(_, _, index)| index as i32).unwrap_or(0)
+    });
     w.set_option_measurement(
         labels
             .iter()

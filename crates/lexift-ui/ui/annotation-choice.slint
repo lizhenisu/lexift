@@ -9,6 +9,13 @@ import { ScrollView } from "std-widgets.slint";
 
 export component AnnotationChoiceWindow inherits Window {
     in property <int> disabled-index: -1;
+    // Optional two independent radio groups; navigation still has four actions.
+    in property <bool> two-choice-groups: false;
+    in property <string> first-group-label;
+    in property <string> second-group-label;
+    in property <int> checked-first: -1;
+    in property <int> checked-second: -1;
+    private property <length> group-heading-height: MenuMetrics.padding * 3;
     title: "Lexift"; no-frame: true; always-on-top: true; background: transparent;
     in property <[string]> options;
     in property <bool> lines;
@@ -66,7 +73,7 @@ export component AnnotationChoiceWindow inherits Window {
     out property <float> options-width: (option-metrics.preferred-width + 32px) / 1px;
     callback parameter-input-finished();
     in-out property <int> selected;
-    out property <length> menu-height: root.text-style-mode == 3 ? 104px : root.text-style-mode == 1 ? 90px : root.text-style-mode == 2 ? 176px : root.color-mode ? 300px : root.font-mode ? 320px : root.options.length * MenuMetrics.row-height + 8px;
+    out property <length> menu-height: root.text-style-mode == 3 ? 104px : root.text-style-mode == 1 ? 90px : root.text-style-mode == 2 ? 176px : root.color-mode ? 300px : root.font-mode ? 320px : root.options.length * MenuMetrics.row-height + 8px + (root.two-choice-groups ? 2 * root.group-heading-height : 0px);
     in-out property <length> font-scroll-y: 0px;
     callback center-selection();
     center-selection => { root.reveal-selection(true); }
@@ -167,16 +174,24 @@ export component AnnotationChoiceWindow inherits Window {
             content-y <=> root.font-scroll-y;
             width: 100%; height: 100%;
             content-width: self.visible-width;
-            content-height: root.options.length * MenuMetrics.row-height + 8px;
+            content-height: root.options.length * MenuMetrics.row-height + 8px + (root.two-choice-groups ? 2 * root.group-heading-height : 0px);
             horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+            if root.two-choice-groups: Text {
+                x:MenuMetrics.text-inset; y:4px; height:root.group-heading-height;
+                text:root.first-group-label; color:Colors.secondary-foreground; font-size:11px; vertical-alignment:center;
+            }
+            if root.two-choice-groups: Text {
+                x:MenuMetrics.text-inset; y:4px + 2 * MenuMetrics.row-height + root.group-heading-height; height:root.group-heading-height;
+                text:root.second-group-label; color:Colors.secondary-foreground; font-size:11px; vertical-alignment:center;
+            }
             for label[i] in root.options: Rectangle {
-            x: 4px; y: 4px + i * MenuMetrics.row-height;
+            x: 4px; y: 4px + i * MenuMetrics.row-height + (root.two-choice-groups ? (i < 2 ? root.group-heading-height : 2 * root.group-heading-height) : 0px);
             width: parent.width - 8px; height: MenuMetrics.row-height;
             border-radius: MenuMetrics.row-radius;
             background: root.selected == i ? Colors.primary : hit.has-hover ? Colors.menu-hover : transparent;
             opacity: i == root.disabled-index ? 0.45 : 1;
             accessible-role: list-item; accessible-label: label;
-            accessible-item-selected: root.selected == i;
+            accessible-item-selected: root.two-choice-groups ? (root.checked-first == i || root.checked-second == i) : root.selected == i;
             accessible-action-default => { root.chosen(i); }
             if root.lines: LineStylePreview {
                 x: 8px; y: (parent.height - 4px) / 2; width: parent.width - 16px; height: 4px;
@@ -187,10 +202,14 @@ export component AnnotationChoiceWindow inherits Window {
                 style: i; ink: root.selected == i ? Colors.on-primary : Colors.foreground;
             }
             if !root.lines && !root.connectors: Text {
-                x: root.sequence-shapes ? 44px : 8px; width: parent.width - self.x - 8px; height: parent.height;
+                x: root.sequence-shapes ? 44px : root.two-choice-groups ? 28px : 8px; width: parent.width - self.x - 8px; height: parent.height;
                 text: label; font-size: 13px; vertical-alignment: center; overflow: elide;
                 font-family: root.font-mode ? label : "";
                 color: root.selected == i ? Colors.on-primary : Colors.foreground;
+            }
+            if root.two-choice-groups && (root.checked-first == i || root.checked-second == i): Image {
+                x:6px;y:(parent.height - 16px)/2;width:16px;height:16px;
+                source:@image-url("assets/icons/check.svg");colorize:root.selected == i ? Colors.on-primary : Colors.foreground;
             }
             if root.sequence-shapes: Image { x:8px;y:6px;width:24px;height:24px;image-fit:contain;
                 source:i==0 ? @image-url("icons/sequence-circle.svg") : i==1 ? @image-url("icons/sequence-circle-border.svg") : i==2 ? @image-url("icons/sequence-outline.svg") : i==3 ? @image-url("icons/sequence-plain.svg") : @image-url("icons/sequence-square.svg"); }

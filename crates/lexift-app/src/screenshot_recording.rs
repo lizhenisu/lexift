@@ -160,6 +160,9 @@ pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, comman
             }
             let result = match port {
                 Some(port) => match command.action {
+                    Action::ConfigureVideo(video) => {
+                        port.control(identity, Control::ConfigureVideo(video))
+                    }
                     Action::ConfigureAudio(mode) => {
                         port.control(identity, Control::ConfigureAudio(mode))
                     }
@@ -174,6 +177,13 @@ pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, comman
             };
             if let Err(error) = result {
                 match command.action {
+                    Action::ConfigureVideo(_) => emit(
+                        c,
+                        Event::Native(Notice::VideoConfigured {
+                            identity,
+                            result: Err(error),
+                        }),
+                    ),
                     Action::ConfigureAudio(_) => emit(
                         c,
                         Event::Native(Notice::AudioConfigured {

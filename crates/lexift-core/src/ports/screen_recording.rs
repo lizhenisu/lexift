@@ -15,6 +15,7 @@ use std::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrepareRequest {
+    pub video: crate::domain::screen_recording::Video,
     pub identity: Identity,
     pub bounds: Rect,
     pub monitor_bounds: Rect,
@@ -23,6 +24,10 @@ pub struct PrepareRequest {
 impl PrepareRequest {
     pub fn validate(&self) -> Result<()> {
         capture_bytes(self.bounds)?;
+        self.video.bitrate(
+            (self.bounds.right - self.bounds.left) as u32,
+            (self.bounds.bottom - self.bounds.top) as u32,
+        )?;
         let m = self.monitor_bounds;
         let b = self.bounds;
         if b.left < m.left || b.top < m.top || b.right > m.right || b.bottom > m.bottom {
@@ -44,6 +49,7 @@ pub struct Progress {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArtifactInfo {
+    pub video: crate::domain::screen_recording::Video,
     pub artifact: Artifact,
     pub width: u32,
     pub height: u32,
@@ -56,6 +62,10 @@ pub enum Notice {
     StartRejected {
         identity: Identity,
         error: crate::Error,
+    },
+    VideoConfigured {
+        identity: Identity,
+        result: crate::Result<crate::domain::screen_recording::Video>,
     },
     AudioConfigured {
         identity: Identity,
@@ -85,6 +95,7 @@ pub type Listener = Arc<dyn Fn(Notice) + Send + Sync>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Control {
+    ConfigureVideo(crate::domain::screen_recording::Video),
     ConfigureAudio(crate::domain::recording_audio::Mode),
     Start,
     Pause,

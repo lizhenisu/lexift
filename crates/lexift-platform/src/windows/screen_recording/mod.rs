@@ -20,7 +20,7 @@ use lexift_core::{
     Error, Result,
     domain::{
         recording_clock::Clock,
-        screen_recording::{Artifact, FPS, Identity, Interruption},
+        screen_recording::{Artifact, Identity, Interruption},
     },
     ports::{annotation_save::SaveOutcome, screen_recording::*},
 };
@@ -226,6 +226,7 @@ enum Phase {
     Failed,
 }
 struct Job {
+    wake: Option<SyncSender<Message>>,
     audio: audio::Sources,
     audio_configuration: Option<(
         lexift_core::domain::recording_audio::Mode,
@@ -261,6 +262,7 @@ struct Job {
 impl Job {
     fn prepare(request: PrepareRequest, listener: Listener) -> Self {
         Self {
+            wake: None,
             audio: audio::Sources::default(),
             audio_configuration: None,
             diagnostics: diagnostics::Diagnostics::default(),
@@ -290,6 +292,14 @@ impl Job {
             file: None,
         }
     }
+    fn arrival_notice(&self) -> Arc<super::screen_capture::arrival::Notice> {
+        let sender = self.wake.clone();
+        super::screen_capture::arrival::Notice::new(move || {
+            if let Some(sender) = &sender {
+                let _ = sender.try_send(Message::Wake);
+            }
+        })
+    }
     fn initialize(&mut self) -> Result<()> {
         self.request.validate()?;
         unsafe {
@@ -307,6 +317,7 @@ impl Job {
         }
         let b = self.request.bounds;
         let (w, h) = ((b.right - b.left) as u32, (b.bottom - b.top) as u32);
+        encoder::validate(w, h, self.request.video).map_err(err)?;
         self.current = vec![0; w as usize * h as usize * 4];
         self.next = vec![0; self.current.len()];
         self.pixels = vec![0; w as usize * h as usize * 3 / 2];
@@ -366,6 +377,23 @@ impl Job {
             return Ok(());
         }
         match (self.phase, action) {
+            (Phase::Ready, Control::ConfigureVideo(video)) => {
+                if self.audio_configuration.is_some() {
+                    return Err(Error::new("Recording audio preparation is pending"));
+                }
+                let b = self.request.bounds;
+                let result =
+                    encoder::validate((b.right - b.left) as u32, (b.bottom - b.top) as u32, video)
+                        .map_err(err)
+                        .map(|()| video);
+                if result.is_ok() {
+                    self.request.video = video;
+                }
+                (self.listener)(Notice::VideoConfigured {
+                    identity: id,
+                    result,
+                });
+            }
             (Phase::Ready, Control::ConfigureAudio(mode)) => {
                 if self.audio_configuration.is_some() {
                     return Err(Error::new("Recording audio preparation is pending"));
@@ -397,6 +425,7 @@ impl Job {
                             (b.right - b.left) as u32,
                             (b.bottom - b.top) as u32,
                             self.audio.mode != lexift_core::domain::recording_audio::Mode::Silent,
+                            self.request.video,
                         )
                         .map_err(err)?,
                     );
@@ -412,7 +441,7 @@ impl Job {
                     return Ok(());
                 }
                 self.fresh = qpc_100ns().map_err(err)?;
-                let notice = super::screen_capture::arrival::Notice::new(|| {});
+                let notice = self.arrival_notice();
                 self.capture = Some(Capture::new(self.request.bounds, notice).map_err(err)?);
                 self.audio.start();
                 tracing::debug!(
@@ -433,13 +462,8 @@ impl Job {
             (Phase::Paused, Control::Resume) => {
                 self.audio.clear_segment();
                 self.fresh = qpc_100ns().map_err(err)?;
-                self.capture = Some(
-                    Capture::new(
-                        self.request.bounds,
-                        super::screen_capture::arrival::Notice::new(|| {}),
-                    )
-                    .map_err(err)?,
-                );
+                self.capture =
+                    Some(Capture::new(self.request.bounds, self.arrival_notice()).map_err(err)?);
                 self.audio.start();
                 self.phase = Phase::Resuming;
                 self.start_deadline = Instant::now() + Duration::from_secs(5);
@@ -458,10 +482,7 @@ impl Job {
                 self.audio.stop();
                 self.capture.take();
                 self.fresh = qpc_100ns().map_err(err)?;
-                match Capture::new(
-                    self.request.bounds,
-                    super::screen_capture::arrival::Notice::new(|| {}),
-                ) {
+                match Capture::new(self.request.bounds, self.arrival_notice()) {
                     Ok(capture) => self.capture = Some(capture),
                     Err(_) => {
                         self.interrupted = Some(Interruption::CaptureUnavailable);
@@ -517,6 +538,7 @@ impl Job {
         let clock = self.clock.as_ref().unwrap();
         let (pts, duration) = clock.sample(self.frames - 1).unwrap();
         let info = ArtifactInfo {
+            video: self.request.video,
             artifact: Artifact(NEXT.fetch_add(1, Ordering::Relaxed)),
             width: (b.right - b.left) as u32,
             height: (b.bottom - b.top) as u32,
@@ -527,6 +549,9 @@ impl Job {
         tracing::info!(
             session = self.request.identity.session,
             operation = self.request.identity.operation,
+            video_fps = self.request.video.frame_rate.get(),
+            video_quality = ?self.request.video.quality,
+            target_bitrate = self.request.video.bitrate(info.width, info.height).ok(),
             ?audio_mode,
             ?audio_devices,
             audio_samples,
@@ -553,6 +578,16 @@ impl Job {
             conversion_p95_ms = self.diagnostics.conversion.p95_ms(),
             submit_p95_ms = self.diagnostics.submit.p95_ms(),
             "Recording sealed with bounded native timing aggregates"
+        );
+        #[cfg(test)]
+        eprintln!(
+            "native aggregates fps={} read={} convert={} submit={} updates={} sources={}",
+            self.request.video.frame_rate.get(),
+            self.diagnostics.read.p95_ms(),
+            self.diagnostics.conversion.p95_ms(),
+            self.diagnostics.submit.p95_ms(),
+            self.diagnostics.content_updates,
+            self.diagnostics.source_frames
         );
         self.info = Some(info.clone());
         (self.listener)(Notice::Finished {
@@ -618,7 +653,9 @@ impl Job {
             };
             if stopped {
                 self.audio.collect()?;
-                self.write_audio_to(self.frames * 1600)?;
+                self.write_audio_to(
+                    self.frames * 48_000 / u64::from(self.request.video.frame_rate.get()),
+                )?;
                 self.phase = Phase::Paused;
                 self.progress();
                 (self.listener)(Notice::Paused(self.request.identity));
@@ -726,7 +763,7 @@ impl Job {
                     let offset = lexift_core::domain::recording_clock::capture_offset(
                         qpc_100ns().map_err(err)?,
                         timing.source_100ns,
-                        FPS,
+                        self.request.video.frame_rate.get(),
                     )
                     .ok_or_else(|| Error::new("Invalid recording capture timestamp"))?;
                     let observed = Instant::now();
@@ -736,7 +773,7 @@ impl Job {
                         observed.checked_add(Duration::from_nanos(offset.unsigned_abs()))
                     }
                     .ok_or_else(|| Error::new("Recording capture timestamp overflow"))?;
-                    self.clock = Clock::new(FPS, Duration::ZERO);
+                    self.clock = Clock::new(self.request.video.frame_rate.get(), Duration::ZERO);
                     self.audio.segment(timing.source_100ns, 0);
                     self.phase = Phase::Recording;
                     (self.listener)(Notice::Started(self.request.identity));
@@ -744,7 +781,7 @@ impl Job {
                     let offset = lexift_core::domain::recording_clock::capture_offset(
                         qpc_100ns().map_err(err)?,
                         timing.source_100ns,
-                        FPS,
+                        self.request.video.frame_rate.get(),
                     )
                     .ok_or_else(|| Error::new("Invalid recording capture timestamp"))?;
                     let now = self.origin.elapsed();
@@ -801,9 +838,27 @@ impl Job {
         let clock = self.clock.as_ref().unwrap();
         let now = self.origin.elapsed();
         if clock.backlog_exceeded(now, self.frames) {
-            return Err(Error::new("Recording encoding backlog exceeded one second"));
+            tracing::warn!(
+                session = self.request.identity.session,
+                operation = self.request.identity.operation,
+                "Recording encoding backlog exceeded one second"
+            );
+            self.capture.take();
+            self.audio.stop();
+            self.clock.as_mut().unwrap().stop(now);
+            self.interrupted = Some(Interruption::CaptureUnavailable);
+            self.phase = Phase::Paused;
+            (self.listener)(Notice::Interrupted {
+                identity: self.request.identity,
+                reason: Interruption::CaptureUnavailable,
+            });
+            return Ok(());
         }
-        if self.frames < clock.frames(now) {
+        // Keep the existing single tail slot available for a fresh arrival.
+        // Sampling an unchanged source immediately at every CFR boundary can
+        // alias two independent 60Hz clocks into duplicate/dropped pairs. A
+        // static/late source still advances at the next absolute frame deadline.
+        if clock.frame_ready(now, self.frames, self.changed) {
             if self.phase != Phase::Finishing {
                 self.convert_current();
             }
@@ -997,6 +1052,7 @@ fn service(receiver: Receiver<Message>, sender: SyncSender<Message>, shared: Arc
         match receiver.recv_timeout(Duration::from_millis(if ticking { 5 } else { 250 })) {
             Ok(Message::Prepare(request, listener)) => {
                 let mut j = Job::prepare(request, listener);
+                j.wake = Some(sender.clone());
                 if let Some(e) = &startup {
                     j.fail(err(e));
                 } else if !shared.cancel.load(Ordering::Acquire)

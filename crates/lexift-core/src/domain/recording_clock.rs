@@ -95,6 +95,13 @@ impl Clock {
         Some((i64::try_from(start).ok()?, i64::try_from(end - start).ok()?))
     }
 
+    /// Prefer a new source for the single retained tail slot. An unchanged
+    /// desktop still advances at the next absolute deadline, without time drift.
+    pub fn frame_ready(&self, now: Duration, submitted: u64, source_changed: bool) -> bool {
+        let due = self.frames(now);
+        submitted < due && (submitted == 1 || source_changed || submitted.saturating_add(1) < due)
+    }
+
     pub fn backlog_exceeded(&self, now: Duration, submitted: u64) -> bool {
         self.frames(now).saturating_sub(submitted) > u64::from(self.fps)
     }
@@ -103,6 +110,38 @@ impl Clock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn latest_source_tail_slot_is_bounded_for_dynamic_static_and_delayed_frames() {
+        for fps in [30, 60] {
+            let c = Clock::new(fps, Duration::ZERO).unwrap();
+            assert!(c.frame_ready(Duration::ZERO, 0, true));
+            let one = Duration::from_nanos(1_000_000_000 / u64::from(fps) + 1);
+            assert!(c.frame_ready(one, 1, false));
+            assert!(c.frame_ready(one, 1, true));
+            let two = Duration::from_nanos(2_000_000_000 / u64::from(fps) + 1);
+            assert!(c.frame_ready(two, 1, false));
+            assert!(!c.frame_ready(two, 2, false));
+            assert!(!c.frame_ready(two, 3, true));
+        }
+    }
+    #[test]
+    fn both_rates_keep_exact_long_duration_and_audio_boundaries() {
+        for fps in [30, 60] {
+            let mut c = Clock::new(fps, Duration::ZERO).unwrap();
+            let count = 60 * 60 * 10 * u64::from(fps);
+            let (pts, duration) = c.sample(count - 1).unwrap();
+            assert_eq!(pts + duration, 360_000_000_000);
+            assert_eq!(c.frames(Duration::from_secs(36000)), count);
+            c.pause(Duration::from_millis(101));
+            c.resume(Duration::from_millis(2101));
+            assert_eq!(c.audio_sample(Duration::from_millis(2201)).unwrap(), 9648);
+            c.stop(Duration::from_millis(2201));
+            assert_eq!(
+                c.frames(Duration::from_secs(100)),
+                (201 * u64::from(fps)).div_ceil(1000)
+            );
+        }
+    }
     #[test]
     fn presentation_clock_lead_is_bounded_and_resume_cannot_move_media_backwards() {
         assert_eq!(capture_offset(1_000_000, 930_000, 30), Some(7_000_000));

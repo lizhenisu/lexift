@@ -1,4 +1,5 @@
 //! Software-only Media Foundation encoder. COM references never leave this MTA.
+use lexift_core::domain::screen_recording::Video;
 use std::path::Path;
 use windows::{Win32::Media::MediaFoundation::*, core::*};
 
@@ -25,13 +26,16 @@ pub struct Encoder {
     #[cfg(test)]
     _lease: super::super::recording_gate::resources::Lease,
 }
-fn video_type(subtype: &GUID, w: u32, h: u32) -> Result<IMFMediaType> {
+fn video_type(subtype: &GUID, w: u32, h: u32, video: Video) -> Result<IMFMediaType> {
     unsafe {
         let t = MFCreateMediaType()?;
         t.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)?;
         t.SetGUID(&MF_MT_SUBTYPE, subtype)?;
         t.SetUINT64(&MF_MT_FRAME_SIZE, (u64::from(w) << 32) | u64::from(h))?;
-        t.SetUINT64(&MF_MT_FRAME_RATE, (30u64 << 32) | 1)?;
+        t.SetUINT64(
+            &MF_MT_FRAME_RATE,
+            (u64::from(video.frame_rate.get()) << 32) | 1,
+        )?;
         t.SetUINT64(&MF_MT_PIXEL_ASPECT_RATIO, (1u64 << 32) | 1)?;
         t.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
         t.SetUINT32(&MF_MT_VIDEO_PRIMARIES, MFVideoPrimaries_BT709.0 as u32)?;
@@ -41,8 +45,67 @@ fn video_type(subtype: &GUID, w: u32, h: u32) -> Result<IMFMediaType> {
         Ok(t)
     }
 }
+fn output_type(w: u32, h: u32, video: Video) -> Result<IMFMediaType> {
+    let t = video_type(&MFVideoFormat_H264, w, h, video)?;
+    let bitrate = video
+        .bitrate(w, h)
+        .map_err(|_| Error::from_hresult(windows::Win32::Foundation::E_INVALIDARG))?;
+    unsafe {
+        t.SetUINT32(&MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_High.0 as u32)?;
+        t.SetUINT32(&MF_MT_AVG_BITRATE, bitrate)?;
+    }
+    Ok(t)
+}
+/// Negotiate a software MFT without capture, BeginWriting or any output file.
+pub fn validate(w: u32, h: u32, video: Video) -> Result<()> {
+    unsafe {
+        let output = MFT_REGISTER_TYPE_INFO {
+            guidMajorType: MFMediaType_Video,
+            guidSubtype: MFVideoFormat_H264,
+        };
+        let input = MFT_REGISTER_TYPE_INFO {
+            guidMajorType: MFMediaType_Video,
+            guidSubtype: MFVideoFormat_NV12,
+        };
+        let mut list = std::ptr::null_mut();
+        let mut count = 0;
+        MFTEnumEx(
+            MFT_CATEGORY_VIDEO_ENCODER,
+            MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_SORTANDFILTER,
+            Some(&input),
+            Some(&output),
+            &mut list,
+            &mut count,
+        )?;
+        let activations: Vec<IMFActivate> = if count == 0 {
+            vec![]
+        } else {
+            std::slice::from_raw_parts_mut(list, count as usize)
+                .iter_mut()
+                .filter_map(Option::take)
+                .collect()
+        };
+        windows::Win32::System::Com::CoTaskMemFree(Some(list.cast()));
+        let mut result = Err(Error::from_hresult(
+            windows::Win32::Foundation::E_INVALIDARG,
+        ));
+        for activation in activations {
+            result = (|| {
+                let transform: IMFTransform = activation.ActivateObject()?;
+                transform.SetOutputType(0, &output_type(w, h, video)?, 0)?;
+                transform.SetInputType(0, &video_type(&MFVideoFormat_NV12, w, h, video)?, 0)?;
+                Ok(())
+            })();
+            let _ = activation.ShutdownObject();
+            if result.is_ok() {
+                break;
+            }
+        }
+        result
+    }
+}
 impl Encoder {
-    pub fn new_av(path: &Path, w: u32, h: u32, audio: bool) -> Result<Self> {
+    pub fn new_av(path: &Path, w: u32, h: u32, audio: bool, video: Video) -> Result<Self> {
         unsafe {
             let mut attrs = None;
             MFCreateAttributes(&mut attrs, 3)?;
@@ -53,14 +116,13 @@ impl Encoder {
             use std::os::windows::ffi::OsStrExt;
             let path: Vec<_> = path.as_os_str().encode_wide().chain([0]).collect();
             let writer = MFCreateSinkWriterFromURL(PCWSTR(path.as_ptr()), None, &attrs)?;
-            let output = video_type(&MFVideoFormat_H264, w, h)?;
-            output.SetUINT32(&MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_High.0 as u32)?;
-            output.SetUINT32(
-                &MF_MT_AVG_BITRATE,
-                (12_000_000u64 * u64::from(w) * u64::from(h) / (1920 * 1080)) as u32,
-            )?;
+            let output = output_type(w, h, video)?;
             let stream = writer.AddStream(&output)?;
-            writer.SetInputMediaType(stream, &video_type(&MFVideoFormat_NV12, w, h)?, None)?;
+            writer.SetInputMediaType(
+                stream,
+                &video_type(&MFVideoFormat_NV12, w, h, video)?,
+                None,
+            )?;
             let audio = if audio {
                 let output = MFCreateMediaType()?;
                 output.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio)?;
@@ -99,6 +161,12 @@ impl Encoder {
         }
     }
     pub fn write(&self, pixels: &[u8], pts: i64, duration: i64) -> Result<()> {
+        #[cfg(test)]
+        if let Ok(delay) = std::env::var("LEXIFT_RECORDING_TEST_SUBMIT_DELAY_MS") {
+            let delay: u64 = delay.parse().expect("test submission delay");
+            assert!(delay <= 100);
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+        }
         unsafe {
             if pixels.len() != self.bytes {
                 return Err(Error::from_hresult(
