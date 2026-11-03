@@ -44,7 +44,7 @@ pub(crate) fn sync(state: &ScreenshotState) {
     });
     let menu_stale = VIEWS.with(|s| {
         let s = s.borrow();
-        if matches!(s.menu_kind, 3 | 4) {
+        if matches!(s.menu_kind, 3..=5) {
             s.menu.is_some()
                 && super::recording::audio_selection().map(|(id, revision, _)| (id, revision))
                     != s.recording
@@ -83,6 +83,12 @@ fn choose(sequence: u64, index: Option<i32>) {
         let kind = VIEWS.with(|s| s.borrow().menu_kind);
         let recording = VIEWS.with(|s| s.borrow().recording);
         clear();
+        if kind == 5 {
+            if let (Some((identity, revision)), Some(index)) = (recording, index) {
+                super::recording::countdown::choose(identity, revision, index);
+            }
+            return;
+        }
         if kind == 4 {
             if let (Some((identity, revision)), Some(index)) = (recording, index) {
                 super::recording::configure_video(identity, revision, index);
@@ -128,6 +134,9 @@ pub(crate) fn import_menu() {
 pub(in crate::annotation) fn transform_menu() {
     menu_kind(2);
 }
+pub(super) fn recording_delay_menu() {
+    menu_kind(5);
+}
 pub(super) fn video_menu() {
     menu_kind(4);
 }
@@ -135,7 +144,7 @@ pub(super) fn audio_menu() {
     menu_kind(3);
 }
 fn menu_kind(kind: u8) {
-    if matches!(kind, 3 | 4) {
+    if matches!(kind, 3..=5) {
         if super::recording::audio_selection().is_none() {
             return;
         }
@@ -161,7 +170,14 @@ fn menu_kind(kind: u8) {
         return;
     };
     crate::theme::apply(&w);
-    let labels: &[&str] = if kind == 4 {
+    let labels: &[&str] = if kind == 5 {
+        &[
+            "Start now",
+            "Start after 3 seconds",
+            "Start after 5 seconds",
+            "Start after 10 seconds",
+        ]
+    } else if kind == 4 {
         &["30fps", "60fps", "Standard", "High quality"]
     } else if kind == 3 {
         &[
@@ -193,7 +209,7 @@ fn menu_kind(kind: u8) {
             .map(|s| crate::i18n::tr(s).into())
             .collect::<Vec<_>>(),
     )));
-    let selection = matches!(kind, 3 | 4)
+    let selection = matches!(kind, 3..=5)
         .then(super::recording::audio_selection)
         .flatten();
     if kind == 4 {
@@ -218,7 +234,9 @@ fn menu_kind(kind: u8) {
             },
         );
     }
-    w.set_selected(if kind == 4 {
+    w.set_selected(if kind == 5 {
+        0
+    } else if kind == 4 {
         w.get_checked_first()
     } else {
         selection.map(|(_, _, index)| index as i32).unwrap_or(0)

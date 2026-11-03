@@ -6,8 +6,8 @@ import { Metrics } from "design/metrics.slint";
 // Recording and annotation have separate bars. Only this window owns video actions.
 export component RecordingControl inherits Window {
     title: @tr("Screen recording"); no-frame: true; always-on-top: true; background: transparent;
-    preferred-width: 455px; preferred-height: Metrics.long-capture-control-height;
-    min-width: 455px; max-width: 455px;
+    preferred-width: 476px; preferred-height: Metrics.long-capture-control-height;
+    min-width: 476px; max-width: 476px;
     min-height: Metrics.long-capture-control-height; max-height: Metrics.long-capture-control-height;
     // 0 preparing, 1 ready, 2 recording, 3 paused, 4 finishing, 5 sealed, 6 saving.
     in property <int> phase: 0;
@@ -55,6 +55,13 @@ export component RecordingControl inherits Window {
                 label:root.phase == 1 ? @tr("Start") : root.phase == 3 ? @tr("Continue") : @tr("Pause");
                 selected:root.phase == 3; enabled:root.phase >= 1 && root.phase <= 3 && (root.phase != 1 || root.start-enabled); busy:root.phase == 0;
                 clicked=>{root.action(0);} }
+            if root.phase == 1: Rectangle { width:18px;
+                Image { x:2px;y:(parent.height - 14px)/2;width:14px;height:14px;source:@image-url("assets/icons/chevron-down.svg");colorize:root.start-enabled ? Colors.foreground : Colors.secondary-foreground; }
+                delay := TouchArea {enabled:root.start-enabled;clicked=>{root.action(6);}}
+                accessible-role:button;accessible-label:@tr("Delayed recording");accessible-enabled:root.start-enabled;
+                AnnotationHintTarget {text:@tr("Delayed recording");hovered:delay.has-hover;pressed:delay.pressed;}
+            }
+            if root.phase != 1: Rectangle {width:18px;}
             CaptureButton { icon:@image-url("assets/icons/recording-stop.svg");label:@tr("Finish");enabled:root.phase == 2 || root.phase == 3;busy:root.phase == 4;clicked=>{root.action(1);} }
             CaptureButton { icon:@image-url("assets/icons/capture-save.svg");label:@tr("Save video");enabled:root.phase == 5;busy:root.phase == 6;clicked=>{root.action(2);} }
             CaptureButton { icon:@image-url("assets/icons/screenshot-close.svg");label:@tr("Cancel");clicked=>{root.action(4);} }

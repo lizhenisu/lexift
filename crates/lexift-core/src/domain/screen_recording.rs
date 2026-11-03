@@ -112,6 +112,10 @@ pub enum Phase {
     PreparingView,
     PreparingBackend,
     Ready,
+    PreparingCountdown,
+    CountingDown,
+    RetiringCountdown,
+    RestoringReady,
     PreparingAudio,
     PreparingVideo,
     Starting,
@@ -140,6 +144,13 @@ pub enum FinishReason {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    StartAfter(u8),
+    CountdownPrepared(std::time::Instant),
+    CountdownElapsed(std::time::Instant),
+    CountdownCancelled,
+    CountdownRetired,
+    CountdownFailed,
+    ReadyRestored,
     StartRejected,
     ConfigureVideo(Video),
     ConfigureAudio(super::recording_audio::Mode),
@@ -169,6 +180,10 @@ pub enum Event {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
+    PrepareCountdown(u8),
+    WaitCountdown(std::time::Instant),
+    RetireCountdown,
+    RestoreReady,
     ConfigureVideo(Video),
     ConfigureAudio(super::recording_audio::Mode),
     PrepareBackend,
@@ -190,6 +205,7 @@ pub struct Command {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct State {
+    pub countdown_deadline: Option<std::time::Instant>,
     pub video: Video,
     pub pending_video: Option<Video>,
     pub audio_devices: super::recording_audio::Devices,
@@ -207,6 +223,7 @@ pub struct State {
 impl State {
     pub fn new(session: u64, operation: u64, source: Rect, monitor: Rect) -> Result<Self> {
         Ok(Self {
+            countdown_deadline: None,
             video: Video::default(),
             pending_video: None,
             audio_devices: Default::default(),
@@ -262,6 +279,35 @@ impl State {
             return None;
         }
         let (phase, action) = match (self.phase, event) {
+            (Phase::Ready, Event::StartAfter(seconds))
+                if matches!(seconds, 3 | 5 | 10) && self.audio_ready =>
+            {
+                (
+                    Phase::PreparingCountdown,
+                    Some(Action::PrepareCountdown(seconds)),
+                )
+            }
+            (Phase::PreparingCountdown, Event::CountdownPrepared(deadline)) => {
+                self.countdown_deadline = Some(deadline);
+                (Phase::CountingDown, Some(Action::WaitCountdown(deadline)))
+            }
+            (Phase::CountingDown, Event::CountdownElapsed(now))
+                if self.countdown_deadline.is_some_and(|d| now >= d) =>
+            {
+                (Phase::RetiringCountdown, Some(Action::RetireCountdown))
+            }
+            (Phase::RetiringCountdown, Event::CountdownRetired) => {
+                self.countdown_deadline = None;
+                (Phase::Starting, Some(Action::Start))
+            }
+            (
+                Phase::PreparingCountdown | Phase::CountingDown | Phase::RetiringCountdown,
+                Event::CountdownCancelled | Event::CountdownFailed,
+            ) => (Phase::RestoringReady, Some(Action::RestoreReady)),
+            (Phase::RestoringReady, Event::ReadyRestored) => {
+                self.countdown_deadline = None;
+                (Phase::Ready, None)
+            }
             (Phase::Ready, Event::ConfigureVideo(video)) if video != self.video => {
                 self.pending_video = Some(video);
                 (Phase::PreparingVideo, Some(Action::ConfigureVideo(video)))
@@ -326,7 +372,11 @@ impl State {
                 | Phase::PreparingBackend
                 | Phase::Ready
                 | Phase::PreparingAudio
-                | Phase::PreparingVideo,
+                | Phase::PreparingVideo
+                | Phase::PreparingCountdown
+                | Phase::CountingDown
+                | Phase::RetiringCountdown
+                | Phase::RestoringReady,
                 Event::Interrupted(reason),
             ) => {
                 self.finish_reason = FinishReason::Interrupted(reason);
@@ -389,6 +439,74 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn failed_countdown_preserves_configuration_and_layout_loss_retires_the_task() {
+        let mut s = State::new(1, 2, rect(0, 0, 1920, 1080), rect(0, 0, 1920, 1080)).unwrap();
+        send(&mut s, Event::ViewReady);
+        send(&mut s, Event::BackendReady);
+        let video = Video {
+            frame_rate: FrameRate::Fps60,
+            quality: Quality::Standard,
+        };
+        send(&mut s, Event::ConfigureVideo(video));
+        send(&mut s, Event::VideoConfigured);
+        send(&mut s, Event::StartAfter(5));
+        let old = s.identity;
+        assert_eq!(
+            send(&mut s, Event::CountdownFailed),
+            Some(Action::RestoreReady)
+        );
+        send(&mut s, Event::ReadyRestored);
+        assert_eq!(s.video, video);
+        assert!(
+            s.apply(old, Event::CountdownPrepared(std::time::Instant::now()))
+                .is_none()
+        );
+        send(&mut s, Event::StartAfter(3));
+        assert_eq!(
+            send(&mut s, Event::Interrupted(Interruption::LayoutChanged)),
+            Some(Action::Release)
+        );
+        assert!(!s.restore_editor);
+    }
+    #[test]
+    fn countdown_is_monotonic_cancellable_and_requires_retirement_before_capture() {
+        let mut s = State::new(1, 2, rect(0, 0, 1920, 1080), rect(0, 0, 1920, 1080)).unwrap();
+        send(&mut s, Event::ViewReady);
+        send(&mut s, Event::BackendReady);
+        let old = s.identity;
+        let now = std::time::Instant::now();
+        let deadline = now + std::time::Duration::from_secs(3);
+        assert_eq!(
+            send(&mut s, Event::StartAfter(3)),
+            Some(Action::PrepareCountdown(3))
+        );
+        assert!(s.apply(old, Event::CountdownPrepared(deadline)).is_none());
+        assert!(send(&mut s, Event::StartAfter(5)).is_none());
+        assert_eq!(
+            send(&mut s, Event::CountdownPrepared(deadline)),
+            Some(Action::WaitCountdown(deadline))
+        );
+        assert!(send(&mut s, Event::CountdownElapsed(now)).is_none());
+        assert_eq!(
+            send(&mut s, Event::CountdownElapsed(deadline)),
+            Some(Action::RetireCountdown)
+        );
+        let expired = s.identity;
+        assert_eq!(
+            send(&mut s, Event::CountdownCancelled),
+            Some(Action::RestoreReady)
+        );
+        assert!(s.apply(expired, Event::CountdownRetired).is_none());
+        send(&mut s, Event::ReadyRestored);
+        assert_eq!(s.phase, Phase::Ready);
+        assert!(send(&mut s, Event::StartAfter(2)).is_none());
+        send(&mut s, Event::StartAfter(10));
+        send(&mut s, Event::CountdownPrepared(deadline));
+        send(&mut s, Event::CountdownElapsed(deadline));
+        assert_eq!(send(&mut s, Event::CountdownRetired), Some(Action::Start));
+        assert!(send(&mut s, Event::CountdownCancelled).is_none());
+    }
     #[test]
     fn video_bitrate_and_configuration_are_atomic_and_mutually_exclusive() {
         let mut s = State::new(1, 2, rect(0, 0, 1920, 1080), rect(0, 0, 1920, 1080)).unwrap();

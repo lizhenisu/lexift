@@ -2758,3 +2758,45 @@ mod passive_style_regression {
         assert!(!unsafe { IsWindowVisible(window.0) }.as_bool());
     }
 }
+
+/// The UI retains each component through this fence, preventing HWND reuse.
+pub(crate) fn countdown_handoff(
+    tokens: &[lexift_core::ports::magnifier::WindowToken],
+    prepare: bool,
+) -> lexift_core::Result<bool> {
+    use windows::Win32::{Foundation::HWND, Graphics::Dwm::*, UI::WindowsAndMessaging::*};
+    let valid = || {
+        tokens.iter().all(|t| unsafe {
+            let h = HWND(t.0 as *mut _);
+            let mut pid = 0;
+            GetWindowThreadProcessId(h, Some(&mut pid));
+            IsWindow(Some(h)).as_bool()
+                && pid == std::process::id()
+                && (prepare || !IsWindowVisible(h).as_bool())
+        })
+    };
+    if tokens.is_empty() || !valid() {
+        return Ok(false);
+    }
+    unsafe {
+        if prepare {
+            for t in tokens {
+                shell_policy::install(
+                    HWND(t.0 as *mut _),
+                    Some(shell_policy::Activation::Passive),
+                )?;
+                let disabled = 1i32;
+                DwmSetWindowAttribute(
+                    HWND(t.0 as *mut _),
+                    DWMWA_TRANSITIONS_FORCEDISABLED,
+                    &disabled as *const _ as _,
+                    std::mem::size_of_val(&disabled) as u32,
+                )
+                .map_err(|e| lexift_core::Error::new(e.to_string()))?;
+            }
+        } else {
+            DwmFlush().map_err(|e| lexift_core::Error::new(e.to_string()))?;
+        }
+    }
+    Ok(valid())
+}

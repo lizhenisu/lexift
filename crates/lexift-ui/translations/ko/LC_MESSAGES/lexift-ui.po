@@ -2222,3 +2222,24 @@ msgstr "30fps"
 
 msgid "60fps"
 msgstr "60fps"
+
+msgid "Delayed recording"
+msgstr "녹화 시작 지연"
+
+msgid "Recording in {} seconds"
+msgstr "{}초 후 녹화 시작"
+
+msgid "Start now"
+msgstr "지금 시작"
+
+msgid "Start after 3 seconds"
+msgstr "3초 후 시작"
+
+msgid "Start after 5 seconds"
+msgstr "5초 후 시작"
+
+msgid "Start after 10 seconds"
+msgstr "10초 후 시작"
+
+msgid "Countdown unavailable"
+msgstr "카운트다운을 사용할 수 없습니다"

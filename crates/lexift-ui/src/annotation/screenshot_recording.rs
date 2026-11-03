@@ -2,6 +2,8 @@
 //! document and frozen feedback for cancellation. Native capture/encoding stay outside UI.
 use super::*;
 use crate::RecordingControl;
+#[path = "recording_countdown.rs"]
+pub(super) mod countdown;
 #[cfg(test)]
 #[path = "recording_tests.rs"]
 mod tests;
@@ -264,6 +266,7 @@ pub(in crate::annotation) fn request() {
     }
 }
 pub(crate) fn clear() {
+    countdown::clear();
     super::super::recording_chrome::clear();
     VIEW.with(|v| *v.borrow_mut() = View::default());
 }
@@ -275,6 +278,9 @@ pub(crate) fn execute(command: Command) {
             request,
         } => prepare(identity, bounds, request),
         Command::Execute(command) => match command.action {
+            Action::PrepareCountdown(seconds) => countdown::begin(command.identity, seconds),
+            Action::RetireCountdown => countdown::retire(command.identity, false),
+            Action::RestoreReady => countdown::retire(command.identity, true),
             Action::PresentFinalContent => {
                 REGISTRY.with(|r| {
                     if let Some(r) = r.borrow_mut().as_mut() {
@@ -475,7 +481,7 @@ fn prepare_windows(identity: Identity, bounds: Rect, attempt: u8) {
             range.set_selection_y((bounds.top - monitor.top) as f32 / scale);
             range.set_selection_width((bounds.right - bounds.left) as f32 / scale);
             range.set_selection_height((bounds.bottom - bounds.top) as f32 / scale);
-            let width = (455. * scale) as i32;
+            let width = (476. * scale) as i32;
             let height = (40. * scale) as i32;
             w.window()
                 .set_size(slint::PhysicalSize::new(width as u32, height as u32));
@@ -751,6 +757,9 @@ fn choose(session: u64, operation: u64, revision: u64, action: i32) {
         return;
     };
     match action {
+        0 if state.lifecycle.phase == Phase::Ready => {
+            countdown::choose(state.lifecycle.identity, revision, 0)
+        }
         0 => input(match state.lifecycle.phase {
             Phase::Ready => Input::Start,
             Phase::Paused => Input::Resume,
@@ -791,6 +800,11 @@ fn choose(session: u64, operation: u64, revision: u64, action: i32) {
             }
         }
         5 => super::delay::video_menu(),
+        6 => {
+            if countdown::available() {
+                super::delay::recording_delay_menu();
+            }
+        }
         _ => cancel(),
     }
 }

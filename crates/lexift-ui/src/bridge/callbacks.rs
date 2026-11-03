@@ -170,6 +170,7 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) annotation_displays: AnnotationDisplays,
     pub(crate) screenshot_displays: Rc<dyn Fn() -> Vec<(Rect, f32)>>,
     pub(crate) configure_capture_feedback: Rc<dyn Fn(&slint::Window) -> bool>,
+    pub(crate) countdown_handoff: CompleteScreenshotRefresh,
     pub(crate) configure_countdown_window: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) configure_hint_window: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) annotation_click_through: AnnotationClickThrough,
@@ -255,6 +256,7 @@ impl WindowLifecycleCallbacks {
             annotation_displays: Rc::new(Vec::new),
             screenshot_displays: Rc::new(Vec::new),
             configure_capture_feedback: Rc::new(|_| false),
+            countdown_handoff: Rc::new(|_, _| false),
             configure_countdown_window: Rc::new(|_| false),
             configure_hint_window: Rc::new(|_| false),
             annotation_click_through: Rc::new(|_, _| false),
@@ -384,6 +386,13 @@ impl WindowLifecycleCallbacks {
     }
 
     /// Supplies passive hint input policy independently of annotation canvas ordering.
+    pub fn with_countdown_handoff(
+        mut self,
+        callback: impl Fn(&[lexift_core::ports::magnifier::WindowToken], bool) -> bool + 'static,
+    ) -> Self {
+        self.countdown_handoff = Rc::new(callback);
+        self
+    }
     pub fn with_countdown_window(
         mut self,
         callback: impl Fn(&slint::Window) -> bool + 'static,

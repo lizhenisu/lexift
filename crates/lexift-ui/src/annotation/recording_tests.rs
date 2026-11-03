@@ -200,7 +200,7 @@ fn recording_controls_render_all_languages_themes_dpis_and_phases() {
                 adapter
                     .window()
                     .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
-                let (width, height) = ((455. * dpi) as u32, (40. * dpi) as u32);
+                let (width, height) = ((476. * dpi) as u32, (40. * dpi) as u32);
                 adapter.set_size(slint::PhysicalSize::new(width, height));
                 for phase in 0..7 {
                     control.set_phase(phase);
@@ -289,6 +289,47 @@ fn video_radio_groups_render_confirmed_values_without_changing_keyboard_selectio
                         height,
                         pixels.iter().map(|p| [p.r, p.g, p.b, 255]),
                     );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn recording_countdown_renders_all_locales_themes_and_dpis() {
+    let windows = Rc::new(RefCell::new(Vec::new()));
+    slint::platform::set_platform(Box::new(Backend(windows.clone()))).unwrap();
+    let w = crate::ScreenshotCountdownWindow::new().unwrap();
+    let adapter = windows.borrow().last().unwrap().clone();
+    w.set_recording(true);
+    for language in lexift_core::domain::ui_language::UiLanguage::ALL {
+        crate::i18n::select(language);
+        for dark in [false, true] {
+            w.global::<crate::Colors>().set_preference(i32::from(dark));
+            for dpi in [1., 1.25] {
+                adapter
+                    .window()
+                    .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
+                for seconds in [10, 3, 1] {
+                    w.set_seconds(seconds);
+                    let width = (w.get_content_width() * dpi).ceil() as u32;
+                    let height = (48. * dpi) as u32;
+                    adapter.set_size(slint::PhysicalSize::new(width, height));
+                    let mut pixels = vec![slint::Rgb8Pixel::default(); (width * height) as usize];
+                    adapter.request_redraw();
+                    adapter.draw_if_needed(|r| {
+                        r.render(&mut pixels, width as usize);
+                    });
+                    assert!(pixels.windows(2).any(|p| p[0] != p[1]));
+                    if let Ok(directory) = std::env::var("LEXIFT_RECORDING_RENDER_DIR") {
+                        crate::i18n::write_test_bitmap(
+                            &directory,
+                            &format!("countdown-{}-{dark}-{dpi}-{seconds}", language.code()),
+                            width,
+                            height,
+                            pixels.iter().map(|p| [p.r, p.g, p.b, 255]),
+                        );
+                    }
                 }
             }
         }

@@ -7,6 +7,7 @@ use lexift_core::domain::{
 use lexift_core::ports::screen_recording::{Control, Notice, ScreenRecordingPort};
 
 pub(super) struct Runtime {
+    countdown: Option<tokio::task::JoinHandle<()>>,
     port: Option<Arc<dyn ScreenRecordingPort>>,
     active: Option<Identity>,
     save: Option<Arc<AtomicBool>>,
@@ -16,6 +17,7 @@ pub(super) struct Runtime {
 impl Default for Runtime {
     fn default() -> Self {
         Self {
+            countdown: None,
             port: None,
             active: None,
             save: None,
@@ -31,6 +33,9 @@ pub(super) fn sync(r: &ScreenshotRuntime, quitting: bool) {
     let mut slot = r.recording.lock().unwrap();
     if let Some(cancel) = slot.save.take() {
         cancel.store(true, Ordering::Release);
+    }
+    if let Some(task) = slot.countdown.take() {
+        task.abort();
     }
     slot.active.take();
     let port = slot.port.take();
@@ -95,6 +100,11 @@ pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, comman
     if !current {
         return;
     }
+    if !matches!(&command,Command::Execute(c) if matches!(c.action,Action::WaitCountdown(_)))
+        && let Some(task) = r.recording.lock().unwrap().countdown.take()
+    {
+        task.abort();
+    }
     match command {
         Command::PrepareView { .. } => c.ui.screen_recording(command),
         Command::PrepareBackend(request) => {
@@ -136,9 +146,48 @@ pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, comman
             }
         }
         Command::Execute(command) => {
+            if let Action::WaitCountdown(deadline) = command.action {
+                // Store the task before cancellation can advance domain identity.
+                let state = c.state.lock().unwrap();
+                if state
+                    .screenshot
+                    .recording
+                    .as_ref()
+                    .is_none_or(|s| s.lifecycle.identity != identity)
+                {
+                    return;
+                }
+                let mut slot = r.recording.lock().unwrap();
+                let controller = c.clone();
+                let task = c.runtime.spawn(async move {
+                    tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+                    tracing::debug!(
+                        session = identity.session,
+                        request = identity.request,
+                        lateness_ms = deadline.elapsed().as_secs_f64() * 1000.,
+                        "Recording countdown deadline reached"
+                    );
+                    emit(
+                        &controller,
+                        Event::Input {
+                            identity,
+                            event: Input::CountdownElapsed(std::time::Instant::now()),
+                        },
+                    );
+                });
+                if let Some(old) = slot.countdown.replace(task) {
+                    old.abort();
+                }
+                return;
+            }
             if matches!(
                 command.action,
-                Action::PresentFinalContent | Action::RestoreScreenshot | Action::EndScreenshot
+                Action::PrepareCountdown(_)
+                    | Action::RetireCountdown
+                    | Action::RestoreReady
+                    | Action::PresentFinalContent
+                    | Action::RestoreScreenshot
+                    | Action::EndScreenshot
             ) {
                 c.ui.screen_recording(Command::Execute(command));
                 return;

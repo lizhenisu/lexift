@@ -995,3 +995,17 @@ pub fn screen_recording_port() -> lexift_core::Result<
         ))
     }
 }
+
+/// View-only preparation/confirmation of hidden countdown-owned windows.
+pub fn countdown_handoff(
+    windows: &[lexift_core::ports::magnifier::WindowToken],
+    prepare: bool,
+) -> lexift_core::Result<bool> {
+    #[cfg(target_os = "windows")]
+    return self::windows::popup::countdown_handoff(windows, prepare);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (windows, prepare);
+        Ok(false)
+    }
+}

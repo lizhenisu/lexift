@@ -22,6 +22,10 @@ pub struct Session {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    CountdownFailed {
+        identity: lifecycle::Identity,
+        error: Error,
+    },
     Requested(ExportRequest),
     Native(crate::ports::screen_recording::Notice),
     Save(crate::ports::screen_recording::SaveRequest),
@@ -307,6 +311,12 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
                 .apply(identity, lifecycle::Event::Finalized(artifact.artifact));
             recording.artifact = Some(artifact);
             command
+        }
+        Event::CountdownFailed { identity, error } if identity == recording.lifecycle.identity => {
+            s.error = Some(error.to_string());
+            recording
+                .lifecycle
+                .apply(identity, lifecycle::Event::CountdownFailed)
         }
         Event::Failed { identity, error } if identity == recording.lifecycle.identity => {
             s.error = Some(error.to_string());

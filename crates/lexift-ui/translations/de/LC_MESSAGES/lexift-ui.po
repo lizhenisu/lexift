@@ -2222,3 +2222,24 @@ msgstr "30fps"
 
 msgid "60fps"
 msgstr "60fps"
+
+msgid "Delayed recording"
+msgstr "Verzögerte Aufnahme"
+
+msgid "Recording in {} seconds"
+msgstr "Aufnahme in {} Sekunden"
+
+msgid "Start now"
+msgstr "Jetzt starten"
+
+msgid "Start after 3 seconds"
+msgstr "In 3 Sekunden starten"
+
+msgid "Start after 5 seconds"
+msgstr "In 5 Sekunden starten"
+
+msgid "Start after 10 seconds"
+msgstr "In 10 Sekunden starten"
+
+msgid "Countdown unavailable"
+msgstr "Countdown nicht verfügbar"

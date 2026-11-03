@@ -268,6 +268,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             services.runtime.handle().clone(), services.credential_store.clone(),
             Arc::new(lexift_translate::providers::llm::LlmService::new()?),
         ))
+        .with_countdown_handoff(|windows,prepare|lexift_platform::countdown_handoff(windows,prepare).unwrap_or(false))
         .with_countdown_window(|window| window.with_winit_window(lexift_platform::configure_countdown_window).is_some_and(|r| r.is_ok()))
         .with_hint_window(|window| window.with_winit_window(lexift_platform::configure_hint_window).is_some_and(|result| result.is_ok()))
         .with_popup_work_area(move |point| {
