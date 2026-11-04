@@ -30,12 +30,57 @@ impl Drop for Apartment {
         unsafe { CoUninitialize() }
     }
 }
-pub fn save(source: &Path, request: SaveRequest, cancel: Arc<AtomicBool>) -> Result<SaveOutcome> {
+pub fn save(
+    source: &Path,
+    request: SaveRequest,
+    cancel: Arc<AtomicBool>,
+    info: &super::ArtifactInfo,
+    listener: super::Listener,
+) -> Result<SaveOutcome> {
     if cancel.load(Ordering::Acquire) {
         return Ok(SaveOutcome::Cancelled);
     }
+    let range = request
+        .range
+        .unwrap_or(lexift_core::domain::recording_trim::Range::full(
+            info.frames,
+        ));
+    if !range.valid(info.frames) {
+        return Err(Error::new("Invalid recording trim range"));
+    }
+    let identity = request.identity;
+    let range_version = request.range_version;
     match host::choose(request, &cancel)? {
-        Some(path) => publish(source, &path, &cancel),
+        Some(path) if range == lexift_core::domain::recording_trim::Range::full(info.frames) => {
+            publish(source, &path, &cancel)
+        }
+        Some(path) => {
+            let file = super::FileArtifact::new()?;
+            let progress = |stage, completed, total| {
+                listener(super::Notice::ExportProgress {
+                    identity,
+                    range_version,
+                    stage,
+                    completed,
+                    total,
+                })
+            };
+            match super::trim::export(source, &file.path, info, range, &cancel, progress) {
+                Ok(()) if !cancel.load(Ordering::Acquire) => {
+                    listener(super::Notice::ExportProgress {
+                        identity,
+                        range_version,
+                        stage: super::ExportStage::Publishing,
+                        completed: range.len(),
+                        total: range.len(),
+                    });
+                    publish(&file.path, &path, &cancel)
+                }
+                _ if cancel.load(Ordering::Acquire) => Ok(SaveOutcome::Cancelled),
+                Err(error) => Err(error),
+                Ok(()) => Ok(SaveOutcome::Cancelled),
+            }
+        }
         None => Ok(SaveOutcome::Cancelled),
     }
 }

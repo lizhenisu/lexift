@@ -2273,3 +2273,21 @@ msgstr "Descartar"
 
 msgid "Playback position"
 msgstr "Posición de reproducción"
+
+msgid "Trim start"
+msgstr "Inicio del recorte"
+
+msgid "Trim end"
+msgstr "Fin del recorte"
+
+msgid "Restore full range"
+msgstr "Restaurar el intervalo completo"
+
+msgid "Exporting video"
+msgstr "Exportando vídeo"
+
+msgid "Finalizing video"
+msgstr "Finalizando vídeo"
+
+msgid "Saving video"
+msgstr "Guardando vídeo"

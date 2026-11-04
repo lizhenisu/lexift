@@ -44,6 +44,13 @@ fn valid(id: p::Identity) -> bool {
     state().is_some_and(|s| s.identity == id)
 }
 pub(super) fn clear() {
+    REGISTRY.with(|r| {
+        if let Ok(mut r) = r.try_borrow_mut()
+            && let Some(r) = r.as_mut()
+        {
+            hints::clear_recording_preview(r);
+        }
+    });
     VIEWS.with(|v| {
         let mut v = v.borrow_mut();
         v.confirmation.clear();
@@ -140,6 +147,19 @@ fn open(id: p::Identity) {
         let v = v.borrow();
         let w = v.window.get().unwrap();
         let revision = v.window.revision();
+        REGISTRY.with(|r| {
+            if let Some(r) = r.borrow().as_ref() {
+                hints::bind_recording_preview(
+                    w,
+                    r.generation,
+                    hints::Owner::RecordingPreview {
+                        session: id.session,
+                        operation: id.operation,
+                        revision,
+                    },
+                );
+            }
+        });
         let work = v.window.input();
         w.on_action(move |action, value| {
             work.post(move || {
@@ -354,6 +374,21 @@ fn install() {
     tracing::debug!("Recording preview first frame presented; capture chrome retired");
 }
 fn act(action: i32, value: f32) {
+    REGISTRY.with(|r| {
+        if let Some(r) = r.borrow_mut().as_mut() {
+            r.hints.clear();
+        }
+    });
+    if action == 12 || action == 5 && current().is_some_and(|s| s.lifecycle.phase == Phase::Saving)
+    {
+        if let Some(s) = state() {
+            emit_recording(Event::CancelExport {
+                identity: s.identity,
+                close: action == 5,
+            });
+        }
+        return;
+    }
     tracing::debug!(action, target = value, "Recording preview user input");
     let event = match action {
         0 => p::Input::PlayPause,
@@ -367,6 +402,22 @@ fn act(action: i32, value: f32) {
         5 => p::Input::Close,
         6 => p::Input::Retry,
         7 => p::Input::CancelSeek,
+        8 => p::Input::BeginTrim,
+        9 | 10 => {
+            let Some(s) = state() else { return };
+            let mut range = s.range;
+            let frame = f64::from(value).round().clamp(0., s.frames as f64) as u64;
+            if action == 9 {
+                range.start = frame;
+            } else {
+                range.end = frame;
+            }
+            p::Input::SetRange {
+                range,
+                end_handle: action == 10,
+            }
+        }
+        11 => p::Input::ResetRange,
         _ => return,
     };
     input(event);
@@ -387,6 +438,46 @@ pub(super) fn sync(s: &lexift_core::domain::screenshot::recording::Session) {
         w.set_has_audio(p.has_audio);
         w.set_duration_seconds(p.duration.as_secs_f32());
         w.set_muted(p.muted);
+        w.set_frames(p.frames as f32);
+        w.set_start_frame(p.range.start as f32);
+        w.set_end_frame(p.range.end as f32);
+        w.set_exporting(s.lifecycle.phase == Phase::Saving);
+        let format_trim = |frame: u64| {
+            let d = lexift_core::domain::recording_trim::Range::time(frame, p.fps);
+            format!(
+                "{:02}:{:02}.{:03}",
+                d.as_secs() / 60,
+                d.as_secs() % 60,
+                d.subsec_millis()
+            )
+        };
+        w.set_range_label(
+            format!(
+                "{}–{} ({})",
+                format_trim(p.range.start),
+                format_trim(p.range.end),
+                format_trim(p.range.len())
+            )
+            .into(),
+        );
+        w.set_export_label(
+            if let Some((done, total)) = s.export_progress {
+                format!(
+                    "{} {}%",
+                    crate::i18n::tr(match s.export_stage {
+                        Some(lexift_core::ports::screen_recording::ExportStage::Finalizing) =>
+                            "Finalizing video",
+                        Some(lexift_core::ports::screen_recording::ExportStage::Publishing) =>
+                            "Saving video",
+                        _ => "Exporting video",
+                    }),
+                    done * 100 / total.max(1)
+                )
+            } else {
+                crate::i18n::tr("Save video")
+            }
+            .into(),
+        );
         w.set_busy(
             s.lifecycle.phase == Phase::Saving
                 || matches!(p.phase, p::Phase::Preparing | p::Phase::Retiring),
@@ -555,4 +646,37 @@ fn prepare_confirmation(id: p::Identity, revision: u64, attempt: u8) {
             }
         },
     );
+}
+
+pub(in crate::annotation) fn with_hint_window<T>(
+    session: u64,
+    operation: u64,
+    revision: u64,
+    f: impl FnOnce(&slint::Window) -> T,
+) -> Option<T> {
+    VIEWS.with(|v| {
+        let v = v.borrow();
+        if v.session != session || v.operation != operation || v.window.revision() != revision {
+            return None;
+        }
+        v.window
+            .get()
+            .filter(|w| !w.get_busy())
+            .map(|w| f(w.window()))
+    })
+}
+
+pub(in crate::annotation) fn feedback_bounds() -> Option<Rect> {
+    VIEWS.with(|v| {
+        let v = v.borrow();
+        let w = v.window.get()?;
+        let p = w.window().position();
+        let s = w.window().size();
+        Some(Rect {
+            left: p.x,
+            top: p.y,
+            right: p.x + s.width as i32,
+            bottom: p.y + s.height as i32,
+        })
+    })
 }

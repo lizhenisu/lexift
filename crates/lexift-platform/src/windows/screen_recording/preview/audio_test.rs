@@ -16,12 +16,12 @@ use windows::{
 };
 /// Independent loopback probe: bypass the recording adapter's resampler and
 /// timestamp correction when measuring a playback implementation.
-struct Probe {
+pub(super) struct Probe {
     client: windows::Win32::Media::Audio::IAudioClient,
     capture: windows::Win32::Media::Audio::IAudioCaptureClient,
 }
 impl Probe {
-    fn new() -> Result<Self> {
+    pub(super) fn new() -> Result<Self> {
         unsafe {
             use windows::Win32::Media::Audio::*;
             let enumerator: IMMDeviceEnumerator =
@@ -52,7 +52,7 @@ impl Probe {
             Ok(Self { client, capture })
         }
     }
-    fn read(&self) -> Result<Option<super::super::audio_capture::Packet>> {
+    pub(super) fn read(&self) -> Result<Option<super::super::audio_capture::Packet>> {
         unsafe {
             use windows::Win32::Media::Audio::*;
             if self.capture.GetNextPacketSize()? == 0 {

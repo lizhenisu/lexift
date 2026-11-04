@@ -5,6 +5,11 @@ use crate::{AnnotationHintWindow, AnnotationHints};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Owner {
+    RecordingPreview {
+        session: u64,
+        operation: u64,
+        revision: u64,
+    },
     RecordingControl {
         session: u64,
         operation: u64,
@@ -40,6 +45,15 @@ impl State {
         self.timer.stop();
         self.pending = None;
         self.window.clear();
+    }
+}
+pub(super) fn clear_recording_preview(r: &mut Registry) {
+    if r.hints
+        .pending
+        .as_ref()
+        .is_some_and(|p| matches!(p.owner, Owner::RecordingPreview { .. }))
+    {
+        r.hints.clear();
     }
 }
 pub(super) fn clear_long(r: &mut Registry) {
@@ -84,6 +98,11 @@ fn with_owner_window<T>(
     f: impl FnOnce(&slint::Window) -> T,
 ) -> Option<T> {
     match owner {
+        Owner::RecordingPreview {
+            session,
+            operation,
+            revision,
+        } => screenshot::recording::preview::with_hint_window(session, operation, revision, f),
         Owner::RecordingControl {
             session,
             operation,
@@ -136,6 +155,7 @@ bind!(bind_toolbar, AnnotationToolbar);
 bind!(bind_panel, AnnotationPanel);
 bind!(bind_size_input, crate::ScreenshotSizeInput);
 bind!(bind_long_control, crate::LongCaptureControl);
+bind!(bind_recording_preview, crate::RecordingPreview);
 bind!(bind_recording_control, crate::RecordingControl);
 bind!(bind_image_editor, crate::AnnotationCanvas);
 fn request(generation: u64, owner: Owner, text: slint::SharedString, anchor: [f32; 4]) {

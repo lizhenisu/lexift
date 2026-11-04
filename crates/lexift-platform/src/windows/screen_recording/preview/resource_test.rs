@@ -248,3 +248,267 @@ fn native_preview_failed_open_recovers() {
         eprintln!("decoder failure recovery round={round} passed");
     }
 }
+
+#[test]
+#[ignore = "explicit owned native trim playback interval"]
+fn native_trim_playback_gate() {
+    use super::super::FileArtifact;
+    use lexift_core::{
+        domain::{
+            geometry::Rect,
+            recording_preview::{Action, Command, Identity, Notice, Target},
+            recording_trim::Range,
+            screen_recording::Artifact,
+        },
+        ports::magnifier::WindowToken,
+    };
+    use std::sync::{Arc, mpsc};
+    use windows::{Win32::UI::WindowsAndMessaging::*, core::w};
+    let source = PathBuf::from(std::env::var_os("LEXIFT_TRIM_SOURCE").unwrap());
+    unsafe {
+        CoInitializeEx(None, COINIT_MULTITHREADED).ok().unwrap();
+    }
+    let parent = unsafe {
+        CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            w!("STATIC"),
+            w!("Owned trim interval probe"),
+            WS_POPUP,
+            40,
+            40,
+            640,
+            360,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+    };
+    let file = FileArtifact::new().unwrap();
+    std::fs::copy(source, &file.path).unwrap();
+    let path = file.path.clone();
+    let fps = std::env::var("LEXIFT_TRIM_PREVIEW_FPS")
+        .ok()
+        .map(|s| s.parse::<u32>().unwrap())
+        .unwrap_or(60);
+    let frames = std::env::var("LEXIFT_TRIM_PREVIEW_FRAMES")
+        .ok()
+        .map(|s| s.parse::<u64>().unwrap())
+        .unwrap_or(205);
+    let replay = std::env::var_os("LEXIFT_TRIM_PREVIEW_REPLAY").is_some();
+    let (mut id, range) = (
+        Identity {
+            session: 991,
+            operation: 1,
+            artifact: Artifact(1),
+            instance: 1,
+            request: 1,
+        },
+        if replay {
+            Range::full(frames)
+        } else {
+            Range {
+                start: 17,
+                end: 103,
+            }
+        },
+    );
+    let (tx, rx) = mpsc::channel();
+    let worker = super::Worker::open(
+        id,
+        Target {
+            window: WindowToken(parent.0 as isize),
+            bounds: Rect {
+                left: 0,
+                top: 0,
+                right: 640,
+                bottom: 360,
+            },
+        },
+        file,
+        Range::time(frames - 1, fps),
+        Some((range, fps)),
+        Arc::new(move |id, n| {
+            let _ = tx.send((id, n));
+        }),
+    )
+    .unwrap();
+    let audio_probe = std::env::var_os("LEXIFT_TRIM_AUDIO_PROBE")
+        .map(|_| super::audio_test::Probe::new().unwrap());
+    let transitions = std::cell::RefCell::new(Vec::<(usize, bool, f64)>::new());
+    let active = std::cell::Cell::new([false, false]);
+    let collect = || {
+        if let Some(probe) = &audio_probe {
+            while let Some(packet) = probe.read().unwrap() {
+                for (index, block) in packet.frames.chunks(48).enumerate() {
+                    let mut was = active.get();
+                    for ch in 0..2 {
+                        let rms = (block.iter().map(|s| s[ch] * s[ch]).sum::<f32>()
+                            / block.len() as f32)
+                            .sqrt();
+                        let on = rms > 0.015;
+                        if on != was[ch] {
+                            transitions.borrow_mut().push((
+                                ch,
+                                on,
+                                packet.qpc as f64 / 10_000_000. + index as f64 / 1000.,
+                            ));
+                            was[ch] = on;
+                        }
+                    }
+                    active.set(was);
+                }
+            }
+        }
+    };
+    let drain = || {
+        let end = Instant::now() + Duration::from_millis(300);
+        while Instant::now() < end {
+            collect();
+            unsafe {
+                let mut msg = MSG::default();
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    DispatchMessageW(&msg);
+                }
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    };
+    let wait = |request: u64, ended: bool| {
+        collect();
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            collect();
+            unsafe {
+                let mut message = windows::Win32::UI::WindowsAndMessaging::MSG::default();
+                while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                    DispatchMessageW(&message);
+                }
+            }
+            let (i, n) = match rx.recv_timeout(Duration::from_millis(5)) {
+                Ok(n) => n,
+                Err(mpsc::RecvTimeoutError::Timeout) if Instant::now() < deadline => continue,
+                Err(e) => panic!("request {request} timed out: {e}"),
+            };
+            if let Notice::Failed(e) = n {
+                panic!("{e}");
+            }
+            if i.request == request
+                && (ended && n == Notice::Ended || !ended && matches!(n, Notice::Frame { .. }))
+            {
+                return n;
+            }
+        }
+    };
+    wait(1, false);
+    id.request = 2;
+    worker
+        .control(Command {
+            identity: id,
+            action: Action::SetRange {
+                range,
+                fps,
+                version: 1,
+                position: Range::time(range.start, fps),
+            },
+        })
+        .unwrap();
+    let first = wait(2, false);
+    assert!(
+        matches!(first,Notice::Frame{position,..} if (position.as_secs_f64()-range.start as f64/fps as f64).abs()<0.5/fps as f64)
+    );
+    id.request = 3;
+    worker
+        .control(Command {
+            identity: id,
+            action: Action::Play,
+        })
+        .unwrap();
+    wait(3, true);
+    drain();
+    id.request = 4;
+    worker
+        .control(Command {
+            identity: id,
+            action: Action::Seek(Range::time(range.start, fps)),
+        })
+        .unwrap();
+    wait(4, false);
+    id.request = 5;
+    worker
+        .control(Command {
+            identity: id,
+            action: Action::Play,
+        })
+        .unwrap();
+    wait(5, true);
+    drain();
+    if replay {
+        for round in 0..20 {
+            id.request += 1;
+            worker
+                .control(Command {
+                    identity: id,
+                    action: Action::Seek(Duration::ZERO),
+                })
+                .unwrap();
+            wait(id.request, false);
+            id.request += 1;
+            worker
+                .control(Command {
+                    identity: id,
+                    action: Action::Play,
+                })
+                .unwrap();
+            wait(id.request, true);
+            eprintln!("FULL_REPLAY round={round} passed");
+        }
+    }
+    drop(audio_probe);
+    let retired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let done = retired.clone();
+    let retire = std::thread::spawn(move || {
+        drop(worker);
+        done.store(true, std::sync::atomic::Ordering::Release);
+    });
+    while !retired.load(std::sync::atomic::Ordering::Acquire) {
+        unsafe {
+            let mut msg = MSG::default();
+            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                DispatchMessageW(&msg);
+            }
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    retire.join().unwrap();
+    if let Some(path) = std::env::var_os("LEXIFT_TRIM_AUDIO_PROBE") {
+        let rows = transitions.borrow();
+        std::fs::write(path, serde_json::to_vec_pretty(&*rows).unwrap()).unwrap();
+        let on: Vec<_> = rows
+            .iter()
+            .filter(|x| x.0 == 0 && x.1)
+            .map(|x| x.2)
+            .collect();
+        let off: Vec<_> = rows
+            .iter()
+            .filter(|x| x.0 == 1 && !x.1)
+            .map(|x| x.2)
+            .collect();
+        assert_eq!((on.len(), off.len()), (2, 2), "{rows:?}");
+        for (a, b) in on.iter().zip(off) {
+            assert!(
+                ((b - a) - (103. / 60. - 0.5)).abs() < 0.05,
+                "audio cutoff delta {} expected {}",
+                b - a,
+                103. / 60. - 0.5
+            );
+        }
+    }
+    assert!(!path.exists());
+    super::super::super::recording_gate::resources::assert_retired();
+    unsafe {
+        DestroyWindow(parent).unwrap();
+        CoUninitialize();
+    }
+}

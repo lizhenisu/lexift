@@ -29,6 +29,10 @@ pub(super) struct Engine {
     #[cfg(test)]
     _lease: super::super::super::recording_gate::resources::Lease,
     pub media: IMFMediaEngine,
+    pub marker_reached: bool,
+    pub seeked: bool,
+    pub frame_step_done: bool,
+    reloading: bool,
     pub device: ID3D11Device,
     pub _context: ID3D11DeviceContext,
     pub texture: Option<ID3D11Texture2D>,
@@ -83,6 +87,10 @@ impl Engine {
                     &super::super::super::recording_gate::resources::PREVIEW_ENGINE,
                 ),
                 media,
+                marker_reached: false,
+                seeked: true,
+                frame_step_done: true,
+                reloading: false,
                 device,
                 _context: context,
                 texture: None,
@@ -103,6 +111,19 @@ impl Engine {
     }
     pub fn check_events(&mut self) -> Result<()> {
         while let Ok((event, _, code)) = self.events.try_recv() {
+            if self.reloading && event == MF_MEDIA_ENGINE_EVENT_LOADEDDATA.0 as u32 {
+                self.seeked = true;
+                self.reloading = false;
+            }
+            if event == MF_MEDIA_ENGINE_EVENT_FRAMESTEPCOMPLETED.0 as u32 {
+                self.frame_step_done = true;
+            }
+            if event == MF_MEDIA_ENGINE_EVENT_SEEKED.0 as u32 {
+                self.seeked = true;
+            }
+            if event == MF_MEDIA_ENGINE_EVENT_TIMELINE_MARKER.0 as u32 {
+                self.marker_reached = true;
+            }
             if event == MF_MEDIA_ENGINE_EVENT_ERROR.0 as u32 {
                 return Err(Error::from_hresult(if code == 0 {
                     E_FAIL
@@ -112,6 +133,25 @@ impl Engine {
             }
         }
         Ok(())
+    }
+    pub fn seek(&mut self, position: f64) -> Result<()> {
+        self.check_events()?;
+        self.seeked = false;
+        self.frame_step_done = true;
+        unsafe {
+            if position == 0. {
+                // MF can settle one frame past zero after EOF and cannot
+                // reliably step backward from there. Re-prime this same source
+                // and wait for loaded data, preserving the immutable artifact.
+                self.reloading = true;
+                self.media.Load()
+            } else {
+                self.reloading = false;
+                self.media
+                    .cast::<IMFMediaEngineEx>()?
+                    .SetCurrentTimeEx(position, MF_MEDIA_ENGINE_SEEK_MODE_NORMAL)
+            }
+        }
     }
     pub fn tick(&self) -> Result<Option<f64>> {
         unsafe {

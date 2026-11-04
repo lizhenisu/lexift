@@ -14,6 +14,9 @@ use crate::{AppCommand, Error, Result};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Session {
     pub preview: Option<preview::State>,
+    pub export_progress: Option<(u64, u64)>,
+    pub export_stage: Option<crate::ports::screen_recording::ExportStage>,
+    close_after_export: bool,
     pending_release: Option<lifecycle::Command>,
     pub lifecycle: lifecycle::State,
     pub request: ExportRequest,
@@ -28,6 +31,9 @@ impl Session {
     pub fn new(lifecycle: lifecycle::State, request: ExportRequest, monitor: Rect) -> Self {
         Self {
             preview: None,
+            export_progress: None,
+            export_stage: None,
+            close_after_export: false,
             pending_release: None,
             lifecycle,
             request,
@@ -41,6 +47,10 @@ impl Session {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    CancelExport {
+        identity: preview::Identity,
+        close: bool,
+    },
     PreviewRequested,
     PreviewInput {
         identity: preview::Identity,
@@ -85,6 +95,7 @@ pub enum Event {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    CancelExport(lifecycle::Identity),
     Preview(preview::Command),
     PrepareView {
         identity: lifecycle::Identity,
@@ -148,6 +159,17 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
         return vec![];
     };
     match &event {
+        Event::CancelExport { identity, close }
+            if recording.lifecycle.phase == lifecycle::Phase::Saving
+                && recording
+                    .preview
+                    .as_ref()
+                    .is_some_and(|p| p.identity == *identity) =>
+        {
+            recording.close_after_export |= *close;
+            return wrap(Command::CancelExport(recording.lifecycle.identity));
+        }
+
         Event::PreviewRequested if recording.lifecycle.phase == lifecycle::Phase::PendingSave => {
             if let Some(p) = recording.preview.as_mut() {
                 return p
@@ -156,7 +178,10 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
                     .unwrap_or_default();
             }
             if let Some(artifact) = recording.lifecycle.artifact {
-                let p = preview::State::new(recording.lifecycle.identity, artifact);
+                let mut p = preview::State::new(recording.lifecycle.identity, artifact);
+                if let Some(info) = &recording.artifact {
+                    p.configure(info.frames, info.video.frame_rate.get());
+                }
                 let command = p.command(preview::Action::PrepareView);
                 recording.preview = Some(p);
                 return wrap(Command::Preview(command));
@@ -216,8 +241,38 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
     let event = match event {
         Event::Native(notice) => {
             use crate::ports::screen_recording::Notice;
+            if let Notice::ExportProgress {
+                identity,
+                range_version,
+                stage,
+                completed,
+                total,
+            } = &notice
+            {
+                if recording.lifecycle.phase == lifecycle::Phase::Saving
+                    && recording.lifecycle.identity == *identity
+                    && recording
+                        .preview
+                        .as_ref()
+                        .is_some_and(|p| p.range_version == *range_version)
+                    && recording
+                        .export_stage
+                        .is_none_or(|current| current <= *stage)
+                    && *total > 0
+                    && *completed <= *total
+                    && recording
+                        .export_progress
+                        .is_none_or(|(done, _)| *completed >= done)
+                {
+                    recording.export_progress = Some((*completed, *total));
+                    recording.export_stage = Some(*stage);
+                }
+                return vec![];
+            }
+
             let identity = match &notice {
                 Notice::Progress(progress) => return reduce(s, Event::Progress(*progress)),
+                Notice::ExportProgress { .. } => unreachable!(),
                 Notice::Prepared(id)
                 | Notice::Started(id)
                 | Notice::Paused(id)
@@ -315,7 +370,7 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
                     identity: current,
                     error,
                 },
-                Notice::Progress(_) => unreachable!(),
+                Notice::Progress(_) | Notice::ExportProgress { .. } => unreachable!(),
             }
         }
         Event::Save(mut request)
@@ -339,6 +394,15 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
                 return vec![];
             };
             request.identity = command.identity;
+            request.range = recording
+                .preview
+                .as_ref()
+                .filter(|p| p.frames > 0)
+                .map(|p| p.range);
+            request.range_version = recording.preview.as_ref().map_or(0, |p| p.range_version);
+            recording.export_progress = None;
+            recording.export_stage = None;
+
             s.error = None;
             return wrap(Command::Save(request));
         }
@@ -359,7 +423,21 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
                     lifecycle::Event::SaveFailed
                 }
             };
-            Event::Input { identity, event }
+            recording.export_progress = None;
+            recording.export_stage = None;
+            let close = std::mem::take(&mut recording.close_after_export);
+            let mut commands = reduce(s, Event::Input { identity, event });
+            if close && let Some(p) = s.recording.as_ref().and_then(|r| r.preview.as_ref()) {
+                let id = p.identity;
+                commands.extend(reduce(
+                    s,
+                    Event::PreviewInput {
+                        identity: id,
+                        input: preview::Input::Close,
+                    },
+                ));
+            }
+            return commands;
         }
         event => event,
     };
@@ -756,6 +834,8 @@ mod tests {
             lifecycle::Event::Saved,
         ] {
             let request = SaveRequest {
+                range: None,
+                range_version: 0,
                 identity: id(&s),
                 artifact: lifecycle::Artifact(9),
                 owner: None,

@@ -248,6 +248,10 @@ fn recording_preview_renders_all_languages_themes_sizes_and_dpis() {
     w.set_time_label("00:12 / 10:00".into());
     w.set_metadata("1920 × 1080 px · 60fps".into());
     w.set_progress(420.);
+    w.set_frames(36000.);
+    w.set_start_frame(170.);
+    w.set_end_frame(31000.);
+    w.set_range_label("00:02.833–08:36.666 (08:33.833)".into());
     for language in lexift_core::domain::ui_language::UiLanguage::ALL {
         crate::i18n::select(language);
         for dark in [false, true] {

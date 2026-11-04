@@ -1,4 +1,5 @@
 //! Playback belongs to a sealed recording, with its own command generation.
+use super::recording_trim::Range;
 use super::{
     geometry::Rect,
     screen_recording::{Artifact, Identity as RecordingIdentity},
@@ -40,6 +41,9 @@ pub enum Input {
     Target(Target),
     PlayPause,
     BeginSeek,
+    BeginTrim,
+    SetRange { range: Range, end_handle: bool },
+    ResetRange,
     CancelSeek,
     Seek(Duration),
     Mute,
@@ -65,10 +69,21 @@ pub enum Notice {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     PrepareView,
-    Open(Target),
+    Open {
+        target: Target,
+        range: Range,
+        fps: u32,
+        version: u64,
+    },
     Play,
     Pause,
     Seek(Duration),
+    SetRange {
+        range: Range,
+        fps: u32,
+        version: u64,
+        position: Duration,
+    },
     Mute(bool),
     Close,
     Handoff,
@@ -87,6 +102,10 @@ pub struct Command {
 pub struct State {
     pub identity: Identity,
     pub phase: Phase,
+    pub range: Range,
+    pub frames: u64,
+    pub fps: u32,
+    pub range_version: u64,
     pub position: Duration,
     pub duration: Duration,
     pub has_audio: bool,
@@ -110,6 +129,10 @@ impl State {
                 request: 0,
             },
             phase: Phase::Preparing,
+            range: Range::full(0),
+            frames: 0,
+            fps: 30,
+            range_version: 0,
             position: Duration::ZERO,
             duration: Duration::ZERO,
             has_audio: false,
@@ -121,6 +144,19 @@ impl State {
             seek_pending: false,
             intent: None,
             cleanup_failed: false,
+        }
+    }
+    pub fn configure(&mut self, frames: u64, fps: u32) {
+        self.frames = frames;
+        self.fps = fps;
+        self.range = Range::full(frames);
+        self.duration = Range::time(frames, fps);
+    }
+    fn range_time(&self, time: Duration) -> Duration {
+        if self.frames == 0 {
+            time.min(self.duration.saturating_sub(Duration::from_nanos(1)))
+        } else {
+            self.range.clamp_time(time, self.fps)
         }
     }
     pub fn command(&self, action: Action) -> Command {
@@ -146,9 +182,12 @@ impl State {
             return None;
         }
         match input {
-            Input::Target(target) if self.phase == Phase::Preparing => {
-                self.next(Action::Open(target))
-            }
+            Input::Target(target) if self.phase == Phase::Preparing => self.next(Action::Open {
+                target,
+                range: self.range,
+                fps: self.fps,
+                version: self.range_version,
+            }),
             Input::PlayPause
                 if self.intent.is_none() && matches!(self.phase, Phase::Paused | Phase::Ended) =>
             {
@@ -156,7 +195,7 @@ impl State {
                     self.resume = true;
                     self.seek_pending = true;
                     self.phase = Phase::Seeking;
-                    self.next(Action::Seek(Duration::ZERO))
+                    self.next(Action::Seek(self.range_time(Duration::ZERO)))
                 } else {
                     self.phase = Phase::Playing;
                     self.next(Action::Play)
@@ -165,6 +204,55 @@ impl State {
             Input::PlayPause if self.phase == Phase::Playing => {
                 self.phase = Phase::Paused;
                 self.next(Action::Pause)
+            }
+            Input::BeginTrim
+                if self.visible
+                    && matches!(
+                        self.phase,
+                        Phase::Paused | Phase::Playing | Phase::Seeking | Phase::Ended
+                    ) =>
+            {
+                self.resume = false;
+                self.seek_pending = false;
+                self.phase = Phase::Seeking;
+                Some(self.command(Action::Pause))
+            }
+            Input::ResetRange | Input::SetRange { .. }
+                if self.visible
+                    && self.frames > 0
+                    && matches!(
+                        self.phase,
+                        Phase::Paused | Phase::Playing | Phase::Seeking | Phase::Ended
+                    ) =>
+            {
+                let (range, end_handle) = match input {
+                    Input::SetRange { range, end_handle } => (range, end_handle),
+                    _ => (Range::full(self.frames), false),
+                };
+                if !range.valid(self.frames) {
+                    return None;
+                }
+                if self.range != range {
+                    self.range_version += 1;
+                    self.range = range;
+                }
+                self.resume = false;
+                self.seek_pending = true;
+                self.phase = Phase::Seeking;
+                let position = Range::time(
+                    if end_handle {
+                        range.end - 1
+                    } else {
+                        range.start
+                    },
+                    self.fps,
+                );
+                self.next(Action::SetRange {
+                    range,
+                    fps: self.fps,
+                    version: self.range_version,
+                    position,
+                })
             }
             Input::BeginSeek
                 if self.intent.is_none()
@@ -185,9 +273,7 @@ impl State {
             }
             Input::Seek(position) if self.phase == Phase::Seeking && self.intent.is_none() => {
                 self.seek_pending = true;
-                self.next(Action::Seek(
-                    position.min(self.duration.saturating_sub(Duration::from_nanos(1))),
-                ))
+                self.next(Action::Seek(self.range_time(position)))
             }
             Input::CancelSeek if self.phase == Phase::Seeking => {
                 self.resume = false;
@@ -280,12 +366,22 @@ impl State {
                 duration,
                 has_audio,
             } if !matches!(self.phase, Phase::Retiring | Phase::Closed | Phase::Failed) => {
-                self.duration = duration;
+                if self.frames > 0
+                    && (position
+                        < Range::time(self.range.start, self.fps)
+                            .saturating_sub(Duration::from_nanos(100))
+                        || position >= Range::time(self.range.end, self.fps))
+                {
+                    return None;
+                }
+                if self.frames == 0 {
+                    self.duration = duration;
+                }
                 self.has_audio = has_audio;
                 if self.phase == Phase::Seeking && !self.seek_pending {
                     return None;
                 }
-                self.position = position.min(duration);
+                self.position = self.range_time(position);
                 if self.phase == Phase::Preparing {
                     self.phase = Phase::Paused;
                     self.presented = true;
@@ -311,9 +407,13 @@ impl State {
                     Action::ConfirmDiscard
                 })
             }),
-            Notice::Ended if self.phase == Phase::Playing => {
+            Notice::Ended if matches!(self.phase, Phase::Playing | Phase::Paused) => {
                 self.phase = Phase::Ended;
-                self.position = self.duration;
+                self.position = if self.frames == 0 {
+                    self.duration
+                } else {
+                    Range::time(self.range.end - 1, self.fps)
+                };
                 None
             }
             Notice::Failed(error) if self.phase != Phase::Retiring => {
@@ -364,6 +464,180 @@ mod tests {
             },
             Artifact(4),
         )
+    }
+    #[test]
+    fn trimming_uses_exclusive_frame_bounds_and_rejects_old_results() {
+        let mut s = state();
+        s.configure(600, 60);
+        s.notice(s.identity, frame());
+        s.notice(s.identity, Notice::Visible);
+        let old = s.identity;
+        let range = Range {
+            start: 17,
+            end: 103,
+        };
+        let command = s
+            .input(
+                old,
+                Input::SetRange {
+                    range,
+                    end_handle: true,
+                },
+            )
+            .unwrap();
+        assert!(
+            matches!(command.action,Action::SetRange{position,..} if position==Range::time(102,60))
+        );
+        assert_eq!(s.range_version, 1);
+        assert!(s.notice(old, frame()).is_none());
+        s.notice(
+            s.identity,
+            Notice::Frame {
+                position: Range::time(102, 60),
+                duration: Duration::from_secs(11),
+                has_audio: true,
+            },
+        );
+        assert_eq!(s.duration, Duration::from_secs(10));
+        assert_eq!(s.phase, Phase::Paused);
+        let version = s.range_version;
+        s.input(s.identity, Input::BeginTrim);
+        s.input(s.identity, Input::CancelSeek);
+        assert_eq!(s.range, range);
+        assert_eq!(s.range_version, version);
+        assert!(
+            s.input(
+                s.identity,
+                Input::SetRange {
+                    range: Range {
+                        start: 103,
+                        end: 103
+                    },
+                    end_handle: false
+                }
+            )
+            .is_none()
+        );
+        s.input(s.identity, Input::ResetRange);
+        assert_eq!(s.range, Range::full(600));
+        assert_eq!(s.range_version, version + 1);
+    }
+    #[test]
+    fn selected_playback_restarts_from_range_start_and_save_keeps_range() {
+        let mut s = state();
+        s.configure(300, 30);
+        s.notice(s.identity, frame());
+        s.notice(s.identity, Notice::Visible);
+        let range = Range { start: 23, end: 24 };
+        s.input(
+            s.identity,
+            Input::SetRange {
+                range,
+                end_handle: false,
+            },
+        );
+        s.notice(
+            s.identity,
+            Notice::Frame {
+                position: Range::time(23, 30),
+                duration: Duration::from_secs(10),
+                has_audio: true,
+            },
+        );
+        s.input(s.identity, Input::PlayPause);
+        s.notice(s.identity, Notice::Ended);
+        assert_eq!(
+            s.input(s.identity, Input::PlayPause).unwrap().action,
+            Action::Seek(Range::time(23, 30))
+        );
+        s.notice(
+            s.identity,
+            Notice::Frame {
+                position: Range::time(23, 30),
+                duration: Duration::from_secs(10),
+                has_audio: true,
+            },
+        );
+        s.input(s.identity, Input::Save);
+        s.save_finished();
+        assert_eq!(s.range, range);
+    }
+    #[test]
+    fn retry_restores_selected_range_before_the_new_window_handoff() {
+        let mut s = state();
+        s.configure(300, 60);
+        s.notice(s.identity, frame());
+        s.notice(s.identity, Notice::Visible);
+        let range = Range {
+            start: 17,
+            end: 103,
+        };
+        s.input(
+            s.identity,
+            Input::SetRange {
+                range,
+                end_handle: false,
+            },
+        );
+        s.notice(s.identity, Notice::Failed("failed".into()));
+        s.input(s.identity, Input::Retry);
+        let target = Target {
+            window: WindowToken(3),
+            bounds: Rect {
+                left: 0,
+                top: 0,
+                right: 640,
+                bottom: 360,
+            },
+        };
+        assert!(
+            matches!(s.input(s.identity,Input::Target(target)).unwrap().action,Action::Open{range:r,..} if r==range)
+        );
+        assert!(s.notice(s.identity, frame()).is_none());
+        assert!(!s.presented);
+        assert_eq!(
+            s.notice(
+                s.identity,
+                Notice::Frame {
+                    position: Range::time(17, 60),
+                    duration: Duration::from_secs(5),
+                    has_audio: true
+                }
+            )
+            .unwrap()
+            .action,
+            Action::Handoff
+        );
+    }
+    #[test]
+    fn press_and_commit_in_one_turn_keep_the_input_generation_valid() {
+        let mut s = state();
+        s.configure(300, 60);
+        s.notice(s.identity, frame());
+        s.notice(s.identity, Notice::Visible);
+        let id = s.identity;
+        assert_eq!(s.input(id, Input::BeginTrim).unwrap().identity, id);
+        assert!(
+            s.input(
+                id,
+                Input::SetRange {
+                    range: Range {
+                        start: 17,
+                        end: 103
+                    },
+                    end_handle: false
+                }
+            )
+            .is_some()
+        );
+        assert_eq!(
+            s.range,
+            Range {
+                start: 17,
+                end: 103
+            }
+        );
+        assert!(s.identity.request > id.request);
     }
     #[test]
     fn closing_during_preparation_resumes_the_owned_handoff_when_cancelled() {

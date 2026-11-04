@@ -174,3 +174,5 @@
 
 - [大图编辑性能与资源管理](features/large-image-performance.md)
 - [大图编辑性能验证](releases/large-image-performance.md)
+
+- [录屏首尾裁剪验证](releases/recording-trim.md)

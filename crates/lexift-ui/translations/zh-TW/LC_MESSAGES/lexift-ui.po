@@ -2273,3 +2273,21 @@ msgstr "捨棄"
 
 msgid "Playback position"
 msgstr "播放進度"
+
+msgid "Trim start"
+msgstr "裁剪起點"
+
+msgid "Trim end"
+msgstr "裁剪終點"
+
+msgid "Restore full range"
+msgstr "恢復完整範圍"
+
+msgid "Exporting video"
+msgstr "正在匯出影片"
+
+msgid "Finalizing video"
+msgstr "正在封裝影片"
+
+msgid "Saving video"
+msgstr "正在儲存影片"

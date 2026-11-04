@@ -72,6 +72,23 @@ fn failed(c: &Arc<AppController>, identity: Identity, error: Error) {
     emit(c, Event::Failed { identity, error });
 }
 pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, command: Command) {
+    if let Command::CancelExport(identity) = &command {
+        let valid = c
+            .state
+            .lock()
+            .unwrap()
+            .screenshot
+            .recording
+            .as_ref()
+            .is_some_and(|s| s.lifecycle.identity == *identity);
+        if valid {
+            let cancel = r.recording.lock().unwrap().save.clone();
+            if let Some(cancel) = cancel {
+                cancel.store(true, Ordering::Release);
+            }
+        }
+        return;
+    }
     if let Command::Preview(command) = command {
         use lexift_core::domain::recording_preview::Action as A;
         let current = c
@@ -116,7 +133,7 @@ pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, comman
         return;
     }
     let identity = match &command {
-        Command::Preview(_) => unreachable!(),
+        Command::Preview(_) | Command::CancelExport(_) => unreachable!(),
         Command::PrepareView { identity, .. } => *identity,
         Command::PrepareBackend(request) => request.identity,
         Command::Execute(command) => command.identity,
@@ -150,7 +167,7 @@ pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, comman
         task.abort();
     }
     match command {
-        Command::Preview(_) => unreachable!(),
+        Command::Preview(_) | Command::CancelExport(_) => unreachable!(),
         Command::PrepareView { .. } => c.ui.screen_recording(command),
         Command::PrepareBackend(request) => {
             let port = {
@@ -329,5 +346,166 @@ pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, comman
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod trim_tests {
+    use lexift_core::{
+        AppCommand, AppEvent, AppState,
+        domain::{
+            annotation::Session as Document,
+            annotation_export::{ExportRequest, ExportSnapshot},
+            geometry::Rect,
+            recording_preview as p,
+            recording_trim::Range,
+            screen_recording as life,
+            screenshot::{
+                ScreenshotCommand, ScreenshotEvent, ScreenshotPhase,
+                recording::{Command, Event, Session},
+            },
+        },
+        ports::screen_recording::{ArtifactInfo, Notice, SaveRequest},
+    };
+    use std::{sync::Arc, time::Duration};
+    #[test]
+    fn export_freezes_range_rejects_old_progress_and_closes_only_after_cancel_completion() {
+        let mut app = AppState::default();
+        let bounds = Rect {
+            left: -1920,
+            top: 0,
+            right: 0,
+            bottom: 1080,
+        };
+        let mut lifecycle = life::State::new(7, 1, bounds, bounds).unwrap();
+        lifecycle.phase = life::Phase::PendingSave;
+        lifecycle.artifact = Some(life::Artifact(1));
+        let id = lifecycle.identity;
+        let request = ExportRequest {
+            session: 7,
+            request: 1,
+            snapshot: Arc::new(ExportSnapshot {
+                session: Arc::new(Document::new()),
+                monitor: bounds,
+                monitors: vec![(bounds, 1.)],
+                scale: 1.,
+                excluded: vec![],
+                owner: None,
+                name: String::new(),
+                title: String::new(),
+            }),
+        };
+        let mut session = Session::new(lifecycle, request, bounds);
+        let mut preview = p::State::new(id, life::Artifact(1));
+        preview.configure(300, 60);
+        preview.phase = p::Phase::Paused;
+        preview.presented = true;
+        preview.visible = true;
+        preview.range = Range {
+            start: 17,
+            end: 103,
+        };
+        preview.range_version = 1;
+        let view_id = preview.identity;
+        session.preview = Some(preview);
+        session.artifact = Some(ArtifactInfo {
+            artifact: life::Artifact(1),
+            video: Default::default(),
+            width: 1920,
+            height: 1080,
+            frames: 300,
+            duration: Duration::from_secs(5),
+            interrupted: None,
+        });
+        app.screenshot.session = 7;
+        app.screenshot.operation = 1;
+        app.screenshot.phase = ScreenshotPhase::Recording;
+        app.screenshot.recording = Some(session);
+        let send =
+            |app: &mut AppState, e| app.reduce(AppEvent::Screenshot(ScreenshotEvent::Recording(e)));
+        let save = SaveRequest {
+            identity: id,
+            artifact: life::Artifact(1),
+            range: None,
+            range_version: 0,
+            owner: None,
+            default_name: "owned".into(),
+            title: "Save".into(),
+            extension_mismatch_message: "MP4".into(),
+        };
+        let commands = send(&mut app, Event::Save(save));
+        let request = match &commands[0] {
+            AppCommand::Screenshot(ScreenshotCommand::Recording(Command::Save(r))) => r.clone(),
+            _ => panic!("save not dispatched"),
+        };
+        assert_eq!(
+            request.range,
+            Some(Range {
+                start: 17,
+                end: 103
+            })
+        );
+        assert_eq!(request.range_version, 1);
+        send(
+            &mut app,
+            Event::Native(Notice::ExportProgress {
+                identity: request.identity,
+                range_version: 0,
+                stage: lexift_core::ports::screen_recording::ExportStage::Transcoding,
+                completed: 9,
+                total: 86,
+            }),
+        );
+        assert!(
+            app.screenshot
+                .recording
+                .as_ref()
+                .unwrap()
+                .export_progress
+                .is_none()
+        );
+        send(
+            &mut app,
+            Event::Native(Notice::ExportProgress {
+                identity: request.identity,
+                range_version: 1,
+                stage: lexift_core::ports::screen_recording::ExportStage::Transcoding,
+                completed: 9,
+                total: 86,
+            }),
+        );
+        assert_eq!(
+            app.screenshot.recording.as_ref().unwrap().export_progress,
+            Some((9, 86))
+        );
+        assert!(matches!(
+            &send(
+                &mut app,
+                Event::CancelExport {
+                    identity: view_id,
+                    close: true
+                }
+            )[0],
+            AppCommand::Screenshot(ScreenshotCommand::Recording(Command::CancelExport(_)))
+        ));
+        let commands = send(
+            &mut app,
+            Event::Saved {
+                identity: request.identity,
+                result: Ok(lexift_core::ports::annotation_save::SaveOutcome::Cancelled),
+            },
+        );
+        assert!(
+            matches!(&commands[0],AppCommand::Screenshot(ScreenshotCommand::Recording(Command::Preview(c))) if c.action==p::Action::Pause)
+        );
+        let session = app.screenshot.recording.as_ref().unwrap();
+        assert_eq!(
+            session.preview.as_ref().unwrap().range,
+            Range {
+                start: 17,
+                end: 103
+            }
+        );
+        assert_eq!(session.lifecycle.phase, life::Phase::PendingSave);
     }
 }

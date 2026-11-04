@@ -2273,3 +2273,21 @@ msgstr "Verwerfen"
 
 msgid "Playback position"
 msgstr "Wiedergabeposition"
+
+msgid "Trim start"
+msgstr "Schnittanfang"
+
+msgid "Trim end"
+msgstr "Schnittende"
+
+msgid "Restore full range"
+msgstr "Gesamten Bereich wiederherstellen"
+
+msgid "Exporting video"
+msgstr "Video wird exportiert"
+
+msgid "Finalizing video"
+msgstr "Video wird fertiggestellt"
+
+msgid "Saving video"
+msgstr "Video wird gespeichert"

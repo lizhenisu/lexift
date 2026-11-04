@@ -57,8 +57,21 @@ pub struct ArtifactInfo {
     pub duration: Duration,
     pub interrupted: Option<Interruption>,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ExportStage {
+    Transcoding,
+    Finalizing,
+    Publishing,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Notice {
+    ExportProgress {
+        identity: Identity,
+        range_version: u64,
+        stage: ExportStage,
+        completed: u64,
+        total: u64,
+    },
     StartRejected {
         identity: Identity,
         error: crate::Error,
@@ -105,6 +118,8 @@ pub enum Control {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SaveRequest {
+    pub range: Option<crate::domain::recording_trim::Range>,
+    pub range_version: u64,
     pub identity: Identity,
     pub artifact: Artifact,
     pub owner: Option<WindowToken>,

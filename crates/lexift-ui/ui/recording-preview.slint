@@ -6,15 +6,17 @@ import { SettingsFocusScope, SettingsInteraction } from "settings-interaction.sl
 import { CaptureButton } from "long-capture.slint";
 import { Slider } from "annotation-fields.slint";
 
+import { RecordingTrim } from "recording-trim.slint";
 export component RecordingPreview inherits Window {
  title:@tr("Recording preview");no-frame:true;background:Colors.surface;
  preferred-width:960px;preferred-height:760px;min-width:640px;min-height:360px;
  in property <bool> ready;in property <bool> playing;in property <bool> has-audio;in property <bool> muted;in property <bool> busy;
  in property <string> error;in property <string> metadata;in property <string> time-label;
  private property <bool> compact-controls:root.width < 800px;
+ in property <float> start-frame;in property <float> end-frame;in property <float> frames;in property <string> range-label;in property <string> export-label;in property <bool> exporting;
  in property <float> progress;in property <float> duration-seconds;
  out property <float> video-x:12;out property <float> video-y:44;
- out property <float> video-width:(root.width - 24px)/1px;out property <float> video-height:max(1,(root.height - (root.compact-controls ? 204px : 156px))/1px);
+ out property <float> video-width:(root.width - 24px)/1px;out property <float> video-height:max(1,(root.height - (root.compact-controls ? 240px : 192px))/1px);
  callback action(int,float);callback move-requested();callback resize-requested(int);callback surface-changed();
  changed width=>{root.surface-changed();}changed height=>{root.surface-changed();}
  forward-focus:keys;
@@ -28,10 +30,13 @@ export component RecordingPreview inherits Window {
   if !root.ready: Text {text:root.error!="" ? root.error : @tr("Preparing preview");x:24px;width:parent.width - 48px;height:parent.height - 64px;vertical-alignment:center;horizontal-alignment:center;wrap:word-wrap;color:#eee;}
   if root.error!="": SettingsButton {x:(parent.width - self.width)/2;y:parent.height/2 + 20px;compact:true;label:@tr("Retry");clicked=>{root.action(6,0);}}
  }
- timeline := Rectangle {x:16px;y:root.height - (root.compact-controls ? 152px : 104px);width:root.width - 32px;height:root.compact-controls ? 144px : 96px;
+ timeline := Rectangle {x:16px;y:root.height - (root.compact-controls ? 188px : 140px);width:root.width - 32px;height:root.compact-controls ? 180px : 132px;
   private property <bool> scrubbing;
   private property <float> draft;
-  seek-keys := SettingsFocusScope {x:0px;y:0px;width:parent.width;height:28px;enabled:root.ready && !root.busy;accessible-role:slider;accessible-label:@tr("Playback position");
+  RecordingTrim {x:0px;y:0px;width:parent.width - 40px;start-frame:root.start-frame;end-frame:root.end-frame;frames:root.frames;enabled:root.ready && !root.busy;
+   begin=>{root.action(8,0);}commit(end,value)=>{root.action(end ? 10 : 9,value);}cancel=>{root.action(7,0);}}
+  CaptureButton {x:parent.width - 32px;y:0px;icon:@image-url("assets/icons/restore-range.svg");label:@tr("Restore full range");enabled:root.ready && !root.busy;clicked=>{root.action(11,0);}}
+  seek-keys := SettingsFocusScope {x:0px;y:32px;width:parent.width - 40px;height:28px;enabled:root.ready && !root.busy;accessible-role:slider;accessible-label:@tr("Playback position");
    key-pressed(event)=>{if event.text==Key.LeftArrow || event.text==Key.RightArrow{root.action(2,0);root.action(3,clamp(root.progress + (event.text==Key.LeftArrow ? -1 : 1)*1000/max(1,root.duration-seconds),0,1000));return accept;}return reject;}
   Slider {x:0px;y:0px;width:parent.width;height:28px;maximum:1000;enabled:root.ready && !root.busy;
    value:timeline.scrubbing ? timeline.draft : root.progress;
@@ -40,16 +45,16 @@ export component RecordingPreview inherits Window {
    dragging(active)=>{if active{SettingsInteraction.pointer-input();seek-keys.focus-target();timeline.draft=root.progress;timeline.scrubbing=true;root.action(2,0);}else if timeline.scrubbing{root.action(3,timeline.draft);timeline.scrubbing=false;}}
   }
   }
-  HorizontalLayout {y:36px;height:40px;spacing:8px;
+  HorizontalLayout {y:72px;height:40px;spacing:8px;
    SettingsButton {compact:true;icon:root.playing ? @image-url("assets/icons/capture-pause.svg") : @image-url("assets/icons/capture-play.svg");label:root.playing ? @tr("Pause") : @tr("Play");enabled:root.ready && !root.busy;clicked=>{root.action(0,0);}}
    SettingsButton {compact:true;icon:@image-url("assets/icons/recording-audio.svg");label:root.muted ? @tr("Unmute") : @tr("Mute");enabled:root.has-audio && root.ready && !root.busy;clicked=>{root.action(1,0);}}
-   VerticalLayout {horizontal-stretch:1;spacing:1px;Text {text:root.time-label;color:Colors.foreground;font-size:13px;}Text {text:root.metadata;color:Colors.secondary-foreground;font-size:11px;}}
-   if !root.compact-controls: SettingsButton {compact:true;label:@tr("Save video");enabled:!root.busy;primary:true;clicked=>{root.action(4,0);}}
-   if !root.compact-controls: SettingsButton {compact:true;label:@tr("Close");enabled:!root.busy;clicked=>{root.action(5,0);}}
+   VerticalLayout {horizontal-stretch:1;spacing:1px;Text {text:root.time-label;color:Colors.foreground;font-size:13px;}Text {text:root.exporting ? root.export-label : root.range-label + " · " + root.metadata;color:Colors.secondary-foreground;font-size:11px;overflow:elide;min-width:0px;}}
+   if !root.compact-controls: SettingsButton {compact:true;label:root.exporting ? @tr("Cancel") : @tr("Save video");enabled:root.exporting || !root.busy;primary:true;clicked=>{root.action(root.exporting ? 12 : 4,0);}}
+   if !root.compact-controls: SettingsButton {compact:true;label:@tr("Close");enabled:root.exporting || !root.busy;clicked=>{root.action(5,0);}}
   }
-  if root.compact-controls: HorizontalLayout {y:84px;height:40px;spacing:8px;Rectangle {horizontal-stretch:1;}
-   SettingsButton {compact:true;label:@tr("Save video");enabled:!root.busy;primary:true;clicked=>{root.action(4,0);}}
-   SettingsButton {compact:true;label:@tr("Close");enabled:!root.busy;clicked=>{root.action(5,0);}}
+  if root.compact-controls: HorizontalLayout {y:120px;height:40px;spacing:8px;Rectangle {horizontal-stretch:1;}
+   SettingsButton {compact:true;label:root.exporting ? @tr("Cancel") : @tr("Save video");enabled:root.exporting || !root.busy;primary:true;clicked=>{root.action(root.exporting ? 12 : 4,0);}}
+   SettingsButton {compact:true;label:@tr("Close");enabled:root.exporting || !root.busy;clicked=>{root.action(5,0);}}
   }
  }
  ResizeEdges {resize-requested(edge)=>{root.resize-requested(edge);}}

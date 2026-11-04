@@ -1121,19 +1121,21 @@ fn show_feedback(state: &ScreenshotState) {
     let context = REGISTRY.with(|s| {
         let s = s.borrow();
         let r = s.as_ref()?;
-        let window = r.toolbar_state.main.get()?;
-        let p = window.window().position();
-        let size = window.window().size();
-        Some((
-            r.prepare,
-            r.lifecycle.clone(),
+        let bounds = if let Some(window) = r.toolbar_state.main.get() {
+            let p = window.window().position();
+            let size = window.window().size();
             Rect {
                 left: p.x,
                 top: p.y,
                 right: p.x + size.width as i32,
                 bottom: p.y + size.height as i32,
-            },
-        ))
+            }
+        } else if state.phase == ScreenshotPhase::Recording {
+            recording::preview::feedback_bounds()?
+        } else {
+            return None;
+        };
+        Some((r.prepare, r.lifecycle.clone(), bounds))
     });
     let Some((prepare, lifecycle, bounds)) = context else {
         return;

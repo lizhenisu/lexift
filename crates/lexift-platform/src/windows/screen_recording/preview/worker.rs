@@ -1,6 +1,7 @@
 use super::{engine::Engine, surface::Surface};
 use lexift_core::{
     Error, Result,
+    domain::recording_trim::Range,
     domain::{
         geometry::Rect,
         recording_preview::{Action, Command, Identity, Notice, Target},
@@ -13,7 +14,10 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use windows::Win32::{System::Com::*, UI::WindowsAndMessaging::*};
+use windows::{
+    Win32::{Media::MediaFoundation::IMFMediaEngineEx, System::Com::*, UI::WindowsAndMessaging::*},
+    core::Interface,
+};
 #[derive(Default)]
 struct Pending {
     commands: VecDeque<Command>,
@@ -65,6 +69,7 @@ impl Worker {
         target: Target,
         file: Arc<super::super::FileArtifact>,
         last_frame: Duration,
+        initial_range: Option<(Range, u32)>,
         listener: PreviewListener,
     ) -> Result<Self> {
         let shared = Arc::new(Shared {
@@ -78,7 +83,7 @@ impl Worker {
             .insert(target.window, Arc::downgrade(&shared));
         let thread = thread::Builder::new()
             .name("lexift-recording-preview".into())
-            .spawn(move || run(id, target, file, last_frame, listener, s))
+            .spawn(move || run(id, target, file, last_frame, initial_range, listener, s))
             .map_err(|_| {
                 unregister(target.window, &shared);
                 Error::new("Recording preview unavailable")
@@ -132,6 +137,7 @@ fn run(
     target: Target,
     file: Arc<super::super::FileArtifact>,
     last_frame: Duration,
+    initial_range: Option<(Range, u32)>,
     listener: PreviewListener,
     shared: Arc<Shared>,
 ) {
@@ -160,12 +166,21 @@ fn run(
         });
         let mut surface = Surface::new(target)?;
         let mut engine = Engine::open(&file.path)?;
+        #[cfg(test)]
+        if std::env::var_os("LEXIFT_TRIM_PREVIEW_PROBE").is_some() {
+            surface.test_probe = Some((500, 66));
+        }
+        let mut range = initial_range;
+        let mut initial_seek = range.is_some_and(|(r, _)| r.start > 0);
+        let mut ending = false;
+        let mut presented_pts: Option<f64> = None;
         let mut dirty = false;
         let mut first = true;
         let mut visible = false;
         let mut ended_notified = false;
         let mut waiting = true;
         let mut seek_target: Option<f64> = None;
+        let mut seek_steps = 0;
         let mut deadline = Instant::now() + Duration::from_secs(10);
         let mut notify = Instant::now();
         let mut response = Some(Instant::now());
@@ -191,20 +206,64 @@ fn run(
                         Action::Play => {
                             response = Some(Instant::now());
                             ended_notified = false;
+                            if let Some((r, fps)) = range {
+                                engine.marker_reached = false;
+                                engine
+                                    .media
+                                    .cast::<IMFMediaEngineEx>()?
+                                    .SetTimelineMarkerTimer(
+                                        Range::time(r.end, fps).as_secs_f64(),
+                                    )?;
+                            }
                             engine.media.Play()?;
                         }
                         Action::Pause => {
                             engine.media.Pause()?;
                             listener(id, Notice::Paused);
                         }
+                        Action::SetRange {
+                            range: r,
+                            fps,
+                            version: _,
+                            position,
+                        } => {
+                            engine.media.Pause()?;
+                            engine
+                                .media
+                                .cast::<IMFMediaEngineEx>()?
+                                .CancelTimelineMarkerTimer()?;
+                            range = Some((r, fps));
+                            response = Some(Instant::now());
+                            ended_notified = false;
+                            engine.marker_reached = false;
+                            ending = false;
+                            engine
+                                .media
+                                .cast::<IMFMediaEngineEx>()?
+                                .CancelTimelineMarkerTimer()?;
+                            engine.seek(position.as_secs_f64())?;
+                            seek_target = Some(position.as_secs_f64());
+                            seek_steps = 0;
+                            waiting = true;
+                            deadline = Instant::now() + Duration::from_secs(5);
+                        }
                         Action::Seek(position) => {
                             // AAC padding can extend container duration beyond
                             // the last video frame. Never seek into that tail.
-                            let position = position.min(last_frame);
+                            let position = range.map_or(position.min(last_frame), |(r, fps)| {
+                                r.clamp_time(position, fps)
+                            });
+                            engine.marker_reached = false;
+                            ending = false;
+                            engine
+                                .media
+                                .cast::<IMFMediaEngineEx>()?
+                                .CancelTimelineMarkerTimer()?;
                             response = Some(Instant::now());
                             ended_notified = false;
-                            engine.media.SetCurrentTime(position.as_secs_f64())?;
+                            engine.seek(position.as_secs_f64())?;
                             seek_target = Some(position.as_secs_f64());
+                            seek_steps = 0;
                             waiting = true;
                             deadline = Instant::now() + Duration::from_secs(5);
                         }
@@ -224,14 +283,140 @@ fn run(
                 }
             }
             engine.check_events()?;
-            let frame = engine
-                .tick()?
-                .filter(|p| seek_target.is_none_or(|t| (t - *p).abs() < 0.1));
+            unsafe {
+                if waiting
+                    && engine.seeked
+                    && engine.frame_step_done
+                    && seek_target
+                        .zip(presented_pts)
+                        .is_some_and(|(target, shown)| {
+                            (target - shown).abs()
+                                < range.map_or(0.000_001, |(_, fps)| 0.5 / f64::from(fps))
+                        })
+                {
+                    // A retained complete frame is also a valid result of a
+                    // seek to that same frame; MF need not emit a new tick.
+                    surface.present(&engine)?;
+                    waiting = false;
+                    seek_target = None;
+                    listener(
+                        id,
+                        Notice::Frame {
+                            position: Duration::from_secs_f64(presented_pts.unwrap().max(0.)),
+                            duration: Duration::from_secs_f64(engine.media.GetDuration().max(0.)),
+                            has_audio: engine.media.HasAudio().as_bool(),
+                        },
+                    );
+                }
+            }
+            let decoded_frame = engine.tick()?;
+            #[cfg(test)]
+            if std::env::var_os("LEXIFT_TRIM_PREVIEW_TRACE").is_some()
+                && (decoded_frame.is_some() || engine.marker_reached)
+            {
+                eprintln!(
+                    "TRIM_TICK request={} pts={decoded_frame:?} target={seek_target:?} waiting={waiting} marker={} current={} ended={}",
+                    id.request,
+                    engine.marker_reached,
+                    unsafe { engine.media.GetCurrentTime() },
+                    unsafe { engine.media.IsEnded().as_bool() }
+                );
+            }
+            if initial_seek && decoded_frame.is_some() {
+                let (r, fps) = range.unwrap();
+                let time = Range::time(r.start, fps).as_secs_f64();
+                engine.seek(time)?;
+                initial_seek = false;
+                seek_target = Some(time);
+                seek_steps = 0;
+                deadline = Instant::now() + Duration::from_secs(5);
+                continue;
+            }
+            if let (Some(target), Some(pts), Some((_, fps))) = (seek_target, decoded_frame, range)
+                && engine.seeked
+                && seek_steps < 8
+                && engine.frame_step_done
+                && unsafe { !engine.media.IsSeeking().as_bool() }
+                && (pts - target).abs() >= 0.5 / f64::from(fps)
+                && (pts - target).abs() < 8.5 / f64::from(fps)
+            {
+                // A paused MF seek can settle on the adjacent frame, notably
+                // frame one when replaying from EOF. Correct using bounded frame steps
+                // asynchronously; keep validating the actual presented PTS.
+                unsafe {
+                    engine
+                        .media
+                        .cast::<IMFMediaEngineEx>()?
+                        .FrameStep(pts < target)?;
+                }
+                engine.frame_step_done = false;
+                seek_steps += 1;
+                continue;
+            }
+            let mut frame = decoded_frame.filter(|p| {
+                seek_target.is_none_or(|t| {
+                    engine.seeked
+                        && engine.frame_step_done
+                        && (t - *p).abs() < range.map_or(0.1, |(_, fps)| 0.5 / f64::from(fps))
+                })
+            });
+            if let Some((r, fps)) = range {
+                let start = Range::time(r.start, fps).as_secs_f64();
+                let end = Range::time(r.end, fps).as_secs_f64();
+                if !ended_notified
+                    && !ending
+                    && (!waiting
+                        && engine.marker_reached
+                        && unsafe { engine.media.GetCurrentTime() } >= end - 0.000_001
+                        || frame.is_some_and(|p| p >= end - 0.000_001)
+                        || !waiting && unsafe { engine.media.GetCurrentTime() } >= end - 0.000_001)
+                {
+                    unsafe {
+                        engine.media.Pause()?;
+                        engine
+                            .media
+                            .cast::<IMFMediaEngineEx>()?
+                            .CancelTimelineMarkerTimer()?;
+                    }
+                    engine.marker_reached = false;
+                    frame = None;
+                    let last = Range::time(r.end - 1, fps).as_secs_f64();
+                    if presented_pts.is_some_and(|p| (p - last).abs() < 0.5 / f64::from(fps)) {
+                        // A paused seek to the already displayed frame may not
+                        // produce another tick. Keep that complete final frame.
+                        ending = false;
+                        waiting = false;
+                        seek_target = None;
+                        ended_notified = true;
+                        listener(id, Notice::Ended);
+                    } else {
+                        engine.seek(last)?;
+                        ending = true;
+                        waiting = true;
+                        seek_target = Some(last);
+                        seek_steps = 0;
+                        deadline = Instant::now() + Duration::from_secs(5);
+                    }
+                }
+                frame = frame.filter(|p| *p >= start - 0.000_001 && *p < end - 0.000_001);
+            }
             if frame.is_some() || dirty && engine.texture.is_some() {
                 if frame.is_some() {
                     engine.accept_frame()?;
                 }
                 surface.present(&engine)?;
+                if frame.is_some() {
+                    presented_pts = frame;
+                }
+                #[cfg(test)]
+                if std::env::var_os("LEXIFT_TRIM_PREVIEW_PROBE").is_some()
+                    && let Some(pts) = frame
+                {
+                    eprintln!(
+                        "TRIM_PRESENT request={} pts={pts} pixel={:?}",
+                        id.request, surface.test_pixel
+                    );
+                }
                 if frame.is_some()
                     && let Some(start) = response.take()
                 {
@@ -283,13 +468,18 @@ fn run(
                     listener(id, Notice::Visible);
                 }
             }
+            if ending && !waiting {
+                ending = false;
+                ended_notified = true;
+                listener(id, Notice::Ended);
+            }
             if waiting && Instant::now() > deadline {
                 return Err(windows::core::Error::from_hresult(
                     windows::core::HRESULT::from_win32(windows::Win32::Foundation::ERROR_TIMEOUT.0),
                 ));
             }
             let paused = unsafe { engine.media.IsPaused().as_bool() };
-            if !ended_notified && unsafe { engine.media.IsEnded().as_bool() } {
+            if !waiting && !ended_notified && unsafe { engine.media.IsEnded().as_bool() } {
                 ended_notified = true;
                 listener(id, Notice::Ended);
             }
@@ -310,6 +500,12 @@ fn run(
         Ok(())
     })();
     if let Err(error) = result {
+        #[cfg(test)]
+        eprintln!(
+            "TRIM_NATIVE_ERROR request={} code={:?}",
+            id.request,
+            error.code()
+        );
         tracing::warn!(session=id.session,instance=id.instance,request=id.request,code=?error.code(),"Recording preview native failed");
         listener(id, Notice::Failed("Recording preview unavailable".into()));
         let mut p = shared.pending.lock().unwrap();

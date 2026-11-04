@@ -26,7 +26,7 @@ pub struct Encoder {
     #[cfg(test)]
     _lease: super::super::recording_gate::resources::Lease,
 }
-fn video_type(subtype: &GUID, w: u32, h: u32, video: Video) -> Result<IMFMediaType> {
+pub(super) fn video_type(subtype: &GUID, w: u32, h: u32, video: Video) -> Result<IMFMediaType> {
     unsafe {
         let t = MFCreateMediaType()?;
         t.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)?;
@@ -162,6 +162,10 @@ impl Encoder {
     }
     pub fn write(&self, pixels: &[u8], pts: i64, duration: i64) -> Result<()> {
         #[cfg(test)]
+        if std::env::var("LEXIFT_RECORDING_TEST_ENCODER_FAULT").is_ok_and(|s| s == "write") {
+            return Err(Error::from_hresult(windows::Win32::Foundation::E_FAIL));
+        }
+        #[cfg(test)]
         if let Ok(delay) = std::env::var("LEXIFT_RECORDING_TEST_SUBMIT_DELAY_MS") {
             let delay: u64 = delay.parse().expect("test submission delay");
             assert!(delay <= 100);
@@ -235,6 +239,10 @@ impl Encoder {
         }
     }
     pub fn finish(&self) -> Result<()> {
+        #[cfg(test)]
+        if std::env::var("LEXIFT_RECORDING_TEST_ENCODER_FAULT").is_ok_and(|s| s == "finalize") {
+            return Err(Error::from_hresult(windows::Win32::Foundation::E_FAIL));
+        }
         unsafe { self.writer.Finalize() }
     }
 }

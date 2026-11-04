@@ -1,0 +1,44 @@
+import { Colors } from "design/colors.slint";
+import { SettingsFocusScope, SettingsInteraction } from "settings-interaction.slint";
+import { AnnotationHintTarget } from "annotation-hint.slint";
+component RangeHandle inherits Rectangle {
+ in property <float> frame;
+ in property <float> total;
+ in property <float> minimum;
+ in property <float> maximum;
+ in property <bool> enabled;
+ in property <string> label;
+ in property <length> track-width;
+ callback begin();callback commit(float);callback cancel();
+ private property <float> draft;
+ private property <float> origin;
+ private property <bool> dragging;
+ out property <float> current:root.dragging ? root.draft : root.frame;
+ width:16px;height:28px;border-radius:3px;
+ background:area.pressed ? Colors.primary : area.has-hover || focus.focus-visible ? Colors.primary-container : Colors.surface;
+ border-width:2px;border-color:Colors.primary;
+ Rectangle {x:6px;y:7px;width:2px;height:14px;background:Colors.primary;}
+ focus:=SettingsFocusScope {width:parent.width;height:parent.height;enabled:root.enabled;accessible-role:slider;accessible-label:root.label;
+  key-pressed(event)=>{if event.text==Key.LeftArrow || event.text==Key.RightArrow {root.begin();root.commit(clamp(root.frame+(event.text==Key.LeftArrow ? -1 : 1),root.minimum,root.maximum));return accept;}if event.text==Key.Escape && root.dragging {root.dragging=false;root.cancel();return accept;}return reject;}
+ }
+ area:=TouchArea {enabled:root.enabled;mouse-cursor:ew-resize;
+  pointer-event(event)=>{
+   if event.kind==PointerEventKind.down && event.button==PointerEventButton.left {SettingsInteraction.pointer-input();focus.focus-target();root.origin=(self.mouse-x + root.x)/1px;root.draft=root.frame;root.dragging=true;root.begin();}
+   if event.kind==PointerEventKind.cancel && root.dragging {root.dragging=false;root.cancel();}
+   if event.kind==PointerEventKind.up && root.dragging {root.dragging=false;root.commit(root.draft);}
+  }
+  moved=>{if self.pressed && root.dragging {root.draft=clamp(round(root.frame+((self.mouse-x + root.x)/1px - root.origin)*root.total/max(1,root.track-width/1px)),root.minimum,root.maximum);}}
+ }
+ AnnotationHintTarget {width:parent.width;height:parent.height;text:root.label;hovered:area.has-hover;pressed:area.pressed;}
+}
+export component RecordingTrim inherits Rectangle {
+ in property <float> start-frame;in property <float> end-frame;in property <float> frames;
+ in property <bool> enabled;
+ callback begin();callback commit(bool,float);callback cancel();
+ height:28px;
+ Rectangle {x:8px;y:8px;width:parent.width - 16px;height:12px;border-radius:3px;background:Colors.outline;
+  Rectangle {x:parent.width*start.current/max(1,root.frames);width:parent.width*(end.current - start.current)/max(1,root.frames);height:parent.height;background:Colors.primary-container;}
+ }
+ start:=RangeHandle {x:(parent.width - 16px)*self.current/max(1,root.frames) - 8px;frame:root.start-frame;total:root.frames;minimum:0;maximum:root.end-frame - 1;track-width:parent.width - 16px;enabled:root.enabled;label:@tr("Trim start");begin=>{root.begin();}commit(value)=>{root.commit(false,value);}cancel=>{root.cancel();}}
+ end:=RangeHandle {x:(parent.width - 16px)*self.current/max(1,root.frames) + 8px;frame:root.end-frame;total:root.frames;minimum:root.start-frame+1;maximum:root.frames;track-width:parent.width - 16px;enabled:root.enabled;label:@tr("Trim end");begin=>{root.begin();}commit(value)=>{root.commit(true,value);}cancel=>{root.cancel();}}
+}

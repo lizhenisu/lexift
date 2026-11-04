@@ -13,6 +13,7 @@ pub(crate) mod preview;
 pub(crate) mod save;
 #[cfg(test)]
 mod tests;
+mod trim;
 use super::{
     recording_capture::{Capture, qpc_100ns},
     recording_pixels::nv12,
@@ -1096,7 +1097,16 @@ fn service(receiver: Receiver<Message>, sender: SyncSender<Message>, shared: Arc
                     && j.request.identity.session == command.identity.session
                     && j.request.identity.operation == command.identity.operation
                 {
-                    let result = if let Action::Open(target) = command.action {
+                    let invalid_range = matches!(command.action,Action::Open{range,fps,..}|Action::SetRange{range,fps,..} if !range.valid(j.frames) || fps!=j.request.video.frame_rate.get());
+                    let result = if invalid_range {
+                        Err(Error::new("Invalid recording preview range"))
+                    } else if let Action::Open {
+                        target,
+                        range,
+                        fps,
+                        version: _,
+                    } = command.action
+                    {
                         j.preview.take();
                         preview::Worker::open(
                             command.identity,
@@ -1106,6 +1116,7 @@ fn service(receiver: Receiver<Message>, sender: SyncSender<Message>, shared: Arc
                                 j.frames.saturating_sub(1) as f64
                                     / f64::from(j.request.video.frame_rate.get()),
                             ),
+                            Some((range, fps)),
                             listener.clone(),
                         )
                         .map(|w| j.preview = Some(w))
@@ -1145,12 +1156,27 @@ fn service(receiver: Receiver<Message>, sender: SyncSender<Message>, shared: Arc
                     let file = j.file.as_ref().unwrap().clone();
                     let tx = sender.clone();
                     let token = cancel.clone();
-                    let handle = thread::spawn(move || {
-                        let result = save::save(&file.path, request, token);
-                        drop(file);
-                        let _ = tx.send(Message::SaveDone(result, callback));
-                    });
-                    saving = Some((cancel, handle));
+                    let info = j.info.as_ref().unwrap().clone();
+                    let listener = j.listener.clone();
+                    let completion = Arc::new(Mutex::new(Some(callback)));
+                    let owned = completion.clone();
+                    match thread::Builder::new()
+                        .name("lexift-recording-export".into())
+                        .spawn(move || {
+                            let callback = owned.lock().unwrap().take().unwrap();
+                            let result = save::save(&file.path, request, token, &info, listener);
+                            drop(file);
+                            let _ = tx.send(Message::SaveDone(result, callback));
+                        }) {
+                        Ok(handle) => saving = Some((cancel, handle)),
+                        Err(error) => {
+                            shared.saving.store(false, Ordering::Release);
+                            let callback = completion.lock().unwrap().take();
+                            if let Some(callback) = callback {
+                                callback(Err(err(error)));
+                            }
+                        }
+                    }
                 } else {
                     shared.saving.store(false, Ordering::Release);
                     callback(Err(Error::new("Video artifact is unavailable")));

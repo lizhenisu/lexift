@@ -5,7 +5,7 @@ use crate::RecordingControl;
 #[path = "recording_countdown.rs"]
 pub(super) mod countdown;
 #[path = "recording_preview.rs"]
-pub(super) mod preview;
+pub(in crate::annotation) mod preview;
 #[cfg(test)]
 #[path = "recording_tests.rs"]
 mod tests;
@@ -812,6 +812,8 @@ fn save_request() {
             })
         });
         emit_recording(Event::Save(SaveRequest {
+            range: None,
+            range_version: 0,
             identity: state.lifecycle.identity,
             artifact,
             owner,

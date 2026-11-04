@@ -2273,3 +2273,21 @@ msgstr "破棄"
 
 msgid "Playback position"
 msgstr "再生位置"
+
+msgid "Trim start"
+msgstr "トリミング開始位置"
+
+msgid "Trim end"
+msgstr "トリミング終了位置"
+
+msgid "Restore full range"
+msgstr "全範囲に戻す"
+
+msgid "Exporting video"
+msgstr "動画を書き出しています"
+
+msgid "Finalizing video"
+msgstr "動画を仕上げています"
+
+msgid "Saving video"
+msgstr "動画を保存しています"
