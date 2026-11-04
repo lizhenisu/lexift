@@ -2243,3 +2243,33 @@ msgstr "10秒後に開始"
 
 msgid "Countdown unavailable"
 msgstr "カウントダウンを利用できません"
+
+msgid "Preview"
+msgstr "プレビュー"
+
+msgid "Recording preview"
+msgstr "録画プレビュー"
+
+msgid "Preparing preview"
+msgstr "プレビューを準備中"
+
+msgid "Play"
+msgstr "再生"
+
+msgid "Mute"
+msgstr "ミュート"
+
+msgid "Unmute"
+msgstr "ミュート解除"
+
+msgid "Recording preview unavailable"
+msgstr "録画プレビューを利用できません"
+
+msgid "Discard this unsaved recording?"
+msgstr "未保存の録画を破棄しますか？"
+
+msgid "Discard"
+msgstr "破棄"
+
+msgid "Playback position"
+msgstr "再生位置"

@@ -39,4 +39,5 @@ pub mod image_resize;
 pub mod image_transform;
 pub mod recording_audio;
 pub mod recording_clock;
+pub mod recording_preview;
 pub mod screen_recording;

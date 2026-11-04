@@ -1,0 +1,57 @@
+import { Colors } from "design/colors.slint";
+import { Metrics } from "design/metrics.slint";
+import { ResizeEdges } from "design/resize-edges.slint";
+import { SettingsButton } from "settings-controls.slint";
+import { SettingsFocusScope, SettingsInteraction } from "settings-interaction.slint";
+import { CaptureButton } from "long-capture.slint";
+import { Slider } from "annotation-fields.slint";
+
+export component RecordingPreview inherits Window {
+ title:@tr("Recording preview");no-frame:true;background:Colors.surface;
+ preferred-width:960px;preferred-height:760px;min-width:640px;min-height:360px;
+ in property <bool> ready;in property <bool> playing;in property <bool> has-audio;in property <bool> muted;in property <bool> busy;
+ in property <string> error;in property <string> metadata;in property <string> time-label;
+ private property <bool> compact-controls:root.width < 800px;
+ in property <float> progress;in property <float> duration-seconds;
+ out property <float> video-x:12;out property <float> video-y:44;
+ out property <float> video-width:(root.width - 24px)/1px;out property <float> video-height:max(1,(root.height - (root.compact-controls ? 204px : 156px))/1px);
+ callback action(int,float);callback move-requested();callback resize-requested(int);callback surface-changed();
+ changed width=>{root.surface-changed();}changed height=>{root.surface-changed();}
+ forward-focus:keys;
+ keys:=FocusScope{width:root.width;height:root.height;key-pressed(event)=>{if event.text==Key.Escape{root.action(5,0);return accept;}return reject;}
+ Rectangle {x:0px;y:0px;width:root.width;height:40px;background:Colors.surface;
+  Text {x:16px;width:parent.width - 72px;height:100%;text:@tr("Recording preview");font-size:14px;font-weight:600;color:Colors.foreground;vertical-alignment:center;}
+  TouchArea {x:0px;y:0px;width:parent.width - 52px;height:parent.height;pointer-event(event)=>{if event.button==PointerEventButton.left && event.kind==PointerEventKind.down{root.move-requested();}}}
+  CaptureButton {x:parent.width - 40px;y:4px;icon:@image-url("assets/icons/screenshot-close.svg");label:@tr("Close");clicked=>{root.action(5,0);}}
+ }
+ Rectangle {x:root.video-x*1px;y:root.video-y*1px;width:root.video-width*1px;height:root.video-height*1px;background:#000;
+  if !root.ready: Text {text:root.error!="" ? root.error : @tr("Preparing preview");x:24px;width:parent.width - 48px;height:parent.height - 64px;vertical-alignment:center;horizontal-alignment:center;wrap:word-wrap;color:#eee;}
+  if root.error!="": SettingsButton {x:(parent.width - self.width)/2;y:parent.height/2 + 20px;compact:true;label:@tr("Retry");clicked=>{root.action(6,0);}}
+ }
+ timeline := Rectangle {x:16px;y:root.height - (root.compact-controls ? 152px : 104px);width:root.width - 32px;height:root.compact-controls ? 144px : 96px;
+  private property <bool> scrubbing;
+  private property <float> draft;
+  seek-keys := SettingsFocusScope {x:0px;y:0px;width:parent.width;height:28px;enabled:root.ready && !root.busy;accessible-role:slider;accessible-label:@tr("Playback position");
+   key-pressed(event)=>{if event.text==Key.LeftArrow || event.text==Key.RightArrow{root.action(2,0);root.action(3,clamp(root.progress + (event.text==Key.LeftArrow ? -1 : 1)*1000/max(1,root.duration-seconds),0,1000));return accept;}return reject;}
+  Slider {x:0px;y:0px;width:parent.width;height:28px;maximum:1000;enabled:root.ready && !root.busy;
+   value:timeline.scrubbing ? timeline.draft : root.progress;
+   changed value=>{if timeline.scrubbing{timeline.draft=self.value;}}
+   drag-cancelled=>{if timeline.scrubbing{timeline.scrubbing=false;root.action(7,0);}}
+   dragging(active)=>{if active{SettingsInteraction.pointer-input();seek-keys.focus-target();timeline.draft=root.progress;timeline.scrubbing=true;root.action(2,0);}else if timeline.scrubbing{root.action(3,timeline.draft);timeline.scrubbing=false;}}
+  }
+  }
+  HorizontalLayout {y:36px;height:40px;spacing:8px;
+   SettingsButton {compact:true;icon:root.playing ? @image-url("assets/icons/capture-pause.svg") : @image-url("assets/icons/capture-play.svg");label:root.playing ? @tr("Pause") : @tr("Play");enabled:root.ready && !root.busy;clicked=>{root.action(0,0);}}
+   SettingsButton {compact:true;icon:@image-url("assets/icons/recording-audio.svg");label:root.muted ? @tr("Unmute") : @tr("Mute");enabled:root.has-audio && root.ready && !root.busy;clicked=>{root.action(1,0);}}
+   VerticalLayout {horizontal-stretch:1;spacing:1px;Text {text:root.time-label;color:Colors.foreground;font-size:13px;}Text {text:root.metadata;color:Colors.secondary-foreground;font-size:11px;}}
+   if !root.compact-controls: SettingsButton {compact:true;label:@tr("Save video");enabled:!root.busy;primary:true;clicked=>{root.action(4,0);}}
+   if !root.compact-controls: SettingsButton {compact:true;label:@tr("Close");enabled:!root.busy;clicked=>{root.action(5,0);}}
+  }
+  if root.compact-controls: HorizontalLayout {y:84px;height:40px;spacing:8px;Rectangle {horizontal-stretch:1;}
+   SettingsButton {compact:true;label:@tr("Save video");enabled:!root.busy;primary:true;clicked=>{root.action(4,0);}}
+   SettingsButton {compact:true;label:@tr("Close");enabled:!root.busy;clicked=>{root.action(5,0);}}
+  }
+ }
+ ResizeEdges {resize-requested(edge)=>{root.resize-requested(edge);}}
+ }
+}

@@ -139,15 +139,9 @@ fn recording_roi_is_not_mistaken_for_a_changed_monitor_layout() {
         let mut f = f.borrow_mut();
         f.state.session = 7;
         f.state.phase = ScreenshotPhase::Recording;
-        f.state.recording = Some(lexift_core::domain::screenshot::recording::Session {
-            lifecycle,
-            request,
-            monitor,
-            excluded: vec![],
-            progress: None,
-            artifact: None,
-            backend_request: None,
-        });
+        f.state.recording = Some(lexift_core::domain::screenshot::recording::Session::new(
+            lifecycle, request, monitor,
+        ));
     });
     REGISTRY.with(|r| {
         let mut r = r.borrow_mut();
@@ -243,6 +237,61 @@ fn recording_controls_render_all_languages_themes_dpis_and_phases() {
     assert!(toolbar.get_toolbar_width() < original);
     toolbar.set_recording_mode(false);
     assert_eq!(toolbar.get_toolbar_width(), original);
+}
+
+#[test]
+fn recording_preview_renders_all_languages_themes_sizes_and_dpis() {
+    let windows = Rc::new(RefCell::new(Vec::new()));
+    slint::platform::set_platform(Box::new(Backend(windows.clone()))).unwrap();
+    let w = crate::RecordingPreview::new().unwrap();
+    let adapter = windows.borrow().last().unwrap().clone();
+    w.set_time_label("00:12 / 10:00".into());
+    w.set_metadata("1920 × 1080 px · 60fps".into());
+    w.set_progress(420.);
+    for language in lexift_core::domain::ui_language::UiLanguage::ALL {
+        crate::i18n::select(language);
+        for dark in [false, true] {
+            w.global::<crate::Colors>().set_preference(i32::from(dark));
+            for dpi in [1., 1.25] {
+                adapter
+                    .window()
+                    .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
+                for (width, height) in [(640., 360.), (960., 760.)] {
+                    let (width, height) = ((width * dpi) as u32, (height * dpi) as u32);
+                    adapter.set_size(slint::PhysicalSize::new(width, height));
+                    for phase in 0..3 {
+                        w.set_ready(phase != 2);
+                        w.set_playing(phase == 1);
+                        w.set_has_audio(phase != 0);
+                        w.set_error(if phase == 2 {
+                            crate::i18n::tr("Recording preview unavailable").into()
+                        } else {
+                            "".into()
+                        });
+                        let mut pixels =
+                            vec![slint::Rgb8Pixel::default(); (width * height) as usize];
+                        adapter.request_redraw();
+                        adapter.draw_if_needed(|r| {
+                            r.render(&mut pixels, width as usize);
+                        });
+                        assert!(pixels.windows(2).any(|p| p[0] != p[1]));
+                        if let Ok(directory) = std::env::var("LEXIFT_PREVIEW_RENDER_DIR") {
+                            crate::i18n::write_test_bitmap(
+                                &directory,
+                                &format!(
+                                    "preview-{}-{dark}-{dpi}-{width}-{phase}",
+                                    language.code()
+                                ),
+                                width,
+                                height,
+                                pixels.iter().map(|p| [p.r, p.g, p.b, 255]),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[test]

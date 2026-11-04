@@ -71,7 +71,7 @@ pub enum PopupResizeEdge {
 }
 
 impl PopupResizeEdge {
-    pub(super) fn from_index(index: i32) -> Option<Self> {
+    pub(crate) fn from_index(index: i32) -> Option<Self> {
         Some(match index {
             0 => Self::Left,
             1 => Self::Right,
@@ -171,6 +171,12 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) screenshot_displays: Rc<dyn Fn() -> Vec<(Rect, f32)>>,
     pub(crate) configure_capture_feedback: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) countdown_handoff: CompleteScreenshotRefresh,
+    pub(crate) recording_preview_surface: Rc<
+        dyn Fn(
+            lexift_core::ports::magnifier::WindowToken,
+            lexift_core::domain::geometry::Rect,
+        ) -> bool,
+    >,
     pub(crate) configure_countdown_window: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) configure_hint_window: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) annotation_click_through: AnnotationClickThrough,
@@ -257,6 +263,7 @@ impl WindowLifecycleCallbacks {
             screenshot_displays: Rc::new(Vec::new),
             configure_capture_feedback: Rc::new(|_| false),
             countdown_handoff: Rc::new(|_, _| false),
+            recording_preview_surface: Rc::new(|_, _| false),
             configure_countdown_window: Rc::new(|_| false),
             configure_hint_window: Rc::new(|_| false),
             annotation_click_through: Rc::new(|_, _| false),
@@ -391,6 +398,17 @@ impl WindowLifecycleCallbacks {
         callback: impl Fn(&[lexift_core::ports::magnifier::WindowToken], bool) -> bool + 'static,
     ) -> Self {
         self.countdown_handoff = Rc::new(callback);
+        self
+    }
+    pub fn with_recording_preview_surface(
+        mut self,
+        callback: impl Fn(
+            lexift_core::ports::magnifier::WindowToken,
+            lexift_core::domain::geometry::Rect,
+        ) -> bool
+        + 'static,
+    ) -> Self {
+        self.recording_preview_surface = Rc::new(callback);
         self
     }
     pub fn with_countdown_window(

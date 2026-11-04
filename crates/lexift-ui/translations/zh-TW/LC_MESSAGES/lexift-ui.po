@@ -2243,3 +2243,33 @@ msgstr "10秒後開始"
 
 msgid "Countdown unavailable"
 msgstr "倒數計時暫時無法使用"
+
+msgid "Preview"
+msgstr "預覽"
+
+msgid "Recording preview"
+msgstr "錄影預覽"
+
+msgid "Preparing preview"
+msgstr "正在準備預覽"
+
+msgid "Play"
+msgstr "播放"
+
+msgid "Mute"
+msgstr "靜音"
+
+msgid "Unmute"
+msgstr "取消靜音"
+
+msgid "Recording preview unavailable"
+msgstr "錄影預覽無法使用"
+
+msgid "Discard this unsaved recording?"
+msgstr "捨棄這段尚未儲存的錄影？"
+
+msgid "Discard"
+msgstr "捨棄"
+
+msgid "Playback position"
+msgstr "播放進度"

@@ -2243,3 +2243,33 @@ msgstr "In 10 Sekunden starten"
 
 msgid "Countdown unavailable"
 msgstr "Countdown nicht verfügbar"
+
+msgid "Preview"
+msgstr "Vorschau"
+
+msgid "Recording preview"
+msgstr "Aufnahmevorschau"
+
+msgid "Preparing preview"
+msgstr "Vorschau wird vorbereitet"
+
+msgid "Play"
+msgstr "Wiedergabe"
+
+msgid "Mute"
+msgstr "Stummschalten"
+
+msgid "Unmute"
+msgstr "Ton einschalten"
+
+msgid "Recording preview unavailable"
+msgstr "Aufnahmevorschau nicht verfügbar"
+
+msgid "Discard this unsaved recording?"
+msgstr "Diese ungespeicherte Aufnahme verwerfen?"
+
+msgid "Discard"
+msgstr "Verwerfen"
+
+msgid "Playback position"
+msgstr "Wiedergabeposition"

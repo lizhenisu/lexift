@@ -2243,3 +2243,33 @@ msgstr "10초 후 시작"
 
 msgid "Countdown unavailable"
 msgstr "카운트다운을 사용할 수 없습니다"
+
+msgid "Preview"
+msgstr "미리 보기"
+
+msgid "Recording preview"
+msgstr "녹화 미리 보기"
+
+msgid "Preparing preview"
+msgstr "미리 보기 준비 중"
+
+msgid "Play"
+msgstr "재생"
+
+msgid "Mute"
+msgstr "음소거"
+
+msgid "Unmute"
+msgstr "음소거 해제"
+
+msgid "Recording preview unavailable"
+msgstr "녹화 미리 보기를 사용할 수 없습니다"
+
+msgid "Discard this unsaved recording?"
+msgstr "저장하지 않은 녹화를 삭제할까요?"
+
+msgid "Discard"
+msgstr "삭제"
+
+msgid "Playback position"
+msgstr "재생 위치"

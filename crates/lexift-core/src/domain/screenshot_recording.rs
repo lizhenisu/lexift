@@ -1,6 +1,7 @@
 //! Screenshot ownership around the recording lifecycle. Pixels and native handles
 //! remain in adapters; cancellation waits for actual retirement before restoration.
 use super::{ScreenshotCommand, ScreenshotPhase, ScreenshotState};
+use crate::domain::recording_preview as preview;
 use crate::domain::{
     annotation_export::ExportRequest, geometry::Rect, screen_recording as lifecycle,
 };
@@ -12,6 +13,8 @@ use crate::{AppCommand, Error, Result};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Session {
+    pub preview: Option<preview::State>,
+    pending_release: Option<lifecycle::Command>,
     pub lifecycle: lifecycle::State,
     pub request: ExportRequest,
     pub monitor: Rect,
@@ -20,8 +23,33 @@ pub struct Session {
     pub artifact: Option<ArtifactInfo>,
     pub backend_request: Option<lifecycle::Identity>,
 }
+impl Session {
+    /// Start ownership without leaking playback retirement internals to adapters.
+    pub fn new(lifecycle: lifecycle::State, request: ExportRequest, monitor: Rect) -> Self {
+        Self {
+            preview: None,
+            pending_release: None,
+            lifecycle,
+            request,
+            monitor,
+            excluded: vec![],
+            progress: None,
+            artifact: None,
+            backend_request: None,
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    PreviewRequested,
+    PreviewInput {
+        identity: preview::Identity,
+        input: preview::Input,
+    },
+    PreviewNotice {
+        identity: preview::Identity,
+        notice: preview::Notice,
+    },
     CountdownFailed {
         identity: lifecycle::Identity,
         error: Error,
@@ -57,6 +85,7 @@ pub enum Event {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    Preview(preview::Command),
     PrepareView {
         identity: lifecycle::Identity,
         bounds: Rect,
@@ -108,15 +137,7 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
         s.color_pending = None;
         s.color_result = None;
         s.error = None;
-        s.recording = Some(Session {
-            lifecycle,
-            request,
-            monitor,
-            excluded: vec![],
-            progress: None,
-            artifact: None,
-            backend_request: None,
-        });
+        s.recording = Some(Session::new(lifecycle, request, monitor));
         return wrap(command);
     }
     let Some(recording) = s
@@ -126,6 +147,72 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
     else {
         return vec![];
     };
+    match &event {
+        Event::PreviewRequested if recording.lifecycle.phase == lifecycle::Phase::PendingSave => {
+            if let Some(p) = recording.preview.as_mut() {
+                return p
+                    .input(p.identity, preview::Input::Retry)
+                    .map(|c| wrap(Command::Preview(c)))
+                    .unwrap_or_default();
+            }
+            if let Some(artifact) = recording.lifecycle.artifact {
+                let p = preview::State::new(recording.lifecycle.identity, artifact);
+                let command = p.command(preview::Action::PrepareView);
+                recording.preview = Some(p);
+                return wrap(Command::Preview(command));
+            }
+            return vec![];
+        }
+        Event::PreviewInput { identity, input } => {
+            if !matches!(recording.lifecycle.phase, lifecycle::Phase::PendingSave) {
+                return vec![];
+            }
+            let Some(p) = recording.preview.as_mut() else {
+                return vec![];
+            };
+            let Some(command) = p.input(*identity, input.clone()) else {
+                return vec![];
+            };
+            if command.action == preview::Action::Discard {
+                let identity = recording.lifecycle.identity;
+                return reduce(
+                    s,
+                    Event::Input {
+                        identity,
+                        event: lifecycle::Event::DiscardCompleted,
+                    },
+                );
+            }
+            return wrap(Command::Preview(command));
+        }
+        Event::PreviewNotice { identity, notice } => {
+            let Some(p) = recording.preview.as_mut() else {
+                return vec![];
+            };
+            if p.identity == *identity
+                && let preview::Notice::Failed(error) = notice
+            {
+                s.error = Some(error.clone());
+            }
+            if p.identity == *identity && *notice == preview::Notice::Visible {
+                // Once playback takes over, the old selection hosts can retire.
+                // Subsequent cancellation restores the pre-screenshot desktop.
+                recording.lifecycle.restore_editor = false;
+            }
+            let Some(command) = p.notice(*identity, notice.clone()) else {
+                return vec![];
+            };
+            let mut commands = wrap(Command::Preview(command));
+            if command.action == preview::Action::DestroyView
+                && let Some(release) = recording.pending_release.take()
+            {
+                recording.backend_request = Some(release.identity);
+                commands.extend(wrap(Command::Execute(release)));
+            }
+            return commands;
+        }
+        _ => {}
+    }
     let event = match event {
         Event::Native(notice) => {
             use crate::ports::screen_recording::Notice;
@@ -234,6 +321,15 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
         Event::Save(mut request)
             if request.identity == recording.lifecycle.identity
                 && recording.lifecycle.phase == lifecycle::Phase::PendingSave
+                && recording.preview.as_ref().is_none_or(|p| {
+                    matches!(
+                        p.phase,
+                        preview::Phase::Paused
+                            | preview::Phase::Ended
+                            | preview::Phase::Failed
+                            | preview::Phase::Preparing
+                    )
+                })
                 && recording.lifecycle.artifact == Some(request.artifact) =>
         {
             let Some(command) = recording
@@ -250,6 +346,9 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
             if identity == recording.lifecycle.identity
                 && recording.lifecycle.phase == lifecycle::Phase::Saving =>
         {
+            if let Some(p) = recording.preview.as_mut() {
+                p.save_finished();
+            }
             let event = match result {
                 Ok(crate::ports::annotation_save::SaveOutcome::Saved) => lifecycle::Event::Saved,
                 Ok(crate::ports::annotation_save::SaveOutcome::Cancelled) => {
@@ -345,8 +444,19 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
         _ => None,
     };
     let Some(command) = command else {
+        if recording.lifecycle.phase == lifecycle::Phase::PendingSave && recording.preview.is_none()
+        {
+            return reduce(s, Event::PreviewRequested);
+        }
         return vec![];
     };
+    if command.action == lifecycle::Action::Release
+        && let Some(p) = recording.preview.as_mut()
+        && p.phase != preview::Phase::Closed
+    {
+        recording.pending_release = Some(command);
+        return wrap(Command::Preview(p.close()));
+    }
     if matches!(
         command.action,
         lifecycle::Action::PrepareBackend
@@ -442,6 +552,21 @@ mod tests {
         )
     }
     fn retire(s: &mut AppState) -> Vec<AppCommand> {
+        if let Some(p) = s
+            .screenshot
+            .recording
+            .as_ref()
+            .and_then(|r| r.preview.as_ref())
+            .filter(|p| p.phase == preview::Phase::Retiring)
+        {
+            emit(
+                s,
+                Event::PreviewNotice {
+                    identity: p.identity,
+                    notice: preview::Notice::Retired,
+                },
+            );
+        }
         let identity = id(s);
         emit(s, Event::Native(Notice::Retired(identity)))
     }

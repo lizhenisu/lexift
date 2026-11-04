@@ -72,7 +72,51 @@ fn failed(c: &Arc<AppController>, identity: Identity, error: Error) {
     emit(c, Event::Failed { identity, error });
 }
 pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, command: Command) {
+    if let Command::Preview(command) = command {
+        use lexift_core::domain::recording_preview::Action as A;
+        let current = c
+            .state
+            .lock()
+            .unwrap()
+            .screenshot
+            .recording
+            .as_ref()
+            .and_then(|s| s.preview.as_ref())
+            .is_some_and(|p| p.identity == command.identity);
+        if !current {
+            return;
+        }
+        if matches!(
+            command.action,
+            A::PrepareView | A::Handoff | A::Install | A::Save | A::ConfirmDiscard | A::DestroyView
+        ) {
+            c.ui.screen_recording(Command::Preview(command));
+            return;
+        }
+        let port = r.recording.lock().unwrap().port.clone();
+        let controller = c.clone();
+        let listener: lexift_core::ports::screen_recording::PreviewListener =
+            Arc::new(move |identity, notice| {
+                emit(&controller, Event::PreviewNotice { identity, notice })
+            });
+        if let Err(error) = port
+            .ok_or_else(|| Error::new("Recording preview unavailable"))
+            .and_then(|p| p.preview(command, listener))
+        {
+            emit(
+                c,
+                Event::PreviewNotice {
+                    identity: command.identity,
+                    notice: lexift_core::domain::recording_preview::Notice::Failed(
+                        error.to_string(),
+                    ),
+                },
+            );
+        }
+        return;
+    }
     let identity = match &command {
+        Command::Preview(_) => unreachable!(),
         Command::PrepareView { identity, .. } => *identity,
         Command::PrepareBackend(request) => request.identity,
         Command::Execute(command) => command.identity,
@@ -106,6 +150,7 @@ pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, comman
         task.abort();
     }
     match command {
+        Command::Preview(_) => unreachable!(),
         Command::PrepareView { .. } => c.ui.screen_recording(command),
         Command::PrepareBackend(request) => {
             let port = {

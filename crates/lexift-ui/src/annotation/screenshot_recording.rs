@@ -4,6 +4,8 @@ use super::*;
 use crate::RecordingControl;
 #[path = "recording_countdown.rs"]
 pub(super) mod countdown;
+#[path = "recording_preview.rs"]
+pub(super) mod preview;
 #[cfg(test)]
 #[path = "recording_tests.rs"]
 mod tests;
@@ -266,12 +268,14 @@ pub(in crate::annotation) fn request() {
     }
 }
 pub(crate) fn clear() {
+    preview::clear();
     countdown::clear();
     super::super::recording_chrome::clear();
     VIEW.with(|v| *v.borrow_mut() = View::default());
 }
 pub(crate) fn execute(command: Command) {
     match command {
+        Command::Preview(command) => preview::execute(command),
         Command::PrepareView {
             identity,
             bounds,
@@ -757,6 +761,7 @@ fn choose(session: u64, operation: u64, revision: u64, action: i32) {
         return;
     };
     match action {
+        0 if state.lifecycle.phase == Phase::PendingSave => emit_recording(Event::PreviewRequested),
         0 if state.lifecycle.phase == Phase::Ready => {
             countdown::choose(state.lifecycle.identity, revision, 0)
         }
@@ -767,32 +772,11 @@ fn choose(session: u64, operation: u64, revision: u64, action: i32) {
         }),
         1 => input(Input::Finish),
         2 => {
-            if let Some(artifact) = state.lifecycle.artifact {
-                let owner = REGISTRY.with(|r| {
-                    r.borrow().as_ref().and_then(|r| {
-                        VIEW.with(|v| {
-                            v.borrow()
-                                .control
-                                .get()
-                                .and_then(|w| (r.lifecycle.annotation_window_token)(w.window()))
-                        })
-                    })
-                });
-                emit_recording(Event::Save(SaveRequest {
-                    identity: state.lifecycle.identity,
-                    artifact,
-                    owner,
-                    default_name: format!(
-                        "Lexift-recording-{}.mp4",
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs()
-                    ),
-                    title: crate::i18n::tr("Save video"),
-                    extension_mismatch_message: crate::i18n::tr("Use the .mp4 file extension."),
-                }));
+            if state.preview.is_some() {
+                preview::input(lexift_core::domain::recording_preview::Input::Save);
+                return;
             }
+            save_request();
         }
         3 => {
             if state.lifecycle.phase == Phase::Ready {
@@ -805,7 +789,42 @@ fn choose(session: u64, operation: u64, revision: u64, action: i32) {
                 super::delay::recording_delay_menu();
             }
         }
+        _ if state.lifecycle.phase == Phase::PendingSave && state.preview.is_some() => {
+            preview::input(lexift_core::domain::recording_preview::Input::Close)
+        }
         _ => cancel(),
+    }
+}
+fn save_request() {
+    if let Some(state) = current()
+        && let Some(artifact) = state.lifecycle.artifact
+    {
+        let owner = preview::owner().or_else(|| {
+            REGISTRY.with(|r| {
+                r.borrow().as_ref().and_then(|r| {
+                    VIEW.with(|v| {
+                        v.borrow()
+                            .control
+                            .get()
+                            .and_then(|w| (r.lifecycle.annotation_window_token)(w.window()))
+                    })
+                })
+            })
+        });
+        emit_recording(Event::Save(SaveRequest {
+            identity: state.lifecycle.identity,
+            artifact,
+            owner,
+            default_name: format!(
+                "Lexift-recording-{}.mp4",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+            ),
+            title: crate::i18n::tr("Save video"),
+            extension_mismatch_message: crate::i18n::tr("Use the .mp4 file extension."),
+        }));
     }
 }
 pub(in crate::annotation) fn render(r: &mut Registry) {
@@ -1029,6 +1048,7 @@ pub(crate) fn sync(state: &ScreenshotState) {
     let Some(recording) = &state.recording else {
         return;
     };
+    preview::sync(recording);
     VIEW.with(|v| {
         let v = v.borrow();
         let Some(w) = v.control.get() else {
@@ -1048,6 +1068,9 @@ pub(crate) fn sync(state: &ScreenshotState) {
             Phase::Saving => 6,
             _ => 0,
         });
+        w.set_preview_preparing(recording.preview.as_ref().is_some_and(|p| {
+            p.phase != lexift_core::domain::recording_preview::Phase::Failed && !p.visible
+        }));
         let video = recording.lifecycle.video;
         w.set_dimensions(
             format!(
@@ -1099,7 +1122,8 @@ pub(crate) fn sync(state: &ScreenshotState) {
                 if matches!(
                     recording.lifecycle.phase,
                     Phase::PendingSave | Phase::Saving
-                ) {
+                ) && recording.preview.as_ref().is_some_and(|p| p.visible)
+                {
                     if let Some(port) = &r.lifecycle.annotation_renderer {
                         port.clear();
                     }

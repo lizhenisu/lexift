@@ -195,6 +195,7 @@ export component Slider inherits Rectangle {
     in property <bool> enabled: true;
     opacity: root.enabled ? 1 : 0.45;
     callback dragging(bool);
+    callback drag-cancelled();
     in-out property <float> value;
     in property <float> minimum;
     in property <float> maximum: 100;
@@ -211,7 +212,7 @@ export component Slider inherits Rectangle {
             root.value = clamp(root.value + (event.delta-y > 0px ? root.wheel-step : -root.wheel-step),root.minimum,root.maximum);
             return accept;
         }
-        pointer-event(event) => { if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {root.dragging(false);} if event.kind == PointerEventKind.down { root.dragging(true); root.value = root.minimum + clamp((self.mouse-x - 8px)/(self.width - 16px),0,1) * (root.maximum - root.minimum); } }
+        pointer-event(event) => { if event.kind == PointerEventKind.cancel {root.drag-cancelled();} if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {root.dragging(false);} if event.kind == PointerEventKind.down { root.dragging(true); root.value = root.minimum + clamp((self.mouse-x - 8px)/(self.width - 16px),0,1) * (root.maximum - root.minimum); } }
         moved => { if self.pressed { root.value = root.minimum + clamp((self.mouse-x - 8px)/(self.width - 16px),0,1) * (root.maximum - root.minimum); } }
     }
 }

@@ -9,6 +9,7 @@ mod audio_source;
 mod audio_visual_fixture;
 mod diagnostics;
 mod encoder;
+pub(crate) mod preview;
 mod save;
 #[cfg(test)]
 mod tests;
@@ -39,6 +40,10 @@ fn err(e: impl std::fmt::Display) -> Error {
 }
 type Completion = Box<dyn FnOnce(Result<SaveOutcome>) + Send>;
 enum Message {
+    Preview(
+        lexift_core::domain::recording_preview::Command,
+        PreviewListener,
+    ),
     Prepare(PrepareRequest, Listener),
     Control(Identity, Control),
     Wake,
@@ -93,6 +98,13 @@ impl Drop for WindowsScreenRecordingPort {
     }
 }
 impl ScreenRecordingPort for WindowsScreenRecordingPort {
+    fn preview(
+        &self,
+        command: lexift_core::domain::recording_preview::Command,
+        listener: PreviewListener,
+    ) -> Result<()> {
+        self.send(Message::Preview(command, listener))
+    }
     fn shutdown(&self, completed: Box<dyn FnOnce() + Send>) -> Result<()> {
         let mut callback = self.shared.shutdown_callback.lock().unwrap();
         if self.shared.shutdown.load(Ordering::Acquire) {
@@ -226,6 +238,7 @@ enum Phase {
     Failed,
 }
 struct Job {
+    preview: Option<preview::Worker>,
     wake: Option<SyncSender<Message>>,
     audio: audio::Sources,
     audio_configuration: Option<(
@@ -262,6 +275,7 @@ struct Job {
 impl Job {
     fn prepare(request: PrepareRequest, listener: Listener) -> Self {
         Self {
+            preview: None,
             wake: None,
             audio: audio::Sources::default(),
             audio_configuration: None,
@@ -1070,6 +1084,47 @@ fn service(receiver: Receiver<Message>, sender: SyncSender<Message>, shared: Arc
                     && let Err(e) = j.control(id, action)
                 {
                     j.fail(e);
+                }
+            }
+            Ok(Message::Preview(command, listener)) => {
+                use lexift_core::domain::recording_preview::{Action, Notice};
+                if let Some(j) = job.as_mut()
+                    && j.phase == Phase::Sealed
+                    && j.info
+                        .as_ref()
+                        .is_some_and(|i| i.artifact == command.identity.artifact)
+                    && j.request.identity.session == command.identity.session
+                    && j.request.identity.operation == command.identity.operation
+                {
+                    let result = if let Action::Open(target) = command.action {
+                        j.preview.take();
+                        preview::Worker::open(
+                            command.identity,
+                            target,
+                            j.file.as_ref().unwrap().clone(),
+                            Duration::from_secs_f64(
+                                j.frames.saturating_sub(1) as f64
+                                    / f64::from(j.request.video.frame_rate.get()),
+                            ),
+                            listener.clone(),
+                        )
+                        .map(|w| j.preview = Some(w))
+                    } else if let Some(w) = j.preview.as_ref() {
+                        w.control(command)
+                    } else if command.action == Action::Close {
+                        listener(command.identity, Notice::Retired);
+                        Ok(())
+                    } else {
+                        Err(Error::new("Recording preview unavailable"))
+                    };
+                    if let Err(error) = result {
+                        listener(command.identity, Notice::Failed(error.to_string()));
+                    }
+                } else {
+                    listener(
+                        command.identity,
+                        Notice::Failed("Recording preview unavailable".into()),
+                    );
                 }
             }
             Ok(Message::Wake) => {}

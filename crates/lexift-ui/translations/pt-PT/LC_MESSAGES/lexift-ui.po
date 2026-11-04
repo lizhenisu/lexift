@@ -2243,3 +2243,33 @@ msgstr "Iniciar dentro de 10 segundos"
 
 msgid "Countdown unavailable"
 msgstr "Contagem decrescente indisponível"
+
+msgid "Preview"
+msgstr "Pré-visualização"
+
+msgid "Recording preview"
+msgstr "Pré-visualização da gravação"
+
+msgid "Preparing preview"
+msgstr "A preparar pré-visualização"
+
+msgid "Play"
+msgstr "Reproduzir"
+
+msgid "Mute"
+msgstr "Silenciar"
+
+msgid "Unmute"
+msgstr "Ativar som"
+
+msgid "Recording preview unavailable"
+msgstr "Pré-visualização da gravação indisponível"
+
+msgid "Discard this unsaved recording?"
+msgstr "Descartar esta gravação não guardada?"
+
+msgid "Discard"
+msgstr "Descartar"
+
+msgid "Playback position"
+msgstr "Posição de reprodução"

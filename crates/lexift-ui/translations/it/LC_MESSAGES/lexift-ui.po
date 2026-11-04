@@ -2243,3 +2243,33 @@ msgstr "Avvia tra 10 secondi"
 
 msgid "Countdown unavailable"
 msgstr "Conto alla rovescia non disponibile"
+
+msgid "Preview"
+msgstr "Anteprima"
+
+msgid "Recording preview"
+msgstr "Anteprima registrazione"
+
+msgid "Preparing preview"
+msgstr "Preparazione anteprima"
+
+msgid "Play"
+msgstr "Riproduci"
+
+msgid "Mute"
+msgstr "Disattiva audio"
+
+msgid "Unmute"
+msgstr "Attiva audio"
+
+msgid "Recording preview unavailable"
+msgstr "Anteprima registrazione non disponibile"
+
+msgid "Discard this unsaved recording?"
+msgstr "Scartare questa registrazione non salvata?"
+
+msgid "Discard"
+msgstr "Scarta"
+
+msgid "Playback position"
+msgstr "Posizione di riproduzione"

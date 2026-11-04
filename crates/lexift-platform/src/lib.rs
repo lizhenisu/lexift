@@ -1009,3 +1009,19 @@ pub fn countdown_handoff(
         Ok(false)
     }
 }
+
+/// Move the worker-owned video child inside its existing parent client area.
+pub fn position_recording_preview_surface(
+    window: lexift_core::ports::magnifier::WindowToken,
+    bounds: lexift_core::domain::geometry::Rect,
+) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        windows::screen_recording::preview::position(window, bounds)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, bounds);
+        false
+    }
+}

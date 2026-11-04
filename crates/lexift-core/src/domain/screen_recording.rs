@@ -144,6 +144,7 @@ pub enum FinishReason {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    DiscardCompleted,
     StartAfter(u8),
     CountdownPrepared(std::time::Instant),
     CountdownElapsed(std::time::Instant),
@@ -410,6 +411,10 @@ impl State {
             (Phase::Saving, Event::SaveCancelled | Event::SaveFailed) => (Phase::PendingSave, None),
             (Phase::Saving, Event::Saved) => {
                 self.saved = true;
+                (Phase::Retiring, Some(Action::Release))
+            }
+            (Phase::PendingSave, Event::DiscardCompleted) => {
+                self.restore_editor = false;
                 (Phase::Retiring, Some(Action::Release))
             }
             (Phase::Retiring, Event::Retired) => {

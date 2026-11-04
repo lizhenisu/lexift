@@ -119,6 +119,12 @@ pub struct SaveRequest {
 /// sequence numbers. Pause/resume notices follow the corresponding clock change;
 /// completion means the container is finalized and all capture resources retired.
 pub trait ScreenRecordingPort: Send + Sync {
+    /// Playback commands have a separate generation from capture/save commands.
+    fn preview(
+        &self,
+        command: crate::domain::recording_preview::Command,
+        listener: PreviewListener,
+    ) -> Result<()>;
     /// Retire the native service and invoke completion after apartment-owned
     /// resources are released. This does not block the calling/UI thread.
     fn shutdown(&self, completed: Box<dyn FnOnce() + Send>) -> Result<()>;
@@ -137,3 +143,8 @@ pub trait ScreenRecordingPort: Send + Sync {
         completed: Box<dyn FnOnce(Result<SaveOutcome>) + Send>,
     ) -> Result<()>;
 }
+pub type PreviewListener = Arc<
+    dyn Fn(crate::domain::recording_preview::Identity, crate::domain::recording_preview::Notice)
+        + Send
+        + Sync,
+>;

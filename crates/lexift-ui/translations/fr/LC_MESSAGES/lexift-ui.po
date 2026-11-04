@@ -2243,3 +2243,33 @@ msgstr "Démarrer dans 10 secondes"
 
 msgid "Countdown unavailable"
 msgstr "Compte à rebours indisponible"
+
+msgid "Preview"
+msgstr "Aperçu"
+
+msgid "Recording preview"
+msgstr "Aperçu de l’enregistrement"
+
+msgid "Preparing preview"
+msgstr "Préparation de l’aperçu"
+
+msgid "Play"
+msgstr "Lire"
+
+msgid "Mute"
+msgstr "Couper le son"
+
+msgid "Unmute"
+msgstr "Rétablir le son"
+
+msgid "Recording preview unavailable"
+msgstr "Aperçu de l’enregistrement indisponible"
+
+msgid "Discard this unsaved recording?"
+msgstr "Supprimer cet enregistrement non sauvegardé ?"
+
+msgid "Discard"
+msgstr "Supprimer"
+
+msgid "Playback position"
+msgstr "Position de lecture"
