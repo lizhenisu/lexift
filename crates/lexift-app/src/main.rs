@@ -13,5 +13,8 @@ mod wiring;
 
 // Startup is silent by default; the legacy --background argument remains accepted.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(code) = lexift_platform::run_recording_dialog_host() {
+        std::process::exit(code);
+    }
     bootstrap::run()
 }

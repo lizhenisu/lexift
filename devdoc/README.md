@@ -38,6 +38,7 @@
 - [录屏帧率、画质与性能验证](releases/recording-video-options.md)
 - [录屏倒计时开始验证](releases/recording-countdown.md)
 - [录屏完成后预览与回放验证](releases/recording-preview.md)
+- [录屏预览同步与资源收尾专项](releases/recording-preview-validation.md)
 - [PixPin 长截图链路与交互研究](planning/pixpin-long-screenshot-research.md)
 - [PixPin 长图结果编辑器研究](planning/pixpin-image-editor-research.md)
 - [阶段实施计划与阶段验收记录](planning/implementation-plan.md)：M2／M3／M4 的阶段背景，不能单独作为当前功能清单。

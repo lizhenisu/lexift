@@ -1,4 +1,6 @@
 //! STA MP4 selection and bounded, atomic publishing of an already sealed file.
+mod host;
+pub(crate) use host::run_from_args;
 use lexift_core::{
     Error, Result,
     ports::{annotation_save::SaveOutcome, screen_recording::SaveRequest},
@@ -10,15 +12,9 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::Duration,
 };
 use windows::{
-    Win32::{
-        Foundation::*,
-        Storage::FileSystem::*,
-        System::{Com::*, Threading::GetCurrentThreadId},
-        UI::{Shell::*, WindowsAndMessaging::*},
-    },
+    Win32::{Foundation::*, Storage::FileSystem::*, System::Com::*, UI::Shell::*},
     core::*,
 };
 fn error(e: impl std::fmt::Display) -> Error {
@@ -34,27 +30,31 @@ impl Drop for Apartment {
         unsafe { CoUninitialize() }
     }
 }
-unsafe extern "system" fn close(hwnd: HWND, _: LPARAM) -> BOOL {
-    unsafe {
-        if IsWindowVisible(hwnd).as_bool() {
-            let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
-        }
-    }
-    BOOL(1)
-}
-
 pub fn save(source: &Path, request: SaveRequest, cancel: Arc<AtomicBool>) -> Result<SaveOutcome> {
     if cancel.load(Ordering::Acquire) {
         return Ok(SaveOutcome::Cancelled);
     }
+    match host::choose(request, &cancel)? {
+        Some(path) => publish(source, &path, &cancel),
+        None => Ok(SaveOutcome::Cancelled),
+    }
+}
+
+/// The helper owns the dialog's entire STA and Shell lifetime; no video is sent.
+fn choose_path(
+    owner: Option<lexift_core::ports::magnifier::WindowToken>,
+    name: String,
+    title: String,
+    mismatch: String,
+) -> Result<Option<PathBuf>> {
     let _shell = super::super::window_shell_policy::ThreadGuard::new()?;
     unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok() }.map_err(error)?;
     let _apartment = Apartment;
     let dialog: IFileSaveDialog =
         unsafe { CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER) }.map_err(error)?;
-    let name = Path::new(&request.default_name).with_extension("");
+    let name = Path::new(&name).with_extension("");
     let name = wide(name.as_os_str());
-    let title = wide(request.title.as_ref());
+    let title = wide(title.as_ref());
     unsafe {
         dialog
             .SetOptions(
@@ -68,39 +68,13 @@ pub fn save(source: &Path, request: SaveRequest, cancel: Arc<AtomicBool>) -> Res
         dialog.SetTitle(PCWSTR(title.as_ptr())).map_err(error)?;
         dialog.SetFileName(PCWSTR(name.as_ptr())).map_err(error)?;
     }
-    let _events = super::super::annotation_save::dialog::configure_mp4(
-        &dialog,
-        request.extension_mismatch_message,
-    )?;
-    let thread = unsafe { GetCurrentThreadId() };
-    let done = AtomicBool::new(false);
-    let shown = std::thread::scope(|scope| {
-        scope.spawn(|| {
-            while !done.load(Ordering::Acquire) {
-                if cancel.load(Ordering::Acquire) {
-                    unsafe {
-                        let _ = EnumThreadWindows(thread, Some(close), LPARAM(0));
-                    }
-                }
-                std::thread::sleep(Duration::from_millis(20));
-            }
-        });
-        let result = if cancel.load(Ordering::Acquire) {
-            Err(windows::core::Error::from_hresult(HRESULT::from_win32(
-                ERROR_CANCELLED.0,
-            )))
-        } else {
-            unsafe { dialog.Show(request.owner.map(|t| HWND(t.0 as *mut _))) }
-        };
-        done.store(true, Ordering::Release);
-        result
-    });
-    if cancel.load(Ordering::Acquire)
-        || shown
-            .as_ref()
-            .is_err_and(|e| e.code() == HRESULT::from_win32(ERROR_CANCELLED.0))
+    let _events = super::super::annotation_save::dialog::configure_mp4(&dialog, mismatch)?;
+    let shown = unsafe { dialog.Show(owner.map(|t| HWND(t.0 as *mut _))) };
+    if shown
+        .as_ref()
+        .is_err_and(|e| e.code() == HRESULT::from_win32(ERROR_CANCELLED.0))
     {
-        return Ok(SaveOutcome::Cancelled);
+        return Ok(None);
     }
     shown.map_err(error)?;
     let item = unsafe { dialog.GetResult() }.map_err(error)?;
@@ -117,7 +91,7 @@ pub fn save(source: &Path, request: SaveRequest, cancel: Arc<AtomicBool>) -> Res
     {
         return Err(Error::new("Video extension must be MP4"));
     }
-    publish(source, &path, &cancel)
+    Ok(Some(path))
 }
 
 pub fn publish(source: &Path, destination: &Path, cancel: &AtomicBool) -> Result<SaveOutcome> {

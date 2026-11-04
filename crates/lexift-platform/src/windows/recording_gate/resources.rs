@@ -4,6 +4,8 @@ pub static CAPTURE: AtomicUsize = AtomicUsize::new(0);
 pub static ENCODER: AtomicUsize = AtomicUsize::new(0);
 pub static CONTROL: AtomicUsize = AtomicUsize::new(0);
 pub static WINDOWS: AtomicUsize = AtomicUsize::new(0);
+pub static PREVIEW_ENGINE: AtomicUsize = AtomicUsize::new(0);
+pub static PREVIEW_SURFACE: AtomicUsize = AtomicUsize::new(0);
 pub struct Lease(&'static AtomicUsize);
 impl Lease {
     pub fn new(counter: &'static AtomicUsize) -> Self {
@@ -17,10 +19,17 @@ impl Drop for Lease {
     }
 }
 pub fn snapshot() -> serde_json::Value {
-    serde_json::json!({"capture":CAPTURE.load(Ordering::Acquire),"encoder":ENCODER.load(Ordering::Acquire),"control":CONTROL.load(Ordering::Acquire),"windows":WINDOWS.load(Ordering::Acquire)})
+    serde_json::json!({"capture":CAPTURE.load(Ordering::Acquire),"encoder":ENCODER.load(Ordering::Acquire),"control":CONTROL.load(Ordering::Acquire),"windows":WINDOWS.load(Ordering::Acquire),"preview_engine":PREVIEW_ENGINE.load(Ordering::Acquire),"preview_surface":PREVIEW_SURFACE.load(Ordering::Acquire)})
 }
 pub fn assert_retired() {
-    for counter in [&CAPTURE, &ENCODER, &CONTROL, &WINDOWS] {
+    for counter in [
+        &CAPTURE,
+        &ENCODER,
+        &CONTROL,
+        &WINDOWS,
+        &PREVIEW_ENGINE,
+        &PREVIEW_SURFACE,
+    ] {
         assert_eq!(
             counter.load(Ordering::Acquire),
             0,

@@ -26,6 +26,8 @@ impl IMFMediaEngineNotify_Impl for Callback_Impl {
     }
 }
 pub(super) struct Engine {
+    #[cfg(test)]
+    _lease: super::super::super::recording_gate::resources::Lease,
     pub media: IMFMediaEngine,
     pub device: ID3D11Device,
     pub _context: ID3D11DeviceContext,
@@ -73,12 +75,13 @@ impl Engine {
             let factory: IMFMediaEngineClassFactory =
                 CoCreateInstance(&CLSID_MFMediaEngineClassFactory, None, CLSCTX_INPROC_SERVER)?;
             let media = factory.CreateInstance(0, &attributes)?;
-            media.SetAutoPlay(false)?;
-            media.SetLoop(false)?;
-            media.SetVolume(1.)?;
-            media.SetSource(&BSTR::from(path.to_string_lossy().as_ref()))?;
-            media.Load()?;
-            Ok(Self {
+            // Establish Shutdown ownership before fallible configuration: releasing
+            // a partially configured COM interface alone does not retire its work.
+            let engine = Self {
+                #[cfg(test)]
+                _lease: super::super::super::recording_gate::resources::Lease::new(
+                    &super::super::super::recording_gate::resources::PREVIEW_ENGINE,
+                ),
                 media,
                 device,
                 _context: context,
@@ -87,7 +90,15 @@ impl Engine {
                 events,
                 _manager: manager,
                 _startup: startup,
-            })
+            };
+            engine.media.SetAutoPlay(false)?;
+            engine.media.SetLoop(false)?;
+            engine.media.SetVolume(1.)?;
+            engine
+                .media
+                .SetSource(&BSTR::from(path.to_string_lossy().as_ref()))?;
+            engine.media.Load()?;
+            Ok(engine)
         }
     }
     pub fn check_events(&mut self) -> Result<()> {

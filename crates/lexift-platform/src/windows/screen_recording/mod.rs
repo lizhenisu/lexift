@@ -10,7 +10,7 @@ mod audio_visual_fixture;
 mod diagnostics;
 mod encoder;
 pub(crate) mod preview;
-mod save;
+pub(crate) mod save;
 #[cfg(test)]
 mod tests;
 use super::{

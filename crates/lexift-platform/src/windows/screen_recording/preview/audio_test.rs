@@ -84,7 +84,7 @@ impl Probe {
                 silence_gap: false,
                 qpc,
                 position,
-                discontinuity: false,
+                discontinuity: flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY.0 as u32 != 0,
                 frames,
             }))
         }
@@ -245,8 +245,14 @@ fn measure() -> serde_json::Value {
         );
         let play_qpc = super::super::super::recording_capture::qpc_100ns().unwrap() as f64 / 1e7;
         engine.media.Play().unwrap();
-        let until = Instant::now() + Duration::from_secs(10);
+        let seconds: u64 = std::env::var("LEXIFT_PREVIEW_SYNC_SECONDS")
+            .ok()
+            .map(|value| value.parse().expect("positive validation duration"))
+            .unwrap_or(10);
+        assert!((1..=610).contains(&seconds));
+        let until = Instant::now() + Duration::from_secs(seconds);
         let mut flashes = Vec::new();
+        let mut flash_media_pts = Vec::new();
         let mut pulses = Vec::new();
         let (mut bright, mut active) = (false, false);
         let mut channel_active = [false, false];
@@ -254,6 +260,7 @@ fn measure() -> serde_json::Value {
         let mut block = Vec::with_capacity(48);
         let mut block_time = 0.;
         let mut frames = 0;
+        let mut discontinuities = Vec::new();
         while Instant::now() < until {
             let mut msg = MSG::default();
             while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
@@ -261,7 +268,7 @@ fn measure() -> serde_json::Value {
             }
             engine.check_events().unwrap();
             let frame = engine.frame().unwrap();
-            if frame.is_some() {
+            if let Some(pts) = frame {
                 frames += 1;
                 let before = super::super::super::recording_capture::qpc_100ns().unwrap();
                 surface.present(&engine).unwrap();
@@ -270,12 +277,16 @@ fn measure() -> serde_json::Value {
                     surface.flush().unwrap();
                     let after = super::super::super::recording_capture::qpc_100ns().unwrap();
                     flashes.push((before as f64 / 1e7, after as f64 / 1e7));
+                    flash_media_pts.push(pts);
                 }
                 bright = now;
             } else {
                 DwmFlush().unwrap();
             }
             while let Some(packet) = endpoint.read().unwrap() {
+                if packet.discontinuity {
+                    discontinuities.push((packet.position, packet.qpc));
+                }
                 for (i, sample) in packet.frames.into_iter().enumerate() {
                     if block.is_empty() {
                         block_time = packet.qpc as f64 / 1e7 + i as f64 / 48000.;
@@ -324,7 +335,7 @@ fn measure() -> serde_json::Value {
             errors.push([(p - hi) * 1000., (p - lo) * 1000.]);
         }
         let bound = errors.iter().flatten().map(|x| x.abs()).fold(0., f64::max);
-        serde_json::json!({"passed":errors.len()>=4&&used.len()==pulses.len()&&bound<=50.,"channel_pulses_seconds":channel_pulses,"frames":frames,"ambient_peak":ambient,"flash_count":flashes.len(),"pulse_count":pulses.len(),"pulse_seconds":pulses.iter().map(|t|t-play_qpc).collect::<Vec<_>>(),"flash_seconds":flashes.iter().map(|(lo,hi)|[lo-play_qpc,hi-play_qpc]).collect::<Vec<_>>(),"error_intervals_ms":errors,"maximum_error_ms":bound,"scope":"WASAPI loopback versus native child Present/DWM completion; not acoustic or photon timing"})
+        serde_json::json!({"passed":errors.len()>=4&&used.len()==pulses.len()&&bound<=50.,"channel_pulses_seconds":channel_pulses,"frames":frames,"ambient_peak":ambient,"duration_seconds":seconds,"discontinuities":discontinuities,"flash_media_pts":flash_media_pts,"flash_count":flashes.len(),"pulse_count":pulses.len(),"pulse_seconds":pulses.iter().map(|t|t-play_qpc).collect::<Vec<_>>(),"flash_seconds":flashes.iter().map(|(lo,hi)|[lo-play_qpc,hi-play_qpc]).collect::<Vec<_>>(),"error_intervals_ms":errors,"maximum_error_ms":bound,"scope":"WASAPI loopback versus native child Present/DWM completion; not acoustic or photon timing"})
     }
 }
 

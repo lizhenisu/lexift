@@ -13,6 +13,8 @@ use windows::{
     core::*,
 };
 pub(super) struct Surface {
+    #[cfg(test)]
+    _lease: super::super::super::recording_gate::resources::Lease,
     window: HWND,
     parent: HWND,
     restore_clip: bool,
@@ -79,6 +81,10 @@ impl Surface {
                 SetWindowLongPtrW(parent, GWL_STYLE, style | WS_CLIPCHILDREN.0 as isize);
             }
             Ok(Self {
+                #[cfg(test)]
+                _lease: super::super::super::recording_gate::resources::Lease::new(
+                    &super::super::super::recording_gate::resources::PREVIEW_SURFACE,
+                ),
                 window,
                 parent,
                 restore_clip,

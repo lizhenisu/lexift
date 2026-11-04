@@ -17,6 +17,19 @@ pub fn local_ocr_port() -> lexift_core::Result<std::sync::Arc<dyn lexift_core::p
 }
 pub mod capabilities;
 mod credential;
+
+/// Internal native-dialog role, dispatched before application initialization.
+/// It creates no tray, hotkeys, configuration, recorder, or Slint event loop.
+pub fn run_recording_dialog_host() -> Option<i32> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::screen_recording::save::run_from_args()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
 #[cfg(feature = "mock")]
 mod mock;
 

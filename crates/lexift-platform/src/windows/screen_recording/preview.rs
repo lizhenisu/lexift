@@ -7,6 +7,8 @@ pub(super) use worker::Worker;
 pub(crate) use worker::position;
 #[cfg(test)]
 mod audio_test;
+#[cfg(test)]
+mod resource_test;
 
 #[cfg(test)]
 mod tests {

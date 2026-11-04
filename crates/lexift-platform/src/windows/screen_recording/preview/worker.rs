@@ -30,6 +30,16 @@ fn targets() -> &'static Targets {
     static TARGETS: OnceLock<Targets> = OnceLock::new();
     TARGETS.get_or_init(Default::default)
 }
+/// A retiring producer cannot unregister a replacement using the same HWND.
+fn unregister(window: WindowToken, owner: &Arc<Shared>) {
+    let mut targets = targets().lock().unwrap();
+    if targets
+        .get(&window)
+        .is_some_and(|registered| registered.ptr_eq(&Arc::downgrade(owner)))
+    {
+        targets.remove(&window);
+    }
+}
 pub(crate) fn position(window: WindowToken, bounds: Rect) -> bool {
     let slot = targets()
         .lock()
@@ -69,7 +79,10 @@ impl Worker {
         let thread = thread::Builder::new()
             .name("lexift-recording-preview".into())
             .spawn(move || run(id, target, file, last_frame, listener, s))
-            .map_err(|_| Error::new("Recording preview unavailable"))?;
+            .map_err(|_| {
+                unregister(target.window, &shared);
+                Error::new("Recording preview unavailable")
+            })?;
         Ok(Self {
             shared,
             thread: Some(thread),
@@ -305,7 +318,7 @@ fn run(
         }
     }
     let close = shared.pending.lock().unwrap().close;
-    targets().lock().unwrap().remove(&target.window);
+    unregister(target.window, &shared);
     drop(file);
     if let Some(id) = close {
         tracing::debug!(
@@ -315,5 +328,51 @@ fn run(
             "Recording preview resources retired"
         );
         listener(id, Notice::Retired);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retirement_preserves_replacement_surface_registration() {
+        let shared = || {
+            Arc::new(Shared {
+                pending: Mutex::new(Default::default()),
+                wake: Condvar::new(),
+            })
+        };
+        let old = shared();
+        let replacement = shared();
+        let window = WindowToken(isize::MAX);
+        targets()
+            .lock()
+            .unwrap()
+            .insert(window, Arc::downgrade(&old));
+        targets()
+            .lock()
+            .unwrap()
+            .insert(window, Arc::downgrade(&replacement));
+        unregister(window, &old);
+        assert!(position(
+            window,
+            Rect {
+                left: 0,
+                top: 0,
+                right: 10,
+                bottom: 10
+            }
+        ));
+        unregister(window, &replacement);
+        assert!(!position(
+            window,
+            Rect {
+                left: 0,
+                top: 0,
+                right: 10,
+                bottom: 10
+            }
+        ));
     }
 }
