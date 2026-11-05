@@ -59,7 +59,9 @@ pub struct ArtifactInfo {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ExportStage {
+    AnalyzingColors,
     Transcoding,
+    EncodingGif,
     Finalizing,
     Publishing,
 }
@@ -118,6 +120,13 @@ pub enum Control {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SaveRequest {
+    pub formats: Vec<crate::domain::recording_gif::Format>,
+    pub default_format: crate::domain::recording_gif::Format,
+    pub gif_plan: std::result::Result<
+        crate::domain::recording_gif::Plan,
+        crate::domain::recording_gif::Rejection,
+    >,
+    pub gif_unavailable_message: String,
     pub range: Option<crate::domain::recording_trim::Range>,
     pub range_version: u64,
     pub identity: Identity,

@@ -263,7 +263,20 @@ fn recording_preview_renders_all_languages_themes_sizes_and_dpis() {
                 for (width, height) in [(640., 360.), (960., 760.)] {
                     let (width, height) = ((width * dpi) as u32, (height * dpi) as u32);
                     adapter.set_size(slint::PhysicalSize::new(width, height));
-                    for phase in 0..3 {
+                    for phase in 0..5 {
+                        w.set_busy(phase >= 3);
+                        w.set_exporting(phase >= 3);
+                        w.set_export_label(
+                            format!(
+                                "{} 50%",
+                                crate::i18n::tr(if phase == 3 {
+                                    "Analyzing GIF colors"
+                                } else {
+                                    "Encoding GIF"
+                                })
+                            )
+                            .into(),
+                        );
                         w.set_ready(phase != 2);
                         w.set_playing(phase == 1);
                         w.set_has_audio(phase != 0);

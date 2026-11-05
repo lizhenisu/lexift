@@ -2,7 +2,7 @@
 //! It is deliberately not a public recording API or a user-facing workflow.
 mod capture;
 mod encoder;
-mod fault;
+pub(super) mod fault;
 pub(super) mod fixture;
 mod hardware;
 mod layers;

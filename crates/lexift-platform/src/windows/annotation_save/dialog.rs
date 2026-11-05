@@ -123,22 +123,60 @@ pub(super) fn configure(
         })
     }
 }
-/// The same validation sink also serves sealed MP4 files, without treating
-/// a video as an image codec or changing the image-save Port contract.
-pub(in crate::windows) fn configure_mp4(
+/// Recording formats share extension validation without extending image codecs.
+#[derive(Clone, Debug)]
+pub(in crate::windows) struct RecordingOptions {
+    pub formats: Vec<lexift_core::domain::recording_gif::Format>,
+    pub default_format: lexift_core::domain::recording_gif::Format,
+    pub gif_allowed: bool,
+    pub mismatch: String,
+    pub gif_unavailable: String,
+}
+impl RecordingOptions {
+    pub fn selected(
+        &self,
+        dialog: &IFileDialog,
+    ) -> windows::core::Result<lexift_core::domain::recording_gif::Format> {
+        self.formats
+            .get(unsafe { dialog.GetFileTypeIndex()? }.wrapping_sub(1) as usize)
+            .copied()
+            .ok_or_else(|| {
+                windows::core::Error::from_hresult(windows::Win32::Foundation::E_INVALIDARG)
+            })
+    }
+}
+pub(in crate::windows) fn configure_recording(
     dialog: &IFileSaveDialog,
-    message: String,
+    options: RecordingOptions,
 ) -> Result<Subscription> {
-    unsafe {
-        dialog
-            .SetFileTypes(&[COMDLG_FILTERSPEC {
+    use lexift_core::domain::recording_gif::Format;
+    let filters: Vec<_> = options
+        .formats
+        .iter()
+        .map(|f| match f {
+            Format::Mp4 => COMDLG_FILTERSPEC {
                 pszName: windows::core::w!("MP4 (*.mp4)"),
                 pszSpec: windows::core::w!("*.mp4"),
-            }])
-            .map_err(native_error)?;
-        dialog.SetFileTypeIndex(1).map_err(native_error)?;
+            },
+            Format::Gif => COMDLG_FILTERSPEC {
+                pszName: windows::core::w!("GIF (*.gif)"),
+                pszSpec: windows::core::w!("*.gif"),
+            },
+        })
+        .collect();
+    let default = options
+        .formats
+        .iter()
+        .position(|f| *f == options.default_format)
+        .ok_or_else(|| lexift_core::Error::new("Invalid recording save formats"))?;
+    unsafe {
+        dialog.SetFileTypes(&filters).map_err(native_error)?;
         dialog
-            .SetDefaultExtension(windows::core::w!("mp4"))
+            .SetFileTypeIndex(default as u32 + 1)
+            .map_err(native_error)?;
+        let extension = wide(options.default_format.extension().as_ref());
+        dialog
+            .SetDefaultExtension(PCWSTR(extension.as_ptr()))
             .map_err(native_error)?;
         let custom: IFileDialogCustomize = dialog.cast().map_err(native_error)?;
         custom
@@ -151,7 +189,7 @@ pub(in crate::windows) fn configure_mp4(
             vtable: &EVENTS_VTABLE,
             references: AtomicU32::new(1),
             options: None,
-            video_message: message,
+            recording: Some(options),
             updating_name: Cell::new(false),
         });
         let handler = IFileDialogEvents::from_raw(Box::into_raw(object).cast());
@@ -169,7 +207,7 @@ struct DialogEvents {
     vtable: &'static IFileDialogEvents_Vtbl,
     references: AtomicU32,
     options: Option<ImageSaveOptions>,
-    video_message: String,
+    recording: Option<RecordingOptions>,
     updating_name: Cell<bool>,
 }
 impl DialogEvents {
@@ -178,7 +216,7 @@ impl DialogEvents {
             vtable: &EVENTS_VTABLE,
             references: AtomicU32::new(1),
             options: Some(options),
-            video_message: String::new(),
+            recording: None,
             updating_name: Cell::new(false),
         });
         unsafe { IFileDialogEvents::from_raw(Box::into_raw(object).cast()) }
@@ -204,17 +242,26 @@ impl DialogEvents {
                     options.extension_mismatch_message.as_str(),
                 )
             } else {
+                let options = self.recording.as_ref().ok_or_else(|| {
+                    windows::core::Error::from_hresult(windows::Win32::Foundation::E_INVALIDARG)
+                })?;
+                let format = options.selected(dialog)?;
                 let matches = |p: &Path| {
                     p.extension()
                         .and_then(|e| e.to_str())
-                        .is_some_and(|e| e.eq_ignore_ascii_case("mp4"))
+                        .is_some_and(|e| format.accepts_extension(e))
                 };
-                (
-                    (Path::new(&typed_name).extension().is_none()
-                        || matches(Path::new(&typed_name)))
-                        && matches(Path::new(&path)),
-                    self.video_message.as_str(),
-                )
+                let extension_ok = (Path::new(&typed_name).extension().is_none()
+                    || matches(Path::new(&typed_name)))
+                    && matches(Path::new(&path));
+                if extension_ok
+                    && format == lexift_core::domain::recording_gif::Format::Gif
+                    && !options.gif_allowed
+                {
+                    (false, options.gif_unavailable.as_str())
+                } else {
+                    (extension_ok, options.mismatch.as_str())
+                }
             };
             if !valid {
                 let custom: IFileDialogCustomize = dialog.cast()?;
@@ -241,8 +288,34 @@ impl DialogEvents {
         }
         let _reset = Reset(&self.updating_name);
         let Some(options) = &self.options else {
+            let options = self.recording.as_ref().ok_or_else(|| {
+                windows::core::Error::from_hresult(windows::Win32::Foundation::E_INVALIDARG)
+            })?;
+            let format = options.selected(dialog)?;
             unsafe {
-                dialog.SetDefaultExtension(windows::core::w!("mp4"))?;
+                let extension = wide(format.extension().as_ref());
+                dialog.SetDefaultExtension(PCWSTR(extension.as_ptr()))?;
+                if let Ok(raw) = dialog.GetFileName() {
+                    let name = raw.to_string();
+                    CoTaskMemFree(Some(raw.0.cast()));
+                    let name = name?;
+                    let path = Path::new(&name);
+                    if path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+                        !format.accepts_extension(e)
+                            && [
+                                lexift_core::domain::recording_gif::Format::Mp4,
+                                lexift_core::domain::recording_gif::Format::Gif,
+                            ]
+                            .iter()
+                            .any(|f| f.accepts_extension(e))
+                    }) {
+                        let name = wide(path.with_extension(format.extension()).as_os_str());
+                        dialog.SetFileName(PCWSTR(name.as_ptr()))?;
+                    }
+                }
+                dialog
+                    .cast::<IFileDialogCustomize>()?
+                    .SetControlState(ERROR_CONTROL, CDCS_ENABLED)?;
             }
             return Ok(());
         };

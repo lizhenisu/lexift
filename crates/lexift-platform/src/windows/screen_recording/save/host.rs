@@ -39,10 +39,14 @@ struct Request {
     name: String,
     title: String,
     mismatch: String,
+    formats: Vec<u8>,
+    default_format: u8,
+    gif_allowed: bool,
+    gif_message: String,
 }
 #[derive(Serialize, Deserialize)]
 enum Reply {
-    Selected(Vec<u16>),
+    Selected(Vec<u16>, u8),
     Cancelled,
     Failed,
 }
@@ -103,21 +107,29 @@ impl Drop for OwnerGuard {
     }
 }
 
-fn decode_reply(bytes: &[u8]) -> Result<Option<PathBuf>> {
+fn decode_reply(bytes: &[u8]) -> Result<Option<super::Selection>> {
     if bytes.len() as u64 > RESPONSE_LIMIT {
         return Err(unavailable());
     }
     match serde_json::from_slice(bytes).map_err(|_| unavailable())? {
-        Reply::Selected(wide) if !wide.is_empty() && wide.len() <= 32767 && !wide.contains(&0) => {
+        Reply::Selected(wide, code)
+            if !wide.is_empty() && wide.len() <= 32767 && !wide.contains(&0) =>
+        {
             let path = PathBuf::from(std::ffi::OsString::from_wide(&wide));
+            let format = match code {
+                0 => lexift_core::domain::recording_gif::Format::Mp4,
+                1 => lexift_core::domain::recording_gif::Format::Gif,
+                _ => return Err(unavailable()),
+            };
             if !path.is_absolute()
                 || !path
                     .extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case("mp4"))
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| format.accepts_extension(e))
             {
                 return Err(unavailable());
             }
-            Ok(Some(path))
+            Ok(Some(super::Selection { path, format }))
         }
         Reply::Cancelled => Ok(None),
         _ => Err(unavailable()),
@@ -142,18 +154,37 @@ unsafe extern "system" fn cancel_window(hwnd: HWND, pid: LPARAM) -> BOOL {
     BOOL(1)
 }
 
-pub(super) fn choose(request: SaveRequest, cancel: &AtomicBool) -> Result<Option<PathBuf>> {
+pub(super) fn choose(
+    request: SaveRequest,
+    cancel: &AtomicBool,
+) -> Result<Option<super::Selection>> {
+    let allowed = request.formats.clone();
+    let gif_allowed = request.gif_plan.is_ok();
     let identity = request.identity;
     let started = Instant::now();
     let owner_guard = OwnerGuard::new(request.owner)?;
     let payload = serde_json::to_vec(&Request {
-        version: 1,
+        version: 2,
         parent: std::process::id(),
         owner: request.owner.map(|w| w.0),
         owner_epoch: request.owner.map(|_| owner_guard.epoch),
         name: request.default_name,
         title: request.title,
         mismatch: request.extension_mismatch_message,
+        formats: request
+            .formats
+            .iter()
+            .map(|f| match f {
+                lexift_core::domain::recording_gif::Format::Mp4 => 0,
+                lexift_core::domain::recording_gif::Format::Gif => 1,
+            })
+            .collect(),
+        default_format: match request.default_format {
+            lexift_core::domain::recording_gif::Format::Mp4 => 0,
+            lexift_core::domain::recording_gif::Format::Gif => 1,
+        },
+        gif_allowed,
+        gif_message: request.gif_unavailable_message,
     })
     .map_err(|_| unavailable())?;
     if payload.len() as u64 > REQUEST_LIMIT {
@@ -266,7 +297,14 @@ pub(super) fn choose(request: SaveRequest, cancel: &AtomicBool) -> Result<Option
     if !status.success() {
         return Err(unavailable());
     }
-    decode_reply(&output)
+    let selected = decode_reply(&output)?;
+    if selected.as_ref().is_some_and(|s| {
+        !allowed.contains(&s.format)
+            || s.format == lexift_core::domain::recording_gif::Format::Gif && !gif_allowed
+    }) {
+        return Err(unavailable());
+    }
+    Ok(selected)
 }
 
 pub(crate) fn run_from_args() -> Option<i32> {
@@ -297,7 +335,7 @@ pub(crate) fn run_from_args() -> Option<i32> {
             return Err(unavailable());
         }
         let request: Request = serde_json::from_slice(&bytes).map_err(|_| unavailable())?;
-        if request.version != 1 || request.parent == 0 {
+        if request.version != 2 || request.parent == 0 {
             return Err(unavailable());
         }
         if let Some(owner) = request.owner {
@@ -316,20 +354,51 @@ pub(crate) fn run_from_args() -> Option<i32> {
                 return Err(unavailable());
             }
         }
+        let formats: Vec<_> = request
+            .formats
+            .iter()
+            .map(|code| match code {
+                0 => Ok(lexift_core::domain::recording_gif::Format::Mp4),
+                1 => Ok(lexift_core::domain::recording_gif::Format::Gif),
+                _ => Err(unavailable()),
+            })
+            .collect::<Result<_>>()?;
+        if formats.is_empty() || formats.len() > 2 || formats.len() == 2 && formats[0] == formats[1]
+        {
+            return Err(unavailable());
+        }
+        let default_format = match request.default_format {
+            0 => lexift_core::domain::recording_gif::Format::Mp4,
+            1 => lexift_core::domain::recording_gif::Format::Gif,
+            _ => return Err(unavailable()),
+        };
         super::choose_path(
             request.owner.map(WindowToken),
             request.name,
             request.title,
-            request.mismatch,
+            super::super::super::annotation_save::dialog::RecordingOptions {
+                formats,
+                default_format,
+                gif_allowed: request.gif_allowed,
+                mismatch: request.mismatch,
+                gif_unavailable: request.gif_message,
+            },
         )
     })();
     let reply = match result {
-        Ok(Some(path)) => {
+        Ok(Some(selected)) => {
+            let path = selected.path;
             let wide: Vec<_> = path.as_os_str().encode_wide().take(32768).collect();
             if wide.len() > 32767 {
                 Reply::Failed
             } else {
-                Reply::Selected(wide)
+                Reply::Selected(
+                    wide,
+                    match selected.format {
+                        lexift_core::domain::recording_gif::Format::Mp4 => 0,
+                        lexift_core::domain::recording_gif::Format::Gif => 1,
+                    },
+                )
             }
         }
         Ok(None) => Reply::Cancelled,
@@ -353,19 +422,47 @@ mod tests {
     fn bounded_protocol_rejects_wrong_paths_and_accepts_cancel() {
         assert!(decode_reply(br#""Cancelled""#).unwrap().is_none());
         for wide in [vec![], vec![0], vec![65], vec![65; 32768]] {
-            assert!(decode_reply(&serde_json::to_vec(&Reply::Selected(wide)).unwrap()).is_err());
+            assert!(decode_reply(&serde_json::to_vec(&Reply::Selected(wide, 0)).unwrap()).is_err());
         }
         assert!(decode_reply(&vec![b' '; RESPONSE_LIMIT as usize + 1]).is_err());
         assert!(decode_reply(br#"{"Unknown":true}"#).is_err());
         let path = PathBuf::from(r"C:\owned-fixture\视频.mp4");
         assert_eq!(
             decode_reply(
-                &serde_json::to_vec(&Reply::Selected(path.as_os_str().encode_wide().collect()))
-                    .unwrap()
+                &serde_json::to_vec(&Reply::Selected(
+                    path.as_os_str().encode_wide().collect(),
+                    0
+                ))
+                .unwrap()
             )
             .unwrap(),
-            Some(path)
+            Some(super::super::Selection {
+                path,
+                format: lexift_core::domain::recording_gif::Format::Mp4
+            })
         );
+    }
+
+    #[test]
+    fn format_identity_must_match_the_selected_path() {
+        for (extension, code, valid) in [
+            ("gif", 1, true),
+            ("GIF", 1, true),
+            ("MP4", 0, true),
+            ("mp4", 1, false),
+            ("gif", 0, false),
+            ("gif", 2, false),
+        ] {
+            let path = PathBuf::from(format!(r"C:\owned-fixture\视频.{extension}"));
+            let result = decode_reply(
+                &serde_json::to_vec(&Reply::Selected(
+                    path.as_os_str().encode_wide().collect(),
+                    code,
+                ))
+                .unwrap(),
+            );
+            assert_eq!(result.is_ok(), valid);
+        }
     }
 
     #[test]

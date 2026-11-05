@@ -460,24 +460,7 @@ pub(super) fn sync(s: &lexift_core::domain::screenshot::recording::Session) {
             )
             .into(),
         );
-        w.set_export_label(
-            if let Some((done, total)) = s.export_progress {
-                format!(
-                    "{} {}%",
-                    crate::i18n::tr(match s.export_stage {
-                        Some(lexift_core::ports::screen_recording::ExportStage::Finalizing) =>
-                            "Finalizing video",
-                        Some(lexift_core::ports::screen_recording::ExportStage::Publishing) =>
-                            "Saving video",
-                        _ => "Exporting video",
-                    }),
-                    done * 100 / total.max(1)
-                )
-            } else {
-                crate::i18n::tr("Save video")
-            }
-            .into(),
-        );
+        w.set_export_label(export_label(s));
         w.set_busy(
             s.lifecycle.phase == Phase::Saving
                 || matches!(p.phase, p::Phase::Preparing | p::Phase::Retiring),
@@ -679,4 +662,29 @@ pub(in crate::annotation) fn feedback_bounds() -> Option<Rect> {
             bottom: p.y + s.height as i32,
         })
     })
+}
+
+pub(super) fn export_label(
+    s: &lexift_core::domain::screenshot::recording::Session,
+) -> slint::SharedString {
+    if let Some((done, total)) = s.export_progress {
+        format!(
+            "{} {}%",
+            crate::i18n::tr(match s.export_stage {
+                Some(lexift_core::ports::screen_recording::ExportStage::AnalyzingColors) =>
+                    "Analyzing GIF colors",
+                Some(lexift_core::ports::screen_recording::ExportStage::EncodingGif) =>
+                    "Encoding GIF",
+                Some(lexift_core::ports::screen_recording::ExportStage::Finalizing) =>
+                    "Finalizing video",
+                Some(lexift_core::ports::screen_recording::ExportStage::Publishing) =>
+                    "Saving video",
+                _ => "Exporting video",
+            }),
+            done * 100 / total.max(1)
+        )
+    } else {
+        crate::i18n::tr("Save video")
+    }
+    .into()
 }

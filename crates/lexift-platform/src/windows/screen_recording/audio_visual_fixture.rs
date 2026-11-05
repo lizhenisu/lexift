@@ -2,7 +2,7 @@
 //! presentation; it is deliberately not advertised as a scanout timestamp.
 use std::{
     io::{BufWriter, Write},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 use windows::{
@@ -16,11 +16,16 @@ use windows::{
 };
 
 struct Source(HWND);
+static FROZEN: AtomicBool = AtomicBool::new(false);
 static CLICKS: AtomicU64 = AtomicU64::new(0);
 static WHEELS: AtomicU64 = AtomicU64::new(0);
 static DRAGS: AtomicU64 = AtomicU64::new(0);
 unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     unsafe {
+        if message == WM_APP + 12 {
+            FROZEN.store(w.0 != 0, Ordering::Release);
+            return LRESULT(0);
+        }
         if message == WM_APP + 11 {
             // UpdateLayeredWindow also sets position. Serialize movement with
             // that presentation on the owner instead of racing a foreign call.
@@ -149,17 +154,19 @@ fn native_playback_clock_visual_source() {
             let sample =
                 played as f64 + (before as f64 - anchor as f64) * 48000. / 10_000_000. - offset;
             let flash = (24000. ..29760.).contains(&sample.rem_euclid(96000.));
-            for y in 100..300 {
-                for x in 1400..1600 {
-                    let i = (y * 1920 + x) * 4;
-                    pixels[i..i + 3].fill(if flash { 255 } else { 0 });
-                }
-            }
-            for bit in 0..12 {
-                for y in 100..150 {
-                    for x in 700 + bit * 24..720 + bit * 24 {
+            if !FROZEN.load(Ordering::Acquire) || !shown {
+                for y in 100..300 {
+                    for x in 1400..1600 {
                         let i = (y * 1920 + x) * 4;
-                        pixels[i..i + 3].fill(if frame & (1 << bit) != 0 { 255 } else { 0 });
+                        pixels[i..i + 3].fill(if flash { 255 } else { 0 });
+                    }
+                }
+                for bit in 0..12 {
+                    for y in 100..150 {
+                        for x in 700 + bit * 24..720 + bit * 24 {
+                            let i = (y * 1920 + x) * 4;
+                            pixels[i..i + 3].fill(if frame & (1 << bit) != 0 { 255 } else { 0 });
+                        }
                     }
                 }
             }
@@ -172,7 +179,9 @@ fn native_playback_clock_visual_source() {
             DwmFlush().unwrap();
             let after = super::super::recording_capture::qpc_100ns().unwrap();
             writeln!(log, "{}", serde_json::json!({"frame":frame,"event":(sample / 96000.).floor() as i64,"flash":flash,"submit_qpc":before,"flush_qpc":after,"playback_sample":played,"playback_qpc":anchor,"offset_samples":offset,"clicks":CLICKS.load(Ordering::Relaxed),"wheels":WHEELS.load(Ordering::Relaxed),"drags":DRAGS.load(Ordering::Relaxed)})).unwrap();
-            frame += 1;
+            if !FROZEN.load(Ordering::Acquire) {
+                frame += 1;
+            }
         }
         log.flush().unwrap();
         drop(source);

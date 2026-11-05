@@ -2291,3 +2291,15 @@ msgstr "正在封裝影片"
 
 msgid "Saving video"
 msgstr "正在儲存影片"
+
+msgid "Analyzing GIF colors"
+msgstr "正在分析 GIF 色彩"
+
+msgid "Encoding GIF"
+msgstr "正在編碼 GIF"
+
+msgid "GIF supports clips up to 60 seconds. Shorten the selected range or choose MP4."
+msgstr "GIF 最長支援60秒。請縮短選取範圍或選擇 MP4。"
+
+msgid "Use the file extension matching the selected video format."
+msgstr "請使用與所選影片格式相符的副檔名。"

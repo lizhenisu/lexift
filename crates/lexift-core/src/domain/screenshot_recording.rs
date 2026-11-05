@@ -254,15 +254,15 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
                     && recording
                         .preview
                         .as_ref()
-                        .is_some_and(|p| p.range_version == *range_version)
+                        .map_or(*range_version == 0, |p| p.range_version == *range_version)
                     && recording
                         .export_stage
                         .is_none_or(|current| current <= *stage)
                     && *total > 0
                     && *completed <= *total
-                    && recording
-                        .export_progress
-                        .is_none_or(|(done, _)| *completed >= done)
+                    && recording.export_progress.is_none_or(|(done, _)| {
+                        recording.export_stage != Some(*stage) || *completed >= done
+                    })
                 {
                     recording.export_progress = Some((*completed, *total));
                     recording.export_stage = Some(*stage);
@@ -400,6 +400,24 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
                 .filter(|p| p.frames > 0)
                 .map(|p| p.range);
             request.range_version = recording.preview.as_ref().map_or(0, |p| p.range_version);
+            use crate::domain::recording_gif::{Format, Plan, Rejection};
+            request.formats = vec![Format::Mp4, Format::Gif];
+            request.default_format = Format::Mp4;
+            request.gif_plan =
+                recording
+                    .artifact
+                    .as_ref()
+                    .map_or(Err(Rejection::InvalidSource), |info| {
+                        Plan::new(
+                            request
+                                .range
+                                .unwrap_or(crate::domain::recording_trim::Range::full(info.frames)),
+                            info.frames,
+                            info.video.frame_rate.get(),
+                            info.width,
+                            info.height,
+                        )
+                    });
             recording.export_progress = None;
             recording.export_stage = None;
 
@@ -834,6 +852,10 @@ mod tests {
             lifecycle::Event::Saved,
         ] {
             let request = SaveRequest {
+                formats: vec![],
+                default_format: crate::domain::recording_gif::Format::Mp4,
+                gif_plan: Err(crate::domain::recording_gif::Rejection::InvalidSource),
+                gif_unavailable_message: String::new(),
                 range: None,
                 range_version: 0,
                 identity: id(&s),

@@ -1,4 +1,4 @@
-//! STA MP4 selection and bounded, atomic publishing of an already sealed file.
+//! Isolated format selection, bounded MP4/GIF export and atomic publication.
 mod host;
 pub(crate) use host::run_from_args;
 use lexift_core::{
@@ -30,6 +30,31 @@ impl Drop for Apartment {
         unsafe { CoUninitialize() }
     }
 }
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Selection {
+    pub path: PathBuf,
+    pub format: lexift_core::domain::recording_gif::Format,
+}
+struct GifTemporary(PathBuf);
+impl Drop for GifTemporary {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+fn gif_temporary(destination: &Path) -> Result<GifTemporary> {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let path = destination.with_file_name(format!(
+        ".lexift-{}-gif-{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(error)?;
+    Ok(GifTemporary(path))
+}
 pub fn save(
     source: &Path,
     request: SaveRequest,
@@ -48,9 +73,52 @@ pub fn save(
     if !range.valid(info.frames) {
         return Err(Error::new("Invalid recording trim range"));
     }
+    let gif_plan = request.gif_plan.clone();
     let identity = request.identity;
     let range_version = request.range_version;
-    match host::choose(request, &cancel)? {
+    let selected = host::choose(request, &cancel)?;
+    if let Some(Selection {
+        path,
+        format: lexift_core::domain::recording_gif::Format::Gif,
+    }) = &selected
+    {
+        let plan = gif_plan.map_err(|_| Error::new("GIF export unavailable for this range"))?;
+        let temp = gif_temporary(path)?;
+        let result = super::gif::export(
+            source,
+            &temp.0,
+            info,
+            &plan,
+            &cancel,
+            |phase, completed, total| {
+                let stage = match phase {
+                    super::gif::Phase::Analyzing => super::ExportStage::AnalyzingColors,
+                    super::gif::Phase::Encoding => super::ExportStage::EncodingGif,
+                    super::gif::Phase::Finalizing => super::ExportStage::Finalizing,
+                };
+                listener(super::Notice::ExportProgress {
+                    identity,
+                    range_version,
+                    stage,
+                    completed,
+                    total,
+                });
+            },
+        );
+        if cancel.load(Ordering::Acquire) {
+            return Ok(SaveOutcome::Cancelled);
+        }
+        result?;
+        listener(super::Notice::ExportProgress {
+            identity,
+            range_version,
+            stage: super::ExportStage::Publishing,
+            completed: plan.frames,
+            total: plan.frames,
+        });
+        return publish(&temp.0, path, &cancel);
+    }
+    match selected.map(|s| s.path) {
         Some(path) if range == lexift_core::domain::recording_trim::Range::full(info.frames) => {
             publish(source, &path, &cancel)
         }
@@ -90,8 +158,8 @@ fn choose_path(
     owner: Option<lexift_core::ports::magnifier::WindowToken>,
     name: String,
     title: String,
-    mismatch: String,
-) -> Result<Option<PathBuf>> {
+    options: super::super::annotation_save::dialog::RecordingOptions,
+) -> Result<Option<Selection>> {
     let _shell = super::super::window_shell_policy::ThreadGuard::new()?;
     unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok() }.map_err(error)?;
     let _apartment = Apartment;
@@ -113,7 +181,8 @@ fn choose_path(
         dialog.SetTitle(PCWSTR(title.as_ptr())).map_err(error)?;
         dialog.SetFileName(PCWSTR(name.as_ptr())).map_err(error)?;
     }
-    let _events = super::super::annotation_save::dialog::configure_mp4(&dialog, mismatch)?;
+    let _events =
+        super::super::annotation_save::dialog::configure_recording(&dialog, options.clone())?;
     let shown = unsafe { dialog.Show(owner.map(|t| HWND(t.0 as *mut _))) };
     if shown
         .as_ref()
@@ -129,14 +198,15 @@ fn choose_path(
         CoTaskMemFree(Some(raw.0.cast()));
     }
     let path = PathBuf::from(path.map_err(error)?);
+    let format = options.selected(&dialog).map_err(error)?;
     if !path
         .extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("mp4"))
+        .is_some_and(|e| format.accepts_extension(e))
     {
-        return Err(Error::new("Video extension must be MP4"));
+        return Err(Error::new("Video extension does not match selected format"));
     }
-    Ok(Some(path))
+    Ok(Some(Selection { path, format }))
 }
 
 pub fn publish(source: &Path, destination: &Path, cancel: &AtomicBool) -> Result<SaveOutcome> {

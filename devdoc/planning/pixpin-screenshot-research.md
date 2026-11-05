@@ -33,7 +33,7 @@
 | 贴图编辑裁剪 | 已接入，验证见记录 | 完整可编辑底图与显示范围分离，非破坏裁剪和共享历史；裁剪长图贴图可扩大恢复完整长图，见[贴图裁剪验证](../releases/pin-image-crop.md) |
 | 图片历史 | 已实现 | 本进程 20 条／512MiB，保留可编辑底图与确认范围，同源成功输出更新；见[图片历史验证](../releases/screenshot-image-history.md) |
 | 独立截图快捷键 | 已接入，验证边界见记录 | 默认 Alt+S，设置可修改；无工具条启动与原状态恢复，见[功能](../features/screenshot-hotkey.md)及[验证](../releases/screenshot-hotkey.md) |
-| 屏幕录制 | 正式入口、声音、视频选项与倒计时已实现；新增成品预览 | 软件 H.264／MP4、30／60fps、两档画质及系统声／麦克风，预览暂停首帧、回放、定位及原成品保存；见[功能](../features/screenshot-mode.md#mp4-录制与声音模式)与[预览验证](../releases/recording-preview.md)。硬件编码及声学同步的环境限制沿用各专项记录；竞品事实仍见[录制研究](pixpin-screen-recording-research.md) |
+| 屏幕录制 | 正式入口、声音、视频选项、倒计时、成品预览与首尾裁剪已实现；新增 GIF 导出 | 软件 H.264／MP4、30／60fps、两档画质及系统声／麦克风；GIF 固定 15fps、最长边 960px、最多 60 秒、无声音。见[功能](../features/screenshot-mode.md#屏幕录制与声音模式)、[预览验证](../releases/recording-preview.md)与[GIF 验证](../releases/recording-gif-export.md)。硬件编码及声学同步的环境限制沿用各专项记录；竞品事实仍见[录制研究](pixpin-screen-recording-research.md) |
 | 贴图旋转／翻转 | 已接入，验证边界见记录 | 普通与编辑贴图菜单四种方向操作，共享非破坏历史、中心定位、后台候选提交；锁定时全部禁用。见[专项验证](../releases/pin-image-transform.md) |
 | 贴图倍率与编辑视口 | 已接入，验收边界见记录 | 普通显示提供物理倍率和适应工作区；编辑使用有界视口平移和局部放大，复用原 HWND、坐标和原始输出。见[交互说明](../features/pin-interaction.md#贴图倍率与编辑视口)及[验证](../releases/pin-image-zoom.md) |
 | 贴图灰度／反色 | 已接入，验收边界见记录 | 独立勾选、共享历史、完整成品处理及处理后底图 OCR；保留原资源和视口。见[交互说明](../features/pin-interaction.md#灰度与反色)与[验证](../releases/pin-image-color.md) |

@@ -9,6 +9,7 @@ mod audio_source;
 mod audio_visual_fixture;
 mod diagnostics;
 mod encoder;
+mod gif;
 pub(crate) mod preview;
 pub(crate) mod save;
 #[cfg(test)]

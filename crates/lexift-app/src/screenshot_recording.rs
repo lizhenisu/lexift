@@ -410,7 +410,10 @@ mod trim_tests {
         session.preview = Some(preview);
         session.artifact = Some(ArtifactInfo {
             artifact: life::Artifact(1),
-            video: Default::default(),
+            video: lexift_core::domain::screen_recording::Video {
+                frame_rate: lexift_core::domain::screen_recording::FrameRate::Fps60,
+                quality: Default::default(),
+            },
             width: 1920,
             height: 1080,
             frames: 300,
@@ -424,6 +427,10 @@ mod trim_tests {
         let send =
             |app: &mut AppState, e| app.reduce(AppEvent::Screenshot(ScreenshotEvent::Recording(e)));
         let save = SaveRequest {
+            formats: vec![],
+            default_format: lexift_core::domain::recording_gif::Format::Mp4,
+            gif_plan: Err(lexift_core::domain::recording_gif::Rejection::InvalidSource),
+            gif_unavailable_message: String::new(),
             identity: id,
             artifact: life::Artifact(1),
             range: None,
@@ -446,6 +453,52 @@ mod trim_tests {
             })
         );
         assert_eq!(request.range_version, 1);
+        assert_eq!(
+            request.default_format,
+            lexift_core::domain::recording_gif::Format::Mp4
+        );
+        assert_eq!(
+            request.formats,
+            vec![
+                lexift_core::domain::recording_gif::Format::Mp4,
+                lexift_core::domain::recording_gif::Format::Gif
+            ]
+        );
+        let gif = request.gif_plan.as_ref().unwrap();
+        assert_eq!(
+            (gif.frames, gif.width, gif.height, gif.source_fps),
+            (22, 960, 540, 60)
+        );
+        for (stage, done, total) in [
+            (
+                lexift_core::ports::screen_recording::ExportStage::AnalyzingColors,
+                22,
+                22,
+            ),
+            (
+                lexift_core::ports::screen_recording::ExportStage::EncodingGif,
+                0,
+                22,
+            ),
+        ] {
+            send(
+                &mut app,
+                Event::Native(Notice::ExportProgress {
+                    identity: request.identity,
+                    range_version: 1,
+                    stage,
+                    completed: done,
+                    total,
+                }),
+            );
+            assert_eq!(
+                app.screenshot.recording.as_ref().unwrap().export_progress,
+                Some((done, total))
+            );
+        }
+        // Regressing stages and stale range notifications cannot replace GIF progress.
+        app.screenshot.recording.as_mut().unwrap().export_progress = None;
+        app.screenshot.recording.as_mut().unwrap().export_stage = None;
         send(
             &mut app,
             Event::Native(Notice::ExportProgress {

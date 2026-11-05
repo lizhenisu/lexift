@@ -2291,3 +2291,15 @@ msgstr "Finalisation de la vidéo"
 
 msgid "Saving video"
 msgstr "Enregistrement de la vidéo"
+
+msgid "Analyzing GIF colors"
+msgstr "Analyse des couleurs GIF"
+
+msgid "Encoding GIF"
+msgstr "Encodage GIF"
+
+msgid "GIF supports clips up to 60 seconds. Shorten the selected range or choose MP4."
+msgstr "Le GIF accepte des extraits de 60 secondes maximum. Réduisez la sélection ou choisissez MP4."
+
+msgid "Use the file extension matching the selected video format."
+msgstr "Utilisez l’extension correspondant au format vidéo sélectionné."

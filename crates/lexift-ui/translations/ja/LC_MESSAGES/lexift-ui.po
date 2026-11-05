@@ -2291,3 +2291,15 @@ msgstr "動画を仕上げています"
 
 msgid "Saving video"
 msgstr "動画を保存しています"
+
+msgid "Analyzing GIF colors"
+msgstr "GIF の色を解析中"
+
+msgid "Encoding GIF"
+msgstr "GIF をエンコード中"
+
+msgid "GIF supports clips up to 60 seconds. Shorten the selected range or choose MP4."
+msgstr "GIF は60秒まで対応しています。選択範囲を短くするか、MP4 を選択してください。"
+
+msgid "Use the file extension matching the selected video format."
+msgstr "選択した動画形式に合う拡張子を使用してください。"

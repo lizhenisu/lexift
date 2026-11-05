@@ -12,6 +12,7 @@ export component RecordingControl inherits Window {
     // 0 preparing, 1 ready, 2 recording, 3 paused, 4 finishing, 5 sealed, 6 saving.
     in property <int> phase: 0;
     in property <string> dimensions;
+    in property <string> export-label;
     in property <string> elapsed: "00:00";
     in property <bool> interrupted: false;
     in property <bool> audio-enabled: false;
@@ -41,7 +42,7 @@ export component RecordingControl inherits Window {
             Rectangle { horizontal-stretch:1;
                 VerticalLayout { spacing:0px;
                     Text { text:root.dimensions + "   " + root.elapsed; color:Colors.foreground; font-size:12px; vertical-alignment:center; }
-                    Text { text:root.video-preparing ? @tr("Preparing video") : root.audio-preparing ? @tr("Preparing audio") : root.interrupted ? @tr("Recording interrupted") : root.phase == 3 ? @tr("Recording paused") : root.phase == 2 ? @tr("Recording") : @tr("Screen recording"); color:Colors.secondary-foreground; font-size:10px; vertical-alignment:center; }
+                    Text { text:root.phase == 6 && root.export-label != "" ? root.export-label : root.video-preparing ? @tr("Preparing video") : root.audio-preparing ? @tr("Preparing audio") : root.interrupted ? @tr("Recording interrupted") : root.phase == 3 ? @tr("Recording paused") : root.phase == 2 ? @tr("Recording") : @tr("Screen recording"); color:Colors.secondary-foreground; font-size:10px; vertical-alignment:center; }
                 }
             }
             CaptureSeparator {}

@@ -176,3 +176,4 @@
 - [大图编辑性能验证](releases/large-image-performance.md)
 
 - [录屏首尾裁剪验证](releases/recording-trim.md)
+- [录屏 GIF 导出验证](releases/recording-gif-export.md)

@@ -812,6 +812,12 @@ fn save_request() {
             })
         });
         emit_recording(Event::Save(SaveRequest {
+            formats: vec![],
+            default_format: lexift_core::domain::recording_gif::Format::Mp4,
+            gif_plan: Err(lexift_core::domain::recording_gif::Rejection::InvalidSource),
+            gif_unavailable_message: crate::i18n::tr(
+                "GIF supports clips up to 60 seconds. Shorten the selected range or choose MP4.",
+            ),
             range: None,
             range_version: 0,
             identity: state.lifecycle.identity,
@@ -825,7 +831,9 @@ fn save_request() {
                     .as_secs()
             ),
             title: crate::i18n::tr("Save video"),
-            extension_mismatch_message: crate::i18n::tr("Use the .mp4 file extension."),
+            extension_mismatch_message: crate::i18n::tr(
+                "Use the file extension matching the selected video format.",
+            ),
         }));
     }
 }
@@ -1061,6 +1069,7 @@ pub(crate) fn sync(state: &ScreenshotState) {
         }) {
             return;
         }
+        w.set_export_label(preview::export_label(recording));
         w.set_phase(match recording.lifecycle.phase {
             Phase::Ready => 1,
             Phase::Recording => 2,
