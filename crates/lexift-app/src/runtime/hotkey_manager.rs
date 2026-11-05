@@ -24,6 +24,9 @@ struct HotkeyState {
 }
 
 impl HotkeyRuntimeManager {
+    pub(crate) fn port(&self) -> Option<Arc<dyn HotkeyPort>> {
+        self.port.clone()
+    }
     pub(crate) fn registrations(&self) -> lexift_core::domain::runtime_config::HotkeyRegistrations {
         if self.port.is_none() {
             return Default::default();

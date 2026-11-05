@@ -329,6 +329,22 @@ pub(super) fn wire_settings_callbacks(
             });
         }
     });
+    let h = handler.clone();
+    settings.on_recording_pause_hotkey_change_requested(move |value| {
+        if let Ok(hotkey) = value.to_string().parse::<HotkeyConfig>() {
+            h(AppEvent::SettingsChangeRequested {
+                change: SettingsChange::RecordingPauseHotkey(hotkey),
+            });
+        }
+    });
+    let h = handler.clone();
+    settings.on_recording_finish_hotkey_change_requested(move |value| {
+        if let Ok(hotkey) = value.to_string().parse::<HotkeyConfig>() {
+            h(AppEvent::SettingsChangeRequested {
+                change: SettingsChange::RecordingFinishHotkey(hotkey),
+            });
+        }
+    });
     crate::ocr::provider::wire_settings(settings, handler.clone());
     let annotation_settings_handler = Rc::clone(&handler);
     settings.on_annotation_hotkey_change_requested(move |hotkey| {
@@ -672,7 +688,11 @@ pub(super) fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static
             ("Target language saved", false)
         }
         SettingsFeedback::SettingsSaved(
-            SettingsField::OcrHotkey | SettingsField::Hotkey | SettingsField::ScreenshotHotkey,
+            SettingsField::RecordingPauseHotkey
+            | SettingsField::RecordingFinishHotkey
+            | SettingsField::OcrHotkey
+            | SettingsField::Hotkey
+            | SettingsField::ScreenshotHotkey,
         ) => ("Shortcut saved", false),
         SettingsFeedback::SettingsSaved(SettingsField::AnnotationHotkey) => {
             ("Shortcut saved", false)
@@ -698,7 +718,11 @@ pub(super) fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static
             ("Target language wasn't saved", true)
         }
         SettingsFeedback::SettingsSaveFailed(
-            SettingsField::OcrHotkey | SettingsField::Hotkey | SettingsField::ScreenshotHotkey,
+            SettingsField::RecordingPauseHotkey
+            | SettingsField::RecordingFinishHotkey
+            | SettingsField::OcrHotkey
+            | SettingsField::Hotkey
+            | SettingsField::ScreenshotHotkey,
         ) => ("Shortcut wasn't saved", true),
         SettingsFeedback::SettingsSaveFailed(SettingsField::AnnotationHotkey) => {
             ("Shortcut wasn't saved", true)

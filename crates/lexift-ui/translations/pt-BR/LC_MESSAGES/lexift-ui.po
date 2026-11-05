@@ -2303,3 +2303,27 @@ msgstr "GIF aceita clipes de até 60 segundos. Reduza o intervalo selecionado ou
 
 msgid "Use the file extension matching the selected video format."
 msgstr "Use a extensão correspondente ao formato de vídeo selecionado."
+
+msgid "Pause / resume recording"
+msgstr "Pausar / retomar gravação"
+
+msgid "Finish recording"
+msgstr "Concluir gravação"
+
+msgid "Enabled when recording starts"
+msgstr "Ativado ao iniciar a gravação"
+
+msgid "Unavailable during recording"
+msgstr "Indisponível durante a gravação"
+
+msgid "Pause / resume shortcut unavailable. Use the toolbar."
+msgstr "Atalho de pausa/retomada indisponível. Use a barra de ferramentas."
+
+msgid "Finish recording shortcut unavailable. Use the toolbar."
+msgstr "Atalho para concluir indisponível. Use a barra de ferramentas."
+
+msgid "Recording shortcuts unavailable. Use the toolbar."
+msgstr "Atalhos de gravação indisponíveis. Use a barra de ferramentas."
+
+msgid "All shortcuts must differ"
+msgstr "Todos os atalhos devem ser diferentes"

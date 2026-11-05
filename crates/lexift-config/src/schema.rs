@@ -257,6 +257,10 @@ pub(crate) struct SettingsFile {
     ocr_hotkey: HotkeyFile,
     #[serde(default = "default_screenshot_hotkey")]
     screenshot_hotkey: HotkeyFile,
+    #[serde(default = "default_recording_pause_hotkey")]
+    recording_pause_hotkey: HotkeyFile,
+    #[serde(default = "default_recording_finish_hotkey")]
+    recording_finish_hotkey: HotkeyFile,
     #[serde(default)]
     ocr_language: Option<String>,
     #[serde(default = "default_true")]
@@ -327,6 +331,12 @@ impl Default for HotkeyFile {
 fn default_ocr_hotkey() -> HotkeyFile {
     HotkeyConfig::ocr_default().into()
 }
+fn default_recording_pause_hotkey() -> HotkeyFile {
+    lexift_core::domain::recording_hotkeys::default_pause().into()
+}
+fn default_recording_finish_hotkey() -> HotkeyFile {
+    lexift_core::domain::recording_hotkeys::default_finish().into()
+}
 fn default_screenshot_hotkey() -> HotkeyFile {
     HotkeyConfig::screenshot_default().into()
 }
@@ -384,6 +394,8 @@ impl ConfigFile {
                 annotation_hotkey: settings.annotation_hotkey.into(),
                 ocr_hotkey: settings.ocr_hotkey.into(),
                 screenshot_hotkey: settings.screenshot_hotkey.into(),
+                recording_pause_hotkey: settings.recording_pause_hotkey.into(),
+                recording_finish_hotkey: settings.recording_finish_hotkey.into(),
                 ocr_language: settings.ocr_language.clone(),
                 ocr_enabled: settings.ocr_enabled,
                 ocr_korean_auto: settings.ocr_korean_auto,
@@ -492,6 +504,24 @@ impl ConfigFile {
                     meta: self.settings.screenshot_hotkey.meta,
                 },
                 self.settings.screenshot_hotkey.key.parse()?,
+            )?,
+            recording_pause_hotkey: HotkeyConfig::new(
+                lexift_core::domain::runtime_config::HotkeyModifiers {
+                    control: self.settings.recording_pause_hotkey.control,
+                    alt: self.settings.recording_pause_hotkey.alt,
+                    shift: self.settings.recording_pause_hotkey.shift,
+                    meta: self.settings.recording_pause_hotkey.meta,
+                },
+                self.settings.recording_pause_hotkey.key.parse()?,
+            )?,
+            recording_finish_hotkey: HotkeyConfig::new(
+                lexift_core::domain::runtime_config::HotkeyModifiers {
+                    control: self.settings.recording_finish_hotkey.control,
+                    alt: self.settings.recording_finish_hotkey.alt,
+                    shift: self.settings.recording_finish_hotkey.shift,
+                    meta: self.settings.recording_finish_hotkey.meta,
+                },
+                self.settings.recording_finish_hotkey.key.parse()?,
             )?,
             ocr_language: self.settings.ocr_language,
             ocr_enabled: self.settings.ocr_enabled,

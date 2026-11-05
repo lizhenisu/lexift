@@ -13,6 +13,9 @@ use crate::{AppCommand, Error, Result};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Session {
+    pub hotkeys: Option<crate::domain::recording_hotkeys::Registration>,
+    pub hotkey_scope: Option<crate::domain::recording_hotkeys::Scope>,
+    hotkeys_pending: bool,
     pub preview: Option<preview::State>,
     pub export_progress: Option<(u64, u64)>,
     pub export_stage: Option<crate::ports::screen_recording::ExportStage>,
@@ -30,6 +33,9 @@ impl Session {
     /// Start ownership without leaking playback retirement internals to adapters.
     pub fn new(lifecycle: lifecycle::State, request: ExportRequest, monitor: Rect) -> Self {
         Self {
+            hotkeys: None,
+            hotkey_scope: None,
+            hotkeys_pending: false,
             preview: None,
             export_progress: None,
             export_stage: None,
@@ -47,6 +53,14 @@ impl Session {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    HotkeysPrepared {
+        identity: lifecycle::Identity,
+        registration: crate::domain::recording_hotkeys::Registration,
+    },
+    Shortcut {
+        scope: crate::domain::recording_hotkeys::Scope,
+        action: crate::domain::recording_hotkeys::Action,
+    },
     CancelExport {
         identity: preview::Identity,
         close: bool,
@@ -95,6 +109,12 @@ pub enum Event {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    PrepareHotkeys(lifecycle::Identity),
+    ReleaseHotkeys(crate::domain::recording_hotkeys::Scope),
+    Shortcut {
+        scope: crate::domain::recording_hotkeys::Scope,
+        action: crate::domain::recording_hotkeys::Action,
+    },
     CancelExport(lifecycle::Identity),
     Preview(preview::Command),
     PrepareView {
@@ -112,6 +132,62 @@ fn wrap(command: Command) -> Vec<AppCommand> {
     ))]
 }
 pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
+    if let Event::HotkeysPrepared {
+        identity,
+        registration,
+    } = &event
+    {
+        if s.phase != ScreenshotPhase::Recording {
+            return wrap(Command::ReleaseHotkeys(registration.scope));
+        }
+        let Some(r) = s
+            .recording
+            .as_mut()
+            .filter(|r| r.hotkey_scope == Some(registration.scope))
+        else {
+            return wrap(Command::ReleaseHotkeys(registration.scope));
+        };
+        if !r.hotkeys_pending {
+            return vec![];
+        }
+        if r.lifecycle.identity != *identity || r.lifecycle.phase != lifecycle::Phase::Starting {
+            return wrap(Command::ReleaseHotkeys(registration.scope));
+        }
+        r.hotkeys_pending = false;
+        s.error = match (registration.pause.is_some(), registration.finish.is_some()) {
+            (true, true) => None,
+            (false, true) => Some("Pause / resume shortcut unavailable. Use the toolbar.".into()),
+            (true, false) => Some("Finish recording shortcut unavailable. Use the toolbar.".into()),
+            _ => Some("Recording shortcuts unavailable. Use the toolbar.".into()),
+        };
+        r.hotkeys = Some(registration.clone());
+        return wrap(Command::Execute(lifecycle::Command {
+            identity: *identity,
+            action: lifecycle::Action::Start,
+        }));
+    }
+    if let Event::Shortcut { scope, action } = &event {
+        if s.phase != ScreenshotPhase::Recording {
+            return vec![];
+        }
+        return s
+            .recording
+            .as_ref()
+            .filter(|r| {
+                r.hotkey_scope == Some(*scope)
+                    && r.hotkeys.as_ref().is_some_and(|k| k.accepts(*action))
+                    && matches!(
+                        r.lifecycle.phase,
+                        lifecycle::Phase::Recording | lifecycle::Phase::Paused
+                    )
+            })
+            .map_or_else(Vec::new, |_| {
+                wrap(Command::Shortcut {
+                    scope: *scope,
+                    action: *action,
+                })
+            });
+    }
     if let Event::Requested(request) = event {
         if !s.editable()
             || s.long.is_some()
@@ -539,7 +615,25 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
             .source_layout_changed(session, operation),
         _ => None,
     };
+    let retirement = if !matches!(
+        recording.lifecycle.phase,
+        lifecycle::Phase::Starting
+            | lifecycle::Phase::Recording
+            | lifecycle::Phase::Pausing
+            | lifecycle::Phase::Paused
+            | lifecycle::Phase::Resuming
+    ) {
+        recording.hotkeys = None;
+        recording.hotkeys_pending = false;
+        recording.hotkey_scope.take().map(Command::ReleaseHotkeys)
+    } else {
+        None
+    };
     let Some(command) = command else {
+        if let Some(retirement) = retirement {
+            return wrap(retirement);
+        }
+
         if recording.lifecycle.phase == lifecycle::Phase::PendingSave && recording.preview.is_none()
         {
             return reduce(s, Event::PreviewRequested);
@@ -566,7 +660,13 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
     ) {
         recording.backend_request = Some(command.identity);
     }
-    match command.action {
+    let mut commands = match command.action {
+        lifecycle::Action::Start => {
+            let scope = crate::domain::recording_hotkeys::Scope::new(command.identity);
+            recording.hotkey_scope = Some(scope);
+            recording.hotkeys_pending = true;
+            wrap(Command::PrepareHotkeys(command.identity))
+        }
         lifecycle::Action::PrepareBackend => wrap(Command::PrepareBackend(PrepareRequest {
             video: recording.lifecycle.video,
             identity: command.identity,
@@ -585,7 +685,14 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
             wrap(Command::Execute(command))
         }
         _ => wrap(Command::Execute(command)),
+    };
+    if let Some(retirement) = retirement {
+        commands.insert(
+            0,
+            AppCommand::Screenshot(ScreenshotCommand::Recording(retirement)),
+        );
     }
+    commands
 }
 
 #[cfg(test)]
@@ -968,6 +1075,171 @@ mod tests {
         let commands = retire(&mut s);
         assert!(
             matches!(&commands[0], AppCommand::Screenshot(ScreenshotCommand::Recording(Command::Execute(c))) if c.action == lifecycle::Action::EndScreenshot)
+        );
+    }
+
+    #[test]
+    fn recording_shortcuts_are_scoped_partial_and_survive_pause_request_numbers() {
+        use crate::domain::recording_hotkeys::{
+            Action as Key, Registration, Scope, default_finish,
+        };
+        let mut s = begin();
+        ready(&mut s);
+        let commands = input(&mut s, lifecycle::Event::Start);
+        let identity = id(&s);
+        let scope = Scope::new(identity);
+        assert!(matches!(
+            commands.as_slice(),
+            [AppCommand::Screenshot(ScreenshotCommand::Recording(
+                Command::PrepareHotkeys(_)
+            ))]
+        ));
+        assert!(
+            emit(
+                &mut s,
+                Event::Shortcut {
+                    scope,
+                    action: Key::Finish
+                }
+            )
+            .is_empty()
+        );
+        let registration = Registration {
+            scope,
+            pause: None,
+            finish: Some(default_finish()),
+        };
+        let start = emit(
+            &mut s,
+            Event::HotkeysPrepared {
+                identity,
+                registration: registration.clone(),
+            },
+        );
+        assert!(
+            matches!(start.as_slice(),[AppCommand::Screenshot(ScreenshotCommand::Recording(Command::Execute(c)))] if c.action==lifecycle::Action::Start)
+        );
+        assert!(
+            emit(
+                &mut s,
+                Event::HotkeysPrepared {
+                    identity,
+                    registration
+                }
+            )
+            .is_empty()
+        );
+        emit(&mut s, Event::Native(Notice::Started(identity)));
+        assert!(
+            emit(
+                &mut s,
+                Event::Shortcut {
+                    scope,
+                    action: Key::TogglePause
+                }
+            )
+            .is_empty()
+        );
+        let old = Scope {
+            generation: scope.generation + 1,
+            ..scope
+        };
+        assert!(
+            emit(
+                &mut s,
+                Event::Shortcut {
+                    scope: old,
+                    action: Key::Finish
+                }
+            )
+            .is_empty()
+        );
+        input(&mut s, lifecycle::Event::Pause);
+        let paused = id(&s);
+        assert_ne!(paused.request, scope.generation);
+        assert!(
+            emit(
+                &mut s,
+                Event::Shortcut {
+                    scope,
+                    action: Key::Finish
+                }
+            )
+            .is_empty()
+        );
+        emit(&mut s, Event::Native(Notice::Paused(paused)));
+        assert!(matches!(
+            emit(
+                &mut s,
+                Event::Shortcut {
+                    scope,
+                    action: Key::Finish
+                }
+            )
+            .as_slice(),
+            [AppCommand::Screenshot(ScreenshotCommand::Recording(
+                Command::Shortcut { .. }
+            ))]
+        ));
+        let finish = input(&mut s, lifecycle::Event::Finish);
+        assert!(finish.iter().any(|c|matches!(c,AppCommand::Screenshot(ScreenshotCommand::Recording(Command::ReleaseHotkeys(k))) if *k==scope)));
+        assert!(s.screenshot.recording.as_ref().unwrap().hotkeys.is_none());
+    }
+    #[test]
+    fn cancelled_registration_is_released_without_starting_or_reviving_a_recording() {
+        use crate::domain::recording_hotkeys::{
+            Registration, Scope, default_finish, default_pause,
+        };
+        let mut s = begin();
+        ready(&mut s);
+        input(&mut s, lifecycle::Event::Start);
+        let identity = id(&s);
+        let scope = Scope::new(identity);
+        input(&mut s, lifecycle::Event::Cancel);
+        let late = emit(
+            &mut s,
+            Event::HotkeysPrepared {
+                identity,
+                registration: Registration {
+                    scope,
+                    pause: Some(default_pause()),
+                    finish: Some(default_finish()),
+                },
+            },
+        );
+        assert!(
+            matches!(late.as_slice(),[AppCommand::Screenshot(ScreenshotCommand::Recording(Command::ReleaseHotkeys(k)))] if *k==scope)
+        );
+        assert_ne!(
+            s.screenshot.recording.as_ref().unwrap().lifecycle.phase,
+            lifecycle::Phase::Recording
+        );
+    }
+
+    #[test]
+    fn quit_rejects_late_shortcut_registration_even_when_old_lifecycle_still_exists() {
+        use crate::domain::recording_hotkeys::{
+            Registration, Scope, default_finish, default_pause,
+        };
+        let mut s = begin();
+        ready(&mut s);
+        input(&mut s, lifecycle::Event::Start);
+        let identity = id(&s);
+        let scope = Scope::new(identity);
+        s.reduce(AppEvent::ExitRequested);
+        let commands = emit(
+            &mut s,
+            Event::HotkeysPrepared {
+                identity,
+                registration: Registration {
+                    scope,
+                    pause: Some(default_pause()),
+                    finish: Some(default_finish()),
+                },
+            },
+        );
+        assert!(
+            matches!(commands.as_slice(),[AppCommand::Screenshot(ScreenshotCommand::Recording(Command::ReleaseHotkeys(k)))] if *k==scope)
         );
     }
 }

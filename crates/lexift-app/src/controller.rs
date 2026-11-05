@@ -422,7 +422,7 @@ pub(crate) struct AppController {
     screen: Option<Arc<dyn ScreenPort>>,
     translator: Arc<dyn TranslatorPort>,
     settings_store: Arc<dyn SettingsStore>,
-    runtime_manager: Option<Arc<RuntimeManager>>,
+    pub(crate) runtime_manager: Option<Arc<RuntimeManager>>,
     credential_store: Option<Arc<dyn CredentialStore>>,
     credential_reference: Option<Arc<RwLock<Option<String>>>>,
     clipboard: Option<Arc<dyn ClipboardPort>>,

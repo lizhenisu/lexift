@@ -1131,7 +1131,8 @@ fn show_feedback(state: &ScreenshotState) {
                 bottom: p.y + size.height as i32,
             }
         } else if state.phase == ScreenshotPhase::Recording {
-            recording::preview::feedback_bounds()?
+            recording::preview::feedback_bounds()
+                .or_else(|| state.recording.as_ref().map(|r| r.monitor))?
         } else {
             return None;
         };

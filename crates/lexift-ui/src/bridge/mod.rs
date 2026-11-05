@@ -959,3 +959,28 @@ pub(crate) use popup::{invalidate_popup_surface_cache, measured_popup_metrics};
 pub(crate) use settings_window::complete_credential_copy;
 
 use app_window::{APP_WINDOW_REGISTRY, AppWindowRegistry};
+
+/// A registered combination may be consumed by Settings rather than recording.
+pub(crate) fn recording_shortcut_captured(key: String) -> bool {
+    APP_WINDOW_REGISTRY.with(|s| {
+        let slot = s.borrow();
+        let Some(w) = slot
+            .as_ref()
+            .and_then(|r| r.settings.as_ref())
+            .map(|w| w.clone_strong())
+        else {
+            return false;
+        };
+        let capturing = w.get_hotkey_capturing()
+            || w.get_annotation_hotkey_capturing()
+            || w.get_ocr_hotkey_capturing()
+            || w.get_screenshot_hotkey_capturing()
+            || w.get_recording_pause_hotkey_capturing()
+            || w.get_recording_finish_hotkey_capturing();
+        drop(slot);
+        if capturing {
+            w.invoke_capture_registered_shortcut(key.into());
+        }
+        capturing || w.get_settings_menu_open() || w.get_app_language_menu_open()
+    })
+}

@@ -2303,3 +2303,27 @@ msgstr "GIF は60秒まで対応しています。選択範囲を短くするか
 
 msgid "Use the file extension matching the selected video format."
 msgstr "選択した動画形式に合う拡張子を使用してください。"
+
+msgid "Pause / resume recording"
+msgstr "録画を一時停止／再開"
+
+msgid "Finish recording"
+msgstr "録画を終了"
+
+msgid "Enabled when recording starts"
+msgstr "録画開始時に有効"
+
+msgid "Unavailable during recording"
+msgstr "録画中は使用できません"
+
+msgid "Pause / resume shortcut unavailable. Use the toolbar."
+msgstr "一時停止／再開のショートカットを使用できません。ツールバーを使用してください。"
+
+msgid "Finish recording shortcut unavailable. Use the toolbar."
+msgstr "録画終了のショートカットを使用できません。ツールバーを使用してください。"
+
+msgid "Recording shortcuts unavailable. Use the toolbar."
+msgstr "録画ショートカットを使用できません。ツールバーを使用してください。"
+
+msgid "All shortcuts must differ"
+msgstr "ショートカットはすべて異なる必要があります"

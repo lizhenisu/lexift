@@ -1148,7 +1148,29 @@ impl AppState {
                 }
             }
         }
-        if let Err(error) = change.validate_translation_change(&self.settings) {
+        if let Err(error) = change
+            .validate_translation_change(&self.settings)
+            .and_then(|_| {
+                change.validate_shortcuts(
+                    &self.settings,
+                    self.screenshot.recording.as_ref().is_some_and(|r| {
+                        matches!(
+                            r.lifecycle.phase,
+                            crate::domain::screen_recording::Phase::PreparingCountdown
+                                | crate::domain::screen_recording::Phase::CountingDown
+                                | crate::domain::screen_recording::Phase::RetiringCountdown
+                                | crate::domain::screen_recording::Phase::Starting
+                                | crate::domain::screen_recording::Phase::Recording
+                                | crate::domain::screen_recording::Phase::Pausing
+                                | crate::domain::screen_recording::Phase::Paused
+                                | crate::domain::screen_recording::Phase::Resuming
+                                | crate::domain::screen_recording::Phase::PresentingFinalContent
+                                | crate::domain::screen_recording::Phase::Finishing
+                        )
+                    }),
+                )
+            })
+        {
             self.settings_error_field = Some(change.field());
             self.set_settings_field_error(change.field(), error.to_string());
             self.restore_desired_field_after_failure(change.field());
@@ -1224,6 +1246,8 @@ impl AppState {
             SettingsField::OcrLanguage
             | SettingsField::OcrKoreanAuto
             | SettingsField::OcrHotkey
+            | SettingsField::RecordingPauseHotkey
+            | SettingsField::RecordingFinishHotkey
             | SettingsField::ScreenshotHotkey
             | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
@@ -1248,6 +1272,8 @@ impl AppState {
             SettingsField::OcrLanguage
             | SettingsField::OcrKoreanAuto
             | SettingsField::OcrHotkey
+            | SettingsField::RecordingPauseHotkey
+            | SettingsField::RecordingFinishHotkey
             | SettingsField::ScreenshotHotkey
             | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
@@ -1311,6 +1337,13 @@ impl AppState {
             SettingsField::OcrHotkey => self.desired_settings.ocr_hotkey = self.settings.ocr_hotkey,
             SettingsField::ScreenshotHotkey => {
                 self.desired_settings.screenshot_hotkey = self.settings.screenshot_hotkey
+            }
+            SettingsField::RecordingPauseHotkey => {
+                self.desired_settings.recording_pause_hotkey = self.settings.recording_pause_hotkey
+            }
+            SettingsField::RecordingFinishHotkey => {
+                self.desired_settings.recording_finish_hotkey =
+                    self.settings.recording_finish_hotkey
             }
             SettingsField::SelectionToolbar => {
                 self.desired_settings.selection_toolbar = self.settings.selection_toolbar;

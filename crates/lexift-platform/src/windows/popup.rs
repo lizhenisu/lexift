@@ -1829,8 +1829,11 @@ pub(crate) fn set_click_through(
     window: &impl raw_window_handle::HasWindowHandle,
     enabled: bool,
 ) -> lexift_core::Result<()> {
-    use windows::Win32::UI::WindowsAndMessaging::WS_EX_TRANSPARENT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GetWindowLongPtrW, WS_EX_TRANSPARENT,
+    };
     let hwnd = required_hwnd(window)?;
+    let before = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
     super::annotation_window_order::canvas(hwnd).map_err(|error| {
         lexift_core::Error::new(format!(
             "Could not register annotation canvas order: {error}"
@@ -1841,7 +1844,16 @@ pub(crate) fn set_click_through(
         configure_hwnd_extended_style(hwnd, |style| style | WS_EX_TRANSPARENT.0 as isize)
     } else {
         configure_hwnd_extended_style(hwnd, |style| style & !(WS_EX_TRANSPARENT.0 as isize))
-    }
+    }?;
+    let after = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+    tracing::debug!(
+        hwnd = ?hwnd,
+        enabled,
+        before_ex_style = format_args!("0x{before:08x}"),
+        after_ex_style = format_args!("0x{after:08x}"),
+        "Annotation click-through policy updated"
+    );
+    Ok(())
 }
 
 /// UpdateLayeredWindow owns the annotation pixels; Slint only owns input and window lifetime.

@@ -2303,3 +2303,27 @@ msgstr "Le GIF accepte des extraits de 60 secondes maximum. Réduisez la sélect
 
 msgid "Use the file extension matching the selected video format."
 msgstr "Utilisez l’extension correspondant au format vidéo sélectionné."
+
+msgid "Pause / resume recording"
+msgstr "Mettre en pause / reprendre"
+
+msgid "Finish recording"
+msgstr "Terminer l’enregistrement"
+
+msgid "Enabled when recording starts"
+msgstr "Activé au début de l’enregistrement"
+
+msgid "Unavailable during recording"
+msgstr "Indisponible pendant l’enregistrement"
+
+msgid "Pause / resume shortcut unavailable. Use the toolbar."
+msgstr "Raccourci pause/reprise indisponible. Utilisez la barre d’outils."
+
+msgid "Finish recording shortcut unavailable. Use the toolbar."
+msgstr "Raccourci de fin indisponible. Utilisez la barre d’outils."
+
+msgid "Recording shortcuts unavailable. Use the toolbar."
+msgstr "Raccourcis d’enregistrement indisponibles. Utilisez la barre d’outils."
+
+msgid "All shortcuts must differ"
+msgstr "Tous les raccourcis doivent être différents"

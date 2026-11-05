@@ -67,6 +67,69 @@ pub(crate) fn wire_settings(settings: &crate::SettingsWindow, handler: Rc<dyn Fn
 }
 
 pub(crate) fn apply_settings(window: &crate::SettingsWindow, state: &lexift_core::AppState) {
+    let locked = state.screenshot.recording.as_ref().is_some_and(|r| {
+        !matches!(
+            r.lifecycle.phase,
+            lexift_core::domain::screen_recording::Phase::Ready
+                | lexift_core::domain::screen_recording::Phase::PreparingView
+                | lexift_core::domain::screen_recording::Phase::PreparingBackend
+                | lexift_core::domain::screen_recording::Phase::PendingSave
+                | lexift_core::domain::screen_recording::Phase::Saving
+        )
+    });
+    window.set_recording_hotkeys_locked(locked);
+    if locked {
+        window.set_recording_pause_hotkey_capturing(false);
+        window.set_recording_finish_hotkey_capturing(false);
+    }
+    window.set_draft_recording_pause_hotkey_label(
+        state
+            .desired_settings
+            .recording_pause_hotkey
+            .to_string()
+            .into(),
+    );
+    window.set_recording_pause_hotkey_status(
+        crate::i18n::tr(if locked {
+            "Unavailable during recording"
+        } else {
+            "Enabled when recording starts"
+        })
+        .into(),
+    );
+    window.set_recording_pause_hotkey_error_text(
+        if state.settings_error_field
+            == Some(lexift_core::domain::settings::SettingsField::RecordingPauseHotkey)
+        {
+            crate::i18n::tr(&state.settings_error_message).into()
+        } else {
+            "".into()
+        },
+    );
+    window.set_draft_recording_finish_hotkey_label(
+        state
+            .desired_settings
+            .recording_finish_hotkey
+            .to_string()
+            .into(),
+    );
+    window.set_recording_finish_hotkey_status(
+        crate::i18n::tr(if locked {
+            "Unavailable during recording"
+        } else {
+            "Enabled when recording starts"
+        })
+        .into(),
+    );
+    window.set_recording_finish_hotkey_error_text(
+        if state.settings_error_field
+            == Some(lexift_core::domain::settings::SettingsField::RecordingFinishHotkey)
+        {
+            crate::i18n::tr(&state.settings_error_message).into()
+        } else {
+            "".into()
+        },
+    );
     let o = &state.ocr;
     window.set_draft_ocr_hotkey_label(state.desired_settings.ocr_hotkey.to_string().into());
     window.set_draft_screenshot_hotkey_label(

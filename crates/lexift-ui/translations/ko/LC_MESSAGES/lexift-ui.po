@@ -2303,3 +2303,27 @@ msgstr "GIF는 최대 60초까지 지원합니다. 선택 구간을 줄이거나
 
 msgid "Use the file extension matching the selected video format."
 msgstr "선택한 동영상 형식에 맞는 파일 확장자를 사용하세요."
+
+msgid "Pause / resume recording"
+msgstr "녹화 일시 정지 / 계속"
+
+msgid "Finish recording"
+msgstr "녹화 완료"
+
+msgid "Enabled when recording starts"
+msgstr "녹화 시작 시 활성화"
+
+msgid "Unavailable during recording"
+msgstr "녹화 중에는 사용할 수 없음"
+
+msgid "Pause / resume shortcut unavailable. Use the toolbar."
+msgstr "일시 정지/계속 단축키를 사용할 수 없습니다. 도구 모음을 사용하세요."
+
+msgid "Finish recording shortcut unavailable. Use the toolbar."
+msgstr "녹화 완료 단축키를 사용할 수 없습니다. 도구 모음을 사용하세요."
+
+msgid "Recording shortcuts unavailable. Use the toolbar."
+msgstr "녹화 단축키를 사용할 수 없습니다. 도구 모음을 사용하세요."
+
+msgid "All shortcuts must differ"
+msgstr "모든 단축키는 서로 달라야 합니다"

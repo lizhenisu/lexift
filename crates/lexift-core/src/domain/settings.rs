@@ -21,6 +21,8 @@ pub enum SettingsField {
     AnnotationHotkey,
     OcrHotkey,
     ScreenshotHotkey,
+    RecordingPauseHotkey,
+    RecordingFinishHotkey,
     OcrLanguage,
     OcrKoreanAuto,
     Provider,
@@ -66,6 +68,8 @@ pub enum SettingsChange {
     AnnotationHotkey(HotkeyConfig),
     OcrHotkey(HotkeyConfig),
     ScreenshotHotkey(HotkeyConfig),
+    RecordingPauseHotkey(HotkeyConfig),
+    RecordingFinishHotkey(HotkeyConfig),
     OcrLanguage(Option<String>),
     OcrKoreanAuto(bool),
     Provider(ProviderConfig),
@@ -105,6 +109,8 @@ impl SettingsChange {
             Self::AnnotationHotkey(_) => SettingsField::AnnotationHotkey,
             Self::OcrHotkey(_) => SettingsField::OcrHotkey,
             Self::ScreenshotHotkey(_) => SettingsField::ScreenshotHotkey,
+            Self::RecordingPauseHotkey(_) => SettingsField::RecordingPauseHotkey,
+            Self::RecordingFinishHotkey(_) => SettingsField::RecordingFinishHotkey,
             Self::OcrLanguage(_) => SettingsField::OcrLanguage,
             Self::OcrKoreanAuto(_) => SettingsField::OcrKoreanAuto,
             Self::Provider(_) => SettingsField::Provider,
@@ -122,6 +128,45 @@ impl SettingsChange {
         }
     }
 
+    /// Check six configured combinations without requiring idle recording keys to be registered.
+    pub fn validate_shortcuts(
+        &self,
+        settings: &Settings,
+        recording_locked: bool,
+    ) -> crate::Result<()> {
+        let recording = matches!(
+            self,
+            Self::RecordingPauseHotkey(_) | Self::RecordingFinishHotkey(_)
+        );
+        if recording && recording_locked {
+            return Err(crate::Error::new("Unavailable during recording"));
+        }
+        if !matches!(
+            self,
+            Self::Hotkey(_)
+                | Self::AnnotationHotkey(_)
+                | Self::OcrHotkey(_)
+                | Self::ScreenshotHotkey(_)
+                | Self::RecordingPauseHotkey(_)
+                | Self::RecordingFinishHotkey(_)
+        ) {
+            return Ok(());
+        }
+        let mut candidate = settings.clone();
+        self.apply_to(&mut candidate);
+        let keys = [
+            candidate.hotkey,
+            candidate.annotation_hotkey,
+            candidate.ocr_hotkey,
+            candidate.screenshot_hotkey,
+            candidate.recording_pause_hotkey,
+            candidate.recording_finish_hotkey,
+        ];
+        if keys.iter().enumerate().any(|(i, k)| keys[..i].contains(k)) {
+            return Err(crate::Error::new("All shortcuts must differ"));
+        }
+        Ok(())
+    }
     /// Validate targeted translation edits against the current configuration at dispatch time.
     pub fn validate_translation_change(&self, settings: &Settings) -> crate::Result<()> {
         if let Self::OcrLanguage(Some(value)) = self
@@ -198,6 +243,8 @@ impl SettingsChange {
             Self::AnnotationHotkey(value) => settings.annotation_hotkey = *value,
             Self::OcrHotkey(value) => settings.ocr_hotkey = *value,
             Self::ScreenshotHotkey(value) => settings.screenshot_hotkey = *value,
+            Self::RecordingPauseHotkey(value) => settings.recording_pause_hotkey = *value,
+            Self::RecordingFinishHotkey(value) => settings.recording_finish_hotkey = *value,
             Self::OcrLanguage(value) => settings.ocr_language = value.clone(),
             Self::OcrKoreanAuto(value) => settings.ocr_korean_auto = *value,
             Self::Provider(value) => settings.provider = *value,
@@ -265,6 +312,8 @@ impl SettingsChange {
             Self::AnnotationHotkey(value) => settings.annotation_hotkey == *value,
             Self::OcrHotkey(value) => settings.ocr_hotkey == *value,
             Self::ScreenshotHotkey(value) => settings.screenshot_hotkey == *value,
+            Self::RecordingPauseHotkey(value) => settings.recording_pause_hotkey == *value,
+            Self::RecordingFinishHotkey(value) => settings.recording_finish_hotkey == *value,
             Self::OcrLanguage(value) => settings.ocr_language == *value,
             Self::OcrKoreanAuto(value) => settings.ocr_korean_auto == *value,
             Self::Provider(value) => settings.provider == *value,
@@ -304,6 +353,8 @@ pub struct Settings {
     pub annotation_hotkey: HotkeyConfig,
     pub ocr_hotkey: HotkeyConfig,
     pub screenshot_hotkey: HotkeyConfig,
+    pub recording_pause_hotkey: HotkeyConfig,
+    pub recording_finish_hotkey: HotkeyConfig,
     pub ocr_language: Option<String>,
     pub ocr_enabled: bool,
     pub ocr_korean_auto: bool,
@@ -328,6 +379,8 @@ impl Default for Settings {
             annotation_hotkey: HotkeyConfig::annotation_default(),
             ocr_hotkey: HotkeyConfig::ocr_default(),
             screenshot_hotkey: HotkeyConfig::screenshot_default(),
+            recording_pause_hotkey: super::recording_hotkeys::default_pause(),
+            recording_finish_hotkey: super::recording_hotkeys::default_finish(),
             ocr_language: Some("auto".into()),
             ocr_enabled: true,
             ocr_korean_auto: false,
@@ -352,6 +405,8 @@ impl Settings {
             annotation_hotkey: self.annotation_hotkey,
             ocr_hotkey: self.ocr_hotkey,
             screenshot_hotkey: self.screenshot_hotkey,
+            recording_pause_hotkey: self.recording_pause_hotkey,
+            recording_finish_hotkey: self.recording_finish_hotkey,
             provider: self.provider,
             ollama: self.ollama.clone(),
             llm: self.llm.clone(),

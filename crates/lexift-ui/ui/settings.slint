@@ -478,15 +478,31 @@ export component SettingsWindow inherits Window {
     in property <string> screenshot-hotkey-status;
     in property <string> screenshot-hotkey-error-text;
     callback screenshot-hotkey-change-requested(string);
+    in property <bool> recording-hotkeys-locked;
+    in-out property <string> draft-recording-pause-hotkey-label;
+    in-out property <bool> recording-pause-hotkey-capturing: false;
+    in property <string> recording-pause-hotkey-status;
+    in property <string> recording-pause-hotkey-error-text;
+    callback recording-pause-hotkey-change-requested(string);
+    public function focus-recording-pause-hotkey-capture() { recording-pause-hotkey-capture.focus(); }
+    in-out property <string> draft-recording-finish-hotkey-label;
+    in-out property <bool> recording-finish-hotkey-capturing: false;
+    in property <string> recording-finish-hotkey-status;
+    in property <string> recording-finish-hotkey-error-text;
+    callback recording-finish-hotkey-change-requested(string);
+    public function focus-recording-finish-hotkey-capture() { recording-finish-hotkey-capture.focus(); }
     public function toggle-hotkey-capture(kind: int) {
-        let was-capturing = kind == 0 ? root.hotkey-capturing : kind == 1 ? root.annotation-hotkey-capturing : kind == 2 ? root.ocr-hotkey-capturing : root.screenshot-hotkey-capturing;
+        if kind >= 4 && root.recording-hotkeys-locked { return; }
+        let was-capturing = kind == 0 ? root.hotkey-capturing : kind == 1 ? root.annotation-hotkey-capturing : kind == 2 ? root.ocr-hotkey-capturing : kind == 3 ? root.screenshot-hotkey-capturing : kind == 4 ? root.recording-pause-hotkey-capturing : root.recording-finish-hotkey-capturing;
         root.hotkey-capturing = false; root.annotation-hotkey-capturing = false;
-        root.ocr-hotkey-capturing = false; root.screenshot-hotkey-capturing = false;
+        root.ocr-hotkey-capturing = false; root.screenshot-hotkey-capturing = false; root.recording-pause-hotkey-capturing = false; root.recording-finish-hotkey-capturing = false;
         if !was-capturing {
             if kind == 0 { root.hotkey-capturing = true; root.focus-hotkey-capture(); }
             if kind == 1 { root.annotation-hotkey-capturing = true; root.focus-annotation-hotkey-capture(); }
             if kind == 2 { root.ocr-hotkey-capturing = true; root.focus-ocr-hotkey-capture(); }
             if kind == 3 { root.screenshot-hotkey-capturing = true; root.focus-screenshot-hotkey-capture(); }
+            if kind == 4 { root.recording-pause-hotkey-capturing = true; root.focus-recording-pause-hotkey-capture(); }
+            if kind == 5 { root.recording-finish-hotkey-capturing = true; root.focus-recording-finish-hotkey-capture(); }
         }
     }
     // Registered global combinations may arrive as a native hotkey rather than a local key event.
@@ -502,7 +518,13 @@ export component SettingsWindow inherits Window {
             root.ocr-hotkey-capturing = false; root.draft-ocr-hotkey-label = value; root.ocr-hotkey-change-requested(value); return true;
         }
         if root.screenshot-hotkey-capturing {
-            root.screenshot-hotkey-capturing = false; root.draft-screenshot-hotkey-label = value; root.screenshot-hotkey-change-requested(value); return true;
+            root.screenshot-hotkey-capturing = false; root.recording-pause-hotkey-capturing = false; root.recording-finish-hotkey-capturing = false; root.draft-screenshot-hotkey-label = value; root.screenshot-hotkey-change-requested(value); return true;
+        }
+        if root.recording-pause-hotkey-capturing {
+            root.recording-pause-hotkey-capturing = false; root.draft-recording-pause-hotkey-label = value; root.recording-pause-hotkey-change-requested(value); return true;
+        }
+        if root.recording-finish-hotkey-capturing {
+            root.recording-finish-hotkey-capturing = false; root.draft-recording-finish-hotkey-label = value; root.recording-finish-hotkey-change-requested(value); return true;
         }
         return false;
     }
@@ -687,7 +709,7 @@ export component SettingsWindow inherits Window {
     callback theme-selected(int);
     callback ui-language-selected(int);
     in-out property <int> appearance-language-index: 2;
-    private property <bool> app-language-menu-open: false;
+    out property <bool> app-language-menu-open: false;
     private property <length> app-language-menu-scroll-y: 0px;
 
     // Match the navigation text's font and leave room for the icon and both margins.
@@ -843,7 +865,7 @@ export component SettingsWindow inherits Window {
         root.history-clear-dialog = false;
         root.settings-close-dialog = false;
         root.credential-delete-dialog = false; root.prompt-reset-undo = false; root.prompt-before-reset = ""; root.prompt-reset-value = "";
-        root.close-settings-menu(); root.close-app-language-menu(); root.hotkey-capturing = false; root.annotation-hotkey-capturing = false; root.screenshot-hotkey-capturing = false; root.active-category = 0; root.llm-page-left();
+        root.close-settings-menu(); root.close-app-language-menu(); root.hotkey-capturing = false; root.annotation-hotkey-capturing = false; root.screenshot-hotkey-capturing = false; root.recording-pause-hotkey-capturing = false; root.recording-finish-hotkey-capturing = false; root.active-category = 0; root.llm-page-left();
         general-scroll.content-y = 0px; translation-scroll.content-y = 0px; providers-scroll.content-y = 0px;
         hotkeys-scroll.content-y = 0px; about-page.content-y = 0px; root.about-link-failed = false;
     }
@@ -874,7 +896,7 @@ export component SettingsWindow inherits Window {
     }
     public function select-category(category: int) {
         if root.ocr-remove-dialog || root.ocr-download-dialog || root.settings-close-dialog || root.credential-delete-dialog || root.history-clear-dialog || root.active-category == category { return; }
-        root.close-settings-menu(); root.close-app-language-menu(); root.hotkey-capturing = false; root.annotation-hotkey-capturing = false; root.screenshot-hotkey-capturing = false;
+        root.close-settings-menu(); root.close-app-language-menu(); root.hotkey-capturing = false; root.annotation-hotkey-capturing = false; root.screenshot-hotkey-capturing = false; root.recording-pause-hotkey-capturing = false; root.recording-finish-hotkey-capturing = false;
         if root.active-category == 5 { root.credential-edit-cancel-requested(); root.llm-page-left(); }
         SettingsInteraction.invalidate();
         root.active-category = category;
@@ -1066,7 +1088,7 @@ export component SettingsWindow inherits Window {
         visible: root.active-category == 2;
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - Metrics.settings-header-height;
         content-width: self.visible-width;
-        content-height: max(self.visible-height, screenshot-hotkeys-card.y + screenshot-hotkeys-card.height + Metrics.settings-page-padding);
+        content-height: max(self.visible-height, recording-finish-hotkeys-card.y + recording-finish-hotkeys-card.height + Metrics.settings-page-padding);
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off; vertical-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
 
         selection-hotkeys-card := SettingsCard {
@@ -1151,9 +1173,9 @@ export component SettingsWindow inherits Window {
                         annotation-hotkey-capture := SettingsFocusScope {
                             key-pressed(event) => {
                                 if !root.annotation-hotkey-capturing || root.active-category != 2 { return reject; }
-                                if event.text == Key.Escape { root.annotation-hotkey-capturing = false; root.screenshot-hotkey-capturing = false; return accept; }
+                                if event.text == Key.Escape { root.annotation-hotkey-capturing = false; root.screenshot-hotkey-capturing = false; root.recording-pause-hotkey-capturing = false; root.recording-finish-hotkey-capturing = false; return accept; }
                                 let captured = root.hotkey-key-pressed(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta);
-                                if captured != "" { root.annotation-hotkey-change-requested(captured); root.draft-annotation-hotkey-label = captured; root.annotation-hotkey-capturing = false; root.screenshot-hotkey-capturing = false; }
+                                if captured != "" { root.annotation-hotkey-change-requested(captured); root.draft-annotation-hotkey-label = captured; root.annotation-hotkey-capturing = false; root.screenshot-hotkey-capturing = false; root.recording-pause-hotkey-capturing = false; root.recording-finish-hotkey-capturing = false; }
                                 return accept;
                             }
                         }
@@ -1247,9 +1269,9 @@ export component SettingsWindow inherits Window {
                         screenshot-hotkey-capture := SettingsFocusScope {
                             key-pressed(event) => {
                                 if !root.screenshot-hotkey-capturing || root.active-category != 2 { return reject; }
-                                if event.text == Key.Escape { root.screenshot-hotkey-capturing = false; return accept; }
+                                if event.text == Key.Escape { root.screenshot-hotkey-capturing = false; root.recording-pause-hotkey-capturing = false; root.recording-finish-hotkey-capturing = false; return accept; }
                                 let captured = root.hotkey-key-pressed(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta);
-                                if captured != "" { root.screenshot-hotkey-change-requested(captured); root.draft-screenshot-hotkey-label = captured; root.screenshot-hotkey-capturing = false; }
+                                if captured != "" { root.screenshot-hotkey-change-requested(captured); root.draft-screenshot-hotkey-label = captured; root.screenshot-hotkey-capturing = false; root.recording-pause-hotkey-capturing = false; root.recording-finish-hotkey-capturing = false; }
                                 return accept;
                             }
                         }
@@ -1258,6 +1280,102 @@ export component SettingsWindow inherits Window {
                         x: parent.width - 84px; y: root.hotkeys-compact ? capture-label-3.height + Spacing.small : (parent.height - 40px) / 2;
                         width: 84px; label: root.screenshot-hotkey-capturing ? @tr("Cancel") : @tr("Change");
                         clicked => { root.toggle-hotkey-capture(3); }
+                    }
+                }
+            }
+        }
+        recording-pause-hotkeys-card := SettingsCard {
+            x: Metrics.settings-page-padding;
+            y: screenshot-hotkeys-card.y + screenshot-hotkeys-card.height + Metrics.settings-card-gap;
+            width: hotkeys-scroll.visible-width - 2 * Metrics.settings-page-padding; title: @tr("Pause / resume recording");
+            VerticalLayout {
+                spacing: Spacing.small;
+                Rectangle {
+                    width: 100%; height: root.hotkeys-compact ? capture-label-4.height + 56px : max(92px, capture-label-4.height + 16px);
+                    capture-label-4 := SettingsTextBlock {
+                        height: self.preferred-height;
+                        x: 0px; y: root.hotkeys-compact ? 0px : (parent.height - self.height) / 2;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.45 - Spacing.small;
+                        label: @tr("Pause / resume recording"); error-text: root.recording-pause-hotkey-error-text;
+                        description: root.recording-pause-hotkey-capturing ? @tr("Press a key combination") : root.recording-pause-hotkey-status;
+
+                    }
+                    Rectangle {
+                        x: root.hotkeys-compact ? 0px : parent.width * 0.45;
+                        y: root.hotkeys-compact ? capture-label-4.height + Spacing.small : (parent.height - 40px) / 2;
+                        width: root.hotkeys-compact ? parent.width - 96px : parent.width * 0.55 - 96px;
+                        height: 40px; border-radius: 6px;
+                        border-width: root.recording-pause-hotkey-capturing ? 2px : 1px;
+                        border-color: root.recording-pause-hotkey-capturing ? Colors.primary : Colors.outline;
+                        background: Colors.background;
+                        Text {
+                            x: Spacing.medium; width: parent.width - 2 * Spacing.medium; height: parent.height;
+                            text: root.recording-pause-hotkey-capturing ? @tr("Press shortcut…") : root.draft-recording-pause-hotkey-label;
+                            color: root.recording-pause-hotkey-capturing ? Colors.primary : Colors.foreground;
+                            font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
+                        }
+                        recording-pause-hotkey-capture := SettingsFocusScope {
+                            key-pressed(event) => {
+                                if !root.recording-pause-hotkey-capturing || root.active-category != 2 { return reject; }
+                                if event.text == Key.Escape { root.recording-pause-hotkey-capturing = false; return accept; }
+                                let captured = root.hotkey-key-pressed(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta);
+                                if captured != "" { root.recording-pause-hotkey-change-requested(captured); root.draft-recording-pause-hotkey-label = captured; root.recording-pause-hotkey-capturing = false; }
+                                return accept;
+                            }
+                        }
+                    }
+                    SettingsButton {
+                        x: parent.width - 84px; y: root.hotkeys-compact ? capture-label-4.height + Spacing.small : (parent.height - 40px) / 2;
+                        enabled: !root.recording-hotkeys-locked; width: 84px; label: root.recording-pause-hotkey-capturing ? @tr("Cancel") : @tr("Change");
+                        clicked => { root.toggle-hotkey-capture(4); }
+                    }
+                }
+            }
+        }
+        recording-finish-hotkeys-card := SettingsCard {
+            x: Metrics.settings-page-padding;
+            y: recording-pause-hotkeys-card.y + recording-pause-hotkeys-card.height + Metrics.settings-card-gap;
+            width: hotkeys-scroll.visible-width - 2 * Metrics.settings-page-padding; title: @tr("Finish recording");
+            VerticalLayout {
+                spacing: Spacing.small;
+                Rectangle {
+                    width: 100%; height: root.hotkeys-compact ? capture-label-5.height + 56px : max(92px, capture-label-5.height + 16px);
+                    capture-label-5 := SettingsTextBlock {
+                        height: self.preferred-height;
+                        x: 0px; y: root.hotkeys-compact ? 0px : (parent.height - self.height) / 2;
+                        width: root.hotkeys-compact ? parent.width : parent.width * 0.45 - Spacing.small;
+                        label: @tr("Finish recording"); error-text: root.recording-finish-hotkey-error-text;
+                        description: root.recording-finish-hotkey-capturing ? @tr("Press a key combination") : root.recording-finish-hotkey-status;
+
+                    }
+                    Rectangle {
+                        x: root.hotkeys-compact ? 0px : parent.width * 0.45;
+                        y: root.hotkeys-compact ? capture-label-5.height + Spacing.small : (parent.height - 40px) / 2;
+                        width: root.hotkeys-compact ? parent.width - 96px : parent.width * 0.55 - 96px;
+                        height: 40px; border-radius: 6px;
+                        border-width: root.recording-finish-hotkey-capturing ? 2px : 1px;
+                        border-color: root.recording-finish-hotkey-capturing ? Colors.primary : Colors.outline;
+                        background: Colors.background;
+                        Text {
+                            x: Spacing.medium; width: parent.width - 2 * Spacing.medium; height: parent.height;
+                            text: root.recording-finish-hotkey-capturing ? @tr("Press shortcut…") : root.draft-recording-finish-hotkey-label;
+                            color: root.recording-finish-hotkey-capturing ? Colors.primary : Colors.foreground;
+                            font-size: Typography.body-size; vertical-alignment: center; overflow: elide;
+                        }
+                        recording-finish-hotkey-capture := SettingsFocusScope {
+                            key-pressed(event) => {
+                                if !root.recording-finish-hotkey-capturing || root.active-category != 2 { return reject; }
+                                if event.text == Key.Escape { root.recording-finish-hotkey-capturing = false; return accept; }
+                                let captured = root.hotkey-key-pressed(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta);
+                                if captured != "" { root.recording-finish-hotkey-change-requested(captured); root.draft-recording-finish-hotkey-label = captured; root.recording-finish-hotkey-capturing = false; }
+                                return accept;
+                            }
+                        }
+                    }
+                    SettingsButton {
+                        x: parent.width - 84px; y: root.hotkeys-compact ? capture-label-5.height + Spacing.small : (parent.height - 40px) / 2;
+                        enabled: !root.recording-hotkeys-locked; width: 84px; label: root.recording-finish-hotkey-capturing ? @tr("Cancel") : @tr("Change");
+                        clicked => { root.toggle-hotkey-capture(5); }
                     }
                 }
             }

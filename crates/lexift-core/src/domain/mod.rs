@@ -43,3 +43,5 @@ pub mod recording_gif;
 pub mod recording_preview;
 pub mod recording_trim;
 pub mod screen_recording;
+
+pub mod recording_hotkeys;

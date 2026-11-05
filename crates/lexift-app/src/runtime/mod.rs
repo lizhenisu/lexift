@@ -26,6 +26,9 @@ pub(crate) struct RuntimeManager {
 }
 
 impl RuntimeManager {
+    pub(crate) fn hotkey_port(&self) -> Option<Arc<dyn lexift_core::ports::hotkey::HotkeyPort>> {
+        self.hotkey.port()
+    }
     pub(crate) fn hotkey_registrations(
         &self,
     ) -> lexift_core::domain::runtime_config::HotkeyRegistrations {
@@ -158,6 +161,14 @@ impl RuntimeManager {
             | SettingsField::SelectionToolbar
             | SettingsField::Theme
             | SettingsField::UiLanguage => {}
+            SettingsField::RecordingPauseHotkey => self
+                .hotkey_port()
+                .ok_or_else(|| lexift_core::Error::new("Recording shortcuts unavailable"))?
+                .probe_recording_hotkey(config.recording_pause_hotkey)?,
+            SettingsField::RecordingFinishHotkey => self
+                .hotkey_port()
+                .ok_or_else(|| lexift_core::Error::new("Recording shortcuts unavailable"))?
+                .probe_recording_hotkey(config.recording_finish_hotkey)?,
             SettingsField::Hotkey => self.hotkey.apply(config.hotkey)?,
             SettingsField::OcrHotkey => self.hotkey.apply_ocr(config.ocr_hotkey)?,
             SettingsField::ScreenshotHotkey => {
@@ -200,6 +211,12 @@ impl RuntimeManager {
             | SettingsField::SelectionToolbar
             | SettingsField::Theme
             | SettingsField::UiLanguage => {}
+            SettingsField::RecordingPauseHotkey => {
+                current.recording_pause_hotkey = config.recording_pause_hotkey
+            }
+            SettingsField::RecordingFinishHotkey => {
+                current.recording_finish_hotkey = config.recording_finish_hotkey
+            }
             SettingsField::Hotkey => current.hotkey = config.hotkey,
             SettingsField::OcrHotkey => current.ocr_hotkey = config.ocr_hotkey,
             SettingsField::ScreenshotHotkey => current.screenshot_hotkey = config.screenshot_hotkey,

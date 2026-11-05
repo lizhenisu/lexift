@@ -1,5 +1,7 @@
+mod recording;
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},
+    sync::Arc,
     sync::{Mutex, mpsc},
     thread::{self, JoinHandle},
 };
@@ -25,6 +27,7 @@ use windows::Win32::{
 
 const TRANSLATE_HOTKEY_ID: i32 = 1;
 pub(crate) struct WindowsHotkeyPort {
+    recording: Mutex<Option<recording::Listener>>,
     listener: Mutex<Option<HotkeyListener>>,
     annotation_listener: Mutex<Option<HotkeyListener>>,
     ocr_listener: Mutex<Option<HotkeyListener>>,
@@ -34,6 +37,7 @@ pub(crate) struct WindowsHotkeyPort {
 impl WindowsHotkeyPort {
     pub(crate) fn new() -> Self {
         Self {
+            recording: Mutex::new(None),
             listener: Mutex::new(None),
             annotation_listener: Mutex::new(None),
             ocr_listener: Mutex::new(None),
@@ -43,6 +47,25 @@ impl WindowsHotkeyPort {
 }
 
 impl HotkeyPort for WindowsHotkeyPort {
+    fn register_recording_hotkeys(
+        &self,
+        scope: lexift_core::domain::recording_hotkeys::Scope,
+        keys: [HotkeyConfig; 2],
+        handler: Arc<dyn Fn(lexift_core::domain::recording_hotkeys::Action) + Send + Sync>,
+    ) -> Result<lexift_core::domain::recording_hotkeys::Registration> {
+        self.start_recording(scope, keys, handler)
+    }
+    fn unregister_recording_hotkeys(
+        &self,
+        scope: lexift_core::domain::recording_hotkeys::Scope,
+    ) -> Result<()> {
+        self.stop_recording(scope)
+    }
+    fn probe_recording_hotkey(&self, config: HotkeyConfig) -> Result<()> {
+        start_listener(config, Arc::new(|| {}))?.shutdown();
+        Ok(())
+    }
+
     fn register_ocr_hotkey(&self, config: HotkeyConfig, handler: HotkeyHandler) -> Result<()> {
         let mut listener = self.ocr_listener.lock().unwrap_or_else(|p| p.into_inner());
         if listener.is_some() {

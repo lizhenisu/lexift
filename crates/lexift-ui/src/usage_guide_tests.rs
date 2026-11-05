@@ -192,7 +192,11 @@ fn screenshot_registered_key_is_consumed_by_each_settings_recorder() {
     w.on_ocr_hotkey_change_requested(move |_| e.borrow_mut().push(2));
     let e = events.clone();
     w.on_screenshot_hotkey_change_requested(move |_| e.borrow_mut().push(3));
-    for kind in 0..4 {
+    let e = events.clone();
+    w.on_recording_pause_hotkey_change_requested(move |_| e.borrow_mut().push(4));
+    let e = events.clone();
+    w.on_recording_finish_hotkey_change_requested(move |_| e.borrow_mut().push(5));
+    for kind in 0..6 {
         w.invoke_toggle_hotkey_capture(kind);
         w.invoke_toggle_hotkey_capture(kind);
         assert!(
@@ -206,7 +210,7 @@ fn screenshot_registered_key_is_consumed_by_each_settings_recorder() {
             "same event is consumed once"
         );
     }
-    assert_eq!(*events.borrow(), vec![0, 1, 2, 3]);
+    assert_eq!(*events.borrow(), vec![0, 1, 2, 3, 4, 5]);
 }
 
 #[test]
@@ -230,6 +234,14 @@ fn screenshot_settings_render_all_locales_themes_and_dpis() {
                     w.set_draft_annotation_hotkey_label("Alt + A".into());
                     w.set_draft_ocr_hotkey_label("Alt + T".into());
                     w.set_draft_screenshot_hotkey_label("Alt + S".into());
+                    w.set_draft_recording_pause_hotkey_label("Ctrl + Alt + F9".into());
+                    w.set_draft_recording_finish_hotkey_label("Ctrl + Alt + F10".into());
+                    w.set_recording_pause_hotkey_status(
+                        crate::i18n::tr("Enabled when recording starts").into(),
+                    );
+                    w.set_recording_finish_hotkey_status(
+                        crate::i18n::tr("Enabled when recording starts").into(),
+                    );
                     w.set_screenshot_hotkey_status(crate::i18n::tr("Registered").into());
                     w.window().dispatch_event(WindowEvent::ScaleFactorChanged {
                         scale_factor: scale,

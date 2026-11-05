@@ -2303,3 +2303,27 @@ msgstr "GIF supports clips up to 60 seconds. Shorten the selected range or choos
 
 msgid "Use the file extension matching the selected video format."
 msgstr "Use the file extension matching the selected video format."
+
+msgid "Pause / resume recording"
+msgstr "Pause / resume recording"
+
+msgid "Finish recording"
+msgstr "Finish recording"
+
+msgid "Enabled when recording starts"
+msgstr "Enabled when recording starts"
+
+msgid "Unavailable during recording"
+msgstr "Unavailable during recording"
+
+msgid "Pause / resume shortcut unavailable. Use the toolbar."
+msgstr "Pause / resume shortcut unavailable. Use the toolbar."
+
+msgid "Finish recording shortcut unavailable. Use the toolbar."
+msgstr "Finish recording shortcut unavailable. Use the toolbar."
+
+msgid "Recording shortcuts unavailable. Use the toolbar."
+msgstr "Recording shortcuts unavailable. Use the toolbar."
+
+msgid "All shortcuts must differ"
+msgstr "All shortcuts must differ"

@@ -5,6 +5,23 @@ use crate::{Result, domain::runtime_config::HotkeyConfig};
 pub type HotkeyHandler = Arc<dyn Fn() + Send + Sync + 'static>;
 
 pub trait HotkeyPort: Send + Sync {
+    fn register_recording_hotkeys(
+        &self,
+        _scope: crate::domain::recording_hotkeys::Scope,
+        _keys: [HotkeyConfig; 2],
+        _handler: Arc<dyn Fn(crate::domain::recording_hotkeys::Action) + Send + Sync>,
+    ) -> Result<crate::domain::recording_hotkeys::Registration> {
+        Err(crate::Error::new("Recording shortcuts unavailable"))
+    }
+    fn unregister_recording_hotkeys(
+        &self,
+        _scope: crate::domain::recording_hotkeys::Scope,
+    ) -> Result<()> {
+        Ok(())
+    }
+    fn probe_recording_hotkey(&self, _config: HotkeyConfig) -> Result<()> {
+        Err(crate::Error::new("Recording shortcuts unavailable"))
+    }
     fn register_ocr_hotkey(&self, _config: HotkeyConfig, _handler: HotkeyHandler) -> Result<()> {
         Err(crate::Error::new(
             "OCR shortcut is unavailable on this platform",

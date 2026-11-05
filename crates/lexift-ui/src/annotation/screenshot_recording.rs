@@ -275,6 +275,7 @@ pub(crate) fn clear() {
 }
 pub(crate) fn execute(command: Command) {
     match command {
+        Command::Shortcut { scope, action } => shortcut(scope, action),
         Command::Preview(command) => preview::execute(command),
         Command::PrepareView {
             identity,
@@ -680,8 +681,7 @@ fn show_windows(identity: Identity, bounds: Rect) -> Result<()> {
                 blank.data(),
                 blank.width(),
                 blank.height(),
-            ) || !(r.lifecycle.annotation_click_through)(layer.window.window(), true)
-            {
+            ) {
                 return Err(Error::new("Recording input preparation failed"));
             }
             layer
@@ -720,6 +720,12 @@ fn show_windows(identity: Identity, bounds: Rect) -> Result<()> {
                         .set_position(slint::PhysicalPosition::new(annotation.x, annotation.y));
                 }
                 main.show().map_err(|e| Error::new(e.to_string()))?;
+            }
+            // The annotation toolbar show participates in the same native
+            // style pass; reassert the final interaction window policy after
+            // every recording chrome window is visible.
+            if !(r.lifecycle.annotation_click_through)(layer.window.window(), true) {
+                return Err(Error::new("Recording input pass-through failed"));
             }
             Ok(())
         })?;
@@ -1069,6 +1075,24 @@ pub(crate) fn sync(state: &ScreenshotState) {
         }) {
             return;
         }
+        w.set_pause_shortcut(
+            recording
+                .hotkeys
+                .as_ref()
+                .and_then(|k| k.pause)
+                .map(|k| format!(" · {k}"))
+                .unwrap_or_default()
+                .into(),
+        );
+        w.set_finish_shortcut(
+            recording
+                .hotkeys
+                .as_ref()
+                .and_then(|k| k.finish)
+                .map(|k| format!(" · {k}"))
+                .unwrap_or_default()
+                .into(),
+        );
         w.set_export_label(preview::export_label(recording));
         w.set_phase(match recording.lifecycle.phase {
             Phase::Ready => 1,
@@ -1241,4 +1265,84 @@ pub(in crate::annotation) fn with_hint_window<T>(
             None
         }
     })
+}
+
+fn shortcut(
+    scope: lexift_core::domain::recording_hotkeys::Scope,
+    action: lexift_core::domain::recording_hotkeys::Action,
+) {
+    use lexift_core::domain::recording_hotkeys::Action as Key;
+    let Some(state) = current().filter(|s| {
+        s.hotkey_scope == Some(scope)
+            && matches!(s.lifecycle.phase, Phase::Recording | Phase::Paused)
+    }) else {
+        return;
+    };
+    let Some(keys) = state.hotkeys.as_ref() else {
+        return;
+    };
+    let key = match action {
+        Key::TogglePause => keys.pause,
+        Key::Finish => keys.finish,
+    };
+    let Some(key) = key else { return };
+    if crate::bridge::recording_shortcut_captured(key.to_string())
+        || crate::tray_menu::is_open()
+        || super::delay::menu_open()
+    {
+        return;
+    }
+    let allowed = REGISTRY.with(|slot| {
+        slot.borrow().as_ref().is_some_and(|r| {
+            shortcut_interaction_allowed(
+                action,
+                r.gesture.is_some()
+                    || !r.pending_drawing.is_none()
+                    || r.toolbar_state.toolbar_drag.is_some()
+                    || r.parameter_edit.dragging(),
+                r.toolbar_state.menus.current.is_some()
+                    || r.toolbar_state.panel.get().is_some()
+                    || r.export.pending(),
+                r.editor.edit().is_some()
+                    || r.parameter_edit.active()
+                    || r.toolbar_state
+                        .panel
+                        .get()
+                        .is_some_and(|p| p.get_parameter_input_active())
+                    || r.toolbar_state.watermark.get().is_some(),
+            )
+        })
+    });
+    if !allowed
+        || !VIEW.with(|v| v.borrow().identity.is_some_and(|id| scope.owns(id)))
+        || VIEW.with(|v| v.borrow().control.get().is_none_or(|w| w.get_dragging()))
+    {
+        return;
+    }
+    tracing::debug!(
+        session = scope.session,
+        operation = scope.operation,
+        generation = scope.generation,
+        ?action,
+        "Recording shortcut accepted by view"
+    );
+    input(match action {
+        Key::Finish => Input::Finish,
+        Key::TogglePause if state.lifecycle.phase == Phase::Paused => Input::Resume,
+        _ => Input::Pause,
+    });
+}
+
+/// Finish settles text/parameter input; neither action may reinterpret an active gesture.
+pub(super) fn shortcut_interaction_allowed(
+    action: lexift_core::domain::recording_hotkeys::Action,
+    gesture: bool,
+    menu: bool,
+    input: bool,
+) -> bool {
+    if gesture {
+        return false;
+    }
+    let finish = action == lexift_core::domain::recording_hotkeys::Action::Finish;
+    (finish && input) || (!menu && !input)
 }

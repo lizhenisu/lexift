@@ -401,3 +401,37 @@ fn recording_countdown_renders_all_locales_themes_and_dpis() {
         }
     }
 }
+
+#[test]
+fn recording_shortcut_input_policy_commits_text_but_never_reinterprets_gestures() {
+    use lexift_core::domain::recording_hotkeys::Action::{Finish, TogglePause};
+    assert!(super::shortcut_interaction_allowed(
+        Finish, false, false, true
+    ));
+    assert!(super::shortcut_interaction_allowed(
+        Finish, false, true, true
+    ));
+    assert!(!super::shortcut_interaction_allowed(
+        TogglePause,
+        false,
+        false,
+        true
+    ));
+    for action in [Finish, TogglePause] {
+        assert!(super::shortcut_interaction_allowed(
+            action, false, false, false
+        ));
+        assert!(!super::shortcut_interaction_allowed(
+            action, true, false, false
+        ));
+        assert!(!super::shortcut_interaction_allowed(
+            action, false, true, false
+        ));
+    }
+    assert!(!super::shortcut_interaction_allowed(
+        TogglePause,
+        false,
+        true,
+        false
+    ));
+}

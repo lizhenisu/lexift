@@ -25,7 +25,6 @@ pub(super) struct Transaction {
 }
 
 impl Transaction {
-    #[cfg(test)]
     pub fn active(&self) -> bool {
         self.active
     }

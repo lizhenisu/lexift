@@ -2303,3 +2303,27 @@ msgstr "GIF 最長支援60秒。請縮短選取範圍或選擇 MP4。"
 
 msgid "Use the file extension matching the selected video format."
 msgstr "請使用與所選影片格式相符的副檔名。"
+
+msgid "Pause / resume recording"
+msgstr "暫停／繼續錄製"
+
+msgid "Finish recording"
+msgstr "完成錄製"
+
+msgid "Enabled when recording starts"
+msgstr "錄製開始時啟用"
+
+msgid "Unavailable during recording"
+msgstr "錄製期間無法使用"
+
+msgid "Pause / resume shortcut unavailable. Use the toolbar."
+msgstr "暫停／繼續快捷鍵無法使用，請使用工具列。"
+
+msgid "Finish recording shortcut unavailable. Use the toolbar."
+msgstr "完成錄製快捷鍵無法使用，請使用工具列。"
+
+msgid "Recording shortcuts unavailable. Use the toolbar."
+msgstr "錄影快捷鍵無法使用，請使用工具列。"
+
+msgid "All shortcuts must differ"
+msgstr "所有快捷鍵必須不同"

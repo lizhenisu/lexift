@@ -537,3 +537,7 @@ pub(crate) fn availability(state: &lexift_core::AppState) {
         clear();
     }
 }
+
+pub(super) fn menu_open() -> bool {
+    VIEWS.with(|v| v.borrow().menu.is_some())
+}

@@ -1,4 +1,6 @@
 //! Composition and native scheduling. Acceptance and restoration stay in Core.
+#[path = "screenshot_recording/hotkeys.rs"]
+mod hotkeys;
 use super::*;
 use lexift_core::domain::{
     screen_recording::{Action, Event as Input, Identity},
@@ -7,6 +9,7 @@ use lexift_core::domain::{
 use lexift_core::ports::screen_recording::{Control, Notice, ScreenRecordingPort};
 
 pub(super) struct Runtime {
+    hotkeys: Option<Arc<hotkeys::Lease>>,
     countdown: Option<tokio::task::JoinHandle<()>>,
     port: Option<Arc<dyn ScreenRecordingPort>>,
     active: Option<Identity>,
@@ -17,6 +20,7 @@ pub(super) struct Runtime {
 impl Default for Runtime {
     fn default() -> Self {
         Self {
+            hotkeys: None,
             countdown: None,
             port: None,
             active: None,
@@ -31,6 +35,9 @@ pub(super) fn sync(r: &ScreenshotRuntime, quitting: bool) {
         return;
     }
     let mut slot = r.recording.lock().unwrap();
+    if let Some(lease) = &slot.hotkeys {
+        lease.cancel.store(true, Ordering::Release);
+    }
     if let Some(cancel) = slot.save.take() {
         cancel.store(true, Ordering::Release);
     }
@@ -50,6 +57,21 @@ pub(super) fn sync(r: &ScreenshotRuntime, quitting: bool) {
     }
 }
 pub(super) async fn wait_for_shutdown(r: &ScreenshotRuntime) {
+    let lease = r.recording.lock().unwrap().hotkeys.clone();
+    if let Some(lease) = lease {
+        let cleanup = lease.clone();
+        let _ = tokio::task::spawn_blocking(move || cleanup.retire()).await;
+        loop {
+            let notified = lease.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if lease.retired.load(Ordering::Acquire) {
+                break;
+            }
+            notified.await;
+        }
+    }
+
     let (complete, notify) = {
         let slot = r.recording.lock().unwrap();
         (slot.shutdown_complete.clone(), slot.shutdown_notify.clone())
@@ -72,6 +94,9 @@ fn failed(c: &Arc<AppController>, identity: Identity, error: Error) {
     emit(c, Event::Failed { identity, error });
 }
 pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, command: Command) {
+    if hotkeys::execute(r, c, &command) {
+        return;
+    }
     if let Command::CancelExport(identity) = &command {
         let valid = c
             .state
@@ -133,7 +158,11 @@ pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, comman
         return;
     }
     let identity = match &command {
-        Command::Preview(_) | Command::CancelExport(_) => unreachable!(),
+        Command::PrepareHotkeys(_)
+        | Command::ReleaseHotkeys(_)
+        | Command::Shortcut { .. }
+        | Command::Preview(_)
+        | Command::CancelExport(_) => unreachable!(),
         Command::PrepareView { identity, .. } => *identity,
         Command::PrepareBackend(request) => request.identity,
         Command::Execute(command) => command.identity,
@@ -167,7 +196,11 @@ pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, comman
         task.abort();
     }
     match command {
-        Command::Preview(_) | Command::CancelExport(_) => unreachable!(),
+        Command::PrepareHotkeys(_)
+        | Command::ReleaseHotkeys(_)
+        | Command::Shortcut { .. }
+        | Command::Preview(_)
+        | Command::CancelExport(_) => unreachable!(),
         Command::PrepareView { .. } => c.ui.screen_recording(command),
         Command::PrepareBackend(request) => {
             let port = {

@@ -10,6 +10,9 @@ export component RecordingControl inherits Window {
     min-width: 476px; max-width: 476px;
     min-height: Metrics.long-capture-control-height; max-height: Metrics.long-capture-control-height;
     // 0 preparing, 1 ready, 2 recording, 3 paused, 4 finishing, 5 sealed, 6 saving.
+    out property <bool> dragging: grip.pressed;
+    in property <string> pause-shortcut;
+    in property <string> finish-shortcut;
     in property <int> phase: 0;
     in property <string> dimensions;
     in property <string> export-label;
@@ -54,7 +57,7 @@ export component RecordingControl inherits Window {
                 enabled:root.phase == 1; busy:root.audio-preparing;
                 clicked=>{root.action(3);} }
             CaptureButton { icon:root.phase == 2 ? @image-url("assets/icons/capture-pause.svg") : @image-url("assets/icons/capture-play.svg");
-                label:root.phase == 5 ? @tr("Preview") : root.phase == 1 ? @tr("Start") : root.phase == 3 ? @tr("Continue") : @tr("Pause");
+                label:root.phase == 5 ? @tr("Preview") : root.phase == 1 ? @tr("Start") : root.phase == 3 ? @tr("Continue") + root.pause-shortcut : @tr("Pause") + root.pause-shortcut;
                 selected:root.phase == 3; enabled:(root.phase >= 1 && root.phase <= 3 && (root.phase != 1 || root.start-enabled)) || (root.phase == 5 && !root.preview-preparing); busy:root.phase == 0 || root.preview-preparing;
                 clicked=>{root.action(0);} }
             if root.phase == 1: Rectangle { width:18px;
@@ -64,7 +67,7 @@ export component RecordingControl inherits Window {
                 AnnotationHintTarget {text:@tr("Delayed recording");hovered:delay.has-hover;pressed:delay.pressed;}
             }
             if root.phase != 1: Rectangle {width:18px;}
-            CaptureButton { icon:@image-url("assets/icons/recording-stop.svg");label:@tr("Finish");enabled:root.phase == 2 || root.phase == 3;busy:root.phase == 4;clicked=>{root.action(1);} }
+            CaptureButton { icon:@image-url("assets/icons/recording-stop.svg");label:@tr("Finish") + root.finish-shortcut;enabled:root.phase == 2 || root.phase == 3;busy:root.phase == 4;clicked=>{root.action(1);} }
             CaptureButton { icon:@image-url("assets/icons/capture-save.svg");label:@tr("Save video");enabled:root.phase == 5 && !root.preview-preparing;busy:root.phase == 6;clicked=>{root.action(2);} }
             CaptureButton { icon:@image-url("assets/icons/screenshot-close.svg");label:@tr("Cancel");clicked=>{root.action(4);} }
         }

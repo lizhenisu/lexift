@@ -94,4 +94,5 @@ jobs:
           )
           gh release create $env:GITHUB_REF_NAME @($assets.FullName) `
             --title "Lexift $env:GITHUB_REF_NAME" `
+            --prerelease `
             --notes-file "devdoc/releases/notes/release-notes-v$($env:GITHUB_REF_NAME.TrimStart('v')).md"
