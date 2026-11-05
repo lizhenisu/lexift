@@ -96,22 +96,23 @@ if ($runningLexift.Count -ne 0) {
 $process = $null
 try {
     $process = Start-Process -FilePath $item.FullName -PassThru
-    $deadline = [DateTime]::UtcNow.AddSeconds(10)
-    $observedTitle = ""
+    $deadline = [DateTime]::UtcNow.AddSeconds(3)
     while ([DateTime]::UtcNow -lt $deadline) {
         Start-Sleep -Milliseconds 200
         $process.Refresh()
         if ($process.HasExited) {
-            throw "Release executable exited before showing its main window (exit code: $($process.ExitCode))"
+            throw "Release executable exited during background startup (exit code: $($process.ExitCode))"
         }
-        $observedTitle = $process.MainWindowTitle
-        if ($observedTitle -eq "Lexift") { break }
-        if ($observedTitle) {
-            throw "Release executable showed an unexpected startup window: $observedTitle"
+        if ($process.MainWindowTitle -eq "Lexift") {
+            throw "Release executable showed the main window despite silent startup"
+        }
+        if ($process.MainWindowTitle) {
+            throw "Release executable showed an unexpected startup window: $($process.MainWindowTitle)"
         }
     }
-    if ($observedTitle -ne "Lexift") {
-        throw "Release executable did not show the Lexift main window within 10 seconds"
+    $process.Refresh()
+    if ($process.HasExited) {
+        throw "Release executable exited during background startup (exit code: $($process.ExitCode))"
     }
 }
 finally {
@@ -122,5 +123,5 @@ finally {
 }
 
 Write-Host "Verified Windows GUI executable metadata for $($item.Name) ($($item.Length) bytes)."
-Write-Host "Verified release executable startup and portable/installed executable hashes."
+Write-Host "Verified silent background startup and portable/installed executable hashes."
 Write-Host "Verified rendered NSIS cleanup, shortcut icon, and Shell refresh behavior."
