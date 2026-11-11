@@ -148,4 +148,4 @@ LongShotWidget 采集处理 0x140213FD0
 
 ## 7. 后续实现
 
-上述差距表保留为研究时的历史基线。当前重做已接入持续透明范围反馈、紧凑可移动控制条、固定宽度尾部预览、当前帧标记、直接输出及有边界的结果编辑器。实现与实际覆盖见[功能说明](../features/screenshot-mode.md#手动纵向长截图)及[重做验证](../releases/screenshot-long-redesign.md)；此更新不扩大前述 PixPin 静态分析或运行观察的证明范围。
+上述差距表保留为研究时的历史基线。当前重做已接入持续透明范围反馈、紧凑可移动控制条、固定宽度尾部预览、当前帧标记、直接输出及有边界的结果编辑器。实现与实际覆盖见[功能说明](../features/screenshot-mode.md#纵向长截图)及[重做验证](../releases/screenshot-long-redesign.md)；此更新不扩大前述 PixPin 静态分析或运行观察的证明范围。

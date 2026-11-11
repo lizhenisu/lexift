@@ -2,9 +2,15 @@
 use super::*;
 use lexift_core::domain::long_capture::{
     Feedback, Stitcher,
+    auto_scroll::{self, Mode, Next, Steps, Stop},
     workflow::{Command, Event, Phase},
 };
 use std::time::{Duration, Instant};
+
+use lexift_core::{domain::geometry::Rect, ports::screen_capture::LongScrollTarget};
+
+type AutoControl = Mutex<auto_scroll::State>;
+type AutoEvents<'a> = (&'a AutoControl, &'a dyn Fn(u64, Option<Stop>));
 
 pub(super) struct Job {
     session: u64,
@@ -12,6 +18,7 @@ pub(super) struct Job {
     cancel: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
     finish: Arc<AtomicBool>,
+    auto: Arc<AutoControl>,
 }
 pub(super) fn sync(
     runtime: &ScreenshotRuntime,
@@ -28,7 +35,11 @@ pub(super) fn sync(
             })
     }) && let Some(j) = job.take()
     {
+        let mut desired = j.auto.lock().unwrap();
+        *desired = auto_scroll::State::default();
         j.cancel.store(true, Ordering::Release);
+    } else if let (Some(job), Some(long)) = (job.as_ref(), state.long.as_ref()) {
+        *job.auto.lock().unwrap() = long.auto_scroll;
     }
 }
 fn emit(c: &Arc<AppController>, event: Event) {
@@ -116,13 +127,17 @@ pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, 
             let cancel = Arc::new(AtomicBool::new(false));
             let paused = Arc::new(AtomicBool::new(false));
             let finish = Arc::new(AtomicBool::new(false));
+            let auto = Arc::new(AutoControl::default());
             if let Some(old) = runtime.long.lock().unwrap().replace(Job {
                 session,
                 operation,
                 cancel: cancel.clone(),
                 paused: paused.clone(),
                 finish: finish.clone(),
+                auto: auto.clone(),
             }) {
+                let mut desired = old.auto.lock().unwrap();
+                *desired = auto_scroll::State::default();
                 old.cancel.store(true, Ordering::Release);
             }
             let factory = runtime.capture;
@@ -133,6 +148,24 @@ pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, 
                     bounds,
                     excluded,
                     (&cancel, &paused, &finish),
+                    Some((&auto, &|generation, stop| {
+                        emit(
+                            &c,
+                            match stop {
+                                Some(reason) => Event::AutoScrollStopped {
+                                    session,
+                                    operation,
+                                    generation,
+                                    reason,
+                                },
+                                None => Event::AutoScrollStarted {
+                                    session,
+                                    operation,
+                                    generation,
+                                },
+                            },
+                        );
+                    })),
                     || c.physical_displays(),
                     |sequence, stitch, feedback| {
                         let (width, height) = stitch.size();
@@ -170,11 +203,109 @@ pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, 
     }
 }
 
+struct AutoRun {
+    generation: u64,
+    started: Instant,
+    anchor: Option<(LongScrollTarget, Instant)>,
+    steps: Steps,
+    sent: Option<Instant>,
+    stopped: bool,
+}
+
+impl AutoRun {
+    fn new(generation: u64) -> Self {
+        Self {
+            generation,
+            started: Instant::now(),
+            anchor: None,
+            steps: Steps::default(),
+            sent: None,
+            stopped: false,
+        }
+    }
+
+    fn stop(&mut self, notify: &dyn Fn(u64, Option<Stop>), reason: Stop) {
+        self.stopped = true;
+        tracing::debug!(
+            generation = self.generation,
+            ?reason,
+            "Long capture automatic scroll stopped"
+        );
+        notify(self.generation, Some(reason));
+    }
+
+    fn tick(
+        &mut self,
+        (control, notify): AutoEvents<'_>,
+        mode: Mode,
+        port: &dyn ScreenCapturePort,
+        bounds: Rect,
+        aligned: bool,
+    ) {
+        if self.stopped {
+            return;
+        }
+        if mode == Mode::Waiting {
+            if !port.supports_long_scroll() {
+                self.stop(notify, Stop::InputUnavailable);
+                return;
+            }
+            if self.started.elapsed() >= auto_scroll::TARGET_WAIT {
+                self.stop(notify, Stop::TargetTimeout);
+                return;
+            }
+            let current = port.long_scroll_target(bounds);
+            match self.anchor {
+                Some((anchor, since)) if Some(anchor) == current => {
+                    if since.elapsed() >= auto_scroll::TARGET_DWELL {
+                        notify(self.generation, None);
+                    }
+                }
+                _ => self.anchor = current.map(|target| (target, Instant::now())),
+            }
+            return;
+        }
+        let Some((target, _)) = self.anchor else {
+            return;
+        };
+        if !port.long_scroll_matches(bounds, target) {
+            self.stop(notify, Stop::TargetChanged);
+            return;
+        }
+        match self.steps.next(self.started.elapsed(), aligned) {
+            Next::Wait => {}
+            Next::Stop(reason) => self.stop(notify, reason),
+            Next::Scroll => {
+                // Keep final authorization and wheel injection ordered with session retirement.
+                let result = {
+                    let desired = control.lock().unwrap();
+                    if desired.generation != self.generation || desired.mode != Mode::Running {
+                        return;
+                    }
+                    port.long_scroll_step(bounds, target)
+                };
+                match result {
+                    Ok(()) => {
+                        let now = Instant::now();
+                        self.sent = Some(now);
+                        self.steps.sent(now.duration_since(self.started));
+                    }
+                    Err(error) => {
+                        tracing::debug!(%error, "Long capture wheel input failed");
+                        self.stop(notify, Stop::InputUnavailable);
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn run(
     factory: impl FnOnce() -> Option<Arc<dyn ScreenCapturePort>>,
     bounds: lexift_core::domain::geometry::Rect,
     excluded: Vec<lexift_core::ports::magnifier::WindowToken>,
     control: (&AtomicBool, &AtomicBool, &AtomicBool),
+    auto: Option<AutoEvents<'_>>,
     layout: impl Fn() -> Result<Vec<lexift_core::domain::geometry::Rect>>,
     mut progress: impl FnMut(u64, &Stitcher, Feedback),
 ) -> Result<Arc<CapturedRegion>> {
@@ -205,6 +336,7 @@ fn run(
     let mut sequence = 0;
     let mut suspended = false;
     let mut last_feedback = Feedback::Unchanged;
+    let mut auto_run: Option<AutoRun> = None;
     let mut last_frame = Instant::now();
     struct Stats {
         start: Instant,
@@ -301,6 +433,19 @@ fn run(
                     stats.feedback += feedback_started.elapsed();
                 }
                 last_feedback = feedback;
+                if let Some(run) = &mut auto_run {
+                    run.steps.frame(feedback, run.started.elapsed());
+                    if feedback == Feedback::Accepted
+                        && let Some(sent) = run.sent.take()
+                    {
+                        tracing::debug!(
+                            generation = run.generation,
+                            step_ms = sent.elapsed().as_secs_f64() * 1000.,
+                            elapsed_ms = run.started.elapsed().as_secs_f64() * 1000.,
+                            "Long capture automatic scroll confirmed"
+                        );
+                    }
+                }
                 if feedback == Feedback::Limit {
                     paused.store(true, Ordering::Release);
                 }
@@ -315,6 +460,27 @@ fn run(
                 return Err(Error::new("Long capture unavailable"));
             }
             _ => {}
+        }
+        if let Some((control, notify)) = auto {
+            let desired = *control.lock().unwrap();
+            if desired.mode == Mode::Manual {
+                auto_run = None;
+            } else if !paused.load(Ordering::Acquire)
+                && !finish.load(Ordering::Acquire)
+                && !cancel.load(Ordering::Acquire)
+            {
+                let run = auto_run.get_or_insert_with(|| AutoRun::new(desired.generation));
+                if run.generation != desired.generation {
+                    *run = AutoRun::new(desired.generation);
+                }
+                run.tick(
+                    (control, notify),
+                    desired.mode,
+                    port.as_ref(),
+                    bounds,
+                    matches!(last_feedback, Feedback::Accepted | Feedback::Unchanged),
+                );
+            }
         }
         std::thread::sleep(Duration::from_millis(30));
     }
@@ -388,6 +554,75 @@ mod tests {
         })
     }
     #[test]
+    fn automatic_scroll_revalidates_authorization_before_injecting() {
+        use lexift_core::{domain::geometry::Point, ports::magnifier::WindowToken};
+        struct Wheel(AtomicUsize, bool);
+        impl ScreenCapturePort for Wheel {
+            fn is_available(&self) -> bool {
+                true
+            }
+            fn request(
+                &self,
+                _: lexift_core::ports::screen_capture::ScreenCaptureRequest,
+            ) -> Result<()> {
+                Ok(())
+            }
+            fn latest(&self) -> Result<Option<Arc<ScreenCaptureFrame>>> {
+                Ok(None)
+            }
+            fn clear(&self) {}
+            fn long_scroll_matches(&self, _: Rect, _: LongScrollTarget) -> bool {
+                true
+            }
+            fn long_scroll_step(&self, _: Rect, _: LongScrollTarget) -> Result<()> {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                if self.1 {
+                    return Err(Error::new("fixture rejected input"));
+                }
+                Ok(())
+            }
+        }
+        let gate = AutoControl::new(auto_scroll::State {
+            generation: 2,
+            mode: Mode::Running,
+            reason: None,
+        });
+        let bounds = frame(0).bounds;
+        let mut run = AutoRun::new(1);
+        run.anchor = Some((
+            LongScrollTarget {
+                hit: WindowToken(10),
+                root: WindowToken(11),
+                process: 12,
+                thread: 13,
+                point: Point { x: 10, y: 10 },
+                dpi: 96,
+            },
+            Instant::now(),
+        ));
+        let wheel = Wheel(AtomicUsize::new(0), false);
+        let notify = |_, _| panic!("unexpected scroll event");
+        run.tick((&gate, &notify), Mode::Running, &wheel, bounds, true);
+        assert_eq!(wheel.0.load(Ordering::Relaxed), 0);
+        run.generation = 2;
+        run.tick((&gate, &notify), Mode::Running, &wheel, bounds, true);
+        run.tick((&gate, &notify), Mode::Running, &wheel, bounds, true);
+        assert_eq!(wheel.0.load(Ordering::Relaxed), 1);
+
+        run.steps = Steps::default();
+        let rejected = Wheel(AtomicUsize::new(0), true);
+        let events = Mutex::new(Vec::new());
+        let notify = |generation, reason| events.lock().unwrap().push((generation, reason));
+        run.tick((&gate, &notify), Mode::Running, &rejected, bounds, true);
+        run.tick((&gate, &notify), Mode::Running, &rejected, bounds, true);
+        assert_eq!(rejected.0.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![(2, Some(Stop::InputUnavailable))]
+        );
+    }
+
+    #[test]
     fn long_capture_pause_releases_resources_and_finishes_latest_accepted_pixels() {
         let port = capture();
         let cancel = AtomicBool::new(false);
@@ -408,6 +643,7 @@ mod tests {
             frame(0).bounds,
             vec![],
             (&cancel, &paused, &finish),
+            None,
             || Ok(vec![frame(0).bounds]),
             |seq, _, feedback| {
                 assert_eq!(feedback, Feedback::Accepted);
@@ -439,6 +675,7 @@ mod tests {
                 frame(0).bounds,
                 vec![],
                 (&cancel, &paused, &finish),
+                None,
                 || Ok(vec![frame(0).bounds]),
                 |_, _, _| cancel.store(true, Ordering::Release)
             )

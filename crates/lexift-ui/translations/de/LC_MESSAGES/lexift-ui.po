@@ -2327,3 +2327,24 @@ msgstr "Aufnahme-Tastenkürzel nicht verfügbar. Verwenden Sie die Werkzeugleist
 
 msgid "All shortcuts must differ"
 msgstr "Alle Tastenkürzel müssen unterschiedlich sein"
+
+msgid "Automatic scrolling"
+msgstr "Automatisch scrollen"
+
+msgid "Stop automatic scrolling"
+msgstr "Automatisches Scrollen stoppen"
+
+msgid "Focus content and move pointer inside"
+msgstr "Inhalt fokussieren und Maus hineinbewegen"
+
+msgid "Automatic scrolling timed out waiting for the target."
+msgstr "Zeitlimit beim Warten auf das Scrollziel erreicht."
+
+msgid "Automatic scrolling stopped because the target changed."
+msgstr "Automatisches Scrollen gestoppt: Das Ziel hat sich geändert."
+
+msgid "Automatic scrolling is unavailable."
+msgstr "Automatisches Scrollen ist nicht verfügbar."
+
+msgid "Automatic scrolling stopped because the image did not change."
+msgstr "Automatisches Scrollen gestoppt: Das Bild blieb unverändert."

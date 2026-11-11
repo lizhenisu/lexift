@@ -2327,3 +2327,24 @@ msgstr "錄影快捷鍵無法使用，請使用工具列。"
 
 msgid "All shortcuts must differ"
 msgstr "所有快捷鍵必須不同"
+
+msgid "Automatic scrolling"
+msgstr "自動捲動"
+
+msgid "Stop automatic scrolling"
+msgstr "停止自動捲動"
+
+msgid "Focus content and move pointer inside"
+msgstr "將內容視窗置於前景，再把滑鼠移入選區"
+
+msgid "Automatic scrolling timed out waiting for the target."
+msgstr "等候捲動目標逾時。"
+
+msgid "Automatic scrolling stopped because the target changed."
+msgstr "捲動目標已變更，自動捲動已停止。"
+
+msgid "Automatic scrolling is unavailable."
+msgstr "自動捲動無法使用。"
+
+msgid "Automatic scrolling stopped because the image did not change."
+msgstr "畫面未變更，自動捲動已停止。"

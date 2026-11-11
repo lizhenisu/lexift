@@ -2327,3 +2327,24 @@ msgstr "録画ショートカットを使用できません。ツールバーを
 
 msgid "All shortcuts must differ"
 msgstr "ショートカットはすべて異なる必要があります"
+
+msgid "Automatic scrolling"
+msgstr "自動スクロール"
+
+msgid "Stop automatic scrolling"
+msgstr "自動スクロールを停止"
+
+msgid "Focus content and move pointer inside"
+msgstr "対象を前面にしてポインターを範囲内へ"
+
+msgid "Automatic scrolling timed out waiting for the target."
+msgstr "スクロール対象の待機時間が過ぎました。"
+
+msgid "Automatic scrolling stopped because the target changed."
+msgstr "対象が変わったため自動スクロールを停止しました。"
+
+msgid "Automatic scrolling is unavailable."
+msgstr "自動スクロールを利用できません。"
+
+msgid "Automatic scrolling stopped because the image did not change."
+msgstr "画像が変化しなかったため自動スクロールを停止しました。"

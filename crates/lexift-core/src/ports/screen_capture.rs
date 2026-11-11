@@ -28,6 +28,17 @@ pub struct ScreenCaptureFrame {
     pub regions: Vec<CapturedRegion>,
 }
 
+/// Native window identity and physical pointer anchor for one automatic scroll run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LongScrollTarget {
+    pub hit: WindowToken,
+    pub root: WindowToken,
+    pub process: u32,
+    pub thread: u32,
+    pub point: crate::domain::geometry::Point,
+    pub dpi: u32,
+}
+
 /// Frozen pixels and window metadata owned by one screenshot preparation.
 pub struct ScreenshotCapture {
     pub frame: Arc<ScreenCaptureFrame>,
@@ -73,6 +84,24 @@ pub trait ScreenCapturePort: Send + Sync {
         _cancel: &std::sync::atomic::AtomicBool,
     ) -> Result<Option<Arc<ScreenCaptureFrame>>> {
         Ok(None)
+    }
+    fn supports_long_scroll(&self) -> bool {
+        false
+    }
+
+    /// Observe a foreground target without moving the pointer or changing focus.
+    fn long_scroll_target(&self, _bounds: Rect) -> Option<LongScrollTarget> {
+        None
+    }
+
+    /// Check the current input target against the originally armed target.
+    fn long_scroll_matches(&self, _bounds: Rect, _target: LongScrollTarget) -> bool {
+        false
+    }
+
+    /// Revalidate the target and issue one downward wheel detent.
+    fn long_scroll_step(&self, _bounds: Rect, _target: LongScrollTarget) -> Result<()> {
+        Err(crate::Error::new("Automatic scrolling is unavailable"))
     }
     fn is_available(&self) -> bool;
     /// Replaces outstanding work; must not wait for GPU readback on the UI thread.

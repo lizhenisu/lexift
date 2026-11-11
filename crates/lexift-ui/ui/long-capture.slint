@@ -33,15 +33,20 @@ export component LongCaptureControl inherits Window {
     min-width: root.content-width; max-width: root.content-width;
     min-height: root.content-height; max-height: root.content-height;
     // Reserve the widest legal dimensions once, so accepted rows never move the controls.
-    measure-square := Text { visible: false; text: "32768 × 32768 px"; font-size: 12px; }
-    measure-wide := Text { visible: false; text: "32000000 × 1 px"; font-size: 12px; }
-    out property <length> content-width: max(measure-square.preferred-width, measure-wide.preferred-width) + 8px + 60px + 6 * Metrics.long-capture-button-size;
+    measure-square := Text { visible: false; text: "32768 脳 32768 px"; font-size: 12px; }
+    measure-wide := Text { visible: false; text: "32000000 脳 1 px"; font-size: 12px; }
+    measure-target := Text { visible: false; text: @tr("Focus content and move pointer inside"); font-size: 12px; }
+    private property <length> status-width: max(measure-square.preferred-width, max(measure-wide.preferred-width, measure-target.preferred-width)) + 8px;
+    out property <length> content-width: root.status-width + 62px + 7 * Metrics.long-capture-button-size;
     out property <length> content-height: Metrics.long-capture-control-height;
     in property <bool> ready;
     in property <bool> paused;
     in property <bool> finishing;
     in property <bool> frozen;
     in property <string> dimensions;
+    in property <bool> auto-waiting;
+    in property <bool> auto-running;
+    callback auto-scroll();
     callback pause(); callback finish(); callback cancel(); callback output(int);
     callback drag-requested(float, float);
     forward-focus: keys;
@@ -56,12 +61,13 @@ export component LongCaptureControl inherits Window {
                     grip := TouchArea { mouse-cursor: move; pointer-event(event) => { if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.drag-requested((self.absolute-position.x + self.mouse-x) / 1px, (self.absolute-position.y + self.mouse-y) / 1px); } } }
                     AnnotationHintTarget { width: parent.width; height: parent.height; text: @tr("Move toolbar"); hovered: grip.has-hover; pressed: grip.pressed; }
                 }
-                Rectangle { width: max(measure-square.preferred-width, measure-wide.preferred-width) + 8px; height: Metrics.long-capture-button-size;
-                    Text { x: 4px; width: parent.width - 8px; height: 100%; text: root.dimensions; color: Colors.foreground; vertical-alignment: center; font-size: 12px; }
+                Rectangle { width: root.status-width; height: Metrics.long-capture-button-size;
+                    Text { x: 4px; width: parent.width - 8px; height: 100%; text: root.auto-waiting ? measure-target.text : root.dimensions; color: Colors.foreground; vertical-alignment: center; font-size: 12px; }
                     dimensions-area := TouchArea {}
                     AnnotationHintTarget { width: parent.width; height: parent.height; text: @tr("Scroll down to extend the image"); hovered: dimensions-area.has-hover; pressed: dimensions-area.pressed; }
                 }
                 CaptureSeparator {}
+                CaptureButton { icon: @image-url("assets/icons/capture-auto-scroll.svg"); label: root.auto-waiting || root.auto-running ? @tr("Stop automatic scrolling") : @tr("Automatic scrolling"); enabled: root.ready && !root.paused && !root.finishing && !root.frozen; selected: root.auto-waiting || root.auto-running; clicked => { root.auto-scroll(); } }
                 CaptureButton { icon: root.paused ? @image-url("assets/icons/capture-play.svg") : @image-url("assets/icons/capture-pause.svg"); label: root.paused ? @tr("Continue") : @tr("Pause"); enabled: root.ready && !root.finishing && !root.frozen; selected: root.paused; busy: !root.ready || root.finishing; clicked => { root.pause(); } }
                 CaptureButton { icon: @image-url("icons/credential-edit.svg"); label: @tr("Edit"); enabled: root.ready && !root.finishing; clicked => { root.finish(); } }
                 CaptureSeparator {}

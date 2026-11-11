@@ -989,6 +989,7 @@ mod tests {
                     height: 2000,
                     feedback: Feedback::Accepted,
                     target: None,
+                    auto_scroll: Default::default(),
                 });
                 let mut req = request(10, 2, crop);
                 if metadata {

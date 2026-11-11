@@ -1,5 +1,8 @@
 //! Session-scoped control of live capture, separate from desktop region editing.
-use super::{Feedback, Preview};
+use super::{
+    Feedback, Preview,
+    auto_scroll::{Mode, Stop},
+};
 use crate::domain::screenshot::ScreenshotOutput;
 use crate::{
     Result,
@@ -31,6 +34,7 @@ pub struct State {
     pub height: usize,
     pub feedback: Feedback,
     pub target: Option<ScreenshotOutput>,
+    pub auto_scroll: super::auto_scroll::State,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -52,6 +56,21 @@ pub enum Event {
         height: usize,
         feedback: Feedback,
         preview: Preview,
+    },
+    ToggleAutoScroll {
+        session: u64,
+        operation: u64,
+    },
+    AutoScrollStarted {
+        session: u64,
+        operation: u64,
+        generation: u64,
+    },
+    AutoScrollStopped {
+        session: u64,
+        operation: u64,
+        generation: u64,
+        reason: Stop,
     },
     Pause {
         session: u64,
@@ -151,6 +170,7 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
             height: 0,
             feedback: Feedback::Unchanged,
             target: None,
+            auto_scroll: Default::default(),
         });
         return wrap(Command::Prepare {
             session,
@@ -163,6 +183,13 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
             session, operation, ..
         }
         | Event::Progress {
+            session, operation, ..
+        }
+        | Event::ToggleAutoScroll { session, operation }
+        | Event::AutoScrollStarted {
+            session, operation, ..
+        }
+        | Event::AutoScrollStopped {
             session, operation, ..
         }
         | Event::Pause {
@@ -188,6 +215,30 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
         return vec![];
     };
     match event {
+        Event::ToggleAutoScroll { .. } if l.phase == Phase::Capturing => {
+            if l.auto_scroll.mode == Mode::Manual {
+                l.auto_scroll.generation += 1;
+                l.auto_scroll.mode = Mode::Waiting;
+                l.auto_scroll.reason = None;
+            } else {
+                l.auto_scroll.stop(None);
+            }
+            vec![]
+        }
+        Event::AutoScrollStarted { generation, .. }
+            if l.phase == Phase::Capturing
+                && l.auto_scroll.generation == generation
+                && l.auto_scroll.mode == Mode::Waiting =>
+        {
+            l.auto_scroll.mode = Mode::Running;
+            vec![]
+        }
+        Event::AutoScrollStopped {
+            generation, reason, ..
+        } if l.auto_scroll.generation == generation && l.auto_scroll.mode != Mode::Manual => {
+            l.auto_scroll.stop(Some(reason));
+            vec![]
+        }
         Event::Ready {
             excluded,
             preview_size,
@@ -230,6 +281,7 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
             if matches!(feedback, Feedback::Limit | Feedback::CaptureLost)
                 && l.phase != Phase::Finishing
             {
+                l.auto_scroll.stop(None);
                 l.phase = Phase::Paused;
             }
             wrap(Command::Present {
@@ -244,6 +296,7 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
             if matches!(l.phase, Phase::Capturing | Phase::Paused)
                 && (paused || l.feedback != Feedback::Limit) =>
         {
+            l.auto_scroll.stop(None);
             l.phase = if paused {
                 Phase::Paused
             } else {
@@ -256,6 +309,7 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
             })
         }
         Event::Finish { target, .. } if matches!(l.phase, Phase::Capturing | Phase::Paused) => {
+            l.auto_scroll.stop(None);
             l.target = target;
             l.phase = Phase::Finishing;
             wrap(Command::Finish { session, operation })
@@ -360,6 +414,87 @@ mod tests {
             image,
         }
     }
+    #[test]
+    fn automatic_scroll_is_owned_by_one_capture_and_one_start() {
+        let mut state = screenshot();
+        let operation = start(&mut state);
+        let toggle = Event::ToggleAutoScroll {
+            session: 9,
+            operation,
+        };
+        reduce(&mut state, toggle.clone());
+        assert_eq!(state.long.as_ref().unwrap().auto_scroll.mode, Mode::Manual);
+        state.long.as_mut().unwrap().phase = Phase::Capturing;
+        reduce(&mut state, toggle.clone());
+        let first = state.long.as_ref().unwrap().auto_scroll.generation;
+        assert_eq!(state.long.as_ref().unwrap().auto_scroll.mode, Mode::Waiting);
+        reduce(&mut state, toggle.clone());
+        reduce(&mut state, toggle);
+        let next = state.long.as_ref().unwrap().auto_scroll.generation;
+        assert_ne!(first, next);
+        let started = |generation| Event::AutoScrollStarted {
+            session: 9,
+            operation,
+            generation,
+        };
+        reduce(&mut state, started(first));
+        assert_eq!(state.long.as_ref().unwrap().auto_scroll.mode, Mode::Waiting);
+        reduce(&mut state, started(next));
+        assert_eq!(state.long.as_ref().unwrap().auto_scroll.mode, Mode::Running);
+        reduce(
+            &mut state,
+            Event::Pause {
+                session: 9,
+                operation,
+                paused: true,
+            },
+        );
+        reduce(
+            &mut state,
+            Event::Pause {
+                session: 9,
+                operation,
+                paused: false,
+            },
+        );
+        reduce(&mut state, started(next));
+        assert_eq!(state.long.as_ref().unwrap().auto_scroll.mode, Mode::Manual);
+        reduce(
+            &mut state,
+            Event::Cancel {
+                session: 9,
+                operation,
+            },
+        );
+        reduce(&mut state, started(next));
+        assert!(state.long.is_none());
+    }
+
+    #[test]
+    fn limit_stops_automatic_scrolling_and_pauses_capture() {
+        let mut state = screenshot();
+        let operation = start(&mut state);
+        let long = state.long.as_mut().unwrap();
+        long.phase = Phase::Capturing;
+        long.auto_scroll.mode = Mode::Running;
+        reduce(
+            &mut state,
+            Event::Progress {
+                session: 9,
+                operation,
+                sequence: 1,
+                width: 400,
+                height: 600,
+                feedback: Feedback::Limit,
+                preview: preview(),
+            },
+        );
+        let long = state.long.as_ref().unwrap();
+        assert_eq!(long.phase, Phase::Paused);
+        assert_eq!(long.auto_scroll.mode, Mode::Manual);
+        assert_eq!(long.feedback, Feedback::Limit);
+    }
+
     #[test]
     fn frozen_output_cancel_failure_retry_and_editor_failure_keep_the_owned_result() {
         use crate::domain::{

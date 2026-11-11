@@ -2327,3 +2327,24 @@ msgstr "녹화 단축키를 사용할 수 없습니다. 도구 모음을 사용�
 
 msgid "All shortcuts must differ"
 msgstr "모든 단축키는 서로 달라야 합니다"
+
+msgid "Automatic scrolling"
+msgstr "자동 스크롤"
+
+msgid "Stop automatic scrolling"
+msgstr "자동 스크롤 중지"
+
+msgid "Focus content and move pointer inside"
+msgstr "콘텐츠를 활성화하고 포인터를 영역 안으로 이동하세요"
+
+msgid "Automatic scrolling timed out waiting for the target."
+msgstr "스크롤 대상 대기 시간이 초과되었습니다."
+
+msgid "Automatic scrolling stopped because the target changed."
+msgstr "대상이 변경되어 자동 스크롤을 중지했습니다."
+
+msgid "Automatic scrolling is unavailable."
+msgstr "자동 스크롤을 사용할 수 없습니다."
+
+msgid "Automatic scrolling stopped because the image did not change."
+msgstr "이미지가 바뀌지 않아 자동 스크롤을 중지했습니다."

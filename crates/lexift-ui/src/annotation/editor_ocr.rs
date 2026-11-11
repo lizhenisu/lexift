@@ -280,6 +280,7 @@ mod tests {
             height: 2000,
             feedback: Feedback::Accepted,
             target: None,
+            auto_scroll: Default::default(),
         });
         screenshot::sync(&state.screenshot);
         REGISTRY.with(|s| {

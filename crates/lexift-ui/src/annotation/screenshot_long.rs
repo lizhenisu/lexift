@@ -5,6 +5,7 @@ use super::*;
 use crate::{LongCaptureConfirmation, LongCaptureControl, LongCapturePreview, LongCaptureRange};
 use lexift_core::domain::long_capture::{
     Feedback, Preview,
+    auto_scroll::{Mode, Stop},
     workflow::{Command, Event, Phase},
 };
 
@@ -100,7 +101,29 @@ fn notification(state: &ScreenshotState) -> Option<(String, bool)> {
     if let Some(error) = state.error.as_ref() {
         return Some((error.clone(), true));
     }
-    let (message, error) = if l.phase == Phase::Paused {
+    let (message, error) = if l.feedback == Feedback::Limit {
+        ("Image limit reached. Finish the current capture.", true)
+    } else if let Some(reason) = l.auto_scroll.reason {
+        match reason {
+            Stop::TargetTimeout => (
+                "Automatic scrolling timed out waiting for the target.",
+                false,
+            ),
+            Stop::TargetChanged => (
+                "Automatic scrolling stopped because the target changed.",
+                false,
+            ),
+            Stop::InputUnavailable => ("Automatic scrolling is unavailable.", true),
+            Stop::Unchanged => (
+                "Automatic scrolling stopped because the image did not change.",
+                false,
+            ),
+            Stop::Uncertain => (
+                "Cannot match this frame. Scroll back to the last captured area.",
+                true,
+            ),
+        }
+    } else if l.phase == Phase::Paused {
         ("Capture paused", false)
     } else if matches!(l.phase, Phase::Capturing | Phase::Frozen) {
         match l.feedback {
@@ -108,7 +131,6 @@ fn notification(state: &ScreenshotState) -> Option<(String, bool)> {
                 "Cannot match this frame. Scroll back to the last captured area.",
                 true,
             ),
-            Feedback::Limit => ("Image limit reached. Finish the current capture.", true),
             _ => return None,
         }
     } else {
@@ -624,6 +646,14 @@ fn open_control(session: u64, operation: u64, bounds: Rect) {
             })
         });
         let work = v.control.input();
+        w.on_auto_scroll(move || {
+            work.post(move || {
+                if current(session, operation, rev) {
+                    send(Event::ToggleAutoScroll { session, operation });
+                }
+            })
+        });
+        let work = v.control.input();
         w.on_pause(move || {
             work.post(move || {
                 if current(session, operation, rev) {
@@ -989,10 +1019,12 @@ pub(in crate::annotation) fn sync() {
             return;
         }
         w.set_ready(l.sequence > 0);
+        w.set_auto_waiting(l.auto_scroll.mode == Mode::Waiting);
+        w.set_auto_running(l.auto_scroll.mode == Mode::Running);
         w.set_paused(l.phase == Phase::Paused);
         w.set_frozen(l.phase == Phase::Frozen);
         w.set_finishing(l.phase == Phase::Finishing || state.phase == ScreenshotPhase::Output);
-        w.set_dimensions(format!("{} × {} px", l.width, l.height).into());
+        w.set_dimensions(format!("{} 脳 {} px", l.width, l.height).into());
         if state.phase == ScreenshotPhase::Output {
             let _ = w.hide();
             if let Some(range) = v.range.get() {
@@ -1254,6 +1286,7 @@ mod tests {
                 height: 400,
                 feedback: Feedback::Unchanged,
                 target: None,
+                auto_scroll: Default::default(),
             })
         });
         REGISTRY.with(|r| {
@@ -1439,6 +1472,7 @@ mod tests {
                 height: 0,
                 feedback: Feedback::Unchanged,
                 target: None,
+                auto_scroll: Default::default(),
             })
         });
         execute(Command::Prepare {
@@ -1554,6 +1588,7 @@ mod tests {
                 height: 800,
                 feedback: Feedback::Accepted,
                 target: None,
+                auto_scroll: Default::default(),
             })
         });
         let w = AnnotationCanvas::new().unwrap();
@@ -1621,6 +1656,7 @@ mod tests {
                 height: 800,
                 feedback: Feedback::Accepted,
                 target: None,
+                auto_scroll: Default::default(),
             })
         });
         let w = AnnotationCanvas::new().unwrap();
@@ -1752,6 +1788,7 @@ mod tests {
             height: 800,
             feedback: Feedback::Accepted,
             target: None,
+            auto_scroll: Default::default(),
         };
         FLOW.with(|f| f.borrow_mut().state.long = Some(state));
         VIEW.with(|v| {
@@ -1861,6 +1898,7 @@ mod tests {
                 height: 2000,
                 feedback: Feedback::Accepted,
                 target: None,
+                auto_scroll: Default::default(),
             });
         });
         let w = AnnotationCanvas::new().unwrap();
@@ -2001,7 +2039,7 @@ mod tests {
             pixels
         };
         w.set_ready(true);
-        w.set_dimensions("600 × 2400 px".into());
+        w.set_dimensions("600 脳 2400 px".into());
         for language in lexift_core::domain::ui_language::UiLanguage::ALL {
             crate::i18n::select(language);
             for dark in [false, true] {
@@ -2029,10 +2067,10 @@ mod tests {
                     let fixed_width = w.get_content_width();
                     assert_eq!(w.get_content_height(), 40.);
                     for (name, dimensions, paused, finishing, ready) in [
-                        ("maximum", "32000000 × 1 px", false, false, true),
-                        ("paused", "32768 × 32768 px", true, false, true),
-                        ("busy", "600 × 2400 px", false, true, true),
-                        ("preparing", "0 × 0 px", false, false, false),
+                        ("maximum", "32000000 脳 1 px", false, false, true),
+                        ("paused", "32768 脳 32768 px", true, false, true),
+                        ("busy", "600 脳 2400 px", false, true, true),
+                        ("preparing", "0 脳 0 px", false, false, false),
                     ] {
                         w.set_dimensions(dimensions.into());
                         w.set_paused(paused);
@@ -2049,7 +2087,7 @@ mod tests {
                     w.set_ready(true);
                     w.set_paused(false);
                     w.set_finishing(false);
-                    w.set_dimensions("600 × 2400 px".into());
+                    w.set_dimensions("600 脳 2400 px".into());
                     draw(
                         &confirm_adapter,
                         format!("confirmation-{}-{dark}-{scale}", language.code()),

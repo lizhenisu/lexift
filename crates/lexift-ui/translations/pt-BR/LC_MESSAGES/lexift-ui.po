@@ -2327,3 +2327,24 @@ msgstr "Atalhos de gravação indisponíveis. Use a barra de ferramentas."
 
 msgid "All shortcuts must differ"
 msgstr "Todos os atalhos devem ser diferentes"
+
+msgid "Automatic scrolling"
+msgstr "Rolagem automática"
+
+msgid "Stop automatic scrolling"
+msgstr "Parar a rolagem automática"
+
+msgid "Focus content and move pointer inside"
+msgstr "Ative o conteúdo e mova o ponteiro para dentro"
+
+msgid "Automatic scrolling timed out waiting for the target."
+msgstr "O tempo de espera pelo alvo da rolagem expirou."
+
+msgid "Automatic scrolling stopped because the target changed."
+msgstr "A rolagem automática parou porque o alvo mudou."
+
+msgid "Automatic scrolling is unavailable."
+msgstr "A rolagem automática não está disponível."
+
+msgid "Automatic scrolling stopped because the image did not change."
+msgstr "A rolagem automática parou porque a imagem não mudou."

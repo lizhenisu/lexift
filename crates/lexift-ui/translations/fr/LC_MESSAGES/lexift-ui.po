@@ -2327,3 +2327,24 @@ msgstr "Raccourcis d’enregistrement indisponibles. Utilisez la barre d’outil
 
 msgid "All shortcuts must differ"
 msgstr "Tous les raccourcis doivent être différents"
+
+msgid "Automatic scrolling"
+msgstr "Défilement automatique"
+
+msgid "Stop automatic scrolling"
+msgstr "Arrêter le défilement automatique"
+
+msgid "Focus content and move pointer inside"
+msgstr "Activez le contenu et placez-y le pointeur"
+
+msgid "Automatic scrolling timed out waiting for the target."
+msgstr "Le délai d’attente de la cible est écoulé."
+
+msgid "Automatic scrolling stopped because the target changed."
+msgstr "Le défilement automatique s’est arrêté car la cible a changé."
+
+msgid "Automatic scrolling is unavailable."
+msgstr "Le défilement automatique est indisponible."
+
+msgid "Automatic scrolling stopped because the image did not change."
+msgstr "Le défilement automatique s’est arrêté car l’image n’a pas changé."

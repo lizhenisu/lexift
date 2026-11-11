@@ -2327,3 +2327,24 @@ msgstr "Scorciatoie di registrazione non disponibili. Usa la barra degli strumen
 
 msgid "All shortcuts must differ"
 msgstr "Tutte le scorciatoie devono essere diverse"
+
+msgid "Automatic scrolling"
+msgstr "Scorrimento automatico"
+
+msgid "Stop automatic scrolling"
+msgstr "Ferma lo scorrimento automatico"
+
+msgid "Focus content and move pointer inside"
+msgstr "Attiva il contenuto e sposta il puntatore al suo interno"
+
+msgid "Automatic scrolling timed out waiting for the target."
+msgstr "Tempo scaduto in attesa dell’area da scorrere."
+
+msgid "Automatic scrolling stopped because the target changed."
+msgstr "Scorrimento automatico interrotto perché l’area è cambiata."
+
+msgid "Automatic scrolling is unavailable."
+msgstr "Scorrimento automatico non disponibile."
+
+msgid "Automatic scrolling stopped because the image did not change."
+msgstr "Scorrimento automatico interrotto perché l’immagine non è cambiata."

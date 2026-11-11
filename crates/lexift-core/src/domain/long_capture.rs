@@ -5,6 +5,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+pub mod auto_scroll;
 pub mod workflow;
 
 pub const MAX_PIXELS: usize = 32_000_000;

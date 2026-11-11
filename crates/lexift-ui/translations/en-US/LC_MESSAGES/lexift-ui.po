@@ -2327,3 +2327,24 @@ msgstr "Recording shortcuts unavailable. Use the toolbar."
 
 msgid "All shortcuts must differ"
 msgstr "All shortcuts must differ"
+
+msgid "Automatic scrolling"
+msgstr "Automatic scrolling"
+
+msgid "Stop automatic scrolling"
+msgstr "Stop automatic scrolling"
+
+msgid "Focus content and move pointer inside"
+msgstr "Focus content and move pointer inside"
+
+msgid "Automatic scrolling timed out waiting for the target."
+msgstr "Automatic scrolling timed out waiting for the target."
+
+msgid "Automatic scrolling stopped because the target changed."
+msgstr "Automatic scrolling stopped because the target changed."
+
+msgid "Automatic scrolling is unavailable."
+msgstr "Automatic scrolling is unavailable."
+
+msgid "Automatic scrolling stopped because the image did not change."
+msgstr "Automatic scrolling stopped because the image did not change."

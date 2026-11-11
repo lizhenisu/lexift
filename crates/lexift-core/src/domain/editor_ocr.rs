@@ -206,6 +206,7 @@ mod tests {
             height: 2200,
             feedback: super::super::long_capture::Feedback::Unchanged,
             target: None,
+            auto_scroll: Default::default(),
         });
         (
             s,

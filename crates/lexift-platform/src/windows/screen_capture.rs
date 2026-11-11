@@ -10,6 +10,7 @@ pub(crate) mod diagnostics;
 pub(crate) mod elements;
 #[cfg(test)]
 mod long_capture_native;
+mod long_scroll;
 pub(crate) mod regions;
 mod runtime;
 
@@ -134,6 +135,33 @@ fn screenshot_surfaces_retired(excluded: &[lexift_core::ports::magnifier::Window
 }
 
 impl ScreenCapturePort for WindowsScreenCapturePort {
+    fn supports_long_scroll(&self) -> bool {
+        true
+    }
+
+    fn long_scroll_target(
+        &self,
+        bounds: lexift_core::domain::geometry::Rect,
+    ) -> Option<lexift_core::ports::screen_capture::LongScrollTarget> {
+        long_scroll::target(bounds)
+    }
+
+    fn long_scroll_matches(
+        &self,
+        bounds: lexift_core::domain::geometry::Rect,
+        target: lexift_core::ports::screen_capture::LongScrollTarget,
+    ) -> bool {
+        long_scroll::matches(bounds, target)
+    }
+
+    fn long_scroll_step(
+        &self,
+        bounds: lexift_core::domain::geometry::Rect,
+        target: lexift_core::ports::screen_capture::LongScrollTarget,
+    ) -> Result<()> {
+        long_scroll::step(bounds, target)
+    }
+
     fn query_screenshot_elements(
         &self,
         query: lexift_core::domain::element_candidate::ElementQuery,

@@ -2327,3 +2327,24 @@ msgstr "录屏快捷键不可用，请使用工具条。"
 
 msgid "All shortcuts must differ"
 msgstr "所有快捷键必须不同"
+
+msgid "Automatic scrolling"
+msgstr "自动滚动"
+
+msgid "Stop automatic scrolling"
+msgstr "停止自动滚动"
+
+msgid "Focus content and move pointer inside"
+msgstr "将内容窗口置于前台，再把鼠标移入选区"
+
+msgid "Automatic scrolling timed out waiting for the target."
+msgstr "等待滚动目标超时。"
+
+msgid "Automatic scrolling stopped because the target changed."
+msgstr "滚动目标已变化，自动滚动已停止。"
+
+msgid "Automatic scrolling is unavailable."
+msgstr "自动滚动不可用。"
+
+msgid "Automatic scrolling stopped because the image did not change."
+msgstr "画面未变化，自动滚动已停止。"
