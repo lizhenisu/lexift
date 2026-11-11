@@ -160,6 +160,7 @@ impl RuntimeManager {
             | SettingsField::ClipboardHistoryLimit
             | SettingsField::SelectionToolbar
             | SettingsField::Theme
+            | SettingsField::QuickSaveDirectory
             | SettingsField::UiLanguage => {}
             SettingsField::RecordingPauseHotkey => self
                 .hotkey_port()
@@ -210,6 +211,7 @@ impl RuntimeManager {
             | SettingsField::ClipboardHistoryLimit
             | SettingsField::SelectionToolbar
             | SettingsField::Theme
+            | SettingsField::QuickSaveDirectory
             | SettingsField::UiLanguage => {}
             SettingsField::RecordingPauseHotkey => {
                 current.recording_pause_hotkey = config.recording_pause_hotkey

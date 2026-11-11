@@ -2354,3 +2354,12 @@ msgstr "Oberhalb der aktuellen Ansicht abschneiden"
 
 msgid "Trim below current view"
 msgstr "Unterhalb der aktuellen Ansicht abschneiden"
+
+msgid "Quick save options"
+msgstr "Schnellspeicheroptionen"
+
+msgid "Quick save PNG"
+msgstr "PNG schnell speichern"
+
+msgid "Change quick save directory"
+msgstr "Schnellspeicherordner ändern"

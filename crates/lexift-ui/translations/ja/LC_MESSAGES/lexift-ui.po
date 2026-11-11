@@ -2354,3 +2354,12 @@ msgstr "現在の表示より上を切り取る"
 
 msgid "Trim below current view"
 msgstr "現在の表示より下を切り取る"
+
+msgid "Quick save options"
+msgstr "クイック保存のオプション"
+
+msgid "Quick save PNG"
+msgstr "PNG をクイック保存"
+
+msgid "Change quick save directory"
+msgstr "クイック保存先を変更"

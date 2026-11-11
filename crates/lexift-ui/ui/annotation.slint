@@ -115,7 +115,9 @@ export component AnnotationToolbar inherits Window {
     callback transform-requested();
     in property <string> feedback;
     private property <int> action-count: root.recording-mode ? 2 : root.screenshot-mode && !root.pin-edit-mode ? 9 + (!root.image-edit-mode ? 2 : 0) : 6;
-    out property <length> toolbar-width: root.collapsed ? 80px : 34px + 38px + 7 * 38px + 5 * 18px + 1px + (root.action-count + (root.image-edit-mode ? 1 : 0)) * 38px + (9 + root.action-count + (root.image-edit-mode ? 1 : 0)) * 7px + 51px + (!root.screenshot-mode ? 99px : 0px) + (root.pin-edit-mode ? 45px : 0px) + (root.pin-edit-mode && root.image-cropping ? 230px : 0px);
+    in property <bool> history-image;
+    private property <bool> quick-save-visible: !root.history-image && root.screenshot-mode && !root.recording-mode && !root.pin-edit-mode;
+    out property <length> toolbar-width: root.collapsed ? 80px : 34px + 38px + 7 * 38px + 5 * 18px + 1px + (root.action-count + (root.image-edit-mode ? 1 : 0)) * 38px + (9 + root.action-count + (root.image-edit-mode ? 1 : 0)) * 7px + 51px + (root.quick-save-visible ? 27px : 0px) + (!root.screenshot-mode ? 99px : 0px) + (root.pin-edit-mode ? 45px : 0px) + (root.pin-edit-mode && root.image-cropping ? 230px : 0px);
     in property <bool> import-available:true;
     callback image-open-requested();
     callback image-import-menu();
@@ -147,6 +149,7 @@ export component AnnotationToolbar inherits Window {
     callback redo-requested();
     callback history-key(int);
     callback download-requested();
+    callback quick-save-menu();
     callback delete-requested();
     callback finish-path-requested();
     callback backspace-requested();
@@ -229,6 +232,14 @@ export component AnnotationToolbar inherits Window {
             ToolButton { kind: 14; enabled: root.can-undo && !root.output-busy && !root.image-cropping; clicked => { root.undo-requested(); } }
             ToolButton { kind:28; enabled:root.can-redo && !root.output-busy && !root.image-cropping; clicked=>{root.redo-requested();} }
             if !root.recording-mode: ToolButton { kind: 15; label: @tr("Save image"); enabled: root.can-download && !root.output-busy && !root.image-cropping; clicked => { root.download-requested(); } }
+            if root.quick-save-visible: Rectangle {
+                width:20px; height:38px; border-radius:6px;
+                accessible-role:button; accessible-label:@tr("Quick save options"); accessible-enabled:quick.enabled;
+                background:quick.has-hover && quick.enabled ? Colors.icon-button-hover : transparent;
+                Image { x:3px;y:12px;width:14px;height:14px;source:@image-url("assets/icons/chevron-down.svg");colorize:quick.enabled ? Colors.foreground : Colors.outline; }
+                quick := TouchArea { enabled:root.can-download && !root.output-busy && !root.image-cropping; clicked=>{root.quick-save-menu();} }
+                AnnotationHintTarget {text:@tr("Quick save options");hovered:quick.has-hover;pressed:quick.pressed;}
+            }
             if root.screenshot-mode && !root.recording-mode: ToolButton { kind:23; label:@tr("Copy screenshot"); enabled:!root.output-busy && !root.image-cropping; clicked => { root.copy-screenshot-requested(); } }
             if root.screenshot-mode && !root.pin-edit-mode && !root.recording-mode: ToolButton { kind:26; busy:root.output-busy; label:root.recognition-busy ? @tr("Recognizing text…") : root.output-busy ? @tr("Processing screenshot") : @tr("Recognize text"); enabled:root.recognize-text-available && !root.output-busy && !root.image-cropping; clicked => { root.recognize-text-requested(); } }
             if root.screenshot-mode && !root.pin-edit-mode && !root.image-edit-mode && !root.recording-mode: ToolButton { kind:33; busy:root.refresh-busy; label:@tr("Refresh screenshot"); enabled:root.refresh-available && !root.output-busy; clicked=>{root.refresh-requested();} }

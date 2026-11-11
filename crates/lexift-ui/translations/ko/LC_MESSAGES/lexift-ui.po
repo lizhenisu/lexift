@@ -2354,3 +2354,12 @@ msgstr "현재 화면 위쪽 잘라내기"
 
 msgid "Trim below current view"
 msgstr "현재 화면 아래쪽 잘라내기"
+
+msgid "Quick save options"
+msgstr "빠른 저장 옵션"
+
+msgid "Quick save PNG"
+msgstr "PNG 빠른 저장"
+
+msgid "Change quick save directory"
+msgstr "빠른 저장 폴더 변경"

@@ -806,6 +806,44 @@ impl ScreenshotRuntime {
                 );
             }
 
+            ScreenshotCommand::ChooseQuickDirectory {
+                session,
+                operation,
+                owner,
+                title,
+            } => {
+                let cancelled = self
+                    .session
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .filter(|job| job.id == session)
+                    .map(|job| job.cancelled.clone());
+                let this = self.clone();
+                let controller = controller.clone();
+                controller.clone().runtime.spawn_blocking(move || {
+                    let result = match cancelled {
+                        Some(cancelled) => select_quick_directory(
+                            &controller,
+                            this.save.as_ref(),
+                            session,
+                            operation,
+                            owner,
+                            &title,
+                            &cancelled,
+                        )
+                        .map(|_| ()),
+                        None => Ok(()),
+                    };
+                    controller.dispatch(AppEvent::Screenshot(
+                        ScreenshotEvent::QuickDirectoryChosen {
+                            session,
+                            operation,
+                            result,
+                        },
+                    ));
+                });
+            }
             ScreenshotCommand::Output {
                 session,
                 operation,
@@ -849,6 +887,31 @@ impl ScreenshotRuntime {
                                         },
                                         cancelled.clone(),
                                     ),
+                                    ScreenshotOutput::QuickSave => {
+                                        let directory = worker_controller.state.lock().unwrap().settings.quick_save_directory.clone();
+                                        let directory = if let Some(directory) = directory {
+                                            std::path::PathBuf::from(directory)
+                                        } else {
+                                            let language = worker_controller.state.lock().unwrap().settings.ui_language;
+                                            let title = lexift_ui::quick_save_directory_title(language);
+                                            let Some(directory) = select_quick_directory(
+                                                &worker_controller, this.save.as_ref(), session, operation,
+                                                request.snapshot.owner, &title, &cancelled,
+                                            )? else { return Ok(SaveOutcome::Cancelled) };
+                                            directory
+                                        };
+                                        this.save.quick_save_png(
+                                            ImageSaveRequest {
+                                                image: (*image).clone(),
+                                                owner: request.snapshot.owner,
+                                                default_name: request.snapshot.name.clone(),
+                                                title: request.snapshot.title.clone(),
+                                                options: crate::annotation_export::save_options(&worker_controller),
+                                            },
+                                            &directory,
+                                            cancelled.clone(),
+                                        )
+                                    }
                                     ScreenshotOutput::Pin => {
                                         let (base, samples, pin_request) = this.retained_source(&frames, &request, operation)?;
                                         this.retain_history(&worker_controller,
@@ -1058,6 +1121,63 @@ impl Drop for ScreenshotRuntime {
             s.retire();
         }
     }
+}
+
+fn select_quick_directory(
+    controller: &Arc<AppController>,
+    port: &dyn lexift_core::ports::annotation_save::ImageFilePort,
+    session: u64,
+    operation: u64,
+    owner: Option<lexift_core::ports::magnifier::WindowToken>,
+    title: &str,
+    cancelled: &Arc<AtomicBool>,
+) -> Result<Option<std::path::PathBuf>> {
+    let Some(directory) = port.choose_directory(
+        lexift_core::ports::annotation_save::ImageOpenRequest {
+            owner,
+            title: title.to_owned(),
+        },
+        cancelled.clone(),
+    )?
+    else {
+        return Ok(None);
+    };
+    let value = directory
+        .to_str()
+        .ok_or_else(|| Error::new("Invalid quick save directory"))?
+        .to_owned();
+    {
+        let state = controller.state.lock().unwrap();
+        if cancelled.load(Ordering::Acquire)
+            || state.screenshot.session != session
+            || state.screenshot.operation != operation
+            || !state.screenshot.active()
+        {
+            return Ok(None);
+        }
+    }
+    controller.dispatch(AppEvent::SettingsChangeRequested {
+        change: lexift_core::domain::settings::SettingsChange::QuickSaveDirectory {
+            directory: value.clone(),
+            session,
+            operation,
+        },
+    });
+    controller
+        .runtime
+        .block_on(controller.wait_for_quick_save_settings());
+    if controller
+        .state
+        .lock()
+        .unwrap()
+        .settings
+        .quick_save_directory
+        .as_ref()
+        != Some(&value)
+    {
+        return Err(Error::new("Could not save the quick save directory"));
+    }
+    Ok((!cancelled.load(Ordering::Acquire)).then_some(directory))
 }
 
 #[cfg(test)]

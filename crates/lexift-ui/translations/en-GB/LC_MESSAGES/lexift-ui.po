@@ -2354,3 +2354,12 @@ msgstr "Trim above current view"
 
 msgid "Trim below current view"
 msgstr "Trim below current view"
+
+msgid "Quick save options"
+msgstr "Quick save options"
+
+msgid "Quick save PNG"
+msgstr "Quick save PNG"
+
+msgid "Change quick save directory"
+msgstr "Change quick save directory"

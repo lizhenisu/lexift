@@ -36,6 +36,7 @@ pub mod refresh;
 pub use super::ocr::OcrOutcome;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScreenshotOutput {
+    QuickSave,
     Copy,
     Save,
     Pin,
@@ -63,6 +64,7 @@ pub enum CaptureOrigin {
 pub struct ScreenshotState {
     pub recording: Option<recording::Session>,
     pub frame_version: u64,
+    pub quick_directory_pending: bool,
     pub refresh: Option<refresh::State>,
     pub shortcut_sequence: u64,
     pub shortcut_pending: Option<u64>,
@@ -87,6 +89,7 @@ pub struct ScreenshotState {
 impl ScreenshotState {
     pub fn editable(&self) -> bool {
         self.phase == ScreenshotPhase::Editing
+            && !self.quick_directory_pending
             && self
                 .long
                 .as_ref()
@@ -112,6 +115,16 @@ impl ScreenshotState {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotEvent {
+    ChooseQuickDirectory {
+        session: u64,
+        owner: Option<crate::ports::magnifier::WindowToken>,
+        title: String,
+    },
+    QuickDirectoryChosen {
+        session: u64,
+        operation: u64,
+        result: Result<()>,
+    },
     Recording(recording::Event),
     Refresh(refresh::Event),
     ShortcutRequested(ShortcutTrigger),
@@ -192,6 +205,12 @@ pub enum ScreenshotEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotCommand {
+    ChooseQuickDirectory {
+        session: u64,
+        operation: u64,
+        owner: Option<crate::ports::magnifier::WindowToken>,
+        title: String,
+    },
     Recording(recording::Command),
     Refresh(refresh::Command),
     FreezeShortcut {
@@ -535,6 +554,45 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.element_pending = None;
             vec![]
         }
+        ScreenshotEvent::ChooseQuickDirectory {
+            session,
+            owner,
+            title,
+        } if s.session == session
+            && s.phase == ScreenshotPhase::Editing
+            && !s.quick_directory_pending
+            && s.long.as_ref().is_none_or(|long| {
+                matches!(
+                    long.phase,
+                    super::long_capture::workflow::Phase::Capturing
+                        | super::long_capture::workflow::Phase::Paused
+                        | super::long_capture::workflow::Phase::Frozen
+                        | super::long_capture::workflow::Phase::Editing
+                ) && !long.trim_pending
+            }) =>
+        {
+            s.operation += 1;
+            s.quick_directory_pending = true;
+            if let Some(long) = &mut s.long {
+                long.auto_scroll.stop(None);
+            }
+            s.error = None;
+            command(ScreenshotCommand::ChooseQuickDirectory {
+                session,
+                operation: s.operation,
+                owner,
+                title,
+            })
+        }
+        ScreenshotEvent::QuickDirectoryChosen {
+            session,
+            operation,
+            result,
+        } if s.session == session && s.operation == operation && s.quick_directory_pending => {
+            s.quick_directory_pending = false;
+            s.error = result.err().map(|error| error.to_string());
+            vec![]
+        }
         ScreenshotEvent::Output {
             session,
             operation,
@@ -546,6 +604,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                     && s.long.as_ref().is_some_and(|l| {
                         l.phase == super::long_capture::workflow::Phase::Frozen
                     }))
+            && !s.quick_directory_pending
             && operation > s.operation
             && request.session == session
             && request.request == operation
@@ -622,6 +681,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                     },
                 );
             }
+            s.quick_directory_pending = false;
             if let ScreenshotEvent::Failed { error, .. } = event {
                 s.error = Some(error);
             }
@@ -1014,10 +1074,47 @@ mod tests {
         }
     }
     #[test]
+    fn quick_directory_selection_is_session_owned_and_does_not_complete_an_output() {
+        let mut state = AppState::default();
+        state.screenshot.session = 7;
+        state.screenshot.phase = ScreenshotPhase::Editing;
+        let choose = || {
+            AppEvent::Screenshot(ScreenshotEvent::ChooseQuickDirectory {
+                session: 7,
+                owner: None,
+                title: String::new(),
+            })
+        };
+        assert_eq!(state.reduce(choose()).len(), 1);
+        assert!(state.screenshot.quick_directory_pending);
+        assert!(state.reduce(choose()).is_empty());
+        let operation = state.screenshot.operation;
+        state.reduce(AppEvent::Screenshot(
+            ScreenshotEvent::QuickDirectoryChosen {
+                session: 7,
+                operation: operation - 1,
+                result: Ok(()),
+            },
+        ));
+        assert!(state.screenshot.quick_directory_pending);
+        state.reduce(AppEvent::Screenshot(
+            ScreenshotEvent::QuickDirectoryChosen {
+                session: 7,
+                operation,
+                result: Err(crate::Error::new("fixture failure")),
+            },
+        ));
+        assert!(state.screenshot.editable());
+        assert_eq!(state.screenshot.error.as_deref(), Some("fixture failure"));
+        assert!(state.screenshot.last_region.is_none());
+    }
+
+    #[test]
     fn last_region_records_only_successful_image_outputs_and_uses_final_bounds() {
         for kind in [
             ScreenshotOutput::Copy,
             ScreenshotOutput::Save,
+            ScreenshotOutput::QuickSave,
             ScreenshotOutput::Pin,
         ] {
             let mut s = begin();

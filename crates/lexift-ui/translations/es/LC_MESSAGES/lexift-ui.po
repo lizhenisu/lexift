@@ -2354,3 +2354,12 @@ msgstr "Recortar por encima de la vista actual"
 
 msgid "Trim below current view"
 msgstr "Recortar por debajo de la vista actual"
+
+msgid "Quick save options"
+msgstr "Opciones de guardado rápido"
+
+msgid "Quick save PNG"
+msgstr "Guardar PNG rápidamente"
+
+msgid "Change quick save directory"
+msgstr "Cambiar carpeta de guardado rápido"

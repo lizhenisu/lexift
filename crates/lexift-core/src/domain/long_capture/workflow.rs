@@ -236,6 +236,17 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
     let Some(l) = s.long.as_mut().filter(|l| l.operation == operation) else {
         return vec![];
     };
+    if s.quick_directory_pending
+        && matches!(
+            event,
+            Event::Finish { .. }
+                | Event::Trim { .. }
+                | Event::ToggleAutoScroll { .. }
+                | Event::Cancel { .. }
+        )
+    {
+        return vec![];
+    }
     match event {
         Event::Trim {
             sequence,

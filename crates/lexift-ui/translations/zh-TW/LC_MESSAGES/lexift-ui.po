@@ -2354,3 +2354,12 @@ msgstr "裁掉目前畫面上方"
 
 msgid "Trim below current view"
 msgstr "裁掉目前畫面下方"
+
+msgid "Quick save options"
+msgstr "快速儲存選項"
+
+msgid "Quick save PNG"
+msgstr "快速儲存 PNG"
+
+msgid "Change quick save directory"
+msgstr "變更快速儲存資料夾"

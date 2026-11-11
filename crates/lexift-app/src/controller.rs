@@ -1340,6 +1340,20 @@ impl AppController {
         });
     }
 
+    pub(crate) async fn wait_for_quick_save_settings(&self) {
+        loop {
+            let notified = self.state_changed.notified();
+            let busy = {
+                let state = self.state.lock().unwrap();
+                state.settings_saving || state.credential_busy
+            };
+            if !busy {
+                return;
+            }
+            notified.await;
+        }
+    }
+
     async fn wait_for_settings_idle(&self) {
         loop {
             let notified = self.state_changed.notified();

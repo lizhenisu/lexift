@@ -103,6 +103,23 @@ pub trait ImageFilePort: Send + Sync {
         Err(Error::new("Opening image files is unavailable"))
     }
 
+    fn choose_directory(
+        &self,
+        _request: ImageOpenRequest,
+        _cancelled: Arc<AtomicBool>,
+    ) -> Result<Option<std::path::PathBuf>> {
+        Err(Error::new("Choosing a quick save directory is unavailable"))
+    }
+
+    fn quick_save_png(
+        &self,
+        _request: ImageSaveRequest,
+        _directory: &std::path::Path,
+        _cancelled: Arc<AtomicBool>,
+    ) -> Result<SaveOutcome> {
+        Err(Error::new("Quick image saving is unavailable"))
+    }
+
     fn is_available(&self) -> bool;
     /// Blocking on a dedicated worker, never on the UI thread. Cancellation must
     /// close the dialog and release its native resources without touching new jobs.

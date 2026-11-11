@@ -733,6 +733,10 @@ impl AppState {
                 change,
             } => {
                 self.settings = settings;
+                if matches!(change, SettingsChange::QuickSaveDirectory { .. }) {
+                    self.desired_settings.quick_save_directory =
+                        self.settings.quick_save_directory.clone();
+                }
                 if !self.settings.selection_toolbar {
                     self.toolbar_generation = self.toolbar_generation.wrapping_add(1);
                     self.toolbar_selection = None;
@@ -1110,7 +1114,9 @@ impl AppState {
                 feedback: change.feedback(false),
             }];
         }
-        change.apply_to(&mut self.desired_settings);
+        if !matches!(change, SettingsChange::QuickSaveDirectory { .. }) {
+            change.apply_to(&mut self.desired_settings);
+        }
         if self.settings_saving || self.credential_busy {
             self.queued_settings_changes
                 .retain(|queued| queued.field() != change.field());
@@ -1121,6 +1127,17 @@ impl AppState {
     }
 
     fn start_settings_change(&mut self, mut change: SettingsChange) -> Vec<AppCommand> {
+        if let SettingsChange::QuickSaveDirectory {
+            session, operation, ..
+        } = &change
+            && (self.screenshot.session != *session
+                || self.screenshot.operation != *operation
+                || !(self.screenshot.quick_directory_pending
+                    || self.screenshot.phase == crate::domain::screenshot::ScreenshotPhase::Output))
+        {
+            return self.start_next_settings_change();
+        }
+
         // A queued enable can outlive removal of its required extension.
         if let Err(error) = self.validate_ocr_setting(&change) {
             self.settings_error_field = Some(change.field());
@@ -1248,6 +1265,7 @@ impl AppState {
             | SettingsField::OcrHotkey
             | SettingsField::RecordingPauseHotkey
             | SettingsField::RecordingFinishHotkey
+            | SettingsField::QuickSaveDirectory
             | SettingsField::ScreenshotHotkey
             | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
@@ -1274,6 +1292,7 @@ impl AppState {
             | SettingsField::OcrHotkey
             | SettingsField::RecordingPauseHotkey
             | SettingsField::RecordingFinishHotkey
+            | SettingsField::QuickSaveDirectory
             | SettingsField::ScreenshotHotkey
             | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
@@ -1344,6 +1363,10 @@ impl AppState {
             SettingsField::RecordingFinishHotkey => {
                 self.desired_settings.recording_finish_hotkey =
                     self.settings.recording_finish_hotkey
+            }
+            SettingsField::QuickSaveDirectory => {
+                self.desired_settings.quick_save_directory =
+                    self.settings.quick_save_directory.clone();
             }
             SettingsField::SelectionToolbar => {
                 self.desired_settings.selection_toolbar = self.settings.selection_toolbar;

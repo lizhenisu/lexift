@@ -246,6 +246,9 @@ impl ScreenshotRuntime {
                                 crate::annotation_export::save_options(&c),
                             ),
                             ScreenshotOutput::Pin => Ok(SaveOutcome::Saved),
+                            ScreenshotOutput::QuickSave => {
+                                Err(Error::new("Quick save is unavailable for history images"))
+                            }
                         };
                         if matches!(result, Ok(SaveOutcome::Saved))
                             && !cancel.load(Ordering::Acquire)

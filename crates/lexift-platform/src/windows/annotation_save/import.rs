@@ -51,42 +51,9 @@ pub(super) fn open(
             }])
             .map_err(native_error)?;
     }
-    let thread_id = unsafe { GetCurrentThreadId() };
-    let done = AtomicBool::new(false);
-    let shown = std::thread::scope(|scope| {
-        scope.spawn(|| {
-            while !done.load(Ordering::Acquire) {
-                if cancelled.load(Ordering::Acquire) {
-                    unsafe {
-                        let _ = EnumThreadWindows(thread_id, Some(close_dialog), LPARAM(0));
-                    }
-                }
-                std::thread::sleep(Duration::from_millis(20));
-            }
-        });
-        let result = if cancelled.load(Ordering::Acquire) {
-            Err(windows::core::Error::from_hresult(
-                windows::core::HRESULT::from_win32(ERROR_CANCELLED.0),
-            ))
-        } else {
-            unsafe { dialog.Show(request.owner.map(|t| HWND(t.0 as *mut _))) }
-        };
-        done.store(true, Ordering::Release);
-        result
-    });
-    if cancelled.load(Ordering::Acquire)
-        || shown
-            .as_ref()
-            .is_err_and(|e| e.code() == windows::core::HRESULT::from_win32(ERROR_CANCELLED.0))
-    {
+    let Some(path) = selected_path(&dialog, request.owner, &cancelled)? else {
         return Ok(None);
-    }
-    shown.map_err(native_error)?;
-    let item = unsafe { dialog.GetResult() }.map_err(native_error)?;
-    let raw = unsafe { item.GetDisplayName(SIGDN_FILESYSPATH) }.map_err(native_error)?;
-    let path = unsafe { raw.to_string() };
-    unsafe { CoTaskMemFree(Some(raw.0.cast())) };
-    let path = PathBuf::from(path.map_err(|_| Error::new("Invalid image path"))?);
+    };
     // Bound encoded input as well as decoded pixels, before reading an untrusted file.
     let file = std::fs::File::open(path).map_err(|_| Error::new("Could not read image"))?;
     if file
@@ -109,6 +76,81 @@ pub(super) fn open(
     }
     let image = decode(&bytes)?;
     Ok((!cancelled.load(Ordering::Acquire)).then_some(image))
+}
+
+pub(super) fn choose_directory(
+    request: ImageOpenRequest,
+    cancelled: Arc<AtomicBool>,
+) -> Result<Option<PathBuf>> {
+    use windows::Win32::UI::Shell::FOS_PICKFOLDERS;
+    if cancelled.load(Ordering::Acquire) {
+        return Ok(None);
+    }
+    let _apartment = Apartment::new()?;
+    let _shell_policy = super::super::window_shell_policy::ThreadGuard::new()?;
+    let dialog: IFileOpenDialog =
+        unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER) }
+            .map_err(native_error)?;
+    let title = wide(request.title.as_ref());
+    unsafe {
+        dialog
+            .SetOptions(
+                dialog.GetOptions().map_err(native_error)?
+                    | FOS_FORCEFILESYSTEM
+                    | FOS_PATHMUSTEXIST
+                    | FOS_PICKFOLDERS,
+            )
+            .map_err(native_error)?;
+        dialog
+            .SetTitle(PCWSTR(title.as_ptr()))
+            .map_err(native_error)?;
+    }
+    selected_path(&dialog, request.owner, &cancelled)
+}
+
+fn selected_path(
+    dialog: &IFileOpenDialog,
+    owner: Option<lexift_core::ports::magnifier::WindowToken>,
+    cancelled: &AtomicBool,
+) -> Result<Option<PathBuf>> {
+    let thread_id = unsafe { GetCurrentThreadId() };
+    let done = AtomicBool::new(false);
+    let shown = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            while !done.load(Ordering::Acquire) {
+                if cancelled.load(Ordering::Acquire) {
+                    unsafe {
+                        let _ = EnumThreadWindows(thread_id, Some(close_dialog), LPARAM(0));
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+        let result = if cancelled.load(Ordering::Acquire) {
+            Err(windows::core::Error::from_hresult(
+                windows::core::HRESULT::from_win32(ERROR_CANCELLED.0),
+            ))
+        } else {
+            unsafe { dialog.Show(owner.map(|t| HWND(t.0 as *mut _))) }
+        };
+        done.store(true, Ordering::Release);
+        result
+    });
+    if cancelled.load(Ordering::Acquire)
+        || shown
+            .as_ref()
+            .is_err_and(|e| e.code() == windows::core::HRESULT::from_win32(ERROR_CANCELLED.0))
+    {
+        return Ok(None);
+    }
+    shown.map_err(native_error)?;
+    let item = unsafe { dialog.GetResult() }.map_err(native_error)?;
+    let raw = unsafe { item.GetDisplayName(SIGDN_FILESYSPATH) }.map_err(native_error)?;
+    let path = unsafe { raw.to_string() };
+    unsafe { CoTaskMemFree(Some(raw.0.cast())) };
+    Ok(Some(PathBuf::from(
+        path.map_err(|_| Error::new("Invalid path"))?,
+    )))
 }
 
 pub(crate) fn decode(bytes: &[u8]) -> Result<CapturedRegion> {

@@ -37,7 +37,7 @@ export component LongCaptureControl inherits Window {
     measure-wide := Text { visible: false; text: "32000000 脳 1 px"; font-size: 12px; }
     measure-target := Text { visible: false; text: @tr("Focus content and move pointer inside"); font-size: 12px; }
     private property <length> status-width: max(measure-square.preferred-width, max(measure-wide.preferred-width, measure-target.preferred-width)) + 8px;
-    out property <length> content-width: root.status-width + 64px + 8 * Metrics.long-capture-button-size;
+    out property <length> content-width: root.status-width + 66px + 9 * Metrics.long-capture-button-size;
     out property <length> content-height: Metrics.long-capture-control-height;
     in property <bool> ready;
     in property <bool> paused;
@@ -49,6 +49,7 @@ export component LongCaptureControl inherits Window {
     in property <bool> trim-pending;
     callback auto-scroll();
     callback trim-menu();
+    callback quick-save-menu();
     callback trim(int);
     callback pause(); callback finish(); callback cancel(); callback output(int);
     callback drag-requested(float, float);
@@ -85,6 +86,7 @@ export component LongCaptureControl inherits Window {
                 CaptureSeparator {}
                 CaptureButton { icon: @image-url("assets/icons/copy.svg"); label: @tr("Copy image"); enabled: root.ready && !root.finishing; clicked => { root.output(0); } }
                 CaptureButton { icon: @image-url("assets/icons/capture-save.svg"); label: @tr("Save image"); enabled: root.ready && !root.finishing; clicked => { root.output(1); } }
+                CaptureButton { icon: @image-url("assets/icons/chevron-down.svg"); label: @tr("Quick save options"); enabled: root.ready && !root.finishing; clicked => { root.quick-save-menu(); } }
                 CaptureButton { icon: @image-url("assets/icons/pin-screenshot.svg"); label: @tr("Pin screenshot"); enabled: root.ready && !root.finishing; clicked => { root.output(2); } }
                 CaptureButton { icon: @image-url("assets/icons/screenshot-close.svg"); label: @tr("Cancel"); clicked => { root.cancel(); } }
             }

@@ -2354,3 +2354,12 @@ msgstr "Rogner au-dessus de la vue actuelle"
 
 msgid "Trim below current view"
 msgstr "Rogner au-dessous de la vue actuelle"
+
+msgid "Quick save options"
+msgstr "Options d’enregistrement rapide"
+
+msgid "Quick save PNG"
+msgstr "Enregistrer rapidement en PNG"
+
+msgid "Change quick save directory"
+msgstr "Changer le dossier d’enregistrement rapide"

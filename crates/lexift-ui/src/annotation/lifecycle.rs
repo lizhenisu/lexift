@@ -262,6 +262,7 @@ pub(crate) fn toggle(requested_at: Instant) {
         crate::theme::apply(&main);
         main.set_screenshot_mode(r.screenshot.is_some());
         main.set_image_edit_mode(history_editor::active());
+        main.set_history_image(history_editor::active());
         main.set_pin_edit_mode(r.screenshot.as_ref().is_some_and(|e| e.pin.is_some()));
         if let Some((_, collapsed)) = r.toolbar_state.resume {
             main.set_collapsed(collapsed);
@@ -303,6 +304,15 @@ pub(crate) fn toggle(requested_at: Instant) {
             later_main(&input, generation, revision, move || history_key(action))
         });
         let input = r.toolbar_state.main.input();
+        let quick_input = input.clone();
+        main.on_quick_save_menu(move || {
+            later_main(
+                &quick_input,
+                generation,
+                revision,
+                screenshot::delay::quick_save_menu,
+            )
+        });
         main.on_download_requested(move || {
             later_main(&input, generation, revision, || {
                 if pin_editor::active() {

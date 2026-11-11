@@ -689,6 +689,7 @@ pub(super) fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static
         }
         SettingsFeedback::SettingsSaved(
             SettingsField::RecordingPauseHotkey
+            | SettingsField::QuickSaveDirectory
             | SettingsField::RecordingFinishHotkey
             | SettingsField::OcrHotkey
             | SettingsField::Hotkey
@@ -719,6 +720,7 @@ pub(super) fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static
         }
         SettingsFeedback::SettingsSaveFailed(
             SettingsField::RecordingPauseHotkey
+            | SettingsField::QuickSaveDirectory
             | SettingsField::RecordingFinishHotkey
             | SettingsField::OcrHotkey
             | SettingsField::Hotkey

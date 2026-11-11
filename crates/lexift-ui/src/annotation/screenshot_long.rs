@@ -537,6 +537,22 @@ pub(super) fn request_trim(direction: Option<Trim>, sequence: u64) {
     }
 }
 
+pub(super) fn control_token() -> Option<lexift_core::ports::magnifier::WindowToken> {
+    REGISTRY.with(|r| {
+        let r = r.borrow();
+        let r = r.as_ref()?;
+        VIEW.with(|v| (r.lifecycle.annotation_window_token)(v.borrow().control.get()?.window()))
+    })
+}
+
+pub(super) fn quick_save() {
+    if let Some((session, operation, revision)) = trim_identity()
+        && current(session, operation, revision)
+    {
+        choose(session, operation, Some(ScreenshotOutput::QuickSave));
+    }
+}
+
 fn choose(session: u64, operation: u64, target: Option<ScreenshotOutput>) {
     if target.is_none() {
         VIEW.with(|v| {
@@ -776,6 +792,14 @@ fn open_control(session: u64, operation: u64, bounds: Rect) {
             })
         });
         let work = v.control.input();
+        let quick_input = work.clone();
+        w.on_quick_save_menu(move || {
+            quick_input.post(move || {
+                if current(session, operation, rev) {
+                    super::delay::quick_save_menu();
+                }
+            })
+        });
         w.on_output(move |kind| {
             work.post(move || {
                 if current(session, operation, rev) {
@@ -1195,7 +1219,10 @@ pub(in crate::annotation) fn sync() {
         w.set_frozen(l.phase == Phase::Frozen);
         w.set_trim_pending(l.trim_pending);
         w.set_finishing(
-            l.trim_pending || l.phase == Phase::Finishing || state.phase == ScreenshotPhase::Output,
+            l.trim_pending
+                || state.quick_directory_pending
+                || l.phase == Phase::Finishing
+                || state.phase == ScreenshotPhase::Output,
         );
         w.set_dimensions(format!("{} 脳 {} px", l.width, l.height).into());
         if state.phase == ScreenshotPhase::Output {

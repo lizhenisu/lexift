@@ -27,7 +27,7 @@ pub struct State {
 }
 
 impl State {
-    pub(super) fn stop(&mut self, reason: Option<Stop>) {
+    pub(crate) fn stop(&mut self, reason: Option<Stop>) {
         self.mode = Mode::Manual;
         self.reason = reason;
     }

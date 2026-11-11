@@ -20,6 +20,7 @@ pub(super) struct Job {
     operation: u64,
     cancel: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
+    choosing_directory: Arc<AtomicBool>,
     finish: Arc<AtomicBool>,
     auto: Arc<AutoControl>,
     trim: Arc<TrimQueue>,
@@ -44,6 +45,8 @@ pub(super) fn sync(
         j.cancel.store(true, Ordering::Release);
     } else if let (Some(job), Some(long)) = (job.as_ref(), state.long.as_ref()) {
         *job.auto.lock().unwrap() = long.auto_scroll;
+        job.choosing_directory
+            .store(state.quick_directory_pending, Ordering::Release);
     }
 }
 fn emit(c: &Arc<AppController>, event: Event) {
@@ -146,6 +149,7 @@ pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, 
         } => {
             let cancel = Arc::new(AtomicBool::new(false));
             let paused = Arc::new(AtomicBool::new(false));
+            let choosing_directory = Arc::new(AtomicBool::new(false));
             let finish = Arc::new(AtomicBool::new(false));
             let auto = Arc::new(AutoControl::default());
             let trim = Arc::new(TrimQueue::default());
@@ -154,6 +158,7 @@ pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, 
                 operation,
                 cancel: cancel.clone(),
                 paused: paused.clone(),
+                choosing_directory: choosing_directory.clone(),
                 finish: finish.clone(),
                 auto: auto.clone(),
                 trim: trim.clone(),
@@ -169,7 +174,7 @@ pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, 
                     factory,
                     bounds,
                     excluded,
-                    (&cancel, &paused, &finish),
+                    (&cancel, &paused, &finish, &choosing_directory),
                     (
                         Some((&auto, &|generation, stop| {
                             emit(
@@ -329,12 +334,12 @@ fn run(
     factory: impl FnOnce() -> Option<Arc<dyn ScreenCapturePort>>,
     bounds: lexift_core::domain::geometry::Rect,
     excluded: Vec<lexift_core::ports::magnifier::WindowToken>,
-    control: (&AtomicBool, &AtomicBool, &AtomicBool),
+    control: (&AtomicBool, &AtomicBool, &AtomicBool, &AtomicBool),
     events: CaptureEvents<'_>,
     layout: impl Fn() -> Result<Vec<lexift_core::domain::geometry::Rect>>,
     mut progress: impl FnMut(u64, &Stitcher, Feedback),
 ) -> Result<Arc<CapturedRegion>> {
-    let (cancel, paused, finish) = control;
+    let (cancel, paused, finish, choosing_directory) = control;
     let (auto, trim) = events;
     let normalize = |mut b: Vec<lexift_core::domain::geometry::Rect>| {
         b.sort_by_key(|r| (r.left, r.top, r.right, r.bottom));
@@ -421,7 +426,7 @@ fn run(
                 .flatten(cancel)
                 .map(Arc::new);
         }
-        if paused.load(Ordering::Acquire) {
+        if paused.load(Ordering::Acquire) || choosing_directory.load(Ordering::Acquire) {
             if let Some((queue, ready)) = trim
                 && (trim_request.take().is_some() || queue.lock().unwrap().take().is_some())
             {
@@ -464,6 +469,9 @@ fn run(
                 serial = Some(frame.serial);
                 last_frame = Instant::now();
                 let image = Arc::new(crop_frames(&frame.regions, bounds)?);
+                if choosing_directory.load(Ordering::Acquire) {
+                    continue;
+                }
                 let first = stitch.is_none();
                 let matching = Instant::now();
                 let prior_position = stitch.as_ref().and_then(Stitcher::position);
@@ -755,7 +763,7 @@ mod tests {
             || Some(port.clone()),
             frame(0).bounds,
             vec![],
-            (&cancel, &paused, &finish),
+            (&cancel, &paused, &finish, &AtomicBool::new(false)),
             (None, None),
             || Ok(vec![frame(0).bounds]),
             |seq, _, feedback| {
@@ -790,7 +798,7 @@ mod tests {
                 || Some(port.clone()),
                 frame(0).bounds,
                 vec![],
-                (&cancel, &paused, &finish),
+                (&cancel, &paused, &finish, &AtomicBool::new(false)),
                 (None, None),
                 || Ok(vec![frame(0).bounds]),
                 |_, _, _| cancel.store(true, Ordering::Release)
@@ -813,7 +821,7 @@ mod tests {
             || Some(port.clone()),
             frame(0).bounds,
             vec![],
-            (&cancel, &paused, &finish),
+            (&cancel, &paused, &finish, &AtomicBool::new(false)),
             (
                 None,
                 Some((&queue, &|| {

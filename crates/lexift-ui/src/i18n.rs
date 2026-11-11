@@ -21,6 +21,10 @@ pub(crate) fn language() -> UiLanguage {
 pub(crate) fn tr(key: &str) -> String {
     lookup(CURRENT.get().code(), key).unwrap_or(key).into()
 }
+pub(crate) fn quick_save_directory_title(language: UiLanguage) -> String {
+    let key = "Change quick save directory";
+    lookup(language.code(), key).unwrap_or(key).into()
+}
 pub(crate) fn detail(key: &str, detail: &str) -> String {
     tr(key).replace("{0}", detail)
 }

@@ -195,12 +195,15 @@ pub(crate) fn sync(state: &ScreenshotState) {
     REGISTRY.with(|slot| {
         if let Some(r) = slot.borrow_mut().as_mut() {
             if let Some(main) = r.toolbar_state.main.get() {
-                main.set_output_busy(matches!(
-                    state.phase,
-                    ScreenshotPhase::Output
-                        | ScreenshotPhase::Recognizing
-                        | ScreenshotPhase::Refreshing
-                ));
+                main.set_output_busy(
+                    state.quick_directory_pending
+                        || matches!(
+                            state.phase,
+                            ScreenshotPhase::Output
+                                | ScreenshotPhase::Recognizing
+                                | ScreenshotPhase::Refreshing
+                        ),
+                );
                 main.set_feedback(crate::i18n::tr(state.error.as_deref().unwrap_or("")).into());
                 main.set_long_capture_available(long::available(r));
                 main.set_refresh_available(refresh::available(r));

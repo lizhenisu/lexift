@@ -63,3 +63,9 @@ pub fn image_save_options(
 ) -> lexift_core::ports::annotation_save::ImageSaveOptions {
     i18n::image_save_options(language)
 }
+
+pub fn quick_save_directory_title(
+    language: lexift_core::domain::ui_language::UiLanguage,
+) -> String {
+    i18n::quick_save_directory_title(language)
+}

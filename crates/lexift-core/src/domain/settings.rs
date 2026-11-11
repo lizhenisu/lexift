@@ -23,6 +23,7 @@ pub enum SettingsField {
     ScreenshotHotkey,
     RecordingPauseHotkey,
     RecordingFinishHotkey,
+    QuickSaveDirectory,
     OcrLanguage,
     OcrKoreanAuto,
     Provider,
@@ -70,6 +71,11 @@ pub enum SettingsChange {
     ScreenshotHotkey(HotkeyConfig),
     RecordingPauseHotkey(HotkeyConfig),
     RecordingFinishHotkey(HotkeyConfig),
+    QuickSaveDirectory {
+        directory: String,
+        session: u64,
+        operation: u64,
+    },
     OcrLanguage(Option<String>),
     OcrKoreanAuto(bool),
     Provider(ProviderConfig),
@@ -111,6 +117,7 @@ impl SettingsChange {
             Self::ScreenshotHotkey(_) => SettingsField::ScreenshotHotkey,
             Self::RecordingPauseHotkey(_) => SettingsField::RecordingPauseHotkey,
             Self::RecordingFinishHotkey(_) => SettingsField::RecordingFinishHotkey,
+            Self::QuickSaveDirectory { .. } => SettingsField::QuickSaveDirectory,
             Self::OcrLanguage(_) => SettingsField::OcrLanguage,
             Self::OcrKoreanAuto(_) => SettingsField::OcrKoreanAuto,
             Self::Provider(_) => SettingsField::Provider,
@@ -245,6 +252,9 @@ impl SettingsChange {
             Self::ScreenshotHotkey(value) => settings.screenshot_hotkey = *value,
             Self::RecordingPauseHotkey(value) => settings.recording_pause_hotkey = *value,
             Self::RecordingFinishHotkey(value) => settings.recording_finish_hotkey = *value,
+            Self::QuickSaveDirectory {
+                directory: value, ..
+            } => settings.quick_save_directory = Some(value.clone()),
             Self::OcrLanguage(value) => settings.ocr_language = value.clone(),
             Self::OcrKoreanAuto(value) => settings.ocr_korean_auto = *value,
             Self::Provider(value) => settings.provider = *value,
@@ -314,6 +324,9 @@ impl SettingsChange {
             Self::ScreenshotHotkey(value) => settings.screenshot_hotkey == *value,
             Self::RecordingPauseHotkey(value) => settings.recording_pause_hotkey == *value,
             Self::RecordingFinishHotkey(value) => settings.recording_finish_hotkey == *value,
+            Self::QuickSaveDirectory {
+                directory: value, ..
+            } => settings.quick_save_directory.as_ref() == Some(value),
             Self::OcrLanguage(value) => settings.ocr_language == *value,
             Self::OcrKoreanAuto(value) => settings.ocr_korean_auto == *value,
             Self::Provider(value) => settings.provider == *value,
@@ -355,6 +368,7 @@ pub struct Settings {
     pub screenshot_hotkey: HotkeyConfig,
     pub recording_pause_hotkey: HotkeyConfig,
     pub recording_finish_hotkey: HotkeyConfig,
+    pub quick_save_directory: Option<String>,
     pub ocr_language: Option<String>,
     pub ocr_enabled: bool,
     pub ocr_korean_auto: bool,
@@ -381,6 +395,7 @@ impl Default for Settings {
             screenshot_hotkey: HotkeyConfig::screenshot_default(),
             recording_pause_hotkey: super::recording_hotkeys::default_pause(),
             recording_finish_hotkey: super::recording_hotkeys::default_finish(),
+            quick_save_directory: None,
             ocr_language: Some("auto".into()),
             ocr_enabled: true,
             ocr_korean_auto: false,

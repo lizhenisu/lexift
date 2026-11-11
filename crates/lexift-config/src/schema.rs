@@ -262,6 +262,8 @@ pub(crate) struct SettingsFile {
     #[serde(default = "default_recording_finish_hotkey")]
     recording_finish_hotkey: HotkeyFile,
     #[serde(default)]
+    quick_save_directory: Option<String>,
+    #[serde(default)]
     ocr_language: Option<String>,
     #[serde(default = "default_true")]
     ocr_enabled: bool,
@@ -396,6 +398,7 @@ impl ConfigFile {
                 screenshot_hotkey: settings.screenshot_hotkey.into(),
                 recording_pause_hotkey: settings.recording_pause_hotkey.into(),
                 recording_finish_hotkey: settings.recording_finish_hotkey.into(),
+                quick_save_directory: settings.quick_save_directory.clone(),
                 ocr_language: settings.ocr_language.clone(),
                 ocr_enabled: settings.ocr_enabled,
                 ocr_korean_auto: settings.ocr_korean_auto,
@@ -514,6 +517,7 @@ impl ConfigFile {
                 },
                 self.settings.recording_pause_hotkey.key.parse()?,
             )?,
+            quick_save_directory: self.settings.quick_save_directory,
             recording_finish_hotkey: HotkeyConfig::new(
                 lexift_core::domain::runtime_config::HotkeyModifiers {
                     control: self.settings.recording_finish_hotkey.control,

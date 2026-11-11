@@ -67,6 +67,44 @@ fn wide(value: &std::ffi::OsStr) -> Vec<u16> {
 }
 
 impl ImageFilePort for WindowsImageFilePort {
+    fn choose_directory(
+        &self,
+        request: lexift_core::ports::annotation_save::ImageOpenRequest,
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<Option<PathBuf>> {
+        import::choose_directory(request, cancelled)
+    }
+
+    fn quick_save_png(
+        &self,
+        request: ImageSaveRequest,
+        directory: &Path,
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<SaveOutcome> {
+        request.validate()?;
+        if cancelled.load(Ordering::Acquire) {
+            return Ok(SaveOutcome::Cancelled);
+        }
+        if !directory.is_absolute() {
+            return Err(Error::new("Invalid quick save directory"));
+        }
+        let stem = Path::new(&request.default_name)
+            .file_stem()
+            .filter(|stem| !stem.is_empty())
+            .ok_or_else(|| Error::new("Invalid quick save filename"))?;
+        let _apartment = Apartment::new()?;
+        let bytes = encode_image(&request, ImageFormat::Png)?;
+        let path = directory.join(stem).with_extension("png");
+        publish_image(&path, &bytes, &cancelled, false)
+            .map(|saved| {
+                if saved {
+                    SaveOutcome::Saved
+                } else {
+                    SaveOutcome::Cancelled
+                }
+            })
+            .map_err(|_| Error::new("Could not write to the quick save directory"))
+    }
     fn open_image(
         &self,
         request: lexift_core::ports::annotation_save::ImageOpenRequest,
@@ -315,6 +353,10 @@ fn encoding_pixels(source: &[u8], format: ImageFormat) -> Vec<u8> {
 
 /// Replace only after the complete file has been written beside the destination.
 fn write_image(path: &Path, bytes: &[u8], cancelled: &AtomicBool) -> Result<bool> {
+    publish_image(path, bytes, cancelled, true)
+}
+
+fn publish_image(path: &Path, bytes: &[u8], cancelled: &AtomicBool, replace: bool) -> Result<bool> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let temp = path.with_file_name(format!(
         ".lexift-{}-{}.image.tmp",
@@ -344,21 +386,83 @@ fn write_image(path: &Path, bytes: &[u8], cancelled: &AtomicBool) -> Result<bool
         return Ok(false);
     }
     let source = wide(temp.as_os_str());
-    let destination = wide(path.as_os_str());
-    unsafe {
-        MoveFileExW(
-            PCWSTR(source.as_ptr()),
-            PCWSTR(destination.as_ptr()),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
+    let flags = if replace {
+        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH
+    } else {
+        MOVEFILE_WRITE_THROUGH
+    };
+    let mut candidate = path.to_path_buf();
+    for index in 2u64.. {
+        if cancelled.load(Ordering::Acquire) {
+            return Ok(false);
+        }
+        let destination = wide(candidate.as_os_str());
+        match unsafe { MoveFileExW(PCWSTR(source.as_ptr()), PCWSTR(destination.as_ptr()), flags) } {
+            Ok(()) => return Ok(true),
+            Err(error)
+                if !replace
+                    && [
+                        windows::Win32::Foundation::ERROR_ALREADY_EXISTS,
+                        windows::Win32::Foundation::ERROR_FILE_EXISTS,
+                    ]
+                    .iter()
+                    .any(|code| error.code() == windows::core::HRESULT::from_win32(code.0)) =>
+            {
+                let mut name = path.file_stem().unwrap_or_default().to_os_string();
+                name.push(format!("-{index}.png"));
+                candidate.set_file_name(name);
+            }
+            Err(error) => return Err(native_error(error)),
+        }
     }
-    .map_err(native_error)?;
-    Ok(true)
+    unreachable!()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quick_png_publishes_concurrently_without_replacing_existing_files() {
+        let directory =
+            std::env::temp_dir().join(format!("lexift-quick-save-{}", std::process::id()));
+        std::fs::create_dir(&directory).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(directory.clone());
+        std::fs::write(directory.join("Lexift.png"), b"existing").unwrap();
+        std::thread::scope(|scope| {
+            for _ in 0..2 {
+                let directory = &directory;
+                scope.spawn(move || {
+                    let mut request = request();
+                    request.default_name = "Lexift".into();
+                    assert_eq!(
+                        WindowsImageFilePort
+                            .quick_save_png(request, directory, Arc::new(AtomicBool::new(false)))
+                            .unwrap(),
+                        SaveOutcome::Saved
+                    );
+                });
+            }
+        });
+        assert_eq!(
+            std::fs::read(directory.join("Lexift.png")).unwrap(),
+            b"existing"
+        );
+        for index in [2, 3] {
+            let bytes = std::fs::read(directory.join(format!("Lexift-{index}.png"))).unwrap();
+            assert_eq!(
+                import::decode(&bytes).unwrap().pixels,
+                request().image.pixels
+            );
+        }
+        assert_eq!(std::fs::read_dir(directory).unwrap().count(), 3);
+    }
     use lexift_core::{domain::geometry::Rect, ports::screen_capture::CapturedRegion};
     fn request() -> ImageSaveRequest {
         ImageSaveRequest {
