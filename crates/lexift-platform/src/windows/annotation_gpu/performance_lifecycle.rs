@@ -31,7 +31,21 @@ fn observe_retirement(label: &str, mut action: impl FnMut()) {
     // Match the retained render worker: its apartment survives per-scene
     // backends. Otherwise this probe would also measure full COM retirement.
     let _apartment = super::super::super::screen_capture::capture::Apartment::new().unwrap();
-    for round in 0..64 {
+    // Opt-in batch observations distinguish delayed system retirement from
+    // growth across successive batches without changing production teardown.
+    let idle_ms = std::env::var("LEXIFT_RESOURCE_BATCH_IDLE_MS")
+        .ok()
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .expect("invalid resource idle duration")
+        });
+    let rounds = if idle_ms.is_some() { 60 } else { 64 };
+    if idle_ms.is_some() {
+        action();
+        observe_idle(label, "warmup", Duration::from_millis(250));
+    }
+    for round in 0..rounds {
         action();
         let deadline = Instant::now() + Duration::from_millis(250);
         while Instant::now() < deadline {
@@ -46,6 +60,48 @@ fn observe_retirement(label: &str, mut action: impl FnMut()) {
         if round == 0 || round % 16 == 15 {
             memory_probe::report(label, round);
         }
+        if let Some(idle_ms) = idle_ms
+            && (round + 1) % 20 == 0
+        {
+            observe_idle(
+                label,
+                &format!("batch{}", (round + 1) / 20),
+                Duration::from_millis(idle_ms),
+            );
+        }
+    }
+}
+
+/// Keep the fixture's COM apartment pumping during the observation interval;
+/// blocking its messages would itself delay native resource retirement.
+fn observe_idle(label: &str, stage: &str, duration: Duration) {
+    let acknowledgement = std::env::var_os("LEXIFT_RESOURCE_OBSERVER_DIR")
+        .map(|directory| std::path::PathBuf::from(directory).join(format!("{label}-{stage}.ack")));
+    if let Some(path) = &acknowledgement {
+        assert!(!path.exists(), "stale lifecycle observer acknowledgement");
+    }
+    let deadline = Instant::now() + duration;
+    while Instant::now() < deadline {
+        surface::pump_messages();
+        thread::sleep(Duration::from_millis(5));
+    }
+    println!(
+        "isolation={label} stage={stage} idle_ms={} private_working_set_bytes={:?} handle_gdi_user={:?}",
+        duration.as_millis(),
+        memory_bytes(),
+        counts()
+    );
+    // The external classifier must finish before the next batch allocates or
+    // the final fixture exits. A missing observer fails instead of reading a
+    // dead process as zero resources or sampling the next batch's peak.
+    if let Some(path) = acknowledgement {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !path.exists() {
+            assert!(Instant::now() < deadline, "lifecycle observer timed out");
+            surface::pump_messages();
+            thread::sleep(Duration::from_millis(5));
+        }
+        std::fs::remove_file(path).unwrap();
     }
 }
 
@@ -53,6 +109,38 @@ fn observe_retirement(label: &str, mut action: impl FnMut()) {
 #[ignore = "D3D11 backend retirement isolation; hardware Windows and Release required"]
 fn lifecycle_memory_backend_without_capture_sessions() {
     observe_retirement("backend", || drop(Backend::new().unwrap()));
+}
+
+#[test]
+#[ignore = "WGC capability activation isolation; Windows and Release required"]
+fn lifecycle_memory_support_without_pool() {
+    observe_retirement("support", || {
+        assert!(super::super::super::screen_capture::activation::supported().unwrap());
+    });
+}
+
+#[test]
+#[ignore = "temporary capture apartments without pools; Windows and Release required"]
+fn lifecycle_memory_support_on_fresh_threads() {
+    observe_retirement("support_threads", || {
+        thread::spawn(|| {
+            assert!(super::super::super::screen_capture::activation::supported().unwrap());
+        })
+        .join()
+        .unwrap();
+    });
+}
+
+#[test]
+#[ignore = "one-shot capture Port construction without UI or element requests; Windows and Release required"]
+fn lifecycle_memory_capture_port_without_queries() {
+    observe_retirement("capture_port", || {
+        thread::spawn(|| {
+            drop(super::super::super::screen_capture::WindowsScreenCapturePort::new().unwrap());
+        })
+        .join()
+        .unwrap();
+    });
 }
 
 #[test]
@@ -393,10 +481,134 @@ fn lifecycle_memory_shader_compiler_without_gpu_device() {
 #[test]
 #[ignore = "WGC pool retirement without StartCapture; Windows and Release required"]
 fn lifecycle_memory_frame_pool_without_capture_sessions() {
-    observe_retirement("frame_pool", retire_frame_pool);
+    observe_retirement("frame_pool", || retire_frame_pool(false));
 }
 
-fn retire_frame_pool() {
+#[test]
+#[ignore = "explicit WinRT device Close after pool Close; Windows and Release required"]
+fn lifecycle_memory_frame_pool_with_closed_device() {
+    observe_retirement("pool_closed_device", || retire_frame_pool(true));
+}
+
+#[test]
+#[ignore = "SDK-only WGC reproduction without a Lexift capture backend; Windows and Release required"]
+fn lifecycle_memory_sdk_frame_pool_without_backend() {
+    assert!(super::super::super::screen_capture::activation::supported().unwrap());
+    observe_retirement("sdk_frame_pool", sdk_frame_pool_once);
+}
+
+#[test]
+#[ignore = "SDK WGC with a fully retired owner thread each round; Windows and Release required"]
+fn lifecycle_memory_sdk_frame_pool_on_fresh_threads() {
+    assert!(super::super::super::screen_capture::activation::supported().unwrap());
+    observe_retirement("sdk_pool_threads", || {
+        thread::spawn(sdk_frame_pool_once).join().unwrap();
+    });
+}
+
+fn sdk_frame_pool_once() {
+    use windows::{
+        Graphics::{
+            Capture::Direct3D11CaptureFramePool,
+            DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat},
+            SizeInt32,
+        },
+        Win32::{
+            Foundation::HMODULE,
+            Graphics::{Direct3D::D3D_DRIVER_TYPE_HARDWARE, Direct3D11::*, Dxgi::IDXGIDevice},
+            System::WinRT::Direct3D11::CreateDirect3D11DeviceFromDXGIDevice,
+        },
+        core::Interface,
+    };
+    let _apartment = super::super::super::screen_capture::capture::Apartment::new().unwrap();
+    let mut device = None;
+    let mut context = None;
+    unsafe {
+        D3D11CreateDevice(
+            None,
+            D3D_DRIVER_TYPE_HARDWARE,
+            HMODULE::default(),
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            None,
+            D3D11_SDK_VERSION,
+            Some(&mut device),
+            None,
+            Some(&mut context),
+        )
+        .unwrap();
+    }
+    let dxgi: IDXGIDevice = device.unwrap().cast().unwrap();
+    let winrt: IDirect3DDevice = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi) }
+        .unwrap()
+        .cast()
+        .unwrap();
+    let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
+        &winrt,
+        DirectXPixelFormat::B8G8R8A8UIntNormalized,
+        2,
+        SizeInt32 {
+            Width: 1280,
+            Height: 720,
+        },
+    )
+    .unwrap();
+    pool.Close().unwrap();
+    drop(pool);
+    winrt.Close().unwrap();
+}
+
+#[test]
+#[ignore = "pool factory reuse without retained pixels; Windows and Release required"]
+fn lifecycle_memory_frame_pools_reused_factory() {
+    use windows::{
+        Graphics::{
+            Capture::IDirect3D11CaptureFramePoolStatics2, DirectX::Direct3D11::IDirect3DDevice,
+        },
+        Win32::{
+            Graphics::Dxgi::IDXGIDevice,
+            System::WinRT::{
+                Direct3D11::CreateDirect3D11DeviceFromDXGIDevice, RoGetActivationFactory,
+            },
+        },
+        core::{HSTRING, Interface},
+    };
+    let _apartment = super::super::super::screen_capture::capture::Apartment::new().unwrap();
+    let factory: IDirect3D11CaptureFramePoolStatics2 = unsafe {
+        RoGetActivationFactory(&HSTRING::from(
+            "Windows.Graphics.Capture.Direct3D11CaptureFramePool",
+        ))
+    }
+    .unwrap();
+    observe_retirement("pool_reused_factory", || {
+        let backend = Backend::new().unwrap();
+        let dxgi: IDXGIDevice = backend.device().cast().unwrap();
+        let device: IDirect3DDevice = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi) }
+            .unwrap()
+            .cast()
+            .unwrap();
+        let mut raw = std::ptr::null_mut();
+        unsafe {
+            (factory.vtable().CreateFreeThreaded)(
+                factory.as_raw(),
+                device.as_raw(),
+                windows::Graphics::DirectX::DirectXPixelFormat::B8G8R8A8UIntNormalized,
+                2,
+                windows::Graphics::SizeInt32 {
+                    Width: 1280,
+                    Height: 720,
+                },
+                &mut raw,
+            )
+            .ok()
+            .unwrap();
+            let pool = windows::Graphics::Capture::Direct3D11CaptureFramePool::from_raw(raw);
+            pool.Close().unwrap();
+            drop(pool);
+        }
+    });
+}
+
+fn retire_frame_pool(close_device: bool) {
     use windows::{
         Graphics::{
             DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat},
@@ -426,6 +638,9 @@ fn retire_frame_pool() {
     .unwrap();
     pool.Close().unwrap();
     drop(pool);
+    if close_device {
+        device.Close().unwrap();
+    }
     drop(device);
     drop(dxgi);
     drop(backend);

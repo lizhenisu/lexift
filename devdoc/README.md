@@ -179,3 +179,4 @@
 - [录屏 GIF 导出验证](releases/recording-gif-export.md)
 - [录屏全局快捷键](features/recording-hotkeys.md)
 - [录屏快捷键验证](releases/recording-hotkeys.md)
+- [截图窗口资源生命周期与第三方叠加层归因](releases/screenshot-resource-lifecycle.md)

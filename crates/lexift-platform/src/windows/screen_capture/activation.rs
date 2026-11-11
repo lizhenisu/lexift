@@ -1,6 +1,7 @@
 //! Apartment-scoped WGC activation. Generated static factory caches can outlive
 //! RoUninitialize and point into an unloaded GraphicsCapture DLL after reopening.
 use super::capture::Apartment;
+use std::sync::Mutex;
 use windows::{
     Graphics::{
         Capture::{
@@ -15,6 +16,27 @@ use windows::{
 };
 
 pub(crate) fn supported() -> Result<bool> {
+    // IsSupported is a capability hint, not a capture/device readiness fence.
+    // Repeated queries retain native ALPC channels on the tested Windows build.
+    // Remember only a positive answer, never a COM interface or apartment; real
+    // device/session creation still validates current native availability.
+    static SUPPORTED: Mutex<bool> = Mutex::new(false);
+    remember_supported(&SUPPORTED, query_supported)
+}
+
+fn remember_supported(known: &Mutex<bool>, probe: impl FnOnce() -> Result<bool>) -> Result<bool> {
+    let mut known = known
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if *known {
+        return Ok(true);
+    }
+    let supported = probe()?;
+    *known = supported;
+    Ok(supported)
+}
+
+fn query_supported() -> Result<bool> {
     super::runtime::keep_code_loaded()?;
     let _apartment = Apartment::for_query()?;
     unsafe {
@@ -23,6 +45,21 @@ pub(crate) fn supported() -> Result<bool> {
         let mut supported = false;
         (factory.vtable().IsSupported)(factory.as_raw(), &mut supported).map(|| supported)
     }
+}
+
+#[test]
+fn capability_hint_retries_negative_and_error_but_does_not_retain_native_ownership() {
+    let known = Mutex::new(false);
+    assert!(!remember_supported(&known, || Ok(false)).unwrap());
+    assert!(
+        remember_supported(&known, || Err(windows::core::Error::from_hresult(
+            windows::Win32::Foundation::E_FAIL
+        )))
+        .is_err()
+    );
+    assert!(!*known.lock().unwrap());
+    assert!(remember_supported(&known, || Ok(true)).unwrap());
+    assert!(remember_supported(&known, || panic!("positive capability queried again")).unwrap());
 }
 
 /// The caller's capture backend owns an active apartment. Keep its factory local
