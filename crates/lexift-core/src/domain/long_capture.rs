@@ -37,6 +37,133 @@ pub struct Stitcher {
     height: usize,
     anchor: Arc<CapturedRegion>,
     strips: Vec<Arc<[u8]>>,
+    bands: Option<Bands>,
+}
+
+/// Fixed rows in physical capture coordinates. Zero rows means ordinary stitching.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Bands {
+    top: usize,
+    bottom: usize,
+}
+
+impl Bands {
+    fn body(self, pixels: &[u8], stride: usize) -> &[u8] {
+        &pixels[self.top * stride..pixels.len() - self.bottom * stride]
+    }
+
+    fn matches(self, a: &[u8], b: &[u8], stride: usize) -> bool {
+        let top = self.top * stride;
+        let bottom = a.len() - self.bottom * stride;
+        a[..top] == b[..top] && a[bottom..] == b[bottom..]
+    }
+
+    fn displacement(self, a: &[u8], b: &[u8], width: usize, cancel: &AtomicBool) -> Option<usize> {
+        let stride = width * 4;
+        if !self.matches(a, b, stride) {
+            return None;
+        }
+        displacement(
+            self.body(a, stride),
+            self.body(b, stride),
+            width,
+            self != Self::default(),
+            cancel,
+        )
+    }
+}
+
+fn textured(pixels: &[u8]) -> bool {
+    let mut min = 255;
+    let mut max = 0;
+    for i in (0..pixels.len()).step_by(4) {
+        let value = gray(pixels, i);
+        min = min.min(value);
+        max = max.max(value);
+        if max - min >= 12 {
+            return true;
+        }
+    }
+    false
+}
+
+/// Require an observable boundary rather than trimming an arbitrary portion of a flat edge.
+fn edge_rows(
+    a: &[u8],
+    b: &[u8],
+    stride: usize,
+    bottom: bool,
+    cancel: &AtomicBool,
+) -> Option<usize> {
+    let height = a.len() / stride;
+    for distance in 0..=height / 4 {
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
+        let y = if bottom {
+            height - 1 - distance
+        } else {
+            distance
+        };
+        let row = y * stride..(y + 1) * stride;
+        if a[row.clone()] != b[row] {
+            let band = if bottom {
+                &a[a.len() - distance * stride..]
+            } else {
+                &a[..distance * stride]
+            };
+            return Some(if distance >= 4 && textured(band) {
+                distance
+            } else {
+                0
+            });
+        }
+    }
+    // The common edge exceeds the supported height. Never try an arbitrary smaller crop.
+    Some(0)
+}
+
+fn initial_match(a: &[u8], b: &[u8], width: usize, cancel: &AtomicBool) -> Option<(Bands, usize)> {
+    let stride = width * 4;
+    let top = edge_rows(a, b, stride, false, cancel)?;
+    let bottom = edge_rows(a, b, stride, true, cancel)?;
+    let mut found = None;
+    for bands in [
+        Bands::default(),
+        Bands { top, bottom: 0 },
+        Bands { top: 0, bottom },
+        Bands { top, bottom },
+    ] {
+        if bands.top + bands.bottom > a.len() / stride / 3
+            || found.is_some_and(|(previous, _)| previous == bands)
+        {
+            continue;
+        }
+        if let Some(dy) = bands.displacement(a, b, width, cancel) {
+            if found.is_some() || ambiguous_boundary(bands, a, b, stride, dy) {
+                return None;
+            }
+            found = Some((bands, dy));
+        }
+        if top == 0 && bottom == 0 {
+            break;
+        }
+    }
+    found
+}
+
+/// A smaller eligible band would explain the same shift if its adjacent overlap row also matched.
+/// Every smaller boundary must include this row, so one comparison rules out the whole range.
+fn ambiguous_boundary(bands: Bands, a: &[u8], b: &[u8], stride: usize, dy: usize) -> bool {
+    let end = a.len() - bands.bottom * stride;
+    let top = bands.top * stride;
+    let shift = dy * stride;
+    (bands.top > 4
+        && textured(&a[..top - stride])
+        && a[top + shift - stride..top + shift] == b[top - stride..top])
+        || (bands.bottom > 4
+            && textured(&a[end + stride..])
+            && a[end..end + stride] == b[end - shift..end - shift + stride])
 }
 
 fn dimensions(frame: &CapturedRegion) -> Result<(usize, usize)> {
@@ -64,6 +191,7 @@ impl Stitcher {
             height,
             strips: vec![Arc::from(first.pixels.as_slice())],
             anchor: first,
+            bands: None,
         })
     }
     pub fn size(&self) -> (usize, usize) {
@@ -83,7 +211,14 @@ impl Stitcher {
         if frame.pixels == self.anchor.pixels {
             return Ok(Feedback::Unchanged);
         }
-        let Some(dy) = displacement(&self.anchor, &frame, w, h, cancel) else {
+        let matched = if let Some(bands) = self.bands {
+            bands
+                .displacement(&self.anchor.pixels, &frame.pixels, w, cancel)
+                .map(|dy| (bands, dy))
+        } else {
+            initial_match(&self.anchor.pixels, &frame.pixels, w, cancel)
+        };
+        let Some((bands, dy)) = matched else {
             return Ok(if cancel.load(Ordering::Relaxed) {
                 Feedback::Cancelled
             } else {
@@ -105,16 +240,35 @@ impl Stitcher {
         if cancel.load(Ordering::Relaxed) {
             return Ok(Feedback::Cancelled);
         }
+        let end = (h - bands.bottom) * w * 4;
         self.strips
-            .push(Arc::from(&frame.pixels[(h - dy) * w * 4..]));
+            .push(Arc::from(&frame.pixels[end - dy * w * 4..end]));
+        self.bands = Some(bands);
         self.height = height;
         self.anchor = frame;
         Ok(Feedback::Accepted)
     }
+    fn output_strips(&self) -> impl Iterator<Item = &[u8]> {
+        let footer = self.bands.unwrap_or_default().bottom * self.width * 4;
+        self.strips
+            .iter()
+            .enumerate()
+            .map(move |(index, strip)| {
+                if index == 0 {
+                    &strip[..strip.len() - footer]
+                } else {
+                    strip.as_ref()
+                }
+            })
+            .chain(std::iter::once(
+                &self.anchor.pixels[self.anchor.pixels.len() - footer..],
+            ))
+    }
+
     /// Flatten only at the immutable editor/output handoff, never for capture feedback.
     pub fn flatten(&self, cancel: &AtomicBool) -> Result<CapturedRegion> {
         let mut pixels = Vec::with_capacity(self.width * self.height * 4);
-        for strip in &self.strips {
+        for strip in self.output_strips() {
             if cancel.load(Ordering::Relaxed) {
                 return Err(Error::new("Long capture cancelled"));
             }
@@ -139,20 +293,23 @@ impl Stitcher {
         let start = self.height - visible_height;
         let h = (visible_height * w / self.width).max(1);
         let mut pixels = vec![0; w * h * 4];
-        let mut strip_index = 0;
+        let stride = self.width * 4;
+        let mut strips = self.output_strips();
+        let mut strip = strips.next().expect("first capture strip");
         let mut strip_start = 0;
         for y in 0..h {
             let sy = start + y * visible_height / h;
-            while sy >= strip_start + self.strips[strip_index].len() / (self.width * 4) {
-                strip_start += self.strips[strip_index].len() / (self.width * 4);
-                strip_index += 1;
+            while sy >= strip_start + strip.len() / stride {
+                strip_start += strip.len() / stride;
+                strip = strips.next().expect("output strips cover preview");
             }
             for x in 0..w {
                 let src = ((sy - strip_start) * self.width + x * self.width / w) * 4;
                 let dst = (y * w + x) * 4;
-                pixels[dst..dst + 4].copy_from_slice(&self.strips[strip_index][src..src + 4]);
+                pixels[dst..dst + 4].copy_from_slice(&strip[src..src + 4]);
             }
         }
+        let bands = self.bands.unwrap_or_default();
         Preview {
             image: Arc::new(CapturedRegion {
                 bounds: Rect {
@@ -177,10 +334,9 @@ impl Stitcher {
             },
             current: Rect {
                 left: 0,
-                top: (self.height - (self.anchor.bounds.bottom - self.anchor.bounds.top) as usize)
-                    as i32,
+                top: (self.height - self.anchor.pixels.len() / stride + bands.top) as i32,
                 right: self.width as i32,
-                bottom: self.height as i32,
+                bottom: (self.height - bands.bottom) as i32,
             },
         }
     }
@@ -191,17 +347,16 @@ fn gray(p: &[u8], i: usize) -> i32 {
 }
 
 /// Coarse grayscale search followed by full-resolution validation. Ambiguous aliases are rejected.
-fn displacement(
-    a: &CapturedRegion,
-    b: &CapturedRegion,
-    w: usize,
-    h: usize,
-    cancel: &AtomicBool,
-) -> Option<usize> {
+fn displacement(a: &[u8], b: &[u8], w: usize, exact: bool, cancel: &AtomicBool) -> Option<usize> {
+    let h = a.len() / (w * 4);
     if w < 8 || h < 16 {
         return None;
     }
-    let max = h * 3 / 4;
+    let max = if exact {
+        (h * 3 / 4).min(h - 16)
+    } else {
+        h * 3 / 4
+    };
     let mut scores = Vec::with_capacity(max);
     for dy in 1..=max {
         if cancel.load(Ordering::Relaxed) {
@@ -214,7 +369,7 @@ fn displacement(
             for x in (0..w).step_by((w / 48).max(1)) {
                 let ia = ((y + dy) * w + x) * 4;
                 let ib = (y * w + x) * 4;
-                error += (gray(&a.pixels, ia) - gray(&b.pixels, ib)).unsigned_abs() as u64;
+                error += (gray(a, ia) - gray(b, ib)).unsigned_abs() as u64;
                 count += 1;
             }
         }
@@ -236,8 +391,18 @@ fn displacement(
     }
     let mut accepted = None;
     for (_, dy) in candidates {
-        if validate_overlap(a, b, w, h, dy, cancel) {
-            if accepted.is_some_and(|old: usize| old.abs_diff(dy) > 2) {
+        let overlap = if exact {
+            let stride = w * 4;
+            a[dy * stride..]
+                .chunks_exact(stride)
+                .zip(b.chunks_exact(stride))
+                .all(|(left, right)| !cancel.load(Ordering::Relaxed) && left == right)
+                && textured(&a[dy * stride..])
+        } else {
+            validate_overlap(a, b, w, h, dy, cancel)
+        };
+        if overlap {
+            if accepted.is_some_and(|old: usize| old.abs_diff(dy) > if exact { 0 } else { 2 }) {
                 return None;
             }
             accepted.get_or_insert(dy);
@@ -247,8 +412,8 @@ fn displacement(
 }
 
 fn validate_overlap(
-    a: &CapturedRegion,
-    b: &CapturedRegion,
+    a: &[u8],
+    b: &[u8],
     w: usize,
     h: usize,
     dy: usize,
@@ -266,10 +431,10 @@ fn validate_overlap(
         for x in 0..w {
             let ia = ((y + dy) * w + x) * 4;
             let ib = (y * w + x) * 4;
-            let value = gray(&a.pixels, ia);
+            let value = gray(a, ia);
             min = min.min(value);
             max = max.max(value);
-            if (0..4).any(|c| a.pixels[ia + c].abs_diff(b.pixels[ib + c]) > 2) {
+            if (0..4).any(|c| a[ia + c].abs_diff(b[ib + c]) > 2) {
                 errors += 1;
             }
             n += 1;
@@ -435,6 +600,151 @@ mod tests {
         assert_eq!(s.push(image(30), &cancel).unwrap(), Feedback::Cancelled);
         assert_eq!(s.size(), (96, 160));
     }
+    fn fixed_frame(offset: usize, top: usize, bottom: usize) -> Arc<CapturedRegion> {
+        let mut frame = (*image(offset)).clone();
+        let stride = 96 * 4;
+        frame.pixels[..top * stride].copy_from_slice(&image(9000).pixels[..top * stride]);
+        let end = frame.pixels.len();
+        let tail = end - bottom * stride;
+        frame.pixels[tail..].copy_from_slice(&image(11000).pixels[tail..]);
+        Arc::new(frame)
+    }
+
+    #[test]
+    fn fixed_edges_are_kept_once_in_export_and_preview() {
+        let cancel = AtomicBool::new(false);
+        for (top, bottom) in [(12, 0), (0, 16), (12, 16)] {
+            let first = fixed_frame(0, top, bottom);
+            let mut stitch = Stitcher::new(first.clone()).unwrap();
+            assert!(stitch.flatten(&cancel).unwrap().pixels == first.pixels);
+            let stride = 96 * 4;
+            let mut expected = first.pixels[..(160 - bottom) * stride].to_vec();
+            for (before, offset) in [(0, 1), (1, 27), (27, 126)] {
+                let frame = fixed_frame(offset, top, bottom);
+                assert_eq!(
+                    stitch.push(frame.clone(), &cancel).unwrap(),
+                    Feedback::Accepted
+                );
+                let end = (160 - bottom) * stride;
+                expected.extend_from_slice(&frame.pixels[end - (offset - before) * stride..end]);
+                let mut full = expected.clone();
+                full.extend_from_slice(&frame.pixels[end..]);
+                assert_eq!(stitch.flatten(&cancel).unwrap().pixels, full);
+                let preview = stitch.preview(96, 180);
+                assert_eq!(preview.current.top, (offset + top) as i32);
+                assert_eq!(preview.current.bottom, (offset + 160 - bottom) as i32);
+                assert_eq!(
+                    preview.image.pixels,
+                    full[preview.visible.top as usize * stride..]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn locked_bands_reject_mutations_and_reverse_or_excessive_motion() {
+        let cancel = AtomicBool::new(false);
+        let mut stitch = Stitcher::new(fixed_frame(0, 12, 16)).unwrap();
+        assert_eq!(
+            stitch.push(fixed_frame(30, 12, 16), &cancel).unwrap(),
+            Feedback::Accepted
+        );
+        let before = stitch.flatten(&cancel).unwrap();
+        let mut changed = (*fixed_frame(60, 12, 16)).clone();
+        changed.pixels[0] ^= 1;
+        let mut floating = (*fixed_frame(60, 12, 16)).clone();
+        for y in 50..70 {
+            floating.pixels[(y * 96 + 20) * 4..(y * 96 + 50) * 4].fill(220);
+        }
+        for frame in [
+            Arc::new(changed),
+            Arc::new(floating),
+            fixed_frame(60, 14, 16),
+            fixed_frame(5, 12, 16),
+            fixed_frame(130, 12, 16),
+        ] {
+            assert_eq!(stitch.push(frame, &cancel).unwrap(), Feedback::Uncertain);
+            assert_eq!(stitch.flatten(&cancel).unwrap(), before);
+        }
+        cancel.store(true, Ordering::Relaxed);
+        assert_eq!(
+            stitch.push(fixed_frame(60, 12, 16), &cancel).unwrap(),
+            Feedback::Cancelled
+        );
+        cancel.store(false, Ordering::Relaxed);
+        assert_eq!(
+            stitch.push(fixed_frame(60, 12, 16), &cancel).unwrap(),
+            Feedback::Accepted
+        );
+    }
+
+    #[test]
+    fn fixed_footer_respects_buffer_limit_and_retains_output() {
+        let cancel = AtomicBool::new(false);
+        // A wide frame reaches the conservative buffer limit before the height limit.
+        let width = 8000;
+        let frame = |offset| {
+            let mut frame = (*image_width(offset, width)).clone();
+            let footer = (160 - 12) * width * 4;
+            frame.pixels[footer..].copy_from_slice(&image_width(9000, width).pixels[footer..]);
+            Arc::new(frame)
+        };
+        let mut stitch = Stitcher::new(frame(0)).unwrap();
+        assert_eq!(stitch.push(frame(90), &cancel).unwrap(), Feedback::Accepted);
+        let mut offset = 90;
+        loop {
+            let height = stitch.height;
+            let anchor = stitch.anchor.clone();
+            match stitch.push(frame(offset + 90), &cancel).unwrap() {
+                Feedback::Accepted => {
+                    offset += 90;
+                    assert!(
+                        offset < 2000,
+                        "buffer limit should precede the height limit"
+                    );
+                }
+                Feedback::Limit => {
+                    assert_eq!(stitch.height, height);
+                    assert!(Arc::ptr_eq(&stitch.anchor, &anchor));
+                    assert_eq!(stitch.retained_bytes(), (height + 160) * width * 4);
+                    break;
+                }
+                feedback => panic!("unexpected feedback: {feedback:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn stationary_edges_need_texture_and_a_unique_boundary() {
+        let cancel = AtomicBool::new(false);
+        let stride = 96 * 4;
+        let solid = |offset| {
+            let mut frame = (*image(offset)).clone();
+            frame.pixels[..12 * stride].fill(230);
+            Arc::new(frame)
+        };
+        let mut stitch = Stitcher::new(solid(0)).unwrap();
+        assert_eq!(
+            stitch.push(solid(25), &cancel).unwrap(),
+            Feedback::Uncertain
+        );
+
+        let first = fixed_frame(0, 12, 0);
+        let mut moved = (*fixed_frame(25, 12, 0)).clone();
+        let mut ambiguous = (*first).clone();
+        let row = ambiguous.pixels[11 * stride..12 * stride].to_vec();
+        ambiguous.pixels[36 * stride..37 * stride].copy_from_slice(&row);
+        // Preserve the exact 25-row body overlap while making the 11-row boundary valid too.
+        moved.pixels[11 * stride..12 * stride].copy_from_slice(&row);
+        let first = Arc::new(ambiguous);
+        let mut stitch = Stitcher::new(first.clone()).unwrap();
+        assert_eq!(
+            stitch.push(Arc::new(moved), &cancel).unwrap(),
+            Feedback::Uncertain
+        );
+        assert!(stitch.flatten(&cancel).unwrap().pixels == first.pixels);
+    }
+
     #[test]
     fn blank_periodic_and_invalid_frames_are_rejected() {
         assert!(
