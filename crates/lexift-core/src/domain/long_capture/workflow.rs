@@ -1,6 +1,6 @@
 //! Session-scoped control of live capture, separate from desktop region editing.
 use super::{
-    Feedback, Preview,
+    Feedback, Preview, Trim,
     auto_scroll::{Mode, Stop},
 };
 use crate::domain::screenshot::ScreenshotOutput;
@@ -35,6 +35,7 @@ pub struct State {
     pub feedback: Feedback,
     pub target: Option<ScreenshotOutput>,
     pub auto_scroll: super::auto_scroll::State,
+    pub trim_pending: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -58,6 +59,16 @@ pub enum Event {
         preview: Preview,
     },
     ToggleAutoScroll {
+        session: u64,
+        operation: u64,
+    },
+    Trim {
+        session: u64,
+        operation: u64,
+        sequence: u64,
+        direction: Option<Trim>,
+    },
+    TrimReady {
         session: u64,
         operation: u64,
     },
@@ -122,6 +133,12 @@ pub enum Command {
         first: bool,
         preview: Preview,
     },
+    Trim {
+        session: u64,
+        operation: u64,
+        sequence: u64,
+        direction: Option<Trim>,
+    },
     Pause {
         session: u64,
         operation: u64,
@@ -171,6 +188,7 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
             feedback: Feedback::Unchanged,
             target: None,
             auto_scroll: Default::default(),
+            trim_pending: false,
         });
         return wrap(Command::Prepare {
             session,
@@ -186,6 +204,10 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
             session, operation, ..
         }
         | Event::ToggleAutoScroll { session, operation }
+        | Event::Trim {
+            session, operation, ..
+        }
+        | Event::TrimReady { session, operation }
         | Event::AutoScrollStarted {
             session, operation, ..
         }
@@ -215,7 +237,35 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
         return vec![];
     };
     match event {
-        Event::ToggleAutoScroll { .. } if l.phase == Phase::Capturing => {
+        Event::Trim {
+            sequence,
+            direction,
+            ..
+        } if l.phase == Phase::Capturing
+            && !l.trim_pending
+            && (direction.is_none()
+                || sequence == l.sequence
+                || l.auto_scroll.mode != Mode::Manual) =>
+        {
+            let direction = if l.auto_scroll.mode == Mode::Manual {
+                direction
+            } else {
+                None
+            };
+            l.auto_scroll.stop(None);
+            l.trim_pending = true;
+            wrap(Command::Trim {
+                session,
+                operation,
+                sequence,
+                direction,
+            })
+        }
+        Event::TrimReady { .. } => {
+            l.trim_pending = false;
+            vec![]
+        }
+        Event::ToggleAutoScroll { .. } if l.phase == Phase::Capturing && !l.trim_pending => {
             if l.auto_scroll.mode == Mode::Manual {
                 l.auto_scroll.generation += 1;
                 l.auto_scroll.mode = Mode::Waiting;
@@ -294,6 +344,7 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
         }
         Event::Pause { paused, .. }
             if matches!(l.phase, Phase::Capturing | Phase::Paused)
+                && !l.trim_pending
                 && (paused || l.feedback != Feedback::Limit) =>
         {
             l.auto_scroll.stop(None);
@@ -308,7 +359,9 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
                 paused,
             })
         }
-        Event::Finish { target, .. } if matches!(l.phase, Phase::Capturing | Phase::Paused) => {
+        Event::Finish { target, .. }
+            if matches!(l.phase, Phase::Capturing | Phase::Paused) && !l.trim_pending =>
+        {
             l.auto_scroll.stop(None);
             l.target = target;
             l.phase = Phase::Finishing;
@@ -411,6 +464,7 @@ mod tests {
             extent: image.bounds,
             visible: image.bounds,
             current: image.bounds,
+            body: Some(image.bounds),
             image,
         }
     }
@@ -735,6 +789,65 @@ mod tests {
             },
         );
         assert!(s.editable());
+    }
+
+    #[test]
+    fn trim_stops_automatic_input_and_serializes_against_finish() {
+        let mut s = screenshot();
+        let operation = start(&mut s);
+        let long = s.long.as_mut().unwrap();
+        long.phase = Phase::Capturing;
+        long.sequence = 3;
+        long.auto_scroll.mode = Mode::Running;
+        let trim = |sequence| Event::Trim {
+            session: 9,
+            operation,
+            sequence,
+            direction: Some(Trim::Below),
+        };
+        assert!(matches!(
+            reduce(&mut s, trim(2)).as_slice(),
+            [ScreenshotCommand::Long(Command::Trim {
+                direction: None,
+                ..
+            })]
+        ));
+        assert_eq!(s.long.as_ref().unwrap().auto_scroll.mode, Mode::Manual);
+        assert!(reduce(&mut s, trim(3)).is_empty());
+        assert!(
+            reduce(
+                &mut s,
+                Event::Finish {
+                    session: 9,
+                    operation,
+                    target: None
+                }
+            )
+            .is_empty()
+        );
+        reduce(
+            &mut s,
+            Event::TrimReady {
+                session: 9,
+                operation: operation + 1,
+            },
+        );
+        assert!(s.long.as_ref().unwrap().trim_pending);
+        reduce(
+            &mut s,
+            Event::TrimReady {
+                session: 9,
+                operation,
+            },
+        );
+        assert!(reduce(&mut s, trim(2)).is_empty());
+        assert!(matches!(
+            reduce(&mut s, trim(3)).as_slice(),
+            [ScreenshotCommand::Long(Command::Trim {
+                direction: Some(Trim::Below),
+                ..
+            })]
+        ));
     }
     #[test]
     fn single_screen_and_failure_preserve_original_region() {

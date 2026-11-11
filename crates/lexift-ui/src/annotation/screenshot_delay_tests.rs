@@ -11,6 +11,24 @@ impl Platform for TestPlatform {
         Ok(w)
     }
 }
+
+#[test]
+fn live_trim_menu_survives_screenshot_launch_availability_updates() {
+    slint::platform::set_platform(Box::new(TestPlatform(Rc::default()))).unwrap();
+    let menu = AnnotationChoiceWindow::new().unwrap();
+    VIEWS.with(|views| {
+        let mut views = views.borrow_mut();
+        views.menu_kind = LONG_TRIM_MENU;
+        views.menu = Some(menu);
+    });
+    let mut state = lexift_core::AppState::default();
+    state.screenshot.phase = ScreenshotPhase::Editing;
+    assert!(!lexift_core::domain::screenshot::delay_available(&state));
+    availability(&state);
+    assert!(menu_open());
+    sync(&state.screenshot);
+    assert!(!menu_open());
+}
 #[test]
 fn countdown_projects_monotonic_deadline_without_tick_accumulation() {
     let now = Instant::now();

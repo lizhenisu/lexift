@@ -2348,3 +2348,9 @@ msgstr "자동 스크롤을 사용할 수 없습니다."
 
 msgid "Automatic scrolling stopped because the image did not change."
 msgstr "이미지가 바뀌지 않아 자동 스크롤을 중지했습니다."
+
+msgid "Trim above current view"
+msgstr "현재 화면 위쪽 잘라내기"
+
+msgid "Trim below current view"
+msgstr "현재 화면 아래쪽 잘라내기"

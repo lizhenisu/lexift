@@ -64,19 +64,22 @@ pub(super) fn preview(
     let span = (preview.visible.bottom - preview.visible.top).max(1) as f32;
     let top = (preview.current.top.max(preview.visible.top) - preview.visible.top) as f32 / span
         * h as f32;
-    let height = (preview.current.bottom - preview.current.top.max(preview.visible.top)).max(0)
-        as f32
+    let height = (preview.current.bottom.min(preview.visible.bottom)
+        - preview.current.top.max(preview.visible.top))
+    .max(0) as f32
         / span
         * h as f32;
-    border(
-        &mut p,
-        t as f32,
-        t as f32 + top,
-        w as f32,
-        height.max(t as f32),
-        t as f32,
-        current,
-    );
+    if height > 0. {
+        border(
+            &mut p,
+            t as f32,
+            t as f32 + top,
+            w as f32,
+            height.max(t as f32),
+            t as f32,
+            current,
+        );
+    }
     if preview.visible.top > 0 {
         let cx = stride as f32 / 2.;
         let size = 8. * dpi;
@@ -145,6 +148,7 @@ mod tests {
                     right: 400,
                     bottom: 2000,
                 },
+                body: None,
                 current: Rect {
                     left: 0,
                     top: 1600,

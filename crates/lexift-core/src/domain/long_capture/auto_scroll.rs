@@ -70,7 +70,7 @@ impl Steps {
                 self.accepted = Some(now);
                 self.uncertain = false;
             }
-            Feedback::Uncertain => self.uncertain = true,
+            Feedback::Uncertain | Feedback::Located => self.uncertain = true,
             Feedback::Unchanged if self.uncertain => {
                 if self.accepted.is_some() {
                     self.accepted = Some(now);
@@ -79,6 +79,10 @@ impl Steps {
             }
             _ => {}
         }
+    }
+
+    pub fn settling(&self, now: Duration, aligned: bool) -> bool {
+        self.sent.is_some() && self.next(now, aligned) == Next::Wait
     }
 
     pub fn next(&self, now: Duration, aligned: bool) -> Next {

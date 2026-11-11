@@ -2348,3 +2348,9 @@ msgstr "自動スクロールを利用できません。"
 
 msgid "Automatic scrolling stopped because the image did not change."
 msgstr "画像が変化しなかったため自動スクロールを停止しました。"
+
+msgid "Trim above current view"
+msgstr "現在の表示より上を切り取る"
+
+msgid "Trim below current view"
+msgstr "現在の表示より下を切り取る"

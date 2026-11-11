@@ -109,6 +109,7 @@
 - [手动纵向长截图验证](releases/screenshot-long-capture.md)
 - [Windows 长截图自动滚动验证](releases/screenshot-long-auto-scroll.md)
 - [长截图固定页眉和页脚验证](releases/screenshot-long-fixed-bands.md)
+- [长截图采集内裁剪验证](releases/screenshot-long-live-trim.md)
 - [长截图采集、预览与编辑体验重做验证](releases/screenshot-long-redesign.md)
 - [长截图单行工具条与延迟提示验证](releases/screenshot-long-toolbar.md)
 - [长图编辑器统一图片视口验证](releases/screenshot-image-viewport.md)

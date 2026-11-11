@@ -2348,3 +2348,9 @@ msgstr "Automatisches Scrollen ist nicht verfügbar."
 
 msgid "Automatic scrolling stopped because the image did not change."
 msgstr "Automatisches Scrollen gestoppt: Das Bild blieb unverändert."
+
+msgid "Trim above current view"
+msgstr "Oberhalb der aktuellen Ansicht abschneiden"
+
+msgid "Trim below current view"
+msgstr "Unterhalb der aktuellen Ansicht abschneiden"

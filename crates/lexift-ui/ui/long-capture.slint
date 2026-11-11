@@ -37,7 +37,7 @@ export component LongCaptureControl inherits Window {
     measure-wide := Text { visible: false; text: "32000000 脳 1 px"; font-size: 12px; }
     measure-target := Text { visible: false; text: @tr("Focus content and move pointer inside"); font-size: 12px; }
     private property <length> status-width: max(measure-square.preferred-width, max(measure-wide.preferred-width, measure-target.preferred-width)) + 8px;
-    out property <length> content-width: root.status-width + 62px + 7 * Metrics.long-capture-button-size;
+    out property <length> content-width: root.status-width + 64px + 8 * Metrics.long-capture-button-size;
     out property <length> content-height: Metrics.long-capture-control-height;
     in property <bool> ready;
     in property <bool> paused;
@@ -46,12 +46,23 @@ export component LongCaptureControl inherits Window {
     in property <string> dimensions;
     in property <bool> auto-waiting;
     in property <bool> auto-running;
+    in property <bool> trim-pending;
     callback auto-scroll();
+    callback trim-menu();
+    callback trim(int);
     callback pause(); callback finish(); callback cancel(); callback output(int);
     callback drag-requested(float, float);
     forward-focus: keys;
     keys := FocusScope {
-        key-pressed(event) => { if event.text == Key.Escape { root.cancel(); return accept; } return reject; }
+        key-pressed(event) => {
+            if event.text == Key.Escape { root.cancel(); return accept; }
+            if !event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt && !event.modifiers.meta
+                && (event.text == "j" || event.text == "k") {
+                if !event.repeat { root.trim(event.text == "j" ? 0 : 1); }
+                return accept;
+            }
+            return reject;
+        }
         Rectangle {
             width: 100%; height: 100%; background: Colors.surface; border-radius: 8px; border-width: 1px; border-color: Colors.outline;
             HorizontalLayout {
@@ -67,6 +78,7 @@ export component LongCaptureControl inherits Window {
                     AnnotationHintTarget { width: parent.width; height: parent.height; text: @tr("Scroll down to extend the image"); hovered: dimensions-area.has-hover; pressed: dimensions-area.pressed; }
                 }
                 CaptureSeparator {}
+                CaptureButton { icon: @image-url("assets/icons/crop.svg"); label: @tr("Crop image"); enabled: root.ready && !root.paused && !root.finishing && !root.frozen && !root.trim-pending; clicked => { keys.focus(); root.trim-menu(); } }
                 CaptureButton { icon: @image-url("assets/icons/capture-auto-scroll.svg"); label: root.auto-waiting || root.auto-running ? @tr("Stop automatic scrolling") : @tr("Automatic scrolling"); enabled: root.ready && !root.paused && !root.finishing && !root.frozen; selected: root.auto-waiting || root.auto-running; clicked => { root.auto-scroll(); } }
                 CaptureButton { icon: root.paused ? @image-url("assets/icons/capture-play.svg") : @image-url("assets/icons/capture-pause.svg"); label: root.paused ? @tr("Continue") : @tr("Pause"); enabled: root.ready && !root.finishing && !root.frozen; selected: root.paused; busy: !root.ready || root.finishing; clicked => { root.pause(); } }
                 CaptureButton { icon: @image-url("icons/credential-edit.svg"); label: @tr("Edit"); enabled: root.ready && !root.finishing; clicked => { root.finish(); } }
@@ -87,7 +99,7 @@ export component LongCapturePreview inherits Window {
     in property <bool> clipped;
     Rectangle { width: 100%; height: 100%; background: Colors.surface; border-width: 2px; border-color: Colors.primary;
         Image { x: 2px; y: 2px; width: parent.width - 4px; height: parent.height - 4px; source: root.preview; image-fit: fill; }
-        Rectangle { x: 1px; y: 2px + root.current-top * (parent.height - 4px); width: parent.width - 2px;
+        if root.current-height > 0: Rectangle { x: 1px; y: 2px + root.current-top * (parent.height - 4px); width: parent.width - 2px;
             height: max(2px, root.current-height * (parent.height - 4px)); background: transparent;
             border-width: 2px; border-color: Colors.success; }
         if root.clipped: Rectangle { x: parent.width / 2 - 13px; y: 2px; width: 26px; height: 20px; background: Colors.surface; border-radius: 4px;

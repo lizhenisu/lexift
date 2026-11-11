@@ -4,7 +4,7 @@ pub(super) mod feedback;
 use super::*;
 use crate::{LongCaptureConfirmation, LongCaptureControl, LongCapturePreview, LongCaptureRange};
 use lexift_core::domain::long_capture::{
-    Feedback, Preview,
+    Feedback, Preview, Trim,
     auto_scroll::{Mode, Stop},
     workflow::{Command, Event, Phase},
 };
@@ -21,6 +21,9 @@ struct View {
     screen: Rect,
     area: Rect,
     presented: u64,
+    trim_above: bool,
+    trim_below: bool,
+    trim_menu: Option<TrimMenu>,
     committed: bool,
     origin: Option<Option<lexift_core::ports::magnifier::WindowToken>>,
     editor: Option<slint::Weak<AnnotationCanvas>>,
@@ -33,6 +36,11 @@ struct View {
     finish_started: Option<std::time::Instant>,
     notification: Option<(String, bool)>,
     notification_revision: u64,
+}
+
+struct TrimMenu {
+    foreground: lexift_core::ports::magnifier::WindowToken,
+    settling: bool,
 }
 thread_local! { static VIEW: RefCell<View> = RefCell::new(View::default()); }
 fn send(event: Event) {
@@ -275,6 +283,8 @@ pub(crate) fn execute(command: Command) {
                     return None;
                 }
                 v.presented = sequence;
+                v.trim_above = false;
+                v.trim_below = false;
                 let first = !v.committed;
                 v.committed = true;
                 Some(first)
@@ -288,7 +298,18 @@ pub(crate) fn execute(command: Command) {
                     }
                 });
             }
-            present_preview(preview);
+            let above = preview.can_trim(Trim::Above);
+            let below = preview.can_trim(Trim::Below);
+            if present_preview(preview) {
+                VIEW.with(|v| {
+                    let mut v = v.borrow_mut();
+                    if v.session == session && v.operation == operation && v.presented == sequence {
+                        v.trim_above = above;
+                        v.trim_below = below;
+                    }
+                });
+            }
+            super::delay::update_long_trim_menu();
             if first {
                 VIEW.with(|v| {
                     let mut v = v.borrow_mut();
@@ -391,6 +412,131 @@ pub(crate) fn execute(command: Command) {
         _ => {}
     }
 }
+pub(super) fn trim_identity() -> Option<(u64, u64, u64)> {
+    VIEW.with(|v| {
+        let v = v.borrow();
+        v.control
+            .get()
+            .map(|_| (v.session, v.operation, v.control.revision()))
+    })
+}
+
+pub(super) fn trim_options() -> (bool, bool) {
+    let allowed = FLOW.with(|f| {
+        f.borrow().state.long.as_ref().is_some_and(|l| {
+            l.phase == Phase::Capturing && !l.trim_pending && l.auto_scroll.mode == Mode::Manual
+        })
+    });
+    VIEW.with(|v| {
+        let v = v.borrow();
+        (allowed && v.trim_above, allowed && v.trim_below)
+    })
+}
+
+pub(super) fn trim_sequence() -> u64 {
+    VIEW.with(|v| v.borrow().presented)
+}
+
+pub(super) fn foreground() -> Option<lexift_core::ports::magnifier::WindowToken> {
+    let query = REGISTRY.with(|r| r.borrow().as_ref()?.lifecycle.annotation_foreground.clone())?;
+    query()
+}
+
+fn arm_trim_menu(session: u64, operation: u64) {
+    let Some(foreground) = foreground() else {
+        return;
+    };
+    let allowed = FLOW.with(|f| {
+        f.borrow()
+            .state
+            .long
+            .as_ref()
+            .is_some_and(|long| long.phase == Phase::Capturing && !long.trim_pending)
+    });
+    if !allowed {
+        return;
+    }
+    VIEW.with(|v| {
+        v.borrow_mut().trim_menu = Some(TrimMenu {
+            foreground,
+            settling: false,
+        })
+    });
+    send(Event::Trim {
+        session,
+        operation,
+        sequence: trim_sequence(),
+        direction: None,
+    });
+}
+
+fn present_settled_trim_menu(state: &ScreenshotState) {
+    let menu = VIEW.with(|v| {
+        let mut v = v.borrow_mut();
+        let Some(long) = state.long.as_ref().filter(|long| {
+            state.session == v.session
+                && long.operation == v.operation
+                && long.phase == Phase::Capturing
+        }) else {
+            v.trim_menu = None;
+            return None;
+        };
+        let request = v.trim_menu.as_mut()?;
+        if long.trim_pending {
+            request.settling = true;
+            return None;
+        }
+        if !request.settling {
+            return None;
+        }
+        let request = v.trim_menu.take()?;
+        Some((
+            v.session,
+            v.operation,
+            v.control.revision(),
+            request.foreground,
+        ))
+    });
+    if let Some((session, operation, revision, owner)) = menu {
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            if current(session, operation, revision) && foreground() == Some(owner) {
+                super::delay::long_trim_menu();
+            }
+        });
+    }
+}
+
+pub(super) fn request_trim(direction: Option<Trim>, sequence: u64) {
+    let Some((session, operation, revision)) = trim_identity() else {
+        return;
+    };
+    if !current(session, operation, revision) {
+        return;
+    }
+    let (above, below) = trim_options();
+    let automatic = FLOW.with(|f| {
+        f.borrow()
+            .state
+            .long
+            .as_ref()
+            .is_some_and(|l| l.phase == Phase::Capturing && l.auto_scroll.mode != Mode::Manual)
+    });
+    if automatic
+        || matches!(direction, Some(Trim::Above)) && above
+        || matches!(direction, Some(Trim::Below)) && below
+    {
+        if !automatic && sequence != trim_sequence() {
+            return;
+        }
+        send(Event::Trim {
+            session,
+            operation,
+            sequence,
+            direction,
+        });
+    }
+}
+
 fn choose(session: u64, operation: u64, target: Option<ScreenshotOutput>) {
     if target.is_none() {
         VIEW.with(|v| {
@@ -652,6 +798,26 @@ fn open_control(session: u64, operation: u64, bounds: Rect) {
                     send(Event::ToggleAutoScroll { session, operation });
                 }
             })
+        });
+        let work = v.control.input();
+        w.on_trim_menu(move || {
+            work.post(move || {
+                if current(session, operation, rev) {
+                    arm_trim_menu(session, operation);
+                }
+            });
+        });
+        let work = v.control.input();
+        w.on_trim(move |index| {
+            let sequence = trim_sequence();
+            work.post(move || {
+                if current(session, operation, rev) {
+                    request_trim(
+                        Some(if index == 0 { Trim::Above } else { Trim::Below }),
+                        sequence,
+                    );
+                }
+            });
         });
         let work = v.control.input();
         w.on_pause(move || {
@@ -922,13 +1088,15 @@ fn move_control(event: PopupPointerInput) -> bool {
     }
     matches!(event, PopupPointerInput::Moved { .. })
 }
-fn present_preview(p: Preview) {
+fn present_preview(p: Preview) -> bool {
     REGISTRY.with(|s| {
         let s = s.borrow();
-        let Some(r) = s.as_ref() else { return };
+        let Some(r) = s.as_ref() else { return false };
         VIEW.with(|v| {
             let v = v.borrow();
-            let Some(w) = v.preview.get() else { return };
+            let Some(w) = v.preview.get() else {
+                return false;
+            };
             let d = w.window().scale_factor().max(0.1);
             let gap = (8. * d) as i32;
             let a = v.area;
@@ -938,7 +1106,7 @@ fn present_preview(p: Preview) {
                 w.global::<crate::Colors>().get_primary(),
                 w.global::<crate::Colors>().get_success(),
             );
-            let Some(frame) = frame else { return };
+            let Some(frame) = frame else { return false };
             let width = frame.width() as i32;
             let height = frame.height() as i32;
             let src = v.source;
@@ -958,7 +1126,9 @@ fn present_preview(p: Preview) {
             let span = (p.visible.bottom - p.visible.top).max(1) as f32;
             w.set_current_top((p.current.top.max(p.visible.top) - p.visible.top) as f32 / span);
             w.set_current_height(
-                (p.current.bottom - p.current.top.max(p.visible.top)).max(0) as f32 / span,
+                (p.current.bottom.min(p.visible.bottom) - p.current.top.max(p.visible.top)).max(0)
+                    as f32
+                    / span,
             );
             w.set_clipped(p.visible.top > 0);
             if !w.window().is_visible() {
@@ -970,9 +1140,9 @@ fn present_preview(p: Preview) {
                 frame.data(),
                 frame.width(),
                 frame.height(),
-            );
-        });
-    });
+            )
+        })
+    })
 }
 pub(in crate::annotation) fn sync() {
     let state = FLOW.with(|f| f.borrow().state.clone());
@@ -1023,7 +1193,10 @@ pub(in crate::annotation) fn sync() {
         w.set_auto_running(l.auto_scroll.mode == Mode::Running);
         w.set_paused(l.phase == Phase::Paused);
         w.set_frozen(l.phase == Phase::Frozen);
-        w.set_finishing(l.phase == Phase::Finishing || state.phase == ScreenshotPhase::Output);
+        w.set_trim_pending(l.trim_pending);
+        w.set_finishing(
+            l.trim_pending || l.phase == Phase::Finishing || state.phase == ScreenshotPhase::Output,
+        );
         w.set_dimensions(format!("{} 脳 {} px", l.width, l.height).into());
         if state.phase == ScreenshotPhase::Output {
             let _ = w.hide();
@@ -1044,6 +1217,8 @@ pub(in crate::annotation) fn sync() {
             let _ = w.show();
         }
     });
+    super::delay::update_long_trim_menu();
+    present_settled_trim_menu(&state);
 }
 pub(in crate::annotation) fn source_area() -> Option<Rect> {
     if history_editor::active() {
@@ -1287,6 +1462,7 @@ mod tests {
                 feedback: Feedback::Unchanged,
                 target: None,
                 auto_scroll: Default::default(),
+                trim_pending: false,
             })
         });
         REGISTRY.with(|r| {
@@ -1473,6 +1649,7 @@ mod tests {
                 feedback: Feedback::Unchanged,
                 target: None,
                 auto_scroll: Default::default(),
+                trim_pending: false,
             })
         });
         execute(Command::Prepare {
@@ -1520,6 +1697,7 @@ mod tests {
                 top: 600,
                 ..image.bounds
             },
+            body: None,
             current: Rect {
                 top: 700,
                 ..image.bounds
@@ -1589,6 +1767,7 @@ mod tests {
                 feedback: Feedback::Accepted,
                 target: None,
                 auto_scroll: Default::default(),
+                trim_pending: false,
             })
         });
         let w = AnnotationCanvas::new().unwrap();
@@ -1657,6 +1836,7 @@ mod tests {
                 feedback: Feedback::Accepted,
                 target: None,
                 auto_scroll: Default::default(),
+                trim_pending: false,
             })
         });
         let w = AnnotationCanvas::new().unwrap();
@@ -1789,6 +1969,7 @@ mod tests {
             feedback: Feedback::Accepted,
             target: None,
             auto_scroll: Default::default(),
+            trim_pending: false,
         };
         FLOW.with(|f| f.borrow_mut().state.long = Some(state));
         VIEW.with(|v| {
@@ -1816,6 +1997,7 @@ mod tests {
                 image: thumbnail.clone(),
                 extent: thumbnail.bounds,
                 visible: thumbnail.bounds,
+                body: None,
                 current: thumbnail.bounds,
             },
         });
@@ -1833,6 +2015,7 @@ mod tests {
                 image: thumbnail.clone(),
                 extent: thumbnail.bounds,
                 visible: thumbnail.bounds,
+                body: None,
                 current: thumbnail.bounds,
             },
         });
@@ -1899,6 +2082,7 @@ mod tests {
                 feedback: Feedback::Accepted,
                 target: None,
                 auto_scroll: Default::default(),
+                trim_pending: false,
             });
         });
         let w = AnnotationCanvas::new().unwrap();

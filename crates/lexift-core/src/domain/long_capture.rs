@@ -1,6 +1,8 @@
 //! Bounded downward registration. Pixels are immutable; an uncertain frame never advances the anchor.
 use super::geometry::Rect;
 use crate::{Error, Result, ports::screen_capture::CapturedRegion};
+use std::collections::HashSet;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -16,10 +18,28 @@ pub const MAX_BUFFER_BYTES: usize = 512 * 1024 * 1024;
 pub enum Feedback {
     Accepted,
     Unchanged,
+    Located,
     Uncertain,
     CaptureLost,
     Limit,
     Cancelled,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Trim {
+    Above,
+    Below,
+}
+
+impl Preview {
+    pub fn can_trim(&self, direction: Trim) -> bool {
+        let Some(body) = self.body else { return false };
+        self.current.bottom > self.current.top
+            && match direction {
+                Trim::Above => self.current.top > body.top,
+                Trim::Below => self.current.bottom < body.bottom,
+            }
+    }
 }
 
 /// One bounded view of accepted pixels, in original image coordinates.
@@ -29,6 +49,7 @@ pub struct Preview {
     pub extent: Rect,
     pub visible: Rect,
     pub current: Rect,
+    pub body: Option<Rect>,
 }
 
 /// Retains only the accepted image strips and one full physical capture as a matching anchor.
@@ -38,6 +59,13 @@ pub struct Stitcher {
     anchor: Arc<CapturedRegion>,
     strips: Vec<Arc<[u8]>>,
     bands: Option<Bands>,
+    header: Arc<[u8]>,
+    first_body: std::ops::Range<usize>,
+    row_keys: Vec<u64>,
+    known_rows: HashSet<u64>,
+    position: Option<usize>,
+    located: Option<Arc<CapturedRegion>>,
+    returning_to_tail: bool,
 }
 
 /// Fixed rows in physical capture coordinates. Zero rows means ordinary stitching.
@@ -45,6 +73,12 @@ pub struct Stitcher {
 struct Bands {
     top: usize,
     bottom: usize,
+}
+
+fn row_key(row: &[u8]) -> u64 {
+    let mut hash = DefaultHasher::new();
+    row.hash(&mut hash);
+    hash.finish()
 }
 
 impl Bands {
@@ -190,15 +224,118 @@ impl Stitcher {
             width,
             height,
             strips: vec![Arc::from(first.pixels.as_slice())],
+            header: Arc::from([]),
+            first_body: 0..first.pixels.len(),
+            row_keys: first.pixels.chunks_exact(width * 4).map(row_key).collect(),
+            known_rows: HashSet::new(),
             anchor: first,
             bands: None,
+            position: Some(0),
+            located: None,
+            returning_to_tail: false,
         })
     }
     pub fn size(&self) -> (usize, usize) {
         (self.width, self.height)
     }
     pub fn retained_bytes(&self) -> usize {
-        self.width * self.height * 4 + self.anchor.pixels.len()
+        let stride = self.width * 4;
+        let footer = self.bands.unwrap_or_default().bottom * stride;
+        self.height * stride + self.strips[0].len() - self.first_body.len() - footer
+            + self.anchor.pixels.len()
+            + self.located.as_ref().map_or(0, |frame| frame.pixels.len())
+    }
+
+    pub fn invalidate_position(&mut self) {
+        self.position = None;
+        self.located = None;
+    }
+
+    pub fn at_tail(&self) -> bool {
+        self.position == Some(self.height - self.anchor.pixels.len() / (self.width * 4))
+    }
+
+    pub fn position(&self) -> Option<usize> {
+        self.position
+    }
+
+    /// Match retained rows without flattening. Stop before expensive or ambiguous comparisons.
+    fn locate(
+        &self,
+        frame: &CapturedRegion,
+        cancel: &AtomicBool,
+    ) -> std::result::Result<Option<usize>, ()> {
+        let Some(bands) = self.bands else {
+            return Ok(None);
+        };
+        let stride = self.width * 4;
+        if !bands.matches(&self.anchor.pixels, &frame.pixels, stride) {
+            return Ok(None);
+        }
+        let body = bands.body(&frame.pixels, stride);
+        let height = body.len() / stride;
+        if [0, height / 2, height - 1].into_iter().any(|y| {
+            !self
+                .known_rows
+                .contains(&row_key(&body[y * stride..(y + 1) * stride]))
+        }) {
+            return Ok(None);
+        }
+        let mut keys = Vec::new();
+        for row in body.chunks_exact(stride) {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(());
+            }
+            keys.push(row_key(row));
+        }
+        // A prefix table keeps long runs of identical rows linear, including blank margins.
+        let mut prefix = vec![0; keys.len()];
+        for i in 1..keys.len() {
+            let mut matching = prefix[i - 1];
+            while matching > 0 && keys[i] != keys[matching] {
+                matching = prefix[matching - 1];
+            }
+            prefix[i] = matching + usize::from(keys[i] == keys[matching]);
+        }
+        let rows = std::cell::OnceCell::<Vec<&[u8]>>::new();
+        let mut found = None;
+        let mut budget = 2 * body.len();
+        let mut matching = 0;
+        for (index, key) in self.row_keys.iter().enumerate() {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(());
+            }
+            while matching > 0 && *key != keys[matching] {
+                matching = prefix[matching - 1];
+            }
+            matching += usize::from(*key == keys[matching]);
+            if matching < keys.len() {
+                continue;
+            }
+            let offset = index + 1 - keys.len();
+            matching = prefix[matching - 1];
+            let rows = rows.get_or_init(|| {
+                self.body_strips()
+                    .flat_map(|strip| strip.chunks_exact(stride))
+                    .collect()
+            });
+            let candidate = &rows[offset..=index];
+            let mut equal = true;
+            for (row, expected) in candidate.iter().zip(body.chunks_exact(stride)) {
+                budget = budget.checked_sub(stride).ok_or(())?;
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(());
+                }
+                if *row != expected {
+                    equal = false;
+                    break;
+                }
+            }
+            if equal && found.replace(offset).is_some() {
+                return Err(());
+            }
+        }
+        Ok(found)
     }
     pub fn push(&mut self, frame: Arc<CapturedRegion>, cancel: &AtomicBool) -> Result<Feedback> {
         let (w, h) = dimensions(&frame)?;
@@ -208,10 +345,43 @@ impl Stitcher {
         if cancel.load(Ordering::Relaxed) {
             return Ok(Feedback::Cancelled);
         }
-        if frame.pixels == self.anchor.pixels {
+        if self
+            .located
+            .as_ref()
+            .is_some_and(|known| known.pixels == frame.pixels)
+        {
+            return Ok(Feedback::Located);
+        }
+        let was_at_tail = self.at_tail();
+        self.invalidate_position();
+        let same_as_tail = frame.pixels == self.anchor.pixels;
+        if same_as_tail && (was_at_tail || self.bands.is_none()) {
+            self.position = Some(self.height - h);
+            self.returning_to_tail = false;
             return Ok(Feedback::Unchanged);
         }
-        let matched = if let Some(bands) = self.bands {
+        match self.locate(&frame, cancel) {
+            Ok(Some(offset)) => {
+                self.position = Some(offset);
+                self.returning_to_tail = offset != self.height - h;
+                if self.returning_to_tail {
+                    self.located = Some(frame);
+                    return Ok(Feedback::Located);
+                }
+                return Ok(Feedback::Unchanged);
+            }
+            Err(()) => {
+                return Ok(if cancel.load(Ordering::Relaxed) {
+                    Feedback::Cancelled
+                } else {
+                    Feedback::Uncertain
+                });
+            }
+            Ok(None) => {}
+        }
+        let matched = if self.returning_to_tail || same_as_tail {
+            None
+        } else if let Some(bands) = self.bands {
             bands
                 .displacement(&self.anchor.pixels, &frame.pixels, w, cancel)
                 .map(|dy| (bands, dy))
@@ -241,25 +411,109 @@ impl Stitcher {
             return Ok(Feedback::Cancelled);
         }
         let end = (h - bands.bottom) * w * 4;
-        self.strips
-            .push(Arc::from(&frame.pixels[end - dy * w * 4..end]));
+        let appended = &frame.pixels[end - dy * w * 4..end];
+        let mut keys = Vec::with_capacity(dy);
+        for row in appended.chunks_exact(w * 4) {
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(Feedback::Cancelled);
+            }
+            keys.push(row_key(row));
+        }
+        if self.bands.is_none() {
+            self.first_body = bands.top * w * 4..end;
+            self.header = Arc::from(&self.strips[0][..self.first_body.start]);
+            self.row_keys.truncate(h - bands.bottom);
+            self.row_keys.drain(..bands.top);
+            self.known_rows.extend(self.row_keys.iter().copied());
+        }
+        self.known_rows.extend(keys.iter().copied());
+        self.row_keys.extend(keys);
+        self.strips.push(Arc::from(appended));
         self.bands = Some(bands);
         self.height = height;
+        self.position = Some(height - h);
         self.anchor = frame;
         Ok(Feedback::Accepted)
     }
+    fn body_strips(&self) -> impl Iterator<Item = &[u8]> {
+        self.strips.iter().enumerate().map(|(index, strip)| {
+            if index == 0 {
+                &strip[self.first_body.clone()]
+            } else {
+                strip.as_ref()
+            }
+        })
+    }
+
+    pub fn trim(&mut self, direction: Trim) -> bool {
+        let Some(offset) = self.position else {
+            return false;
+        };
+        let stride = self.width * 4;
+        let frame_height = self.anchor.pixels.len() / stride;
+        let removed = match direction {
+            Trim::Above => offset,
+            Trim::Below => self.height - offset - frame_height,
+        };
+        if removed == 0 {
+            return false;
+        }
+        let bands = self.bands.unwrap_or_default();
+        let body_end = self.height - bands.top - bands.bottom;
+        let keep = match direction {
+            Trim::Above => offset * stride..body_end * stride,
+            Trim::Below => 0..(offset + frame_height - bands.top - bands.bottom) * stride,
+        };
+        let mut start = 0;
+        let mut strips = Vec::new();
+        let mut first_body = 0..0;
+        for (index, strip) in self.strips.iter().enumerate() {
+            let range = if index == 0 {
+                self.first_body.clone()
+            } else {
+                0..strip.len()
+            };
+            let end = start + range.len();
+            let left = start.max(keep.start);
+            let right = end.min(keep.end);
+            if left < right {
+                let slice = range.start + left - start..range.start + right - start;
+                let retained = if slice == range {
+                    if strips.is_empty() {
+                        first_body = range;
+                    }
+                    strip.clone()
+                } else {
+                    if strips.is_empty() {
+                        first_body = 0..slice.len();
+                    }
+                    Arc::from(&strip[slice])
+                };
+                strips.push(retained);
+            }
+            start = end;
+        }
+        self.strips = strips;
+        self.first_body = first_body;
+        self.row_keys.truncate(keep.end / stride);
+        self.row_keys.drain(..keep.start / stride);
+        self.known_rows.clear();
+        self.known_rows.extend(self.row_keys.iter().copied());
+        self.height -= removed;
+        match direction {
+            Trim::Above => self.position = Some(0),
+            Trim::Below => {
+                self.anchor = self.located.take().expect("interior capture");
+                self.returning_to_tail = false;
+            }
+        }
+        true
+    }
+
     fn output_strips(&self) -> impl Iterator<Item = &[u8]> {
         let footer = self.bands.unwrap_or_default().bottom * self.width * 4;
-        self.strips
-            .iter()
-            .enumerate()
-            .map(move |(index, strip)| {
-                if index == 0 {
-                    &strip[..strip.len() - footer]
-                } else {
-                    strip.as_ref()
-                }
-            })
+        std::iter::once(self.header.as_ref())
+            .chain(self.body_strips())
             .chain(std::iter::once(
                 &self.anchor.pixels[self.anchor.pixels.len() - footer..],
             ))
@@ -290,7 +544,25 @@ impl Stitcher {
         let visible_height = (max_height.max(1).saturating_mul(self.width) / w)
             .max(1)
             .min(self.height);
-        let start = self.height - visible_height;
+        let bands = self.bands.unwrap_or_default();
+        let current = self
+            .position
+            .map(|offset| Rect {
+                left: 0,
+                top: (offset + bands.top) as i32,
+                right: self.width as i32,
+                bottom: (offset + self.anchor.pixels.len() / (self.width * 4) - bands.bottom)
+                    as i32,
+            })
+            .unwrap_or_default();
+        let tail = self.height - visible_height;
+        let start = if self.at_tail() || self.position.is_none() {
+            tail
+        } else {
+            ((current.top as usize + current.bottom as usize) / 2)
+                .saturating_sub(visible_height / 2)
+                .min(tail)
+        };
         let h = (visible_height * w / self.width).max(1);
         let mut pixels = vec![0; w * h * 4];
         let stride = self.width * 4;
@@ -309,7 +581,6 @@ impl Stitcher {
                 pixels[dst..dst + 4].copy_from_slice(&strip[src..src + 4]);
             }
         }
-        let bands = self.bands.unwrap_or_default();
         Preview {
             image: Arc::new(CapturedRegion {
                 bounds: Rect {
@@ -330,14 +601,15 @@ impl Stitcher {
                 left: 0,
                 top: start as i32,
                 right: self.width as i32,
-                bottom: self.height as i32,
+                bottom: (start + visible_height) as i32,
             },
-            current: Rect {
+            current,
+            body: Some(Rect {
                 left: 0,
-                top: (self.height - self.anchor.pixels.len() / stride + bands.top) as i32,
+                top: bands.top as i32,
                 right: self.width as i32,
                 bottom: (self.height - bands.bottom) as i32,
-            },
+            }),
         }
     }
 }
@@ -495,11 +767,12 @@ mod tests {
                 assert_eq!(&p.image.pixels[dst..dst + 4], &full.pixels[src..src + 4]);
             }
         }
-        assert_eq!(
-            stitch.push(image(320), &cancel).unwrap(),
-            Feedback::Uncertain
-        );
-        assert_eq!(stitch.preview(48, 120), p);
+        assert_eq!(stitch.push(image(320), &cancel).unwrap(), Feedback::Located);
+        let earlier = stitch.preview(48, 120);
+        assert_eq!(earlier.extent, p.extent);
+        assert!(earlier.visible.top < p.visible.top);
+        assert_eq!(earlier.current.top, 320);
+        assert_eq!(stitch.flatten(&cancel).unwrap(), full);
     }
     #[test]
     fn sparse_repeated_rows_use_full_resolution_to_reject_coarse_aliases() {
@@ -535,6 +808,11 @@ mod tests {
             Feedback::Accepted
         );
         assert_eq!(stitch.size(), (600, 525));
+        assert_eq!(
+            stitch.push(frame(15), &AtomicBool::new(false)).unwrap(),
+            Feedback::Located
+        );
+        assert_eq!(stitch.position(), Some(15));
     }
     #[test]
     fn height_and_reserved_buffer_limits_preserve_the_last_anchor() {
@@ -575,7 +853,7 @@ mod tests {
             assert_eq!(s.push(image(y), &cancel).unwrap(), Feedback::Accepted);
         }
         let before = s.flatten(&cancel).unwrap().pixels;
-        assert_eq!(s.push(image(100), &cancel).unwrap(), Feedback::Uncertain);
+        assert_eq!(s.push(image(100), &cancel).unwrap(), Feedback::Located);
         assert_eq!(s.flatten(&cancel).unwrap().pixels, before);
         assert_eq!(s.push(image(140), &cancel).unwrap(), Feedback::Unchanged);
         assert_eq!(s.push(image(160), &cancel).unwrap(), Feedback::Accepted);
@@ -642,7 +920,7 @@ mod tests {
     }
 
     #[test]
-    fn locked_bands_reject_mutations_and_reverse_or_excessive_motion() {
+    fn locked_bands_reject_mutations_and_locate_reverse_without_appending() {
         let cancel = AtomicBool::new(false);
         let mut stitch = Stitcher::new(fixed_frame(0, 12, 16)).unwrap();
         assert_eq!(
@@ -660,12 +938,20 @@ mod tests {
             Arc::new(changed),
             Arc::new(floating),
             fixed_frame(60, 14, 16),
-            fixed_frame(5, 12, 16),
             fixed_frame(130, 12, 16),
         ] {
             assert_eq!(stitch.push(frame, &cancel).unwrap(), Feedback::Uncertain);
             assert_eq!(stitch.flatten(&cancel).unwrap(), before);
         }
+        assert_eq!(
+            stitch.push(fixed_frame(5, 12, 16), &cancel).unwrap(),
+            Feedback::Located
+        );
+        assert_eq!(stitch.flatten(&cancel).unwrap(), before);
+        assert_eq!(
+            stitch.push(fixed_frame(30, 12, 16), &cancel).unwrap(),
+            Feedback::Unchanged
+        );
         cancel.store(true, Ordering::Relaxed);
         assert_eq!(
             stitch.push(fixed_frame(60, 12, 16), &cancel).unwrap(),
@@ -676,6 +962,67 @@ mod tests {
             stitch.push(fixed_frame(60, 12, 16), &cancel).unwrap(),
             Feedback::Accepted
         );
+    }
+
+    #[test]
+    fn trim_uses_the_live_frame_and_preserves_fixed_bands_and_continuation() {
+        let cancel = AtomicBool::new(false);
+        let stride = 96 * 4;
+        for (top, bottom) in [(0, 0), (12, 0), (0, 16), (12, 16)] {
+            let frame = |offset| fixed_frame(offset, top, bottom);
+            let mut stitch = Stitcher::new(frame(0)).unwrap();
+            assert!(!stitch.trim(Trim::Above));
+            assert!(!stitch.trim(Trim::Below));
+            for offset in [28, 68, 118] {
+                assert_eq!(
+                    stitch.push(frame(offset), &cancel).unwrap(),
+                    Feedback::Accepted
+                );
+            }
+            let original = stitch.flatten(&cancel).unwrap().pixels;
+            assert_eq!(stitch.push(frame(15), &cancel).unwrap(), Feedback::Located);
+            let view = stitch.preview(96, 165);
+            assert_eq!(view.current.top, (15 + top) as i32);
+            assert!(view.can_trim(Trim::Above) && view.can_trim(Trim::Below));
+            assert!(
+                view.image.pixels
+                    == original
+                        [view.visible.top as usize * stride..view.visible.bottom as usize * stride]
+            );
+            assert!(stitch.trim(Trim::Above));
+            assert!(!stitch.at_tail());
+            assert_eq!(stitch.push(frame(57), &cancel).unwrap(), Feedback::Located);
+            assert!(stitch.trim(Trim::Below));
+            assert!(stitch.at_tail());
+            assert!(!stitch.trim(Trim::Below));
+            let mut expected = original[..top * stride].to_vec();
+            expected
+                .extend_from_slice(&original[(top + 15) * stride..(57 + 160 - bottom) * stride]);
+            expected.extend_from_slice(&original[original.len() - bottom * stride..]);
+            assert!(stitch.flatten(&cancel).unwrap().pixels == expected);
+            assert_eq!(stitch.push(frame(79), &cancel).unwrap(), Feedback::Accepted);
+            assert_eq!(stitch.size(), (96, 224));
+            let result = stitch.flatten(&cancel).unwrap();
+            expected.truncate(expected.len() - bottom * stride);
+            expected.extend_from_slice(&frame(79).pixels[(160 - bottom - 22) * stride..]);
+            assert!(result.pixels == expected);
+        }
+    }
+
+    #[test]
+    fn duplicate_history_matches_do_not_offer_a_crop() {
+        let cancel = AtomicBool::new(false);
+        let mut stitch = Stitcher::new(image(0)).unwrap();
+        assert_eq!(stitch.push(image(50), &cancel).unwrap(), Feedback::Accepted);
+        stitch.strips.push(Arc::from(image(0).pixels.as_slice()));
+        stitch
+            .row_keys
+            .extend(image(0).pixels.chunks_exact(stitch.width * 4).map(row_key));
+        stitch.height += 160;
+        assert_eq!(stitch.locate(&image(0), &cancel), Err(()));
+        stitch.invalidate_position();
+        assert!(!stitch.preview(96, 160).can_trim(Trim::Above));
+        assert!(!stitch.trim(Trim::Below));
     }
 
     #[test]

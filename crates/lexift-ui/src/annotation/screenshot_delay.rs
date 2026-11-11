@@ -3,9 +3,12 @@ use super::*;
 use crate::bridge::{PopupPointerInput, dispatch_pointer_input};
 use crate::{AnnotationChoiceWindow, ScreenshotCountdownWindow};
 type Ready = Box<dyn FnOnce(lexift_core::Result<std::time::Instant>) + Send>;
+const LONG_TRIM_MENU: u8 = 6;
 #[derive(Default)]
 struct Views {
     recording: Option<(lexift_core::domain::screen_recording::Identity, u64)>,
+    long_trim: Option<(u64, u64, u64)>,
+    trim_foreground: Option<lexift_core::ports::magnifier::WindowToken>,
     menu_kind: u8,
     sequence: u64,
     menu: Option<AnnotationChoiceWindow>,
@@ -48,6 +51,12 @@ pub(crate) fn sync(state: &ScreenshotState) {
             s.menu.is_some()
                 && super::recording::audio_selection().map(|(id, revision, _)| (id, revision))
                     != s.recording
+        } else if s.menu_kind == LONG_TRIM_MENU {
+            s.menu.is_some()
+                && (super::long::trim_identity() != s.long_trim
+                    || state.long.as_ref().is_none_or(|long| {
+                        long.phase != lexift_core::domain::long_capture::workflow::Phase::Capturing
+                    }))
         } else {
             s.menu.is_some() && s.menu_kind != 2 && state.active()
         }
@@ -76,13 +85,27 @@ pub(crate) fn clear() {
     }
 }
 fn choose(sequence: u64, index: Option<i32>) {
+    let trim_sequence = super::long::trim_sequence();
     slint::Timer::single_shot(Duration::ZERO, move || {
         if !VIEWS.with(|s| s.borrow().sequence == sequence && s.borrow().menu.is_some()) {
             return;
         }
         let kind = VIEWS.with(|s| s.borrow().menu_kind);
         let recording = VIEWS.with(|s| s.borrow().recording);
+        let long_trim = VIEWS.with(|s| s.borrow().long_trim);
         clear();
+        if kind == LONG_TRIM_MENU {
+            use lexift_core::domain::long_capture::Trim;
+            if super::long::trim_identity() == long_trim
+                && let Some(index) = index
+            {
+                super::long::request_trim(
+                    Some(if index == 0 { Trim::Above } else { Trim::Below }),
+                    trim_sequence,
+                );
+            }
+            return;
+        }
         if kind == 5 {
             if let (Some((identity, revision)), Some(index)) = (recording, index) {
                 super::recording::countdown::choose(identity, revision, index);
@@ -143,8 +166,29 @@ pub(super) fn video_menu() {
 pub(super) fn audio_menu() {
     menu_kind(3);
 }
+pub(super) fn long_trim_menu() {
+    menu_kind(LONG_TRIM_MENU);
+}
+
+pub(super) fn update_long_trim_menu() {
+    let (above, below) = super::long::trim_options();
+    VIEWS.with(|views| {
+        let views = views.borrow();
+        if views.menu_kind == LONG_TRIM_MENU
+            && let Some(menu) = &views.menu
+        {
+            menu.set_trim_above(above);
+            menu.set_trim_below(below);
+        }
+    });
+}
+
 fn menu_kind(kind: u8) {
-    if matches!(kind, 3..=5) {
+    if kind == LONG_TRIM_MENU {
+        if super::long::trim_identity().is_none() {
+            return;
+        }
+    } else if matches!(kind, 3..=5) {
         if super::recording::audio_selection().is_none() {
             return;
         }
@@ -170,7 +214,10 @@ fn menu_kind(kind: u8) {
         return;
     };
     crate::theme::apply(&w);
-    let labels: &[&str] = if kind == 5 {
+    let labels: &[&str] = if kind == LONG_TRIM_MENU {
+        w.set_capture_trim_menu(true);
+        &["Trim above current view", "Trim below current view"]
+    } else if kind == 5 {
         &[
             "Start now",
             "Start after 3 seconds",
@@ -249,16 +296,26 @@ fn menu_kind(kind: u8) {
             .join("\n")
             .into(),
     );
+    let trim_foreground = (kind == LONG_TRIM_MENU)
+        .then(super::long::foreground)
+        .flatten();
     let seq = VIEWS.with(|s| {
         let mut s = s.borrow_mut();
         s.sequence += 1;
         s.menu_kind = kind;
         s.recording = selection.map(|(identity, revision, _)| (identity, revision));
+        s.long_trim = (kind == LONG_TRIM_MENU)
+            .then(super::long::trim_identity)
+            .flatten();
+        s.trim_foreground = trim_foreground;
         s.menu = Some(w.clone_strong());
         s.sequence
     });
     w.on_chosen(move |i| choose(seq, Some(i)));
     w.on_cancel(move || choose(seq, None));
+    if kind == LONG_TRIM_MENU {
+        update_long_trim_menu();
+    }
     prepare_menu(seq, 0);
 }
 fn prepare_menu(seq: u64, attempt: u8) {
@@ -275,6 +332,13 @@ fn prepare_menu(seq: u64, attempt: u8) {
                     .flatten()
             });
             let Some(w) = window else { return };
+            let capture_trim = w.get_capture_trim_menu();
+            if capture_trim
+                && VIEWS.with(|views| views.borrow().trim_foreground) != super::long::foreground()
+            {
+                choose(seq, None);
+                return;
+            }
             match prepare(w.window()) {
                 PassiveWindowPreparation::Pending if attempt < 20 => {
                     prepare_menu(seq, attempt + 1);
@@ -285,6 +349,15 @@ fn prepare_menu(seq: u64, attempt: u8) {
                     choose(seq, None);
                     return;
                 }
+            }
+            if capture_trim && !(l.exclude_view_from_capture)(w.window()) {
+                if attempt < 20 {
+                    prepare_menu(seq, attempt + 1);
+                } else {
+                    tracing::warn!(sequence = seq, "Long capture trim menu exclusion failed");
+                    choose(seq, None);
+                }
+                return;
             }
             let anchor = (l.toolbar_cursor_position)().unwrap_or_default();
             let Some(area) = (l.popup_work_area)(anchor) else {
@@ -305,8 +378,11 @@ fn prepare_menu(seq: u64, attempt: u8) {
             ));
             let weak = w.as_weak();
             let sink = Rc::new(move |e| {
-                if matches!(e, PopupPointerInput::DismissRequested { .. }) {
-                    choose(seq, None)
+                if let PopupPointerInput::DismissRequested { cause } = e {
+                    if capture_trim {
+                        tracing::debug!(sequence = seq, ?cause, "Long capture trim menu dismissed");
+                    }
+                    choose(seq, None);
                 } else if let Some(w) = weak.upgrade() {
                     dispatch_pointer_input(w.window(), e);
                 }
@@ -316,10 +392,16 @@ fn prepare_menu(seq: u64, attempt: u8) {
                 || !(l.complete_passive_window_show)(w.window(), sink)
                 || !(l.set_popup_dismissal)(w.window(), true)
             {
+                if capture_trim {
+                    tracing::warn!(sequence = seq, "Long capture trim menu could not be shown");
+                }
                 choose(seq, None);
                 return;
             }
-            (l.activate_user_requested_window)(w.window());
+            let active = (l.activate_user_requested_window)(w.window());
+            if capture_trim {
+                tracing::debug!(sequence = seq, active, "Long capture trim menu shown");
+            }
         },
     );
 }
@@ -533,7 +615,13 @@ pub(crate) fn availability(state: &lexift_core::AppState) {
             w.set_delay_available(allowed);
         }
     });
-    if !allowed && VIEWS.with(|s| s.borrow().menu.is_some()) {
+    // The live trim menu follows the capture session even as progress disables screenshot launch.
+    if !allowed
+        && VIEWS.with(|s| {
+            let s = s.borrow();
+            s.menu.is_some() && s.menu_kind != LONG_TRIM_MENU
+        })
+    {
         clear();
     }
 }

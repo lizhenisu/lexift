@@ -990,6 +990,7 @@ mod tests {
                     feedback: Feedback::Accepted,
                     target: None,
                     auto_scroll: Default::default(),
+                    trim_pending: false,
                 });
                 let mut req = request(10, 2, crop);
                 if metadata {

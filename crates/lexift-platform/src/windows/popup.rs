@@ -1737,17 +1737,21 @@ pub(crate) fn configure_countdown_input(
         return Err(lexift_core::Error::new("Could not protect countdown input"));
     }
     configure_hwnd_extended_style(hwnd, passive_extended_style)?;
-    unsafe {
-        windows::Win32::UI::WindowsAndMessaging::SetWindowDisplayAffinity(
-            hwnd,
-            windows::Win32::UI::WindowsAndMessaging::WDA_EXCLUDEFROMCAPTURE,
-        )
-    }
-    .map_err(|e| lexift_core::Error::new(e.to_string()))?;
+    exclude_view_from_capture(window)?;
     unsafe {
         let _ = EnableWindow(hwnd, true);
     }
     Ok(())
+}
+
+pub(crate) fn exclude_view_from_capture(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE,
+    };
+    unsafe { SetWindowDisplayAffinity(required_hwnd(window)?, WDA_EXCLUDEFROMCAPTURE) }
+        .map_err(|error| lexift_core::Error::new(error.to_string()))
 }
 /// Live capture feedback uses the existing native RGBA presenter, so layered cross-process
 /// hit-test transparency must survive Winit's show and geometry style rewrites.

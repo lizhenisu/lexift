@@ -1,7 +1,7 @@
 //! Sequential background orchestration; matching and acceptance policy belong to Core.
 use super::*;
 use lexift_core::domain::long_capture::{
-    Feedback, Stitcher,
+    Feedback, Stitcher, Trim,
     auto_scroll::{self, Mode, Next, Steps, Stop},
     workflow::{Command, Event, Phase},
 };
@@ -11,6 +11,9 @@ use lexift_core::{domain::geometry::Rect, ports::screen_capture::LongScrollTarge
 
 type AutoControl = Mutex<auto_scroll::State>;
 type AutoEvents<'a> = (&'a AutoControl, &'a dyn Fn(u64, Option<Stop>));
+type TrimQueue = Mutex<Option<(u64, Option<Trim>)>>;
+type TrimEvents<'a> = (&'a TrimQueue, &'a dyn Fn());
+type CaptureEvents<'a> = (Option<AutoEvents<'a>>, Option<TrimEvents<'a>>);
 
 pub(super) struct Job {
     session: u64,
@@ -19,6 +22,7 @@ pub(super) struct Job {
     paused: Arc<AtomicBool>,
     finish: Arc<AtomicBool>,
     auto: Arc<AutoControl>,
+    trim: Arc<TrimQueue>,
 }
 pub(super) fn sync(
     runtime: &ScreenshotRuntime,
@@ -49,6 +53,22 @@ fn emit(c: &Arc<AppController>, event: Event) {
 pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, command: Command) {
     match command {
         Command::Prepare { .. } | Command::Present { .. } => c.ui.long_screenshot(command),
+        Command::Trim {
+            session,
+            operation,
+            sequence,
+            direction,
+        } => {
+            if let Some(job) = runtime
+                .long
+                .lock()
+                .unwrap()
+                .as_ref()
+                .filter(|job| job.session == session && job.operation == operation)
+            {
+                *job.trim.lock().unwrap() = Some((sequence, direction));
+            }
+        }
         Command::Restore { session, operation } => {
             {
                 let mut owned = runtime.session.lock().unwrap();
@@ -128,6 +148,7 @@ pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, 
             let paused = Arc::new(AtomicBool::new(false));
             let finish = Arc::new(AtomicBool::new(false));
             let auto = Arc::new(AutoControl::default());
+            let trim = Arc::new(TrimQueue::default());
             if let Some(old) = runtime.long.lock().unwrap().replace(Job {
                 session,
                 operation,
@@ -135,6 +156,7 @@ pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, 
                 paused: paused.clone(),
                 finish: finish.clone(),
                 auto: auto.clone(),
+                trim: trim.clone(),
             }) {
                 let mut desired = old.auto.lock().unwrap();
                 *desired = auto_scroll::State::default();
@@ -148,24 +170,27 @@ pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, 
                     bounds,
                     excluded,
                     (&cancel, &paused, &finish),
-                    Some((&auto, &|generation, stop| {
-                        emit(
-                            &c,
-                            match stop {
-                                Some(reason) => Event::AutoScrollStopped {
-                                    session,
-                                    operation,
-                                    generation,
-                                    reason,
+                    (
+                        Some((&auto, &|generation, stop| {
+                            emit(
+                                &c,
+                                match stop {
+                                    Some(reason) => Event::AutoScrollStopped {
+                                        session,
+                                        operation,
+                                        generation,
+                                        reason,
+                                    },
+                                    None => Event::AutoScrollStarted {
+                                        session,
+                                        operation,
+                                        generation,
+                                    },
                                 },
-                                None => Event::AutoScrollStarted {
-                                    session,
-                                    operation,
-                                    generation,
-                                },
-                            },
-                        );
-                    })),
+                            );
+                        })),
+                        Some((&trim, &|| emit(&c, Event::TrimReady { session, operation }))),
+                    ),
                     || c.physical_displays(),
                     |sequence, stitch, feedback| {
                         let (width, height) = stitch.size();
@@ -305,11 +330,12 @@ fn run(
     bounds: lexift_core::domain::geometry::Rect,
     excluded: Vec<lexift_core::ports::magnifier::WindowToken>,
     control: (&AtomicBool, &AtomicBool, &AtomicBool),
-    auto: Option<AutoEvents<'_>>,
+    events: CaptureEvents<'_>,
     layout: impl Fn() -> Result<Vec<lexift_core::domain::geometry::Rect>>,
     mut progress: impl FnMut(u64, &Stitcher, Feedback),
 ) -> Result<Arc<CapturedRegion>> {
     let (cancel, paused, finish) = control;
+    let (auto, trim) = events;
     let normalize = |mut b: Vec<lexift_core::domain::geometry::Rect>| {
         b.sort_by_key(|r| (r.left, r.top, r.right, r.bottom));
         b
@@ -337,6 +363,7 @@ fn run(
     let mut suspended = false;
     let mut last_feedback = Feedback::Unchanged;
     let mut auto_run: Option<AutoRun> = None;
+    let mut trim_request = None;
     let mut last_frame = Instant::now();
     struct Stats {
         start: Instant,
@@ -346,6 +373,10 @@ fn run(
         matching: Duration,
         feedback: Duration,
         peak: usize,
+        trimming: Duration,
+        trims: u64,
+        located: u64,
+        locating: Duration,
     }
     impl Drop for Stats {
         fn drop(&mut self) {
@@ -357,6 +388,10 @@ fn run(
                 feedback_ms = self.feedback.as_secs_f64() * 1000.,
                 elapsed_ms = self.start.elapsed().as_secs_f64() * 1000.,
                 retained_pixel_peak_bytes = self.peak,
+                trim_ms = self.trimming.as_secs_f64() * 1000.,
+                trims = self.trims,
+                located = self.located,
+                located_frame_matching_ms = self.locating.as_secs_f64() * 1000.,
                 "Long capture summary"
             );
         }
@@ -369,6 +404,10 @@ fn run(
         matching: Duration::ZERO,
         feedback: Duration::ZERO,
         peak: 0,
+        trimming: Duration::ZERO,
+        trims: 0,
+        located: 0,
+        locating: Duration::ZERO,
     };
     loop {
         if cancel.load(Ordering::Acquire) {
@@ -383,6 +422,11 @@ fn run(
                 .map(Arc::new);
         }
         if paused.load(Ordering::Acquire) {
+            if let Some((queue, ready)) = trim
+                && (trim_request.take().is_some() || queue.lock().unwrap().take().is_some())
+            {
+                ready();
+            }
             if !suspended {
                 port.clear();
                 suspended = true;
@@ -395,11 +439,18 @@ fn run(
             suspended = false;
             serial = None;
             last_frame = Instant::now();
+            if let Some(stitch) = &mut stitch {
+                stitch.invalidate_position();
+                sequence += 1;
+                last_feedback = Feedback::Unchanged;
+                progress(sequence, stitch, last_feedback);
+            }
         }
         if layout_checked.elapsed() >= Duration::from_millis(250) {
             layout_checked = Instant::now();
             if layout().map_or(true, |b| normalize(b) != original_layout) {
-                if let Some(s) = &stitch {
+                if let Some(s) = &mut stitch {
+                    s.invalidate_position();
                     paused.store(true, Ordering::Release);
                     sequence += 1;
                     progress(sequence, s, Feedback::CaptureLost);
@@ -415,6 +466,7 @@ fn run(
                 let image = Arc::new(crop_frames(&frame.regions, bounds)?);
                 let first = stitch.is_none();
                 let matching = Instant::now();
+                let prior_position = stitch.as_ref().and_then(Stitcher::position);
                 stats.frames += 1;
                 let feedback = if let Some(stitch) = &mut stitch {
                     stitch.push(image, cancel)?
@@ -423,14 +475,29 @@ fn run(
                     Feedback::Accepted
                 };
                 stats.matching += matching.elapsed();
+                if feedback == Feedback::Located {
+                    stats.located += 1;
+                    stats.locating += matching.elapsed();
+                }
                 stats.accepted += u64::from(feedback == Feedback::Accepted);
                 stats.rejected += u64::from(feedback == Feedback::Uncertain);
                 stats.peak = stats.peak.max(stitch.as_ref().unwrap().retained_bytes());
-                if first || feedback != last_feedback || feedback == Feedback::Accepted {
+                if first
+                    || feedback != last_feedback
+                    || feedback == Feedback::Accepted
+                    || stitch.as_ref().unwrap().position() != prior_position
+                {
                     sequence += 1;
                     let feedback_started = Instant::now();
                     progress(sequence, stitch.as_ref().unwrap(), feedback);
                     stats.feedback += feedback_started.elapsed();
+                    if feedback == Feedback::Located || feedback == Feedback::Uncertain {
+                        tracing::trace!(
+                            sequence,
+                            ?feedback,
+                            "Long capture viewport located or lost"
+                        );
+                    }
                 }
                 last_feedback = feedback;
                 if let Some(run) = &mut auto_run {
@@ -454,17 +521,63 @@ fn run(
             Err(_) => {
                 paused.store(true, Ordering::Release);
                 sequence += 1;
-                progress(sequence, stitch.as_ref().unwrap(), Feedback::CaptureLost);
+                let stitch = stitch.as_mut().unwrap();
+                stitch.invalidate_position();
+                progress(sequence, stitch, Feedback::CaptureLost);
             }
             _ if stitch.is_none() && last_frame.elapsed() > Duration::from_secs(3) => {
                 return Err(Error::new("Long capture unavailable"));
             }
             _ => {}
         }
+        let aligned = stitch.as_ref().is_some_and(Stitcher::at_tail)
+            && matches!(last_feedback, Feedback::Accepted | Feedback::Unchanged);
+        if let Some((queue, ready)) = trim {
+            if trim_request.is_none() {
+                trim_request = queue.lock().unwrap().take();
+            }
+            if !auto_run
+                .as_ref()
+                .is_some_and(|run| run.steps.settling(run.started.elapsed(), aligned))
+                && let Some((expected, direction)) = trim_request.take()
+            {
+                let started = Instant::now();
+                if let Some(direction) = direction
+                    && sequence == expected
+                    && !cancel.load(Ordering::Acquire)
+                    && !paused.load(Ordering::Acquire)
+                    && let Some(stitch) = stitch.as_mut()
+                    && stitch.trim(direction)
+                {
+                    stats.trims += 1;
+                    sequence += 1;
+                    last_feedback = if stitch.at_tail() {
+                        Feedback::Unchanged
+                    } else {
+                        Feedback::Located
+                    };
+                    progress(sequence, stitch, last_feedback);
+                    tracing::debug!(
+                        sequence,
+                        ?direction,
+                        height = stitch.size().1,
+                        elapsed_ms = started.elapsed().as_secs_f64() * 1000.,
+                        "Long capture trim committed"
+                    );
+                }
+                stats.trimming += started.elapsed();
+                ready();
+            }
+        }
         if let Some((control, notify)) = auto {
             let desired = *control.lock().unwrap();
             if desired.mode == Mode::Manual {
-                auto_run = None;
+                if !auto_run
+                    .as_ref()
+                    .is_some_and(|run| run.steps.settling(run.started.elapsed(), aligned))
+                {
+                    auto_run = None;
+                }
             } else if !paused.load(Ordering::Acquire)
                 && !finish.load(Ordering::Acquire)
                 && !cancel.load(Ordering::Acquire)
@@ -478,7 +591,7 @@ fn run(
                     desired.mode,
                     port.as_ref(),
                     bounds,
-                    matches!(last_feedback, Feedback::Accepted | Feedback::Unchanged),
+                    aligned,
                 );
             }
         }
@@ -643,9 +756,12 @@ mod tests {
             frame(0).bounds,
             vec![],
             (&cancel, &paused, &finish),
-            None,
+            (None, None),
             || Ok(vec![frame(0).bounds]),
             |seq, _, feedback| {
+                if feedback == Feedback::Unchanged {
+                    return;
+                }
                 assert_eq!(feedback, Feedback::Accepted);
                 if seq == 1 {
                     paused.store(true, Ordering::Release);
@@ -675,7 +791,7 @@ mod tests {
                 frame(0).bounds,
                 vec![],
                 (&cancel, &paused, &finish),
-                None,
+                (None, None),
                 || Ok(vec![frame(0).bounds]),
                 |_, _, _| cancel.store(true, Ordering::Release)
             )
@@ -683,5 +799,39 @@ mod tests {
         );
         assert_eq!(port.clears.load(Ordering::SeqCst), 1);
         assert_eq!(port.frames.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn long_capture_worker_rejects_stale_trim_and_exports_confirmed_rows() {
+        let port = capture();
+        let cancel = AtomicBool::new(false);
+        let paused = AtomicBool::new(false);
+        let finish = AtomicBool::new(false);
+        let queue = TrimQueue::default();
+        let settled = AtomicUsize::new(0);
+        let result = run(
+            || Some(port.clone()),
+            frame(0).bounds,
+            vec![],
+            (&cancel, &paused, &finish),
+            (
+                None,
+                Some((&queue, &|| {
+                    if settled.fetch_add(1, Ordering::Relaxed) == 0 {
+                        *queue.lock().unwrap() = Some((2, Some(Trim::Above)));
+                    }
+                })),
+            ),
+            || Ok(vec![frame(0).bounds]),
+            |sequence, stitch, _| match sequence {
+                1 => *queue.lock().unwrap() = Some((0, Some(Trim::Above))),
+                2 => assert_eq!(stitch.size(), (64, 100)),
+                3 => finish.store(true, Ordering::Release),
+                _ => unreachable!(),
+            },
+        )
+        .unwrap();
+        assert_eq!(settled.load(Ordering::Relaxed), 2);
+        assert_eq!(*result, frame(20));
     }
 }

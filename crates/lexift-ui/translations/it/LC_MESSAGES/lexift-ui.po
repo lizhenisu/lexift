@@ -2348,3 +2348,9 @@ msgstr "Scorrimento automatico non disponibile."
 
 msgid "Automatic scrolling stopped because the image did not change."
 msgstr "Scorrimento automatico interrotto perché l’immagine non è cambiata."
+
+msgid "Trim above current view"
+msgstr "Ritaglia sopra la vista corrente"
+
+msgid "Trim below current view"
+msgstr "Ritaglia sotto la vista corrente"

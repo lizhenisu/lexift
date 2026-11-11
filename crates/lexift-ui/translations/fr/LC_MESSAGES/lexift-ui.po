@@ -2348,3 +2348,9 @@ msgstr "Le défilement automatique est indisponible."
 
 msgid "Automatic scrolling stopped because the image did not change."
 msgstr "Le défilement automatique s’est arrêté car l’image n’a pas changé."
+
+msgid "Trim above current view"
+msgstr "Rogner au-dessus de la vue actuelle"
+
+msgid "Trim below current view"
+msgstr "Rogner au-dessous de la vue actuelle"

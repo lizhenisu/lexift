@@ -178,6 +178,7 @@ pub struct WindowLifecycleCallbacks {
         ) -> bool,
     >,
     pub(crate) configure_countdown_window: Rc<dyn Fn(&slint::Window) -> bool>,
+    pub(crate) exclude_view_from_capture: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) configure_hint_window: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) annotation_click_through: AnnotationClickThrough,
     pub(crate) annotation_corner_cursor: AnnotationCornerCursor,
@@ -265,6 +266,7 @@ impl WindowLifecycleCallbacks {
             countdown_handoff: Rc::new(|_, _| false),
             recording_preview_surface: Rc::new(|_, _| false),
             configure_countdown_window: Rc::new(|_| false),
+            exclude_view_from_capture: Rc::new(|_| false),
             configure_hint_window: Rc::new(|_| false),
             annotation_click_through: Rc::new(|_, _| false),
             annotation_corner_cursor: Rc::new(|_, _| false),
@@ -411,6 +413,14 @@ impl WindowLifecycleCallbacks {
         self.recording_preview_surface = Rc::new(callback);
         self
     }
+    pub fn with_capture_view_exclusion(
+        mut self,
+        callback: impl Fn(&slint::Window) -> bool + 'static,
+    ) -> Self {
+        self.exclude_view_from_capture = Rc::new(callback);
+        self
+    }
+
     pub fn with_countdown_window(
         mut self,
         callback: impl Fn(&slint::Window) -> bool + 'static,

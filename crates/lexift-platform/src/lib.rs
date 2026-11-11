@@ -970,6 +970,23 @@ pub fn configure_countdown_window(
     }
 }
 
+/// Excludes an owned top-level view without changing its input or activation policy.
+pub fn exclude_view_from_capture(
+    window: &impl raw_window_handle::HasWindowHandle,
+) -> lexift_core::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::popup::exclude_view_from_capture(window)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+        Err(lexift_core::Error::new(
+            "View capture exclusion is unavailable",
+        ))
+    }
+}
+
 /// Native view metrics; independent of capture and document ownership.
 pub fn screenshot_display_metrics()
 -> lexift_core::Result<Vec<(lexift_core::domain::geometry::Rect, f32)>> {

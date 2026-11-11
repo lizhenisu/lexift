@@ -2348,3 +2348,9 @@ msgstr "O deslocamento automático não está disponível."
 
 msgid "Automatic scrolling stopped because the image did not change."
 msgstr "O deslocamento automático parou porque a imagem não mudou."
+
+msgid "Trim above current view"
+msgstr "Recortar acima da vista atual"
+
+msgid "Trim below current view"
+msgstr "Recortar abaixo da vista atual"

@@ -2348,3 +2348,9 @@ msgstr "自動捲動無法使用。"
 
 msgid "Automatic scrolling stopped because the image did not change."
 msgstr "畫面未變更，自動捲動已停止。"
+
+msgid "Trim above current view"
+msgstr "裁掉目前畫面上方"
+
+msgid "Trim below current view"
+msgstr "裁掉目前畫面下方"

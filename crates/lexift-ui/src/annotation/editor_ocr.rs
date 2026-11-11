@@ -281,6 +281,7 @@ mod tests {
             feedback: Feedback::Accepted,
             target: None,
             auto_scroll: Default::default(),
+            trim_pending: false,
         });
         screenshot::sync(&state.screenshot);
         REGISTRY.with(|s| {

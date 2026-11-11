@@ -271,6 +271,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with_countdown_handoff(|windows,prepare|lexift_platform::countdown_handoff(windows,prepare).unwrap_or(false))
         .with_recording_preview_surface(lexift_platform::position_recording_preview_surface)
         .with_countdown_window(|window| window.with_winit_window(lexift_platform::configure_countdown_window).is_some_and(|r| r.is_ok()))
+        .with_capture_view_exclusion(|window| window.with_winit_window(lexift_platform::exclude_view_from_capture).is_some_and(|r| r.is_ok()))
         .with_hint_window(|window| window.with_winit_window(lexift_platform::configure_hint_window).is_some_and(|result| result.is_ok()))
         .with_popup_work_area(move |point| {
             screen_for_popup

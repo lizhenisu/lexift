@@ -207,6 +207,7 @@ mod tests {
             feedback: super::super::long_capture::Feedback::Unchanged,
             target: None,
             auto_scroll: Default::default(),
+            trim_pending: false,
         });
         (
             s,
