@@ -1,6 +1,6 @@
 //! Session-scoped control of live capture, separate from desktop region editing.
 use super::{
-    Feedback, Preview, Trim,
+    Axis, Feedback, Preview, Trim,
     auto_scroll::{Mode, Stop},
 };
 use crate::domain::screenshot::ScreenshotOutput;
@@ -36,6 +36,10 @@ pub struct State {
     pub target: Option<ScreenshotOutput>,
     pub auto_scroll: super::auto_scroll::State,
     pub trim_pending: bool,
+    pub axis: Axis,
+    pub axis_locked: bool,
+    pub axis_pending: Option<u64>,
+    pub axis_request: u64,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -47,7 +51,7 @@ pub enum Event {
         session: u64,
         operation: u64,
         excluded: Vec<WindowToken>,
-        preview_size: (usize, usize),
+        preview_size: (usize, usize, usize),
     },
     Progress {
         session: u64,
@@ -61,6 +65,20 @@ pub enum Event {
     ToggleAutoScroll {
         session: u64,
         operation: u64,
+    },
+    ChangeAxis {
+        session: u64,
+        operation: u64,
+        sequence: u64,
+        axis: Axis,
+    },
+    AxisChanged {
+        session: u64,
+        operation: u64,
+        request: u64,
+        sequence: u64,
+        axis: Axis,
+        preview: Option<Preview>,
     },
     Trim {
         session: u64,
@@ -124,14 +142,22 @@ pub enum Command {
         operation: u64,
         bounds: Rect,
         excluded: Vec<WindowToken>,
-        preview_size: (usize, usize),
+        preview_size: (usize, usize, usize),
     },
     Present {
         session: u64,
         operation: u64,
         sequence: u64,
+        axis: Axis,
         first: bool,
         preview: Preview,
+    },
+    ChangeAxis {
+        session: u64,
+        operation: u64,
+        request: u64,
+        sequence: u64,
+        axis: Axis,
     },
     Trim {
         session: u64,
@@ -189,6 +215,10 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
             target: None,
             auto_scroll: Default::default(),
             trim_pending: false,
+            axis: Axis::Vertical,
+            axis_locked: false,
+            axis_pending: None,
+            axis_request: 0,
         });
         return wrap(Command::Prepare {
             session,
@@ -204,6 +234,12 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
             session, operation, ..
         }
         | Event::ToggleAutoScroll { session, operation }
+        | Event::ChangeAxis {
+            session, operation, ..
+        }
+        | Event::AxisChanged {
+            session, operation, ..
+        }
         | Event::Trim {
             session, operation, ..
         }
@@ -241,6 +277,7 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
             event,
             Event::Finish { .. }
                 | Event::Trim { .. }
+                | Event::ChangeAxis { .. }
                 | Event::ToggleAutoScroll { .. }
                 | Event::Cancel { .. }
         )
@@ -248,11 +285,57 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
         return vec![];
     }
     match event {
+        Event::ChangeAxis { sequence, axis, .. }
+            if l.phase == Phase::Capturing
+                && sequence != 0
+                && sequence == l.sequence
+                && !l.axis_locked
+                && l.axis_pending.is_none()
+                && !l.trim_pending
+                && l.auto_scroll.mode == Mode::Manual
+                && axis != l.axis =>
+        {
+            l.axis_request += 1;
+            l.axis_pending = Some(l.axis_request);
+            wrap(Command::ChangeAxis {
+                session,
+                operation,
+                sequence,
+                axis,
+                request: l.axis_request,
+            })
+        }
+        Event::AxisChanged {
+            request,
+            sequence,
+            axis,
+            preview,
+            ..
+        } if l.axis_pending == Some(request) => {
+            l.axis_pending = None;
+            let Some(preview) = preview.filter(|_| sequence > l.sequence && !l.axis_locked) else {
+                return vec![];
+            };
+            l.axis = axis;
+            l.sequence = sequence;
+            l.width = (preview.extent.right - preview.extent.left) as usize;
+            l.height = (preview.extent.bottom - preview.extent.top) as usize;
+            l.feedback = Feedback::Unchanged;
+            wrap(Command::Present {
+                session,
+                operation,
+                sequence,
+                first: false,
+                axis,
+                preview,
+            })
+        }
         Event::Trim {
             sequence,
             direction,
             ..
         } if l.phase == Phase::Capturing
+            && l.axis_pending.is_none()
             && !l.trim_pending
             && (direction.is_none()
                 || sequence == l.sequence
@@ -276,7 +359,12 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
             l.trim_pending = false;
             vec![]
         }
-        Event::ToggleAutoScroll { .. } if l.phase == Phase::Capturing && !l.trim_pending => {
+        Event::ToggleAutoScroll { .. }
+            if l.phase == Phase::Capturing
+                && !l.trim_pending
+                && l.axis_pending.is_none()
+                && l.axis == Axis::Vertical =>
+        {
             if l.auto_scroll.mode == Mode::Manual {
                 l.auto_scroll.generation += 1;
                 l.auto_scroll.mode = Mode::Waiting;
@@ -332,6 +420,7 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
             ) =>
         {
             let first = l.sequence == 0;
+            l.axis_locked |= !first && feedback == Feedback::Accepted;
             l.sequence = sequence;
             l.width = width;
             l.height = height;
@@ -350,12 +439,14 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
                 operation,
                 sequence,
                 first,
+                axis: l.axis,
                 preview,
             })
         }
         Event::Pause { paused, .. }
             if matches!(l.phase, Phase::Capturing | Phase::Paused)
                 && !l.trim_pending
+                && l.axis_pending.is_none()
                 && (paused || l.feedback != Feedback::Limit) =>
         {
             l.auto_scroll.stop(None);
@@ -371,7 +462,9 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
             })
         }
         Event::Finish { target, .. }
-            if matches!(l.phase, Phase::Capturing | Phase::Paused) && !l.trim_pending =>
+            if matches!(l.phase, Phase::Capturing | Phase::Paused)
+                && !l.trim_pending
+                && l.axis_pending.is_none() =>
         {
             l.auto_scroll.stop(None);
             l.target = target;
@@ -479,6 +572,63 @@ mod tests {
             image,
         }
     }
+    #[test]
+    fn axis_request_is_versioned_and_first_append_wins() {
+        let mut s = screenshot();
+        let operation = start(&mut s);
+        let request = |sequence| Event::ChangeAxis {
+            session: 9,
+            operation,
+            sequence,
+            axis: Axis::Horizontal,
+        };
+        let progress = |sequence| Event::Progress {
+            session: 9,
+            operation,
+            sequence,
+            width: 400,
+            height: 400,
+            feedback: Feedback::Accepted,
+            preview: preview(),
+        };
+        assert!(reduce(&mut s, request(0)).is_empty());
+        reduce(&mut s, progress(1));
+        assert!(matches!(
+            &reduce(&mut s, request(1))[..],
+            [ScreenshotCommand::Long(Command::ChangeAxis {
+                request: 1,
+                ..
+            })]
+        ));
+        let changed = |request, sequence, preview| Event::AxisChanged {
+            session: 9,
+            operation,
+            request,
+            sequence,
+            axis: Axis::Horizontal,
+            preview,
+        };
+        assert!(reduce(&mut s, changed(99, 2, Some(preview()))).is_empty());
+        assert_eq!(s.long.as_ref().unwrap().axis_pending, Some(1));
+        assert!(
+            reduce(
+                &mut s,
+                Event::ToggleAutoScroll {
+                    session: 9,
+                    operation
+                }
+            )
+            .is_empty()
+        );
+        reduce(&mut s, progress(2));
+        assert!(reduce(&mut s, changed(1, 3, Some(preview()))).is_empty());
+        assert!(reduce(&mut s, request(2)).is_empty());
+        let state = s.long.as_ref().unwrap();
+        assert!(state.axis_locked);
+        assert_eq!(state.axis, Axis::Vertical);
+        assert_eq!(state.axis_pending, None);
+    }
+
     #[test]
     fn automatic_scroll_is_owned_by_one_capture_and_one_start() {
         let mut state = screenshot();
@@ -734,7 +884,7 @@ mod tests {
                     session: 9,
                     operation: op,
                     excluded: vec![],
-                    preview_size: (200, 800),
+                    preview_size: (200, 800, 1200),
                 }
             )
             .len(),

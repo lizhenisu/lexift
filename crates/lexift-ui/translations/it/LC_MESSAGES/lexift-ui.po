@@ -2372,3 +2372,21 @@ msgstr "Impossibile ripristinare l’immagine fissata chiusa"
 
 msgid "The closed pin could not be retained"
 msgstr "Impossibile conservare l’immagine fissata chiusa"
+
+msgid "Capture direction"
+msgstr "Direzione di acquisizione"
+
+msgid "Vertical"
+msgstr "Verticale"
+
+msgid "Horizontal"
+msgstr "Orizzontale"
+
+msgid "Trim left of current view"
+msgstr "Ritaglia a sinistra della vista corrente"
+
+msgid "Trim right of current view"
+msgstr "Ritaglia a destra della vista corrente"
+
+msgid "Scroll right to extend the image"
+msgstr "Scorri a destra per estendere l’immagine"

@@ -2372,3 +2372,21 @@ msgstr "닫은 고정 이미지를 복원할 수 없습니다"
 
 msgid "The closed pin could not be retained"
 msgstr "닫은 고정 이미지를 보관할 수 없습니다"
+
+msgid "Capture direction"
+msgstr "캡처 방향"
+
+msgid "Vertical"
+msgstr "세로"
+
+msgid "Horizontal"
+msgstr "가로"
+
+msgid "Trim left of current view"
+msgstr "현재 화면 왼쪽 자르기"
+
+msgid "Trim right of current view"
+msgstr "현재 화면 오른쪽 자르기"
+
+msgid "Scroll right to extend the image"
+msgstr "오른쪽으로 스크롤하여 이미지 확장"

@@ -5,6 +5,7 @@ use crate::{AnnotationChoiceWindow, ScreenshotCountdownWindow};
 type Ready = Box<dyn FnOnce(lexift_core::Result<std::time::Instant>) + Send>;
 const LONG_TRIM_MENU: u8 = 6;
 const QUICK_SAVE_MENU: u8 = 7;
+const LONG_AXIS_MENU: u8 = 8;
 #[derive(Default)]
 struct Views {
     recording: Option<(lexift_core::domain::screen_recording::Identity, u64)>,
@@ -57,6 +58,8 @@ pub(crate) fn sync(state: &ScreenshotState) {
             s.menu.is_some()
                 && (s.quick_owner != Some((state.session, state.operation))
                     || state.phase != ScreenshotPhase::Editing)
+        } else if s.menu_kind == LONG_AXIS_MENU {
+            s.menu.is_some() && super::long::axis_menu_owner() != s.long_trim
         } else if s.menu_kind == LONG_TRIM_MENU {
             s.menu.is_some()
                 && (super::long::trim_identity() != s.long_trim
@@ -127,6 +130,14 @@ fn choose(sequence: u64, index: Option<i32>) {
                 } else {
                     super::output(lexift_core::domain::screenshot::ScreenshotOutput::QuickSave);
                 }
+            }
+            return;
+        }
+        if kind == LONG_AXIS_MENU {
+            if super::long::axis_menu_owner() == long_trim
+                && let Some(index) = index
+            {
+                super::long::change_axis(index);
             }
             return;
         }
@@ -202,6 +213,10 @@ pub(super) fn video_menu() {
 pub(super) fn audio_menu() {
     menu_kind(3);
 }
+pub(super) fn long_axis_menu() {
+    menu_kind(LONG_AXIS_MENU);
+}
+
 pub(super) fn long_trim_menu() {
     menu_kind(LONG_TRIM_MENU);
 }
@@ -236,6 +251,10 @@ fn menu_kind(kind: u8) {
         if quick_save_owner().is_none() || super::history_editor::active() || pin_editor::active() {
             return;
         }
+    } else if kind == LONG_AXIS_MENU {
+        if super::long::axis_menu_owner().is_none() {
+            return;
+        }
     } else if kind == LONG_TRIM_MENU {
         if super::long::trim_identity().is_none() {
             return;
@@ -268,9 +287,18 @@ fn menu_kind(kind: u8) {
     crate::theme::apply(&w);
     let labels: &[&str] = if kind == QUICK_SAVE_MENU {
         &["Quick save PNG", "Change quick save directory"]
+    } else if kind == LONG_AXIS_MENU {
+        w.set_checked_first(i32::from(
+            super::long::axis() == lexift_core::domain::long_capture::Axis::Horizontal,
+        ));
+        &["Vertical", "Horizontal"]
     } else if kind == LONG_TRIM_MENU {
         w.set_capture_trim_menu(true);
-        &["Trim above current view", "Trim below current view"]
+        if super::long::axis() == lexift_core::domain::long_capture::Axis::Horizontal {
+            &["Trim left of current view", "Trim right of current view"]
+        } else {
+            &["Trim above current view", "Trim below current view"]
+        }
     } else if kind == 5 {
         &[
             "Start now",
@@ -335,7 +363,9 @@ fn menu_kind(kind: u8) {
             },
         );
     }
-    w.set_selected(if kind == 5 {
+    w.set_selected(if kind == LONG_AXIS_MENU {
+        w.get_checked_first()
+    } else if kind == 5 {
         0
     } else if kind == 4 {
         w.get_checked_first()
@@ -359,9 +389,13 @@ fn menu_kind(kind: u8) {
         s.menu_kind = kind;
         s.quick_owner = (kind == QUICK_SAVE_MENU).then(quick_save_owner).flatten();
         s.recording = selection.map(|(identity, revision, _)| (identity, revision));
-        s.long_trim = (kind == LONG_TRIM_MENU)
-            .then(super::long::trim_identity)
-            .flatten();
+        s.long_trim = if kind == LONG_AXIS_MENU {
+            super::long::axis_menu_owner()
+        } else {
+            (kind == LONG_TRIM_MENU)
+                .then(super::long::trim_identity)
+                .flatten()
+        };
         s.trim_foreground = trim_foreground;
         s.menu = Some(w.clone_strong());
         s.sequence
@@ -406,8 +440,9 @@ fn prepare_menu(seq: u64, attempt: u8) {
                 }
             }
             if (capture_trim
-                || VIEWS.with(|views| views.borrow().menu_kind == QUICK_SAVE_MENU)
-                    && super::long::busy()
+                || VIEWS.with(|views| {
+                    matches!(views.borrow().menu_kind, QUICK_SAVE_MENU | LONG_AXIS_MENU)
+                }) && super::long::busy()
                     && !super::long::image_editing())
                 && !(l.exclude_view_from_capture)(w.window())
             {
@@ -679,7 +714,11 @@ pub(crate) fn availability(state: &lexift_core::AppState) {
     if !allowed
         && VIEWS.with(|s| {
             let s = s.borrow();
-            s.menu.is_some() && !matches!(s.menu_kind, LONG_TRIM_MENU | QUICK_SAVE_MENU)
+            s.menu.is_some()
+                && !matches!(
+                    s.menu_kind,
+                    LONG_TRIM_MENU | QUICK_SAVE_MENU | LONG_AXIS_MENU
+                )
         })
     {
         clear();

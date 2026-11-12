@@ -2372,3 +2372,21 @@ msgstr "无法恢复已关闭的贴图"
 
 msgid "The closed pin could not be retained"
 msgstr "无法保留已关闭的贴图"
+
+msgid "Capture direction"
+msgstr "采集方向"
+
+msgid "Vertical"
+msgstr "纵向"
+
+msgid "Horizontal"
+msgstr "横向"
+
+msgid "Trim left of current view"
+msgstr "裁掉当前画面左侧"
+
+msgid "Trim right of current view"
+msgstr "裁掉当前画面右侧"
+
+msgid "Scroll right to extend the image"
+msgstr "向右滚动以扩展图片"

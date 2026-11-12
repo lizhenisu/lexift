@@ -25,6 +25,13 @@ pub enum Feedback {
     Cancelled,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Axis {
+    #[default]
+    Vertical,
+    Horizontal,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Trim {
     Above,
@@ -33,11 +40,19 @@ pub enum Trim {
 
 impl Preview {
     pub fn can_trim(&self, direction: Trim) -> bool {
+        self.can_trim_on(Axis::Vertical, direction)
+    }
+
+    pub fn can_trim_on(&self, axis: Axis, direction: Trim) -> bool {
         let Some(body) = self.body else { return false };
-        self.current.bottom > self.current.top
+        let (current, body) = match axis {
+            Axis::Vertical => (self.current, body),
+            Axis::Horizontal => (transpose_rect(self.current), transpose_rect(body)),
+        };
+        current.bottom > current.top
             && match direction {
-                Trim::Above => self.current.top > body.top,
-                Trim::Below => self.current.bottom < body.bottom,
+                Trim::Above => current.top > body.top,
+                Trim::Below => current.bottom < body.bottom,
             }
     }
 }
@@ -54,6 +69,7 @@ pub struct Preview {
 
 /// Retains only the accepted image strips and one full physical capture as a matching anchor.
 pub struct Stitcher {
+    axis: Axis,
     width: usize,
     height: usize,
     anchor: Arc<CapturedRegion>,
@@ -200,6 +216,38 @@ fn ambiguous_boundary(bands: Bands, a: &[u8], b: &[u8], stride: usize, dy: usize
             && a[end..end + stride] == b[end - shift..end - shift + stride])
 }
 
+fn transpose_rect(rect: Rect) -> Rect {
+    Rect {
+        left: rect.top,
+        top: rect.left,
+        right: rect.bottom,
+        bottom: rect.right,
+    }
+}
+
+/// Store horizontal frames as column strips using the same registration and history machinery.
+fn transpose(frame: &CapturedRegion, cancel: &AtomicBool) -> Result<CapturedRegion> {
+    let (width, height) = dimensions(frame)?;
+    if width > MAX_HEIGHT {
+        return Err(Error::new("Invalid long capture frame"));
+    }
+    let mut pixels = vec![0; frame.pixels.len()];
+    for x in 0..width {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(Error::new("Long capture cancelled"));
+        }
+        for y in 0..height {
+            let src = (y * width + x) * 4;
+            let dst = (x * height + y) * 4;
+            pixels[dst..dst + 4].copy_from_slice(&frame.pixels[src..src + 4]);
+        }
+    }
+    Ok(CapturedRegion {
+        bounds: transpose_rect(frame.bounds),
+        pixels,
+    })
+}
+
 fn dimensions(frame: &CapturedRegion) -> Result<(usize, usize)> {
     let w = i64::from(frame.bounds.right) - i64::from(frame.bounds.left);
     let h = i64::from(frame.bounds.bottom) - i64::from(frame.bounds.top);
@@ -216,11 +264,16 @@ fn dimensions(frame: &CapturedRegion) -> Result<(usize, usize)> {
 
 impl Stitcher {
     pub fn new(first: Arc<CapturedRegion>) -> Result<Self> {
+        Self::new_on_axis(first, Axis::Vertical)
+    }
+
+    fn new_on_axis(first: Arc<CapturedRegion>, axis: Axis) -> Result<Self> {
         let (width, height) = dimensions(&first)?;
         if width * height * 60 > MAX_BUFFER_BYTES {
             return Err(Error::new("Long capture buffer limit"));
         }
         Ok(Self {
+            axis,
             width,
             height,
             strips: vec![Arc::from(first.pixels.as_slice())],
@@ -236,7 +289,22 @@ impl Stitcher {
         })
     }
     pub fn size(&self) -> (usize, usize) {
-        (self.width, self.height)
+        match self.axis {
+            Axis::Vertical => (self.width, self.height),
+            Axis::Horizontal => (self.height, self.width),
+        }
+    }
+    pub fn axis(&self) -> Axis {
+        self.axis
+    }
+    pub fn change_axis(&mut self, axis: Axis, cancel: &AtomicBool) -> Result<bool> {
+        if axis == self.axis || self.bands.is_some() {
+            return Ok(false);
+        }
+        // The original first frame remains the anchor until the first accepted append.
+        let first = Arc::new(transpose(&self.anchor, cancel)?);
+        *self = Self::new_on_axis(first, axis)?;
+        Ok(true)
     }
     pub fn retained_bytes(&self) -> usize {
         let stride = self.width * 4;
@@ -338,6 +406,21 @@ impl Stitcher {
         Ok(found)
     }
     pub fn push(&mut self, frame: Arc<CapturedRegion>, cancel: &AtomicBool) -> Result<Feedback> {
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(Feedback::Cancelled);
+        }
+        let frame = if self.axis == Axis::Horizontal {
+            if transpose_rect(frame.bounds) != self.anchor.bounds {
+                return Err(Error::new("Long capture geometry changed"));
+            }
+            match transpose(&frame, cancel) {
+                Ok(frame) => Arc::new(frame),
+                Err(_) if cancel.load(Ordering::Relaxed) => return Ok(Feedback::Cancelled),
+                Err(error) => return Err(error),
+            }
+        } else {
+            frame
+        };
         let (w, h) = dimensions(&frame)?;
         if frame.bounds != self.anchor.bounds || w != self.width {
             return Err(Error::new("Long capture geometry changed"));
@@ -382,9 +465,15 @@ impl Stitcher {
         let matched = if self.returning_to_tail || same_as_tail {
             None
         } else if let Some(bands) = self.bands {
-            bands
-                .displacement(&self.anchor.pixels, &frame.pixels, w, cancel)
-                .map(|dy| (bands, dy))
+            if self.axis == Axis::Horizontal {
+                displacement(&self.anchor.pixels, &frame.pixels, w, true, cancel)
+            } else {
+                bands.displacement(&self.anchor.pixels, &frame.pixels, w, cancel)
+            }
+            .map(|dy| (bands, dy))
+        } else if self.axis == Axis::Horizontal {
+            displacement(&self.anchor.pixels, &frame.pixels, w, true, cancel)
+                .map(|shift| (Bands::default(), shift))
         } else {
             initial_match(&self.anchor.pixels, &frame.pixels, w, cancel)
         };
@@ -521,6 +610,31 @@ impl Stitcher {
 
     /// Flatten only at the immutable editor/output handoff, never for capture feedback.
     pub fn flatten(&self, cancel: &AtomicBool) -> Result<CapturedRegion> {
+        if self.axis == Axis::Horizontal {
+            let mut pixels = vec![0; self.width * self.height * 4];
+            for (column, strip) in self
+                .output_strips()
+                .flat_map(|strip| strip.chunks_exact(self.width * 4))
+                .enumerate()
+            {
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(Error::new("Long capture cancelled"));
+                }
+                for (row, pixel) in strip.as_chunks::<4>().0.iter().enumerate() {
+                    let offset = (row * self.height + column) * 4;
+                    pixels[offset..offset + 4].copy_from_slice(pixel);
+                }
+            }
+            return Ok(CapturedRegion {
+                bounds: Rect {
+                    left: 0,
+                    top: 0,
+                    right: self.height as i32,
+                    bottom: self.width as i32,
+                },
+                pixels,
+            });
+        }
         let mut pixels = Vec::with_capacity(self.width * self.height * 4);
         for strip in self.output_strips() {
             if cancel.load(Ordering::Relaxed) {
@@ -540,6 +654,10 @@ impl Stitcher {
     }
     /// Keep a stable preview width and sample only the accepted tail when its height is bounded.
     pub fn preview(&self, max_width: usize, max_height: usize) -> Preview {
+        let (max_width, max_height) = match self.axis {
+            Axis::Vertical => (max_width, max_height),
+            Axis::Horizontal => (max_height, max_width),
+        };
         let w = max_width.max(1).min(self.width);
         let visible_height = (max_height.max(1).saturating_mul(self.width) / w)
             .max(1)
@@ -564,6 +682,7 @@ impl Stitcher {
                 .min(tail)
         };
         let h = (visible_height * w / self.width).max(1);
+        let horizontal = self.axis == Axis::Horizontal;
         let mut pixels = vec![0; w * h * 4];
         let stride = self.width * 4;
         let mut strips = self.output_strips();
@@ -577,17 +696,21 @@ impl Stitcher {
             }
             for x in 0..w {
                 let src = ((sy - strip_start) * self.width + x * self.width / w) * 4;
-                let dst = (y * w + x) * 4;
+                let dst = if horizontal {
+                    (x * h + y) * 4
+                } else {
+                    (y * w + x) * 4
+                };
                 pixels[dst..dst + 4].copy_from_slice(&strip[src..src + 4]);
             }
         }
-        Preview {
+        let mut preview = Preview {
             image: Arc::new(CapturedRegion {
                 bounds: Rect {
                     left: 0,
                     top: 0,
-                    right: w as i32,
-                    bottom: h as i32,
+                    right: if horizontal { h } else { w } as i32,
+                    bottom: if horizontal { w } else { h } as i32,
                 },
                 pixels,
             }),
@@ -610,7 +733,14 @@ impl Stitcher {
                 right: self.width as i32,
                 bottom: (self.height - bands.bottom) as i32,
             }),
+        };
+        if horizontal {
+            preview.extent = transpose_rect(preview.extent);
+            preview.visible = transpose_rect(preview.visible);
+            preview.current = transpose_rect(preview.current);
+            preview.body = preview.body.map(transpose_rect);
         }
+        preview
     }
 }
 
@@ -718,6 +848,115 @@ fn validate_overlap(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn columns(offset: usize, width: usize) -> Arc<CapturedRegion> {
+        let height = 40;
+        let pixels = (0..height)
+            .flat_map(|y| {
+                (offset..offset + width).flat_map(move |x| {
+                    let k = (x as u32 + 1).wrapping_mul(0x9e3779b9).rotate_left(y % 29)
+                        ^ (y + 1).wrapping_mul(0x85ebca6b);
+                    [k as u8, (k >> 8) as u8, (k >> 16) as u8, 255]
+                })
+            })
+            .collect();
+        Arc::new(CapturedRegion {
+            bounds: Rect {
+                left: -16,
+                top: 8,
+                right: width as i32 - 16,
+                bottom: height as i32 + 8,
+            },
+            pixels,
+        })
+    }
+
+    #[test]
+    fn horizontal_output_preview_and_trim_share_exact_column_order() {
+        let cancel = AtomicBool::new(false);
+        let mut stitch = Stitcher::new(columns(0, 80)).unwrap();
+        assert!(stitch.change_axis(Axis::Horizontal, &cancel).unwrap());
+        assert_eq!(
+            stitch.flatten(&cancel).unwrap().pixels,
+            columns(0, 80).pixels
+        );
+        assert!(stitch.change_axis(Axis::Vertical, &cancel).unwrap());
+        assert!(stitch.change_axis(Axis::Horizontal, &cancel).unwrap());
+        assert_eq!(
+            stitch.push(columns(0, 80), &cancel).unwrap(),
+            Feedback::Unchanged
+        );
+        for offset in [1, 33, 73] {
+            assert_eq!(
+                stitch.push(columns(offset, 80), &cancel).unwrap(),
+                Feedback::Accepted
+            );
+        }
+        assert_eq!(stitch.size(), (153, 40));
+        assert!(!stitch.change_axis(Axis::Vertical, &cancel).unwrap());
+        assert_eq!(
+            stitch.flatten(&cancel).unwrap().pixels,
+            columns(0, 153).pixels
+        );
+        let preview = stitch.preview(90, 40);
+        assert_eq!(preview.visible.left, 63);
+        assert_eq!(preview.current.left, 73);
+        assert_eq!(preview.image.pixels, columns(63, 90).pixels);
+        assert_eq!(
+            stitch.push(columns(33, 80), &cancel).unwrap(),
+            Feedback::Located
+        );
+        assert!(
+            stitch
+                .preview(90, 40)
+                .can_trim_on(Axis::Horizontal, Trim::Above)
+        );
+        assert!(stitch.trim(Trim::Above));
+        assert_eq!(
+            stitch.flatten(&cancel).unwrap().pixels,
+            columns(33, 120).pixels
+        );
+        assert_eq!(
+            stitch.push(columns(49, 80), &cancel).unwrap(),
+            Feedback::Located
+        );
+        assert!(stitch.trim(Trim::Below));
+        assert_eq!(
+            stitch.flatten(&cancel).unwrap().pixels,
+            columns(33, 96).pixels
+        );
+        assert_eq!(
+            stitch.push(columns(77, 80), &cancel).unwrap(),
+            Feedback::Accepted
+        );
+        assert_eq!(
+            stitch.flatten(&cancel).unwrap().pixels,
+            columns(33, 124).pixels
+        );
+    }
+
+    #[test]
+    fn horizontal_sidebars_and_lost_overlap_do_not_advance_the_anchor() {
+        let cancel = AtomicBool::new(false);
+        let with_sidebar = |offset| {
+            let mut image = (*columns(offset, 80)).clone();
+            let stationary = columns(0, 80);
+            for (y, row) in image.pixels.as_chunks_mut::<320>().0.iter_mut().enumerate() {
+                row[..32].copy_from_slice(&stationary.pixels[y * 320..y * 320 + 32]);
+            }
+            Arc::new(image)
+        };
+        let first = with_sidebar(0);
+        let mut stitch = Stitcher::new(first.clone()).unwrap();
+        assert!(stitch.change_axis(Axis::Horizontal, &cancel).unwrap());
+        for next in [with_sidebar(24), columns(100, 80)] {
+            assert_eq!(stitch.push(next, &cancel).unwrap(), Feedback::Uncertain);
+            assert_eq!(stitch.flatten(&cancel).unwrap().pixels, first.pixels);
+            assert!(stitch.position().is_none());
+        }
+        cancel.store(true, Ordering::Relaxed);
+        assert_eq!(stitch.push(first, &cancel).unwrap(), Feedback::Cancelled);
+    }
+
     fn image(y0: usize) -> Arc<CapturedRegion> {
         image_width(y0, 96)
     }

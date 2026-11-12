@@ -2372,3 +2372,21 @@ msgstr "Could not restore the closed pin"
 
 msgid "The closed pin could not be retained"
 msgstr "The closed pin could not be retained"
+
+msgid "Capture direction"
+msgstr "Capture direction"
+
+msgid "Vertical"
+msgstr "Vertical"
+
+msgid "Horizontal"
+msgstr "Horizontal"
+
+msgid "Trim left of current view"
+msgstr "Trim left of current view"
+
+msgid "Trim right of current view"
+msgstr "Trim right of current view"
+
+msgid "Scroll right to extend the image"
+msgstr "Scroll right to extend the image"

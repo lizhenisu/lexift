@@ -2372,3 +2372,21 @@ msgstr "Impossible de restaurer l’image épinglée fermée"
 
 msgid "The closed pin could not be retained"
 msgstr "Impossible de conserver l’image épinglée fermée"
+
+msgid "Capture direction"
+msgstr "Direction de capture"
+
+msgid "Vertical"
+msgstr "Verticale"
+
+msgid "Horizontal"
+msgstr "Horizontale"
+
+msgid "Trim left of current view"
+msgstr "Rogner à gauche de la vue actuelle"
+
+msgid "Trim right of current view"
+msgstr "Rogner à droite de la vue actuelle"
+
+msgid "Scroll right to extend the image"
+msgstr "Faites défiler vers la droite pour étendre l’image"

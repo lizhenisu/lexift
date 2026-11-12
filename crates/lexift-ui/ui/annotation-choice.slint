@@ -203,7 +203,7 @@ export component AnnotationChoiceWindow inherits Window {
             background: root.selected == i ? Colors.primary : hit.has-hover ? Colors.menu-hover : transparent;
             opacity: root.option-enabled(i) ? 1 : 0.45;
             accessible-role: list-item; accessible-label: label;
-            accessible-item-selected: root.two-choice-groups ? (root.checked-first == i || root.checked-second == i) : root.selected == i;
+            accessible-item-selected: root.checked-first >= 0 ? (root.checked-first == i || root.checked-second == i) : root.selected == i;
             accessible-enabled: root.option-enabled(i);
             accessible-action-default => { if root.option-enabled(i) { root.chosen(i); } }
             if root.lines: LineStylePreview {
@@ -220,7 +220,7 @@ export component AnnotationChoiceWindow inherits Window {
                 font-family: root.font-mode ? label : "";
                 color: root.selected == i ? Colors.on-primary : Colors.foreground;
             }
-            if root.two-choice-groups && (root.checked-first == i || root.checked-second == i): Image {
+            if root.checked-first == i || root.checked-second == i: Image {
                 x:6px;y:(parent.height - 16px)/2;width:16px;height:16px;
                 source:@image-url("assets/icons/check.svg");colorize:root.selected == i ? Colors.on-primary : Colors.foreground;
             }

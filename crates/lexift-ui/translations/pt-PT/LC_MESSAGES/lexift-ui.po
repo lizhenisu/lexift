@@ -2372,3 +2372,21 @@ msgstr "Não foi possível restaurar a imagem afixada fechada"
 
 msgid "The closed pin could not be retained"
 msgstr "Não foi possível manter a imagem afixada fechada"
+
+msgid "Capture direction"
+msgstr "Direção da captura"
+
+msgid "Vertical"
+msgstr "Vertical"
+
+msgid "Horizontal"
+msgstr "Horizontal"
+
+msgid "Trim left of current view"
+msgstr "Recortar à esquerda da vista atual"
+
+msgid "Trim right of current view"
+msgstr "Recortar à direita da vista atual"
+
+msgid "Scroll right to extend the image"
+msgstr "Desloque para a direita para expandir a imagem"

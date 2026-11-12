@@ -2372,3 +2372,21 @@ msgstr "閉じたピンを復元できませんでした"
 
 msgid "The closed pin could not be retained"
 msgstr "閉じたピンを保持できませんでした"
+
+msgid "Capture direction"
+msgstr "キャプチャ方向"
+
+msgid "Vertical"
+msgstr "縦方向"
+
+msgid "Horizontal"
+msgstr "横方向"
+
+msgid "Trim left of current view"
+msgstr "現在の表示範囲より左を切り取る"
+
+msgid "Trim right of current view"
+msgstr "現在の表示範囲より右を切り取る"
+
+msgid "Scroll right to extend the image"
+msgstr "右にスクロールして画像を広げる"

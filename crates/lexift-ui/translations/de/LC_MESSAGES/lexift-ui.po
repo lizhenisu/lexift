@@ -2372,3 +2372,21 @@ msgstr "Geschlossenes Bild konnte nicht wiederhergestellt werden"
 
 msgid "The closed pin could not be retained"
 msgstr "Geschlossenes Bild konnte nicht behalten werden"
+
+msgid "Capture direction"
+msgstr "Aufnahmerichtung"
+
+msgid "Vertical"
+msgstr "Vertikal"
+
+msgid "Horizontal"
+msgstr "Horizontal"
+
+msgid "Trim left of current view"
+msgstr "Links vom aktuellen Bildausschnitt abschneiden"
+
+msgid "Trim right of current view"
+msgstr "Rechts vom aktuellen Bildausschnitt abschneiden"
+
+msgid "Scroll right to extend the image"
+msgstr "Nach rechts scrollen, um das Bild zu erweitern"

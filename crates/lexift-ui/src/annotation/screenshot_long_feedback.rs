@@ -36,6 +36,22 @@ pub(in crate::annotation::screenshot) fn range(
     border(&mut p, x, y, w, h, (2. * dpi).round().max(1.), primary);
     Some(p)
 }
+/// Clipped frame marker in normalized preview coordinates.
+pub(super) fn marker(preview: &Preview) -> (f32, f32, f32, f32) {
+    let visible = preview.visible;
+    let current = preview.current;
+    let width = (visible.right - visible.left).max(1) as f32;
+    let height = (visible.bottom - visible.top).max(1) as f32;
+    let left = current.left.max(visible.left);
+    let top = current.top.max(visible.top);
+    (
+        (left - visible.left) as f32 / width,
+        (top - visible.top) as f32 / height,
+        (current.right.min(visible.right) - left).max(0) as f32 / width,
+        (current.bottom.min(visible.bottom) - top).max(0) as f32 / height,
+    )
+}
+
 pub(super) fn preview(
     preview: &Preview,
     dpi: f32,
@@ -61,32 +77,38 @@ pub(super) fn preview(
         t as f32,
         primary,
     );
-    let span = (preview.visible.bottom - preview.visible.top).max(1) as f32;
-    let top = (preview.current.top.max(preview.visible.top) - preview.visible.top) as f32 / span
-        * h as f32;
-    let height = (preview.current.bottom.min(preview.visible.bottom)
-        - preview.current.top.max(preview.visible.top))
-    .max(0) as f32
-        / span
-        * h as f32;
-    if height > 0. {
+    let (left, top, width, height) = marker(preview);
+    if width > 0. && height > 0. {
         border(
             &mut p,
-            t as f32,
-            t as f32 + top,
-            w as f32,
-            height.max(t as f32),
+            t as f32 + left * w as f32,
+            t as f32 + top * h as f32,
+            (width * w as f32).max(t as f32),
+            (height * h as f32).max(t as f32),
             t as f32,
             current,
         );
     }
-    if preview.visible.top > 0 {
-        let cx = stride as f32 / 2.;
-        let size = 8. * dpi;
-        for i in 0..(size as i32) {
-            let y = t as f32 + size - i as f32;
-            fill(&mut p, cx - i as f32, y, t as f32, t as f32, primary);
-            fill(&mut p, cx + i as f32, y, t as f32, t as f32, primary);
+    let size = (8. * dpi) as i32;
+    for i in 0..size {
+        let distance = (size - i) as f32;
+        let offset = i as f32;
+        if preview.visible.top > 0 {
+            let cx = stride as f32 / 2.;
+            let y = t as f32 + distance;
+            fill(&mut p, cx - offset, y, t as f32, t as f32, primary);
+            fill(&mut p, cx + offset, y, t as f32, t as f32, primary);
+        }
+        let cy = h as f32 / 2. + t as f32;
+        for x in [
+            (preview.visible.left > 0).then_some(t as f32 + distance),
+            (preview.visible.right < preview.extent.right).then_some((w + t) as f32 - distance),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            fill(&mut p, x, cy - offset, t as f32, t as f32, primary);
+            fill(&mut p, x, cy + offset, t as f32, t as f32, primary);
         }
     }
     Some(p)

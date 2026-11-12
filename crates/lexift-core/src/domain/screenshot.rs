@@ -1051,6 +1051,10 @@ mod tests {
                     target: None,
                     auto_scroll: Default::default(),
                     trim_pending: false,
+                    axis: Default::default(),
+                    axis_locked: false,
+                    axis_pending: None,
+                    axis_request: 0,
                 });
                 let mut req = request(10, 2, crop);
                 if metadata {

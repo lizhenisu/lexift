@@ -1,7 +1,7 @@
 //! Sequential background orchestration; matching and acceptance policy belong to Core.
 use super::*;
 use lexift_core::domain::long_capture::{
-    Feedback, Stitcher, Trim,
+    Axis, Feedback, Preview, Stitcher, Trim,
     auto_scroll::{self, Mode, Next, Steps, Stop},
     workflow::{Command, Event, Phase},
 };
@@ -13,7 +13,17 @@ type AutoControl = Mutex<auto_scroll::State>;
 type AutoEvents<'a> = (&'a AutoControl, &'a dyn Fn(u64, Option<Stop>));
 type TrimQueue = Mutex<Option<(u64, Option<Trim>)>>;
 type TrimEvents<'a> = (&'a TrimQueue, &'a dyn Fn());
-type CaptureEvents<'a> = (Option<AutoEvents<'a>>, Option<TrimEvents<'a>>);
+type AxisQueue = Mutex<Option<(u64, u64, Axis)>>;
+type AxisEvents<'a> = (
+    &'a AxisQueue,
+    &'a dyn Fn(u64, u64, Axis, Option<Preview>),
+    [(usize, usize); 2],
+);
+type CaptureEvents<'a> = (
+    Option<AutoEvents<'a>>,
+    Option<TrimEvents<'a>>,
+    Option<AxisEvents<'a>>,
+);
 
 pub(super) struct Job {
     session: u64,
@@ -24,6 +34,7 @@ pub(super) struct Job {
     finish: Arc<AtomicBool>,
     auto: Arc<AutoControl>,
     trim: Arc<TrimQueue>,
+    axis: Arc<AxisQueue>,
 }
 pub(super) fn sync(
     runtime: &ScreenshotRuntime,
@@ -56,6 +67,23 @@ fn emit(c: &Arc<AppController>, event: Event) {
 pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, command: Command) {
     match command {
         Command::Prepare { .. } | Command::Present { .. } => c.ui.long_screenshot(command),
+        Command::ChangeAxis {
+            session,
+            operation,
+            request,
+            sequence,
+            axis,
+        } => {
+            if let Some(job) = runtime
+                .long
+                .lock()
+                .unwrap()
+                .as_ref()
+                .filter(|job| job.session == session && job.operation == operation)
+            {
+                *job.axis.lock().unwrap() = Some((request, sequence, axis));
+            }
+        }
         Command::Trim {
             session,
             operation,
@@ -153,6 +181,9 @@ pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, 
             let finish = Arc::new(AtomicBool::new(false));
             let auto = Arc::new(AutoControl::default());
             let trim = Arc::new(TrimQueue::default());
+            let axis = Arc::new(AxisQueue::default());
+            let horizontal_preview = (preview_size.2, preview_size.0.min(preview_size.1));
+            let vertical_preview = (preview_size.0, preview_size.1);
             if let Some(old) = runtime.long.lock().unwrap().replace(Job {
                 session,
                 operation,
@@ -162,6 +193,7 @@ pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, 
                 finish: finish.clone(),
                 auto: auto.clone(),
                 trim: trim.clone(),
+                axis: axis.clone(),
             }) {
                 let mut desired = old.auto.lock().unwrap();
                 *desired = auto_scroll::State::default();
@@ -195,6 +227,23 @@ pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, 
                             );
                         })),
                         Some((&trim, &|| emit(&c, Event::TrimReady { session, operation }))),
+                        Some((
+                            &axis,
+                            &|request, sequence, axis, preview| {
+                                emit(
+                                    &c,
+                                    Event::AxisChanged {
+                                        session,
+                                        operation,
+                                        request,
+                                        sequence,
+                                        axis,
+                                        preview,
+                                    },
+                                );
+                            },
+                            [vertical_preview, horizontal_preview],
+                        )),
                     ),
                     || c.physical_displays(),
                     |sequence, stitch, feedback| {
@@ -208,7 +257,14 @@ pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, 
                                 width,
                                 height,
                                 feedback,
-                                preview: stitch.preview(preview_size.0, preview_size.1),
+                                preview: {
+                                    let (w, h) = if stitch.axis() == Axis::Horizontal {
+                                        horizontal_preview
+                                    } else {
+                                        vertical_preview
+                                    };
+                                    stitch.preview(w, h)
+                                },
                             },
                         );
                     },
@@ -340,7 +396,7 @@ fn run(
     mut progress: impl FnMut(u64, &Stitcher, Feedback),
 ) -> Result<Arc<CapturedRegion>> {
     let (cancel, paused, finish, choosing_directory) = control;
-    let (auto, trim) = events;
+    let (auto, trim, axis) = events;
     let normalize = |mut b: Vec<lexift_core::domain::geometry::Rect>| {
         b.sort_by_key(|r| (r.left, r.top, r.right, r.bottom));
         b
@@ -377,6 +433,8 @@ fn run(
         rejected: u64,
         matching: Duration,
         feedback: Duration,
+        flatten: Duration,
+        working_peak: usize,
         peak: usize,
         trimming: Duration,
         trims: u64,
@@ -393,6 +451,8 @@ fn run(
                 feedback_ms = self.feedback.as_secs_f64() * 1000.,
                 elapsed_ms = self.start.elapsed().as_secs_f64() * 1000.,
                 retained_pixel_peak_bytes = self.peak,
+                accounted_worker_pixel_peak_bytes = self.working_peak,
+                flatten_ms = self.flatten.as_secs_f64() * 1000.,
                 trim_ms = self.trimming.as_secs_f64() * 1000.,
                 trims = self.trims,
                 located = self.located,
@@ -408,6 +468,8 @@ fn run(
         rejected: 0,
         matching: Duration::ZERO,
         feedback: Duration::ZERO,
+        flatten: Duration::ZERO,
+        working_peak: 0,
         peak: 0,
         trimming: Duration::ZERO,
         trims: 0,
@@ -420,11 +482,47 @@ fn run(
         }
         if finish.load(Ordering::Acquire) {
             port.clear();
-            return stitch
+            let stitch = stitch
                 .as_ref()
-                .ok_or_else(|| Error::new("Long capture unavailable"))?
-                .flatten(cancel)
-                .map(Arc::new);
+                .ok_or_else(|| Error::new("Long capture unavailable"))?;
+            let started = Instant::now();
+            let (width, height) = stitch.size();
+            stats.working_peak = stats
+                .working_peak
+                .max(stitch.retained_bytes() + width * height * 4);
+            let result = stitch.flatten(cancel).map(Arc::new);
+            stats.flatten += started.elapsed();
+            return result;
+        }
+        if let Some((queue, notify, sizes)) = axis {
+            let request = queue.lock().unwrap().take();
+            if let Some((request, expected, desired)) = request {
+                let started = Instant::now();
+                let preview = if expected == sequence
+                    && !paused.load(Ordering::Acquire)
+                    && !choosing_directory.load(Ordering::Acquire)
+                    && let Some(stitch) = stitch.as_mut()
+                    && stitch.change_axis(desired, cancel).unwrap_or(false)
+                {
+                    // Re-evaluate the last delivered capture on the new axis even if the desktop is static.
+                    serial = None;
+                    sequence += 1;
+                    last_feedback = Feedback::Unchanged;
+                    let (width, height) = sizes[usize::from(desired == Axis::Horizontal)];
+                    Some(stitch.preview(width, height))
+                } else {
+                    None
+                };
+                tracing::debug!(
+                    request,
+                    sequence,
+                    ?desired,
+                    applied = preview.is_some(),
+                    elapsed_ms = started.elapsed().as_secs_f64() * 1000.,
+                    "Long capture direction resolved"
+                );
+                notify(request, sequence, desired, preview);
+            }
         }
         if paused.load(Ordering::Acquire) || choosing_directory.load(Ordering::Acquire) {
             if let Some((queue, ready)) = trim
@@ -472,6 +570,11 @@ fn run(
                 if choosing_directory.load(Ordering::Acquire) {
                     continue;
                 }
+                let retained_before = stitch.as_ref().map_or(0, Stitcher::retained_bytes);
+                let incoming = image.pixels.len();
+                let horizontal = stitch
+                    .as_ref()
+                    .is_some_and(|s| s.axis() == Axis::Horizontal);
                 let first = stitch.is_none();
                 let matching = Instant::now();
                 let prior_position = stitch.as_ref().and_then(Stitcher::position);
@@ -489,7 +592,11 @@ fn run(
                 }
                 stats.accepted += u64::from(feedback == Feedback::Accepted);
                 stats.rejected += u64::from(feedback == Feedback::Uncertain);
-                stats.peak = stats.peak.max(stitch.as_ref().unwrap().retained_bytes());
+                let retained = stitch.as_ref().unwrap().retained_bytes();
+                stats.peak = stats.peak.max(retained);
+                stats.working_peak = stats
+                    .working_peak
+                    .max(retained.max(retained_before) + incoming * if horizontal { 2 } else { 1 });
                 if first
                     || feedback != last_feedback
                     || feedback == Feedback::Accepted
@@ -629,7 +736,12 @@ mod tests {
             Ok(())
         }
         fn latest(&self) -> Result<Option<Arc<ScreenCaptureFrame>>> {
-            Ok(self.frames.lock().unwrap().pop_front())
+            let mut frames = self.frames.lock().unwrap();
+            Ok(if frames.len() > 1 {
+                frames.pop_front()
+            } else {
+                frames.front().cloned()
+            })
         }
         fn clear(&self) {
             self.clears.fetch_add(1, Ordering::SeqCst);
@@ -674,6 +786,95 @@ mod tests {
             clears: AtomicUsize::new(0),
         })
     }
+    #[test]
+    fn direction_switch_rechecks_the_latest_capture_even_with_the_same_serial() {
+        fn columns(x0: usize, width: usize) -> CapturedRegion {
+            let mut image = frame(0);
+            image.bounds.right = width as i32;
+            image.pixels = (0u32..80)
+                .flat_map(|y| {
+                    (x0..x0 + width).flat_map(move |x| {
+                        let v = (x as u32 + 1).wrapping_mul(0x9e3779b9).rotate_left(y % 29)
+                            ^ y.wrapping_mul(0x85ebca6b);
+                        [v as u8, (v >> 8) as u8, (v >> 16) as u8, 255]
+                    })
+                })
+                .collect();
+            image
+        }
+        let bounds = columns(0, 64).bounds;
+        let port = Arc::new(Capture {
+            frames: Mutex::new(
+                [0, 20]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, x)| {
+                        Arc::new(ScreenCaptureFrame {
+                            revision: 1,
+                            serial: index as u64 + 1,
+                            regions: vec![columns(x, 64)],
+                        })
+                    })
+                    .collect(),
+            ),
+            requests: AtomicUsize::new(0),
+            clears: AtomicUsize::new(0),
+        });
+        let queue = AxisQueue::default();
+        let cancel = AtomicBool::new(false);
+        let finish = AtomicBool::new(false);
+        let (done, deadline) = std::sync::mpsc::channel();
+        let result = std::thread::scope(|scope| {
+            let cancelled = &cancel;
+            scope.spawn(move || {
+                if deadline.recv_timeout(Duration::from_secs(3)).is_err() {
+                    cancelled.store(true, Ordering::Release);
+                }
+            });
+            let result = run(
+                || Some(port),
+                bounds,
+                vec![],
+                (
+                    &cancel,
+                    &AtomicBool::new(false),
+                    &finish,
+                    &AtomicBool::new(false),
+                ),
+                (
+                    None,
+                    None,
+                    Some((
+                        &queue,
+                        &|request, version, axis, preview| {
+                            assert_eq!((request, version, axis), (1, 3, Axis::Horizontal));
+                            assert!(preview.is_some());
+                        },
+                        [(30, 50), (50, 30)],
+                    )),
+                ),
+                || Ok(vec![bounds]),
+                |sequence, stitch, feedback| match sequence {
+                    1 => assert_eq!(feedback, Feedback::Accepted),
+                    2 => {
+                        assert_eq!(feedback, Feedback::Uncertain);
+                        *queue.lock().unwrap() = Some((1, sequence, Axis::Horizontal));
+                    }
+                    4 => {
+                        assert_eq!(feedback, Feedback::Accepted);
+                        assert_eq!(stitch.size(), (84, 80));
+                        finish.store(true, Ordering::Release);
+                    }
+                    _ => unreachable!(),
+                },
+            );
+            let _ = done.send(());
+            result
+        })
+        .unwrap();
+        assert_eq!(result.pixels, columns(0, 84).pixels);
+    }
+
     #[test]
     fn automatic_scroll_revalidates_authorization_before_injecting() {
         use lexift_core::{domain::geometry::Point, ports::magnifier::WindowToken};
@@ -764,7 +965,7 @@ mod tests {
             frame(0).bounds,
             vec![],
             (&cancel, &paused, &finish, &AtomicBool::new(false)),
-            (None, None),
+            (None, None, None),
             || Ok(vec![frame(0).bounds]),
             |seq, _, feedback| {
                 if feedback == Feedback::Unchanged {
@@ -799,7 +1000,7 @@ mod tests {
                 frame(0).bounds,
                 vec![],
                 (&cancel, &paused, &finish, &AtomicBool::new(false)),
-                (None, None),
+                (None, None, None),
                 || Ok(vec![frame(0).bounds]),
                 |_, _, _| cancel.store(true, Ordering::Release)
             )
@@ -829,6 +1030,7 @@ mod tests {
                         *queue.lock().unwrap() = Some((2, Some(Trim::Above)));
                     }
                 })),
+                None,
             ),
             || Ok(vec![frame(0).bounds]),
             |sequence, stitch, _| match sequence {

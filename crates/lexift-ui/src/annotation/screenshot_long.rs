@@ -31,7 +31,7 @@ struct View {
     original: Option<(Arc<Vec<CapturedRegion>>, Arc<ScreenCaptureFrame>)>,
     drag: Option<toolbar::Drag>,
     retired_canvases: Vec<CanvasLayer>,
-    preview_size: (usize, usize),
+    preview_size: (usize, usize, usize),
     started: Option<std::time::Instant>,
     finish_started: Option<std::time::Instant>,
     notification: Option<(String, bool)>,
@@ -274,6 +274,7 @@ pub(crate) fn execute(command: Command) {
             session,
             operation,
             sequence,
+            axis,
             preview,
             ..
         } if valid(session, operation) && !image_editing() => {
@@ -298,9 +299,9 @@ pub(crate) fn execute(command: Command) {
                     }
                 });
             }
-            let above = preview.can_trim(Trim::Above);
-            let below = preview.can_trim(Trim::Below);
-            if present_preview(preview) {
+            let above = preview.can_trim_on(axis, Trim::Above);
+            let below = preview.can_trim_on(axis, Trim::Below);
+            if present_preview(preview, axis) {
                 VIEW.with(|v| {
                     let mut v = v.borrow_mut();
                     if v.session == session && v.operation == operation && v.presented == sequence {
@@ -412,6 +413,50 @@ pub(crate) fn execute(command: Command) {
         _ => {}
     }
 }
+pub(super) fn axis() -> lexift_core::domain::long_capture::Axis {
+    FLOW.with(|f| {
+        f.borrow()
+            .state
+            .long
+            .as_ref()
+            .map_or(lexift_core::domain::long_capture::Axis::Vertical, |long| {
+                long.axis
+            })
+    })
+}
+
+pub(super) fn axis_menu_owner() -> Option<(u64, u64, u64)> {
+    let enabled = FLOW.with(|f| {
+        let f = f.borrow();
+        !f.state.quick_directory_pending
+            && f.state.long.as_ref().is_some_and(|l| {
+                l.phase == Phase::Capturing
+                    && l.sequence != 0
+                    && !l.axis_locked
+                    && l.axis_pending.is_none()
+                    && !l.trim_pending
+                    && l.auto_scroll.mode == Mode::Manual
+            })
+    });
+    enabled.then(trim_identity).flatten()
+}
+
+pub(super) fn change_axis(index: i32) {
+    use lexift_core::domain::long_capture::Axis;
+    if let Some((session, operation, _)) = axis_menu_owner() {
+        send(Event::ChangeAxis {
+            session,
+            operation,
+            sequence: trim_sequence(),
+            axis: if index == 0 {
+                Axis::Vertical
+            } else {
+                Axis::Horizontal
+            },
+        });
+    }
+}
+
 pub(super) fn trim_identity() -> Option<(u64, u64, u64)> {
     VIEW.with(|v| {
         let v = v.borrow();
@@ -424,7 +469,10 @@ pub(super) fn trim_identity() -> Option<(u64, u64, u64)> {
 pub(super) fn trim_options() -> (bool, bool) {
     let allowed = FLOW.with(|f| {
         f.borrow().state.long.as_ref().is_some_and(|l| {
-            l.phase == Phase::Capturing && !l.trim_pending && l.auto_scroll.mode == Mode::Manual
+            l.phase == Phase::Capturing
+                && !l.trim_pending
+                && l.axis_pending.is_none()
+                && l.auto_scroll.mode == Mode::Manual
         })
     });
     VIEW.with(|v| {
@@ -816,6 +864,14 @@ fn open_control(session: u64, operation: u64, bounds: Rect) {
             })
         });
         let work = v.control.input();
+        let axis_work = work.clone();
+        w.on_axis_menu(move || {
+            axis_work.post(move || {
+                if current(session, operation, rev) {
+                    super::delay::long_axis_menu();
+                }
+            });
+        });
         w.on_auto_scroll(move || {
             work.post(move || {
                 if current(session, operation, rev) {
@@ -953,6 +1009,7 @@ fn prepare(session: u64, operation: u64, attempt: u8) {
             v.preview_size = (
                 (200. * dpi).round() as usize,
                 ((a.bottom - a.top) as f32 - 20. * dpi).max(1.) as usize,
+                ((a.right - a.left) as f32 - 20. * dpi).max(1.) as usize,
             );
             Some((states, roles && through))
         })
@@ -1112,7 +1169,8 @@ fn move_control(event: PopupPointerInput) -> bool {
     }
     matches!(event, PopupPointerInput::Moved { .. })
 }
-fn present_preview(p: Preview) -> bool {
+fn present_preview(p: Preview, axis: lexift_core::domain::long_capture::Axis) -> bool {
+    let horizontal = axis == lexift_core::domain::long_capture::Axis::Horizontal;
     REGISTRY.with(|s| {
         let s = s.borrow();
         let Some(r) = s.as_ref() else { return false };
@@ -1134,27 +1192,56 @@ fn present_preview(p: Preview) -> bool {
             let width = frame.width() as i32;
             let height = frame.height() as i32;
             let src = v.source;
-            let x = if src.right + gap + width <= a.right {
-                src.right + gap
-            } else if src.left - gap - width >= a.left {
-                src.left - gap - width
+            let max_x = (a.right - width).max(a.left);
+            let max_y = (a.bottom - height).max(a.top);
+            let (x, y) = if horizontal {
+                let x = src.left.clamp(a.left, max_x);
+                let mut below = src.bottom + gap;
+                let mut above = src.top - height - gap;
+                if let Some(control) = v.control.get() {
+                    let pos = control.window().position();
+                    let size = control.window().size();
+                    if x < pos.x + size.width as i32 && x + width > pos.x {
+                        if below < pos.y + size.height as i32 && below + height > pos.y {
+                            below = pos.y + size.height as i32 + gap;
+                        }
+                        if above < pos.y + size.height as i32 && above + height > pos.y {
+                            above = pos.y - height - gap;
+                        }
+                    }
+                }
+                let y = if below <= max_y {
+                    below
+                } else if above >= a.top {
+                    above
+                } else {
+                    above.clamp(a.top, max_y)
+                };
+                (x, y)
             } else {
-                (src.right - width - gap).clamp(a.left, a.right - width)
+                let x = if src.right + gap + width <= a.right {
+                    src.right + gap
+                } else if src.left - gap - width >= a.left {
+                    src.left - gap - width
+                } else {
+                    (src.right - width - gap).clamp(a.left, max_x)
+                };
+                let y = (src.bottom - height)
+                    .clamp(a.top + gap, (a.bottom - height - gap).max(a.top + gap));
+                (x, y)
             };
-            let y = (src.bottom - height)
-                .clamp(a.top + gap, (a.bottom - height - gap).max(a.top + gap));
             w.window().set_position(slint::PhysicalPosition::new(x, y));
             w.window()
                 .set_size(slint::PhysicalSize::new(width as u32, height as u32));
             w.set_preview(image(&p.image));
-            let span = (p.visible.bottom - p.visible.top).max(1) as f32;
-            w.set_current_top((p.current.top.max(p.visible.top) - p.visible.top) as f32 / span);
-            w.set_current_height(
-                (p.current.bottom.min(p.visible.bottom) - p.current.top.max(p.visible.top)).max(0)
-                    as f32
-                    / span,
-            );
+            let (left, top, width, height) = feedback::marker(&p);
+            w.set_current_left(left);
+            w.set_current_top(top);
+            w.set_current_width(width);
+            w.set_current_height(height);
             w.set_clipped(p.visible.top > 0);
+            w.set_clipped_left(p.visible.left > 0);
+            w.set_clipped_right(p.visible.right < p.extent.right);
             if !w.window().is_visible() {
                 let _ = w.show();
                 (r.lifecycle.configure_capture_feedback)(w.window());
@@ -1213,6 +1300,37 @@ pub(in crate::annotation) fn sync() {
             return;
         }
         w.set_ready(l.sequence > 0);
+        let horizontal = l.axis == lexift_core::domain::long_capture::Axis::Horizontal;
+        if w.get_horizontal() != horizontal {
+            w.set_horizontal(horizontal);
+            let scale = w.window().scale_factor();
+            let area = v.area;
+            let width = (w.get_content_width() * scale).ceil() as i32;
+            let height = w.window().size().height;
+            let pos = w.window().position();
+            if pos.x >= area.left && pos.x < area.right && pos.y >= area.top && pos.y < area.bottom
+            {
+                let width = width.min(area.right - area.left);
+                w.window()
+                    .set_size(slint::PhysicalSize::new(width as u32, height));
+                w.window().set_position(slint::PhysicalPosition::new(
+                    pos.x.min(area.right - width),
+                    pos.y,
+                ));
+            } else {
+                w.window()
+                    .set_size(slint::PhysicalSize::new(width as u32, height));
+            }
+        }
+        w.set_axis_enabled(
+            l.phase == Phase::Capturing
+                && l.sequence != 0
+                && !l.axis_locked
+                && l.axis_pending.is_none()
+                && !l.trim_pending
+                && l.auto_scroll.mode == Mode::Manual
+                && !state.quick_directory_pending,
+        );
         w.set_auto_waiting(l.auto_scroll.mode == Mode::Waiting);
         w.set_auto_running(l.auto_scroll.mode == Mode::Running);
         w.set_paused(l.phase == Phase::Paused);
@@ -1220,6 +1338,7 @@ pub(in crate::annotation) fn sync() {
         w.set_trim_pending(l.trim_pending);
         w.set_finishing(
             l.trim_pending
+                || l.axis_pending.is_some()
                 || state.quick_directory_pending
                 || l.phase == Phase::Finishing
                 || state.phase == ScreenshotPhase::Output,
@@ -1490,6 +1609,10 @@ mod tests {
                 target: None,
                 auto_scroll: Default::default(),
                 trim_pending: false,
+                axis: lexift_core::domain::long_capture::Axis::Vertical,
+                axis_locked: false,
+                axis_pending: None,
+                axis_request: 0,
             })
         });
         REGISTRY.with(|r| {
@@ -1677,6 +1800,10 @@ mod tests {
                 target: None,
                 auto_scroll: Default::default(),
                 trim_pending: false,
+                axis: lexift_core::domain::long_capture::Axis::Vertical,
+                axis_locked: false,
+                axis_pending: None,
+                axis_request: 0,
             })
         });
         execute(Command::Prepare {
@@ -1734,6 +1861,7 @@ mod tests {
             session: 81,
             operation: 3,
             sequence: 1,
+            axis: Default::default(),
             first: true,
             preview: preview.clone(),
         });
@@ -1747,6 +1875,7 @@ mod tests {
             session: 81,
             operation: 3,
             sequence: 0,
+            axis: Default::default(),
             first: true,
             preview,
         });
@@ -1795,6 +1924,10 @@ mod tests {
                 target: None,
                 auto_scroll: Default::default(),
                 trim_pending: false,
+                axis: lexift_core::domain::long_capture::Axis::Vertical,
+                axis_locked: false,
+                axis_pending: None,
+                axis_request: 0,
             })
         });
         let w = AnnotationCanvas::new().unwrap();
@@ -1864,6 +1997,10 @@ mod tests {
                 target: None,
                 auto_scroll: Default::default(),
                 trim_pending: false,
+                axis: lexift_core::domain::long_capture::Axis::Vertical,
+                axis_locked: false,
+                axis_pending: None,
+                axis_request: 0,
             })
         });
         let w = AnnotationCanvas::new().unwrap();
@@ -1997,6 +2134,10 @@ mod tests {
             target: None,
             auto_scroll: Default::default(),
             trim_pending: false,
+            axis: lexift_core::domain::long_capture::Axis::Vertical,
+            axis_locked: false,
+            axis_pending: None,
+            axis_request: 0,
         };
         FLOW.with(|f| f.borrow_mut().state.long = Some(state));
         VIEW.with(|v| {
@@ -2019,6 +2160,7 @@ mod tests {
             session: 81,
             operation: 3,
             sequence: 2,
+            axis: Default::default(),
             first: true,
             preview: Preview {
                 image: thumbnail.clone(),
@@ -2037,6 +2179,7 @@ mod tests {
             session: 81,
             operation: 3,
             sequence: 4,
+            axis: Default::default(),
             first: true,
             preview: Preview {
                 image: thumbnail.clone(),
@@ -2110,6 +2253,10 @@ mod tests {
                 target: None,
                 auto_scroll: Default::default(),
                 trim_pending: false,
+                axis: lexift_core::domain::long_capture::Axis::Vertical,
+                axis_locked: false,
+                axis_pending: None,
+                axis_request: 0,
             });
         });
         let w = AnnotationCanvas::new().unwrap();
@@ -2299,6 +2446,20 @@ mod tests {
                     w.set_paused(false);
                     w.set_finishing(false);
                     w.set_dimensions("600 脳 2400 px".into());
+                    w.set_horizontal(true);
+                    w.set_axis_enabled(true);
+                    w.set_dimensions("2400 × 600 px".into());
+                    let horizontal_width = w.get_content_width();
+                    assert!(horizontal_width < fixed_width);
+                    draw(
+                        &adapter,
+                        format!("horizontal-control-{}-{dark}-{scale}", language.code()),
+                        (horizontal_width * scale) as u32,
+                        (40. * scale) as u32,
+                    );
+                    w.set_horizontal(false);
+                    w.set_axis_enabled(false);
+                    w.set_dimensions("600 × 2400 px".into());
                     draw(
                         &confirm_adapter,
                         format!("confirmation-{}-{dark}-{scale}", language.code()),
