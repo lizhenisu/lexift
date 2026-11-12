@@ -2363,3 +2363,12 @@ msgstr "Salvar PNG rapidamente"
 
 msgid "Change quick save directory"
 msgstr "Alterar pasta de salvamento rápido"
+
+msgid "Restore last closed pin"
+msgstr "Restaurar a última imagem fixada fechada"
+
+msgid "Could not restore the closed pin"
+msgstr "Não foi possível restaurar a imagem fixada fechada"
+
+msgid "The closed pin could not be retained"
+msgstr "Não foi possível manter a imagem fixada fechada"

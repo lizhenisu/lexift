@@ -2363,3 +2363,12 @@ msgstr "快速保存 PNG"
 
 msgid "Change quick save directory"
 msgstr "更改快速保存目录"
+
+msgid "Restore last closed pin"
+msgstr "恢复上次关闭的贴图"
+
+msgid "Could not restore the closed pin"
+msgstr "无法恢复已关闭的贴图"
+
+msgid "The closed pin could not be retained"
+msgstr "无法保留已关闭的贴图"

@@ -20,6 +20,7 @@ struct Edit {
     source: Rect,
     before: Rect,
     original_before: Rect,
+    confirmed_display: Rect,
     orientation: lexift_core::domain::image_transform::Orientation,
     position: slint::PhysicalPosition,
     size: slint::PhysicalSize,
@@ -32,6 +33,14 @@ struct Edit {
 thread_local! { static EDIT:RefCell<Option<Edit>>=const{RefCell::new(None)}; }
 pub(super) fn active() -> bool {
     EDIT.with(|s| s.borrow().is_some())
+}
+pub(crate) fn confirmed_display(id: u64) -> Option<Rect> {
+    EDIT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .filter(|edit| edit.id == id)
+            .map(|edit| edit.confirmed_display)
+    })
 }
 pub(super) fn clear() {
     EDIT.with(|s| s.borrow_mut().take());
@@ -50,6 +59,7 @@ fn saved(r: &Registry) -> Option<Edit> {
         window: w.as_weak(),
         source,
         before,
+        confirmed_display: display,
         original_before: r.document.session.image_crop.unwrap_or(source),
         orientation: r.document.session.image_orientation,
         position: w.window().position(),

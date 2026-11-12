@@ -2363,3 +2363,12 @@ msgstr "PNG 빠른 저장"
 
 msgid "Change quick save directory"
 msgstr "빠른 저장 폴더 변경"
+
+msgid "Restore last closed pin"
+msgstr "마지막으로 닫은 고정 이미지 복원"
+
+msgid "Could not restore the closed pin"
+msgstr "닫은 고정 이미지를 복원할 수 없습니다"
+
+msgid "The closed pin could not be retained"
+msgstr "닫은 고정 이미지를 보관할 수 없습니다"

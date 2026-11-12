@@ -2363,3 +2363,12 @@ msgstr "PNG をクイック保存"
 
 msgid "Change quick save directory"
 msgstr "クイック保存先を変更"
+
+msgid "Restore last closed pin"
+msgstr "最後に閉じたピンを復元"
+
+msgid "Could not restore the closed pin"
+msgstr "閉じたピンを復元できませんでした"
+
+msgid "The closed pin could not be retained"
+msgstr "閉じたピンを保持できませんでした"

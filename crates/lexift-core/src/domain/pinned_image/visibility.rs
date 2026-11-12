@@ -71,7 +71,7 @@ pub fn available(s: &AppState, hidden: bool) -> bool {
 
 /// A visibility batch cannot race the start of another image operation.
 pub(crate) fn blocks_event(s: &AppState, e: &AppEvent) -> bool {
-    if s.pin_visibility.pending.is_none() {
+    if s.pin_visibility.pending.is_none() && s.pin_restore.is_none() {
         return false;
     }
     matches!(
@@ -79,6 +79,7 @@ pub(crate) fn blocks_event(s: &AppState, e: &AppEvent) -> bool {
         AppEvent::Screenshot(
             crate::domain::screenshot::ScreenshotEvent::Requested(_)
                 | crate::domain::screenshot::ScreenshotEvent::Delayed { .. }
+                | crate::domain::screenshot::ScreenshotEvent::ShortcutRequested(_)
         ) | AppEvent::Ocr(crate::domain::ocr::OcrEvent::Requested { .. })
             | AppEvent::EditorOcr(crate::domain::editor_ocr::Event::Requested { .. })
             | AppEvent::ImageImport(crate::domain::image_import::Event::Requested { .. })
@@ -90,7 +91,8 @@ pub(crate) fn blocks_event(s: &AppState, e: &AppEvent) -> bool {
                 _
             ))
             | AppEvent::PinnedImage(
-                PinEvent::EditRequested { .. }
+                PinEvent::WindowVisibility(Event::Requested { .. })
+                    | PinEvent::EditRequested { .. }
                     | PinEvent::TransformRequested { .. }
                     | PinEvent::Requested { .. }
                     | PinEvent::Recognize { .. }

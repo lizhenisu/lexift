@@ -90,6 +90,14 @@ impl Gesture {
 }
 #[derive(Clone, Copy)]
 enum Origin {
+    Restored(
+        u64,
+        u64,
+        lexift_core::domain::pinned_image::ClosedGeometry,
+        lexift_core::domain::pinned_image::interaction::Policy,
+        bool,
+        lexift_core::domain::geometry::Point,
+    ),
     Screenshot(u64, u64),
     History(
         lexift_core::domain::image_history::workflow::OutputKey,
@@ -102,11 +110,21 @@ impl Origin {
             Self::Screenshot(session, operation) => {
                 crate::annotation::screenshot::output_current(session, operation)
             }
+            Self::Restored(source, request, ..) => {
+                RESTORE.with(|r| r.get() == Some((source, request)))
+            }
             Self::History(key, _) => crate::bridge::image_history::output_current(key),
         }
     }
     fn complete(self, result: lexift_core::Result<SaveOutcome>) {
         match self {
+            Self::Restored(source, request, ..) if result != Ok(SaveOutcome::Saved) => {
+                emit_pin(lexift_core::domain::pinned_image::Event::RestoreFinished {
+                    source,
+                    request,
+                    id: None,
+                })
+            }
             Self::History(
                 lexift_core::domain::image_history::workflow::OutputKey::Import { operation },
                 _,
@@ -872,13 +890,59 @@ pub(crate) fn shutdown() {
     let retired = STATE.with(|s| s.borrow_mut().take());
     drop(retired);
 }
+thread_local! {
+    static RESTORE: Cell<Option<(u64, u64)>> = const { Cell::new(None) };
+    static RESTORE_NOTICE: Cell<Option<(lexift_core::domain::geometry::Point, bool)>> = const { Cell::new(None) };
+    static RESTORE_AVAILABLE: Cell<bool> = const { Cell::new(false) };
+}
+pub(crate) fn sync_closed_restore(state: &lexift_core::AppState) {
+    RESTORE.set(state.pin_restore);
+    if RESTORE_NOTICE.replace(state.pin_restore_notice) != state.pin_restore_notice
+        && let Some((point, restoring)) = state.pin_restore_notice
+    {
+        crate::bridge::image_history::show_passive_feedback(
+            point,
+            if restoring {
+                "Could not restore the closed pin"
+            } else {
+                "The closed pin could not be retained"
+            },
+            true,
+        );
+    }
+    RESTORE_AVAILABLE.set(lexift_core::domain::pinned_image::restore_available(state));
+}
+pub(crate) fn closed_restore_available() -> bool {
+    RESTORE_AVAILABLE.get() && visibility::runtime_idle()
+}
+pub(crate) fn close_from_core(id: u64) {
+    retire(id, false);
+}
 pub(crate) fn request_close(id: u64) {
+    retire(id, true);
+}
+fn retire(id: u64, user: bool) {
+    let content = user
+        .then(|| {
+            crate::annotation::pin_crop::confirmed_display(id)
+                .or_else(|| geometry(id).map(|(_, content)| content))
+        })
+        .flatten();
     let window = STATE.with(|s| {
         let mut s = s.borrow_mut();
         let pin = s.as_mut()?.windows.get_mut(&id)?;
         if pin.phase == Phase::Closing {
             return None;
         }
+        let record = content
+            .filter(|_| pin.phase == Phase::Visible)
+            .map(
+                |content| lexift_core::domain::pinned_image::ClosedGeometry {
+                    content,
+                    topmost: pin.topmost,
+                    shadow: pin.shadow,
+                },
+            );
         pin.phase = Phase::Closing;
         pin.gesture.retire();
         pin.window.retire_input();
@@ -886,10 +950,13 @@ pub(crate) fn request_close(id: u64) {
             .start(slint::TimerMode::SingleShot, Duration::ZERO, move || {
                 close(id)
             });
-        pin.window.get().map(ComponentHandle::clone_strong)
+        pin.window.get().map(|w| (w.clone_strong(), record))
     });
-    if let Some(window) = window {
-        emit_pin(lexift_core::domain::pinned_image::Event::Closed { id });
+    if let Some((window, record)) = window {
+        emit_pin(match record {
+            Some(geometry) => lexift_core::domain::pinned_image::Event::UserClosed { id, geometry },
+            None => lexift_core::domain::pinned_image::Event::Closed { id },
+        });
         window.invoke_close_menu();
     }
 }
@@ -1160,6 +1227,37 @@ pub(crate) fn show_history_document(
         Some((base, samples, document)),
     );
 }
+pub(crate) fn show_restored(
+    pin: lexift_core::domain::pinned_image::ClosedPin,
+    request: u64,
+    anchor: lexift_core::domain::geometry::Point,
+    image: Arc<CapturedRegion>,
+    base: Arc<CapturedRegion>,
+    samples: Option<Arc<lexift_core::ports::screen_capture::ScreenCaptureFrame>>,
+) {
+    let origin = Origin::Restored(
+        pin.id,
+        request,
+        pin.geometry,
+        pin.policy,
+        pin.hidden,
+        anchor,
+    );
+    let document = pin.document.map(|document| {
+        (
+            base,
+            samples.unwrap_or_else(|| {
+                Arc::new(lexift_core::ports::screen_capture::ScreenCaptureFrame {
+                    revision: 0,
+                    serial: 0,
+                    regions: vec![],
+                })
+            }),
+            document,
+        )
+    });
+    show_from(origin, image, document);
+}
 fn show_from(
     origin: Origin,
     image: Arc<CapturedRegion>,
@@ -1174,7 +1272,7 @@ fn show_from(
     }
     let (session, operation) = match origin {
         Origin::Screenshot(s, o) => (s, o),
-        Origin::History(..) => (0, 0),
+        Origin::History(..) | Origin::Restored(..) => (0, 0),
     };
     let result = STATE.with(|slot| {
         let mut slot = slot.borrow_mut();
@@ -1308,7 +1406,35 @@ fn show_from(
         window.on_zoom_preset_requested(move |percent| zoom::request(id, percent));
         window
             .on_navigation_key(move |down| crate::annotation::pin_editor::navigation_key(id, down));
+        let mut interaction = lexift_core::domain::pinned_image::interaction::State::default();
+        let (mut topmost, mut shadow) = (true, true);
+        let (mut w, mut h) = (w, h);
+        if let Origin::Restored(_, _, geometry, policy, hidden, _) = origin {
+            interaction.applied = policy;
+            topmost = geometry.topmost;
+            shadow = geometry.shadow;
+            w = geometry
+                .content
+                .right
+                .saturating_sub(geometry.content.left)
+                .max(1);
+            h = geometry
+                .content
+                .bottom
+                .saturating_sub(geometry.content.top)
+                .max(1);
+            window.set_topmost(topmost);
+            window.set_shadow_enabled(shadow);
+            window.set_locked(policy.locked);
+            window.set_content_opacity_percent(i32::from(policy.opacity.percent()));
+            window.set_annotations_hidden(hidden);
+        }
         let initial = match origin {
+            Origin::Restored(_, _, geometry, _, _, anchor) => Some(restored_position(
+                geometry.content,
+                anchor,
+                &(r.lifecycle.annotation_displays)(),
+            )),
             Origin::History(
                 lexift_core::domain::image_history::workflow::OutputKey::Import { operation },
                 _,
@@ -1346,7 +1472,7 @@ fn show_from(
                 visibility_epoch: 0,
                 hidden_work_area: None,
                 frame_queued: false,
-                interaction: Default::default(),
+                interaction,
                 origin,
                 window: owned,
                 visible: image.bounds,
@@ -1357,8 +1483,8 @@ fn show_from(
                 revision: 0,
                 phase: Phase::Preparing,
                 prepared_inset: inset,
-                topmost: true,
-                shadow: true,
+                topmost,
+                shadow,
                 gesture,
                 close_task: slint::Timer::default(),
                 output_error: None,
@@ -1374,10 +1500,11 @@ fn show_from(
     if let (Ok(id), Some((base, samples, request))) = (&result, document) {
         if matches!(
             origin,
-            Origin::History(
-                lexift_core::domain::image_history::workflow::OutputKey::History { .. },
-                _
-            )
+            Origin::Restored(..)
+                | Origin::History(
+                    lexift_core::domain::image_history::workflow::OutputKey::History { .. },
+                    _
+                )
         ) {
             crate::annotation::pin_editor::install_history(*id, base, samples, request);
         } else {
@@ -1592,6 +1719,13 @@ fn prepare(id: u64, attempt: u8) {
                             source: (session, operation),
                         }
                     }
+                    Origin::Restored(source, request, ..) => {
+                        lexift_core::domain::pinned_image::Event::RestoreFinished {
+                            source,
+                            request,
+                            id: Some(id),
+                        }
+                    }
                     Origin::History(key, hidden) => {
                         lexift_core::domain::pinned_image::Event::HistoryOpened { id, key, hidden }
                     }
@@ -1637,6 +1771,27 @@ fn prepare(id: u64, attempt: u8) {
 fn zoom(id: u64, delta: f32, x: f32, y: f32) {
     zoom::wheel(id, delta, x, y);
 }
+fn restored_position(
+    content: lexift_core::domain::geometry::Rect,
+    anchor: lexift_core::domain::geometry::Point,
+    displays: &[lexift_core::domain::geometry::Rect],
+) -> lexift_core::domain::geometry::Point {
+    let point = lexift_core::domain::geometry::Point {
+        x: content.left,
+        y: content.top,
+    };
+    if displays.iter().any(|display| {
+        point.x >= display.left
+            && point.x < display.right
+            && point.y >= display.top
+            && point.y < display.bottom
+    }) {
+        point
+    } else {
+        anchor
+    }
+}
+
 fn fit(id: u64, zoom: Option<(f32, f32, f32)>) {
     let value = STATE.with(|s| {
         let s = s.borrow();
@@ -1651,9 +1806,10 @@ fn fit(id: u64, zoom: Option<(f32, f32, f32)>) {
             p.visible,
             p.phase,
             p.prepared_inset,
+            p.origin,
         ))
     });
-    let Some((window, lifecycle, image, phase, prepared_inset)) = value else {
+    let Some((window, lifecycle, image, phase, prepared_inset, origin)) = value else {
         return;
     };
     let pos = window.window().position();
@@ -1665,18 +1821,43 @@ fn fit(id: u64, zoom: Option<(f32, f32, f32)>) {
     } else {
         margin
     };
+    let (inner_pos, inner_size, restoring) = match origin {
+        Origin::Restored(_, _, geometry, _, _, anchor) if phase == Phase::Preparing => {
+            let position =
+                restored_position(geometry.content, anchor, &(lifecycle.annotation_displays)());
+            (
+                slint::PhysicalPosition::new(position.x, position.y),
+                slint::PhysicalSize::new(
+                    geometry
+                        .content
+                        .right
+                        .saturating_sub(geometry.content.left)
+                        .max(1) as u32,
+                    geometry
+                        .content
+                        .bottom
+                        .saturating_sub(geometry.content.top)
+                        .max(1) as u32,
+                ),
+                true,
+            )
+        }
+        _ => (
+            slint::PhysicalPosition::new(pos.x + previous, pos.y + previous),
+            slint::PhysicalSize::new(
+                size.width.saturating_sub(2 * previous as u32),
+                size.height.saturating_sub(2 * previous as u32),
+            ),
+            false,
+        ),
+    };
     // A glow can cross a monitor seam; choose the work area from the image itself.
     let Some(area) = (lifecycle.popup_work_area)(lexift_core::domain::geometry::Point {
-        x: pos.x + previous + 1,
-        y: pos.y + previous + 1,
+        x: inner_pos.x,
+        y: inner_pos.y,
     }) else {
         return;
     };
-    let inner_pos = slint::PhysicalPosition::new(pos.x + previous, pos.y + previous);
-    let inner_size = slint::PhysicalSize::new(
-        size.width.saturating_sub(2 * previous as u32),
-        size.height.saturating_sub(2 * previous as u32),
-    );
     let area = lexift_core::domain::geometry::Rect {
         left: area.left + margin,
         top: area.top + margin,
@@ -1690,7 +1871,7 @@ fn fit(id: u64, zoom: Option<(f32, f32, f32)>) {
             y - window.get_frame_inset(),
         )
     });
-    let (size, position) = placement(inner_pos, inner_size, image, area, scale, zoom);
+    let (size, position) = placement(inner_pos, inner_size, image, area, scale, zoom, restoring);
     let size = zoom::initial_size(size, margin, lifecycle.pin_window_budget);
     window.window().set_size(slint::PhysicalSize::new(
         size.width + 2 * margin as u32,
@@ -1715,6 +1896,7 @@ fn placement(
     area: lexift_core::domain::geometry::Rect,
     scale: f32,
     zoom: Option<(f32, f32, f32)>,
+    keep_smaller_size: bool,
 ) -> (slint::PhysicalSize, slint::PhysicalPosition) {
     let (iw, ih) = (
         (image.right - image.left) as f32,
@@ -1722,8 +1904,13 @@ fn placement(
     );
     let max = ((area.right - area.left - 16).max(1) as f32 / iw)
         .min((area.bottom - area.top - 16).max(1) as f32 / ih);
-    let min = (32. * scale / iw.min(ih)).min(max);
     let current = (size.width as f32 / iw).max(f32::EPSILON);
+    let min = (32. * scale / iw.min(ih)).min(max);
+    let min = if keep_smaller_size {
+        min.min(current)
+    } else {
+        min
+    };
     let factor = (current * zoom.map_or(1., |z| z.0)).clamp(min, max);
     let (w, h) = (
         (iw * factor).round().max(1.) as u32,
@@ -2419,6 +2606,7 @@ fn zoom_keeps_the_mouse_anchor_and_clamps_negative_work_areas() {
         area,
         1.25,
         Some((1.1, 80., 40.)),
+        false,
     );
     assert_eq!(size, slint::PhysicalSize::new(220, 110));
     assert_eq!(position, slint::PhysicalPosition::new(-110, -5));
@@ -2429,6 +2617,7 @@ fn zoom_keeps_the_mouse_anchor_and_clamps_negative_work_areas() {
         area,
         1.25,
         Some((100., 0., 0.)),
+        false,
     );
     assert!(position.x >= area.left + 8 && position.y >= area.top + 8);
     assert!(position.x + size.width as i32 <= area.right - 8);

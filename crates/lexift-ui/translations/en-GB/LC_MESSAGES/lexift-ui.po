@@ -2363,3 +2363,12 @@ msgstr "Quick save PNG"
 
 msgid "Change quick save directory"
 msgstr "Change quick save directory"
+
+msgid "Restore last closed pin"
+msgstr "Restore last closed pin"
+
+msgid "Could not restore the closed pin"
+msgstr "Could not restore the closed pin"
+
+msgid "The closed pin could not be retained"
+msgstr "The closed pin could not be retained"

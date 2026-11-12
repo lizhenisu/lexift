@@ -155,6 +155,17 @@ pub(crate) trait ViewPort: Send + Sync {
         _image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
     ) {
     }
+    fn show_restored_pin(
+        &self,
+        _pin: lexift_core::domain::pinned_image::ClosedPin,
+        _request: u64,
+        _anchor: lexift_core::domain::geometry::Point,
+        _image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        _base: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        _samples: Option<Arc<lexift_core::ports::screen_capture::ScreenCaptureFrame>>,
+    ) -> bool {
+        false
+    }
     fn show_editable_pinned_screenshot(
         &self,
         session: u64,
@@ -261,6 +272,17 @@ impl ViewPort for lexift_ui::UiHandle {
         image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
     ) {
         self.present_pinned_image(id, revision, image);
+    }
+    fn show_restored_pin(
+        &self,
+        pin: lexift_core::domain::pinned_image::ClosedPin,
+        request: u64,
+        anchor: lexift_core::domain::geometry::Point,
+        image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        base: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        samples: Option<Arc<lexift_core::ports::screen_capture::ScreenCaptureFrame>>,
+    ) -> bool {
+        lexift_ui::UiHandle::show_restored_pin(self, pin, request, anchor, image, base, samples)
     }
     fn show_editable_pinned_screenshot(
         &self,
@@ -647,7 +669,7 @@ impl AppController {
             if let Some(runtime) = &self.screenshot {
                 runtime.sync_history(&snapshot.image_history);
                 runtime.sync(&snapshot.screenshot, quitting);
-                runtime.sync_pins(&snapshot.pinned_images, quitting);
+                runtime.sync_closed_pin(&snapshot, &commands, quitting);
                 runtime.sync_image_ocr(&snapshot, quitting);
             }
             if let Some(export) = &self.annotation_export {

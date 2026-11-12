@@ -87,7 +87,7 @@ mod panel;
 #[path = "parameter_transaction.rs"]
 mod parameter_edit;
 mod parameters;
-mod pin_crop;
+pub(crate) mod pin_crop;
 use parameters::endpoint;
 mod presenter;
 mod watermark;

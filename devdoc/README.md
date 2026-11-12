@@ -65,6 +65,7 @@
 - [选区历史与区域复用验证](releases/screenshot-region-history.md)
 - [截图模式验证](releases/screenshot-mode-2026-10-13.md)
 - [多贴图输入与生命周期验证](releases/multi-pin-interaction-2026-10-13.md)
+- [恢复上次关闭的贴图验证](releases/restore-closed-pin.md)
 - [剪贴板历史](features/clipboard-history.md)
 - [复制按钮反馈](features/copy-feedback.md)
 - [界面国际化](features/i18n.md)

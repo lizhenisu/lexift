@@ -666,8 +666,23 @@ impl UiHandle {
             crate::annotation::screenshot::show(session, frames, capture, windows)
         });
     }
+    pub fn show_restored_pin(
+        &self,
+        pin: lexift_core::domain::pinned_image::ClosedPin,
+        request: u64,
+        anchor: lexift_core::domain::geometry::Point,
+        image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        base: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
+        samples: Option<Arc<lexift_core::ports::screen_capture::ScreenCaptureFrame>>,
+    ) -> bool {
+        slint::invoke_from_event_loop(move || {
+            crate::pinned_screenshot::show_restored(pin, request, anchor, image, base, samples);
+        })
+        .is_ok()
+    }
     pub fn close_pinned_image(&self, id: u64) {
-        let _ = slint::invoke_from_event_loop(move || crate::pinned_screenshot::request_close(id));
+        let _ =
+            slint::invoke_from_event_loop(move || crate::pinned_screenshot::close_from_core(id));
     }
     pub fn apply_pinned_interaction(
         &self,
@@ -783,6 +798,7 @@ impl UiHandle {
             crate::annotation::screenshot::sync(&state.screenshot);
             crate::annotation::screenshot::delay::availability(&state);
             crate::annotation::image_import::sync(&state);
+            crate::pinned_screenshot::sync_closed_restore(&state);
             crate::pinned_screenshot::sync_outputs(&state.pinned_images);
             crate::pinned_screenshot::visibility::sync(&state);
             let view_state = mapper::view_state(&state);

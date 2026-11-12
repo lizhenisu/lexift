@@ -4,7 +4,7 @@ use lexift_core::domain::pinned_image::{
     Command as PinCommand, Event as PinEvent, Output as PinOutput, States as PinStates,
 };
 use lexift_core::{
-    AppEvent, Error, Result,
+    AppCommand, AppEvent, Error, Result,
     domain::{
         annotation_export::ExportRequest,
         screen_snapshot::crop_frames,
@@ -73,6 +73,7 @@ pub(crate) struct ScreenshotRuntime {
     color_job: Mutex<Option<(u64, u64, Arc<AtomicBool>)>>,
     color_serial: tokio::sync::Mutex<()>,
     pin_pending: Mutex<BTreeMap<(u64, u64), Arc<CapturedRegion>>>,
+    pin_restore_job: Mutex<Option<(u64, Arc<AtomicBool>)>>,
     pin_images: Mutex<BTreeMap<u64, Arc<CapturedRegion>>>,
     pin_jobs: Mutex<BTreeMap<u64, Arc<AtomicBool>>>,
     pin_pending_samples: Mutex<BTreeMap<(u64, u64), Arc<ScreenCaptureFrame>>>,
@@ -105,6 +106,7 @@ impl ScreenshotRuntime {
             color_job: Mutex::new(None),
             color_serial: Default::default(),
             pin_pending: Default::default(),
+            pin_restore_job: Default::default(),
             pin_images: Default::default(),
             pin_jobs: Default::default(),
             pin_previews: Default::default(),
@@ -214,7 +216,47 @@ impl ScreenshotRuntime {
             s.retire();
         }
     }
+    pub(crate) fn sync_closed_pin(
+        &self,
+        state: &lexift_core::AppState,
+        commands: &[AppCommand],
+        quitting: bool,
+    ) {
+        {
+            let mut job = self.pin_restore_job.lock().unwrap();
+            if job.as_ref().is_some_and(|(request, _)| {
+                quitting
+                    || state
+                        .pin_restore
+                        .is_none_or(|(_, pending)| pending != *request)
+            }) && let Some((_, cancel)) = job.take()
+            {
+                cancel.store(true, Ordering::Release);
+            }
+        }
+        for command in commands {
+            if let AppCommand::PinnedImage(PinCommand::AdoptRestored { source, id }) = command {
+                let mut images = self.pin_images.lock().unwrap();
+                if let Some(image) = images.remove(source) {
+                    images.insert(*id, image);
+                }
+                let mut samples = self.pin_samples.lock().unwrap();
+                if let Some(sample) = samples.remove(source) {
+                    samples.insert(*id, sample);
+                }
+            }
+        }
+        self.sync_pin_resources(
+            &state.pinned_images,
+            state.closed_pin.as_ref().map(|pin| pin.id),
+            quitting,
+        );
+    }
+    #[cfg(test)]
     pub fn sync_pins(&self, pins: &PinStates, quitting: bool) {
+        self.sync_pin_resources(pins, None, quitting);
+    }
+    pub(crate) fn sync_pin_resources(&self, pins: &PinStates, closed: Option<u64>, quitting: bool) {
         self.pin_previews
             .lock()
             .unwrap()
@@ -228,11 +270,11 @@ impl ScreenshotRuntime {
         self.pin_samples
             .lock()
             .unwrap()
-            .retain(|id, _| !quitting && pins.contains_key(id));
+            .retain(|id, _| !quitting && (pins.contains_key(id) || closed == Some(*id)));
         self.pin_images
             .lock()
             .unwrap()
-            .retain(|id, _| !quitting && pins.contains_key(id));
+            .retain(|id, _| !quitting && (pins.contains_key(id) || closed == Some(*id)));
         self.pin_jobs.lock().unwrap().retain(|id, cancel| {
             let keep = !quitting && pins.get(id).is_some_and(|p| p.busy);
             if !keep {
@@ -247,6 +289,82 @@ impl ScreenshotRuntime {
     }
     pub fn execute_pin(self: &Arc<Self>, controller: &Arc<AppController>, command: PinCommand) {
         match command {
+            PinCommand::CheckClosed { id } => {
+                let base = self.pin_images.lock().unwrap().get(&id).cloned();
+                let sample = self.pin_samples.lock().unwrap().get(&id).cloned();
+                let retained = base.is_some_and(|base| {
+                    let mut seen = std::collections::HashSet::new();
+                    std::iter::once(base.as_ref())
+                        .chain(sample.iter().flat_map(|frame| frame.regions.iter()))
+                        .filter(|region| seen.insert(region.pixels.as_ptr()))
+                        .try_fold(0usize, |total, region| {
+                            total.checked_add(region.pixels.capacity())
+                        })
+                        .is_some_and(|bytes| bytes <= 512 * 1024 * 1024)
+                });
+                controller.dispatch(AppEvent::PinnedImage(PinEvent::ClosedResources {
+                    id,
+                    retained,
+                }));
+            }
+            PinCommand::RestoreClosed {
+                pin,
+                request,
+                anchor,
+            } => {
+                let cancel = Arc::new(AtomicBool::new(false));
+                {
+                    let state = controller.state.lock().unwrap();
+                    if state.pin_restore != Some((pin.id, request)) {
+                        return;
+                    }
+                    *self.pin_restore_job.lock().unwrap() = Some((request, cancel.clone()));
+                }
+                let base = self.pin_images.lock().unwrap().get(&pin.id).cloned();
+                let samples = self.pin_samples.lock().unwrap().get(&pin.id).cloned();
+                let this = self.clone();
+                let c = controller.clone();
+                controller.runtime.spawn_blocking(move || {
+                    if let Some(base) = base
+                        && let Ok(image) = this.compose_pin(
+                            &base,
+                            samples.clone(),
+                            pin.document.as_ref(),
+                            pin.hidden,
+                            &cancel,
+                        )
+                        && !cancel.load(Ordering::Acquire)
+                        && c.state.lock().unwrap().pin_restore == Some((pin.id, request))
+                        && c.ui.show_restored_pin(
+                            pin.clone(),
+                            request,
+                            anchor,
+                            Arc::new(image),
+                            base,
+                            samples,
+                        )
+                    {
+                        return;
+                    }
+                    c.dispatch(AppEvent::PinnedImage(PinEvent::RestoreFinished {
+                        source: pin.id,
+                        request,
+                        id: None,
+                    }));
+                });
+            }
+            PinCommand::AdoptRestored { id, .. } => {
+                let bounds = self
+                    .pin_images
+                    .lock()
+                    .unwrap()
+                    .get(&id)
+                    .map(|image| image.bounds);
+                if let Some(bounds) = bounds {
+                    controller
+                        .dispatch(AppEvent::PinnedImage(PinEvent::SourceReady { id, bounds }));
+                }
+            }
             PinCommand::ApplyVisibility(request) => {
                 if !controller.ui.apply_pinned_visibility(request) {
                     controller.dispatch(AppEvent::PinnedImage(PinEvent::WindowVisibility(
@@ -384,8 +502,17 @@ impl ScreenshotRuntime {
             }
             PinCommand::Drop { id } => {
                 controller.ui.close_pinned_image(id);
-                self.pin_images.lock().unwrap().remove(&id);
-                self.pin_samples.lock().unwrap().remove(&id);
+                if controller
+                    .state
+                    .lock()
+                    .unwrap()
+                    .closed_pin
+                    .as_ref()
+                    .is_none_or(|pin| pin.id != id)
+                {
+                    self.pin_images.lock().unwrap().remove(&id);
+                    self.pin_samples.lock().unwrap().remove(&id);
+                }
                 if let Some(cancel) = self.pin_jobs.lock().unwrap().remove(&id) {
                     cancel.store(true, Ordering::Release);
                 }
@@ -1183,6 +1310,59 @@ fn select_quick_directory(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closed_pin_resource_is_transferred_before_pruning_live_pins() {
+        use lexift_core::domain::pinned_image::{ClosedGeometry, ClosedPin};
+        let runtime = ScreenshotRuntime::new(
+            || None,
+            Arc::new(Save),
+            Arc::new(lexift_ui::SoftwareExportRenderer),
+            Arc::new(Clipboard),
+        );
+        let image = Arc::new(CapturedRegion {
+            bounds: lexift_core::domain::geometry::Rect {
+                left: 0,
+                top: 0,
+                right: 1,
+                bottom: 1,
+            },
+            pixels: vec![255; 4],
+        });
+        let mut state = lexift_core::AppState::default();
+        runtime.install_test_pin_source(1, image.clone());
+        state.closed_pin = Some(ClosedPin {
+            id: 1,
+            geometry: ClosedGeometry {
+                content: image.bounds,
+                topmost: true,
+                shadow: true,
+            },
+            document: None,
+            hidden: false,
+            policy: Default::default(),
+            ready: true,
+        });
+        runtime.sync_closed_pin(&state, &[], false);
+        assert!(runtime.pin_images.lock().unwrap().contains_key(&1));
+        state.closed_pin = None;
+        state.pinned_images.insert(2, Default::default());
+        runtime.sync_closed_pin(
+            &state,
+            &[AppCommand::PinnedImage(PinCommand::AdoptRestored {
+                source: 1,
+                id: 2,
+            })],
+            false,
+        );
+        {
+            let images = runtime.pin_images.lock().unwrap();
+            assert!(!images.contains_key(&1));
+            assert!(Arc::ptr_eq(&image, &images[&2]));
+        }
+        runtime.sync_closed_pin(&state, &[], true);
+        assert!(runtime.pin_images.lock().unwrap().is_empty());
+    }
     use lexift_core::{
         domain::{annotation::Session, annotation_export::ExportSnapshot, geometry::Rect},
         ports::annotation_save::ImageSaveRequest,

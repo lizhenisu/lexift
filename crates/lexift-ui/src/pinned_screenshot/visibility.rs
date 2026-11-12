@@ -18,7 +18,7 @@ pub(super) fn reset() {
 pub(crate) fn available(hidden: bool) -> bool {
     VIEW.with(|v| v.borrow().available[usize::from(hidden)]) && runtime_idle()
 }
-fn runtime_idle() -> bool {
+pub(super) fn runtime_idle() -> bool {
     STATE.with(|s| {
         s.borrow().as_ref().is_some_and(|r| {
             !r.frozen

@@ -48,6 +48,10 @@ pub struct AppState {
     pub image_import: crate::domain::image_import::State,
     pub image_history: crate::domain::image_history::workflow::Workflow,
     pub last_pin_id: u64,
+    pub closed_pin: Option<crate::domain::pinned_image::ClosedPin>,
+    pub pin_restore: Option<(u64, u64)>,
+    pub pin_restore_serial: u64,
+    pub pin_restore_notice: Option<(crate::domain::geometry::Point, bool)>,
     pub pinned_images: crate::domain::pinned_image::States,
     pub pin_visibility: crate::domain::pinned_image::visibility::State,
     pub screenshot: crate::domain::screenshot::ScreenshotState,
@@ -100,6 +104,10 @@ impl AppState {
             image_import: Default::default(),
             image_history: Default::default(),
             last_pin_id: 0,
+            closed_pin: None,
+            pin_restore: None,
+            pin_restore_serial: 0,
+            pin_restore_notice: None,
             pinned_images: Default::default(),
             pin_visibility: Default::default(),
             screenshot: Default::default(),
@@ -1055,6 +1063,9 @@ impl AppState {
                 commands
             }
             AppEvent::ExitRequested => {
+                self.closed_pin = None;
+                self.pin_restore = None;
+                self.pin_restore_notice = None;
                 self.pin_visibility.pending = None;
                 self.pin_visibility.notice = None;
                 self.pin_visibility.serial = self

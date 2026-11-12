@@ -601,6 +601,11 @@ pub(crate) fn after(
                         .insert(Source::Pin(*id), (pending.ticket.origin, pending.kind));
                 }
             }
+            AppCommand::PinnedImage(pin::Command::AdoptRestored { source, id }) => {
+                if let Some(origin) = h.sources.remove(&Source::Pin(*source)) {
+                    h.sources.insert(Source::Pin(*id), origin);
+                }
+            }
             AppCommand::PinnedImage(pin::Command::RetainHistory { id, ticket }) => {
                 if let Some(pending) = h.pending.values().find(|p| p.ticket == *ticket) {
                     h.sources
@@ -648,7 +653,10 @@ pub(crate) fn after(
         Source::Screenshot(session) | Source::LongImage(session, _) => {
             *session == state.screenshot.session
         }
-        Source::Pin(id) => state.pinned_images.contains_key(id),
+        Source::Pin(id) => {
+            state.pinned_images.contains_key(id)
+                || state.closed_pin.as_ref().is_some_and(|pin| pin.id == *id)
+        }
         Source::Import(id) => state
             .image_import
             .request

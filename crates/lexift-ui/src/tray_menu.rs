@@ -70,6 +70,7 @@ pub(crate) fn refresh_pin_recovery() {
             w.set_pin_recovery_available(crate::pinned_screenshot::policy::recoverable());
             w.set_pin_hide_available(crate::pinned_screenshot::visibility::available(true));
             w.set_pin_restore_available(crate::pinned_screenshot::visibility::available(false));
+            w.set_closed_restore_available(crate::pinned_screenshot::closed_restore_available());
         }
     });
 }
@@ -185,6 +186,7 @@ pub(crate) fn show(request: TrayMenuRequest) {
         window.set_pin_recovery_available(crate::pinned_screenshot::policy::recoverable());
         window.set_pin_hide_available(crate::pinned_screenshot::visibility::available(true));
         window.set_pin_restore_available(crate::pinned_screenshot::visibility::available(false));
+        window.set_closed_restore_available(crate::pinned_screenshot::closed_restore_available());
         window.set_import_available(crate::annotation::image_import::available());
         window.set_selected(if request.keyboard { 0 } else { -1 });
         let key = Opening {
@@ -192,6 +194,9 @@ pub(crate) fn show(request: TrayMenuRequest) {
             request_id: request.request_id,
         };
         window.on_action(move |index| {
+            if index == 8 && !crate::pinned_screenshot::closed_restore_available() {
+                return;
+            }
             if index == 5 && !crate::pinned_screenshot::policy::recoverable() {
                 return;
             }
@@ -221,10 +226,14 @@ pub(crate) fn show(request: TrayMenuRequest) {
                     &crate::i18n::tr("Turn off mouse passthrough for all pins"),
                     &crate::i18n::tr("Hide all pins"),
                     &crate::i18n::tr("Restore hidden pins"),
+                    &crate::i18n::tr("Restore last closed pin"),
                     &labels.quit,
                 ],
                 &text,
             );
+            if matches == [8] && !crate::pinned_screenshot::closed_restore_available() {
+                return;
+            }
             if matches == [5] && !crate::pinned_screenshot::policy::recoverable() {
                 return;
             }
@@ -402,7 +411,10 @@ fn action_for_index(index: i32, anchor: lexift_core::domain::geometry::Point) ->
                 anchor,
             },
         )),
-        8 => AppEvent::ExitRequested,
+        8 => AppEvent::PinnedImage(lexift_core::domain::pinned_image::Event::RestoreClosed {
+            anchor,
+        }),
+        9 => AppEvent::ExitRequested,
         _ => return None,
     })
 }
@@ -583,7 +595,7 @@ mod tests {
             Some(AppEvent::SettingsWindowRequested)
         );
         assert_eq!(
-            action_for_index(8, Default::default()),
+            action_for_index(9, Default::default()),
             Some(AppEvent::ExitRequested)
         );
         assert_eq!(action_for_index(-1, Default::default()), None);
@@ -624,7 +636,7 @@ mod tests {
                 ))
             );
         }
-        assert_eq!(action_for_index(9, Default::default()), None);
+        assert_eq!(action_for_index(10, Default::default()), None);
     }
 }
 

@@ -40,8 +40,47 @@ pub struct Recognition {
     pub revision: u64,
     pub bounds: super::geometry::Rect,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClosedGeometry {
+    pub content: super::geometry::Rect,
+    pub topmost: bool,
+    pub shadow: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClosedPin {
+    pub id: u64,
+    pub geometry: ClosedGeometry,
+    pub document: Option<ExportRequest>,
+    pub hidden: bool,
+    pub policy: interaction::Policy,
+    pub ready: bool,
+}
+
+pub fn restore_available(state: &AppState) -> bool {
+    state.pin_restore.is_none()
+        && state.closed_pin.as_ref().is_some_and(|pin| pin.ready)
+        && visibility::idle(state)
+        && state.image_history.editor.is_none()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    UserClosed {
+        id: u64,
+        geometry: ClosedGeometry,
+    },
+    ClosedResources {
+        id: u64,
+        retained: bool,
+    },
+    RestoreClosed {
+        anchor: super::geometry::Point,
+    },
+    RestoreFinished {
+        source: u64,
+        request: u64,
+        id: Option<u64>,
+    },
     ColorRequested {
         id: u64,
         action: super::image_color::Action,
@@ -153,6 +192,19 @@ pub enum Event {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    CheckClosed {
+        id: u64,
+    },
+    RestoreClosed {
+        pin: ClosedPin,
+        request: u64,
+        anchor: super::geometry::Point,
+    },
+    AdoptRestored {
+        source: u64,
+        id: u64,
+    },
+
     ApplyVisibility(visibility::Request),
     ApplyInteraction {
         id: u64,
@@ -673,6 +725,100 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
             }
             vec![]
         }
+        Event::UserClosed { id, geometry } if state.pinned_images.contains_key(&id) => {
+            let pin = &state.pinned_images[&id];
+            let mut policy = pin.interaction.applied;
+            policy.passthrough = false;
+            let document = pin.document.as_ref().map(|document| {
+                let mut snapshot = (*document.snapshot).clone();
+                snapshot.session = std::sync::Arc::new(snapshot.session.restored_image());
+                snapshot.owner = None;
+                snapshot.excluded.clear();
+                ExportRequest {
+                    session: 0,
+                    request: 0,
+                    snapshot: std::sync::Arc::new(snapshot),
+                }
+            });
+            state.pin_restore = None;
+            state.pin_restore_notice = None;
+            state.closed_pin = Some(ClosedPin {
+                id,
+                geometry,
+                document,
+                policy,
+                hidden: pin.hidden,
+                ready: false,
+            });
+            let mut commands = reduce(state, Event::Closed { id });
+            commands.push(AppCommand::PinnedImage(Command::CheckClosed { id }));
+            commands
+        }
+        Event::ClosedResources { id, retained }
+            if state.closed_pin.as_ref().is_some_and(|p| p.id == id) =>
+        {
+            if retained {
+                state.closed_pin.as_mut().unwrap().ready = true;
+            } else {
+                let content = state.closed_pin.take().unwrap().geometry.content;
+                state.pin_restore_notice = Some((
+                    super::geometry::Point {
+                        x: content.left,
+                        y: content.top,
+                    },
+                    false,
+                ));
+            }
+            vec![]
+        }
+        Event::RestoreClosed { anchor } if restore_available(state) => {
+            let pin = state.closed_pin.as_ref().unwrap().clone();
+            state.pin_restore_notice = None;
+            state.pin_restore_serial += 1;
+            let request = state.pin_restore_serial;
+            state.pin_restore = Some((pin.id, request));
+            command(Command::RestoreClosed {
+                pin,
+                request,
+                anchor,
+            })
+        }
+        Event::RestoreFinished {
+            source,
+            request,
+            id,
+        } if state.pin_restore == Some((source, request)) => {
+            state.pin_restore = None;
+            let Some(id) = id.filter(|id| *id > state.last_pin_id) else {
+                let content = state.closed_pin.as_ref().unwrap().geometry.content;
+                state.pin_restore_notice = Some((
+                    super::geometry::Point {
+                        x: content.left,
+                        y: content.top,
+                    },
+                    true,
+                ));
+                return vec![];
+            };
+            let pin = state.closed_pin.take().unwrap();
+            state.last_pin_id = id;
+            state.pinned_images.insert(
+                id,
+                State {
+                    hidden: pin.hidden,
+                    document: pin.document,
+                    interaction: interaction::State {
+                        applied: pin.policy,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            );
+            command(Command::AdoptRestored { source, id })
+        }
+        Event::RestoreFinished { id: Some(id), .. } if !state.pinned_images.contains_key(&id) => {
+            command(Command::Drop { id })
+        }
         Event::Closed { id } => {
             visibility::closed(state, id);
             let Some(pin) = state.pinned_images.remove(&id) else {
@@ -691,6 +837,90 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn closed_pin_restores_once_and_rejects_a_failed_attempts_late_window() {
+        let mut state = AppState::default();
+        state.last_pin_id = 2;
+        let mut pin = State {
+            hidden: true,
+            document: Some(document(8)),
+            ..Default::default()
+        };
+        pin.interaction.applied.passthrough = true;
+        pin.interaction.applied.locked = true;
+        state.pinned_images.insert(2, pin);
+        let geometry = ClosedGeometry {
+            content: super::super::geometry::Rect {
+                left: -50,
+                top: 20,
+                right: 40,
+                bottom: 80,
+            },
+            topmost: false,
+            shadow: true,
+        };
+        reduce(&mut state, Event::UserClosed { id: 2, geometry });
+        assert!(reduce(&mut state, Event::UserClosed { id: 2, geometry }).is_empty());
+        assert!(!restore_available(&state));
+        reduce(
+            &mut state,
+            Event::ClosedResources {
+                id: 2,
+                retained: true,
+            },
+        );
+        let restore = || Event::RestoreClosed {
+            anchor: Default::default(),
+        };
+        assert_eq!(reduce(&mut state, restore()).len(), 1);
+        let (_, first) = state.pin_restore.unwrap();
+        assert!(reduce(&mut state, restore()).is_empty());
+        reduce(
+            &mut state,
+            Event::RestoreFinished {
+                source: 2,
+                request: first,
+                id: None,
+            },
+        );
+        assert!(restore_available(&state));
+        reduce(&mut state, restore());
+        let (_, current) = state.pin_restore.unwrap();
+        assert_ne!(first, current);
+        assert!(matches!(
+            reduce(
+                &mut state,
+                Event::RestoreFinished {
+                    source: 2,
+                    request: first,
+                    id: Some(3)
+                }
+            )
+            .as_slice(),
+            [AppCommand::PinnedImage(Command::Drop { id: 3 })]
+        ));
+        assert!(matches!(
+            reduce(
+                &mut state,
+                Event::RestoreFinished {
+                    source: 2,
+                    request: current,
+                    id: Some(4)
+                }
+            )
+            .as_slice(),
+            [AppCommand::PinnedImage(Command::AdoptRestored {
+                source: 2,
+                id: 4
+            })]
+        ));
+        assert!(state.closed_pin.is_none());
+        let restored = &state.pinned_images[&4];
+        assert!(restored.hidden && restored.interaction.applied.locked);
+        assert!(!restored.interaction.applied.passthrough);
+        assert_eq!(restored.document.as_ref().unwrap().request, 0);
+    }
+
     fn document(request: u64) -> ExportRequest {
         use crate::domain::{
             annotation::Session, annotation_export::ExportSnapshot, geometry::Rect,

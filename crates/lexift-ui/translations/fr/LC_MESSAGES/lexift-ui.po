@@ -2363,3 +2363,12 @@ msgstr "Enregistrer rapidement en PNG"
 
 msgid "Change quick save directory"
 msgstr "Changer le dossier d’enregistrement rapide"
+
+msgid "Restore last closed pin"
+msgstr "Restaurer la dernière image épinglée fermée"
+
+msgid "Could not restore the closed pin"
+msgstr "Impossible de restaurer l’image épinglée fermée"
+
+msgid "The closed pin could not be retained"
+msgstr "Impossible de conserver l’image épinglée fermée"
