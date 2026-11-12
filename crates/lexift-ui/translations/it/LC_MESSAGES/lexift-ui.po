@@ -2390,3 +2390,30 @@ msgstr "Ritaglia a destra della vista corrente"
 
 msgid "Scroll right to extend the image"
 msgstr "Scorri a destra per estendere l’immagine"
+
+msgid "More"
+msgstr "Altro"
+
+msgid "Window pin"
+msgstr "Fissa finestra in diretta"
+
+msgid "Freeze as ordinary pin"
+msgstr "Blocca come immagine fissata"
+
+msgid "Freeze or close the existing window pin first"
+msgstr "Blocca o chiudi prima la finestra fissata"
+
+msgid "The live image comes from the source window. Screenshot annotations will not be included."
+msgstr "L’immagine in diretta proviene dalla finestra sorgente. Le annotazioni della cattura non saranno incluse."
+
+msgid "Window capture is unavailable"
+msgstr "Cattura della finestra non disponibile"
+
+msgid "Select an area entirely inside one window’s content"
+msgstr "Seleziona un’area interamente nel contenuto di una finestra"
+
+msgid "The source window changed. Take another screenshot"
+msgstr "La finestra sorgente è cambiata. Acquisisci una nuova schermata."
+
+msgid "The window is too large to capture live"
+msgstr "La finestra è troppo grande per la cattura in diretta"

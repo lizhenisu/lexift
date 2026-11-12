@@ -32,6 +32,8 @@ mod long;
 mod recording;
 #[path = "screenshot_refresh.rs"]
 mod refresh;
+#[path = "window_pin.rs"]
+pub(crate) mod window_pin;
 type CaptureFactory = fn() -> Option<Arc<dyn ScreenCapturePort>>;
 struct PreparedScreenshot {
     frames: Vec<CapturedRegion>,
@@ -73,6 +75,7 @@ pub(crate) struct ScreenshotRuntime {
     color_job: Mutex<Option<(u64, u64, Arc<AtomicBool>)>>,
     color_serial: tokio::sync::Mutex<()>,
     pin_pending: Mutex<BTreeMap<(u64, u64), Arc<CapturedRegion>>>,
+    live_job: Mutex<Option<window_pin::Job>>,
     pin_restore_job: Mutex<Option<(u64, Arc<AtomicBool>)>>,
     pin_images: Mutex<BTreeMap<u64, Arc<CapturedRegion>>>,
     pin_jobs: Mutex<BTreeMap<u64, Arc<AtomicBool>>>,
@@ -106,6 +109,7 @@ impl ScreenshotRuntime {
             color_job: Mutex::new(None),
             color_serial: Default::default(),
             pin_pending: Default::default(),
+            live_job: Default::default(),
             pin_restore_job: Default::default(),
             pin_images: Default::default(),
             pin_jobs: Default::default(),
@@ -289,6 +293,7 @@ impl ScreenshotRuntime {
     }
     pub fn execute_pin(self: &Arc<Self>, controller: &Arc<AppController>, command: PinCommand) {
         match command {
+            PinCommand::Live(command) => window_pin::execute(self, controller, command),
             PinCommand::CheckClosed { id } => {
                 let base = self.pin_images.lock().unwrap().get(&id).cloned();
                 let sample = self.pin_samples.lock().unwrap().get(&id).cloned();

@@ -2390,3 +2390,30 @@ msgstr "Rogner à droite de la vue actuelle"
 
 msgid "Scroll right to extend the image"
 msgstr "Faites défiler vers la droite pour étendre l’image"
+
+msgid "More"
+msgstr "Plus"
+
+msgid "Window pin"
+msgstr "Épingler la fenêtre en direct"
+
+msgid "Freeze as ordinary pin"
+msgstr "Figer en image épinglée"
+
+msgid "Freeze or close the existing window pin first"
+msgstr "Figez ou fermez d’abord la fenêtre épinglée"
+
+msgid "The live image comes from the source window. Screenshot annotations will not be included."
+msgstr "L’image en direct provient de la fenêtre source. Les annotations de la capture ne sont pas incluses."
+
+msgid "Window capture is unavailable"
+msgstr "La capture de fenêtre est indisponible"
+
+msgid "Select an area entirely inside one window’s content"
+msgstr "Sélectionnez une zone entièrement dans le contenu d’une seule fenêtre"
+
+msgid "The source window changed. Take another screenshot"
+msgstr "La fenêtre source a changé. Faites une nouvelle capture."
+
+msgid "The window is too large to capture live"
+msgstr "La fenêtre est trop grande pour une capture en direct"

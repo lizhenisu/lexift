@@ -2390,3 +2390,30 @@ msgstr "Recortar a la derecha de la vista actual"
 
 msgid "Scroll right to extend the image"
 msgstr "Desplázate a la derecha para ampliar la imagen"
+
+msgid "More"
+msgstr "Más"
+
+msgid "Window pin"
+msgstr "Fijar ventana en directo"
+
+msgid "Freeze as ordinary pin"
+msgstr "Congelar como imagen fija"
+
+msgid "Freeze or close the existing window pin first"
+msgstr "Primero congela o cierra la ventana fijada"
+
+msgid "The live image comes from the source window. Screenshot annotations will not be included."
+msgstr "La imagen en directo procede de la ventana de origen. No incluye las anotaciones de la captura."
+
+msgid "Window capture is unavailable"
+msgstr "No se puede capturar la ventana"
+
+msgid "Select an area entirely inside one window’s content"
+msgstr "Selecciona un área completamente dentro del contenido de una ventana"
+
+msgid "The source window changed. Take another screenshot"
+msgstr "La ventana de origen ha cambiado. Haz otra captura."
+
+msgid "The window is too large to capture live"
+msgstr "La ventana es demasiado grande para capturarla en directo"

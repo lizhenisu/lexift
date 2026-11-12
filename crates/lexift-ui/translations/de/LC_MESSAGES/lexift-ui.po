@@ -2390,3 +2390,30 @@ msgstr "Rechts vom aktuellen Bildausschnitt abschneiden"
 
 msgid "Scroll right to extend the image"
 msgstr "Nach rechts scrollen, um das Bild zu erweitern"
+
+msgid "More"
+msgstr "Mehr"
+
+msgid "Window pin"
+msgstr "Live-Fenster anheften"
+
+msgid "Freeze as ordinary pin"
+msgstr "Als normales Bild einfrieren"
+
+msgid "Freeze or close the existing window pin first"
+msgstr "Zuerst das angeheftete Live-Fenster einfrieren oder schließen"
+
+msgid "The live image comes from the source window. Screenshot annotations will not be included."
+msgstr "Das Live-Bild stammt aus dem Quellfenster. Bildschirmfoto-Markierungen werden nicht übernommen."
+
+msgid "Window capture is unavailable"
+msgstr "Fensteraufnahme nicht verfügbar"
+
+msgid "Select an area entirely inside one window’s content"
+msgstr "Wählen Sie einen Bereich vollständig innerhalb eines Fensterinhalts"
+
+msgid "The source window changed. Take another screenshot"
+msgstr "Das Quellfenster hat sich geändert. Erstellen Sie ein neues Bildschirmfoto."
+
+msgid "The window is too large to capture live"
+msgstr "Das Fenster ist zu groß für die Live-Aufnahme"

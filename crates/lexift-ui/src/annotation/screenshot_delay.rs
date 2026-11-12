@@ -6,6 +6,7 @@ type Ready = Box<dyn FnOnce(lexift_core::Result<std::time::Instant>) + Send>;
 const LONG_TRIM_MENU: u8 = 6;
 const QUICK_SAVE_MENU: u8 = 7;
 const LONG_AXIS_MENU: u8 = 8;
+const WINDOW_PIN_MENU: u8 = 9;
 #[derive(Default)]
 struct Views {
     recording: Option<(lexift_core::domain::screen_recording::Identity, u64)>,
@@ -54,7 +55,7 @@ pub(crate) fn sync(state: &ScreenshotState) {
             s.menu.is_some()
                 && super::recording::audio_selection().map(|(id, revision, _)| (id, revision))
                     != s.recording
-        } else if s.menu_kind == QUICK_SAVE_MENU {
+        } else if matches!(s.menu_kind, QUICK_SAVE_MENU | WINDOW_PIN_MENU) {
             s.menu.is_some()
                 && (s.quick_owner != Some((state.session, state.operation))
                     || state.phase != ScreenshotPhase::Editing)
@@ -104,6 +105,12 @@ fn choose(sequence: u64, index: Option<i32>) {
         let long_trim = VIEWS.with(|s| s.borrow().long_trim);
         let quick_owner = VIEWS.with(|s| s.borrow().quick_owner);
         clear();
+        if kind == WINDOW_PIN_MENU {
+            if index == Some(0) && quick_owner == quick_save_owner() {
+                super::request_window_pin();
+            }
+            return;
+        }
         if kind == QUICK_SAVE_MENU {
             if index == Some(1)
                 && quick_owner == quick_save_owner()
@@ -238,6 +245,10 @@ pub(in crate::annotation) fn quick_save_menu() {
     menu_kind(QUICK_SAVE_MENU);
 }
 
+pub(in crate::annotation) fn window_pin_menu() {
+    menu_kind(WINDOW_PIN_MENU);
+}
+
 fn quick_save_owner() -> Option<(u64, u64)> {
     FLOW.with(|flow| {
         let flow = flow.borrow();
@@ -247,7 +258,7 @@ fn quick_save_owner() -> Option<(u64, u64)> {
 }
 
 fn menu_kind(kind: u8) {
-    if kind == QUICK_SAVE_MENU {
+    if matches!(kind, QUICK_SAVE_MENU | WINDOW_PIN_MENU) {
         if quick_save_owner().is_none() || super::history_editor::active() || pin_editor::active() {
             return;
         }
@@ -285,7 +296,14 @@ fn menu_kind(kind: u8) {
         return;
     };
     crate::theme::apply(&w);
-    let labels: &[&str] = if kind == QUICK_SAVE_MENU {
+    let labels: &[&str] = if kind == WINDOW_PIN_MENU {
+        if super::window_pin_available() {
+            &["Window pin"]
+        } else {
+            w.set_disabled_index(0);
+            &["Freeze or close the existing window pin first"]
+        }
+    } else if kind == QUICK_SAVE_MENU {
         &["Quick save PNG", "Change quick save directory"]
     } else if kind == LONG_AXIS_MENU {
         w.set_checked_first(i32::from(
@@ -387,7 +405,9 @@ fn menu_kind(kind: u8) {
         let mut s = s.borrow_mut();
         s.sequence += 1;
         s.menu_kind = kind;
-        s.quick_owner = (kind == QUICK_SAVE_MENU).then(quick_save_owner).flatten();
+        s.quick_owner = matches!(kind, QUICK_SAVE_MENU | WINDOW_PIN_MENU)
+            .then(quick_save_owner)
+            .flatten();
         s.recording = selection.map(|(identity, revision, _)| (identity, revision));
         s.long_trim = if kind == LONG_AXIS_MENU {
             super::long::axis_menu_owner()
@@ -441,7 +461,10 @@ fn prepare_menu(seq: u64, attempt: u8) {
             }
             if (capture_trim
                 || VIEWS.with(|views| {
-                    matches!(views.borrow().menu_kind, QUICK_SAVE_MENU | LONG_AXIS_MENU)
+                    matches!(
+                        views.borrow().menu_kind,
+                        QUICK_SAVE_MENU | LONG_AXIS_MENU | WINDOW_PIN_MENU
+                    )
                 }) && super::long::busy()
                     && !super::long::image_editing())
                 && !(l.exclude_view_from_capture)(w.window())
@@ -717,7 +740,7 @@ pub(crate) fn availability(state: &lexift_core::AppState) {
             s.menu.is_some()
                 && !matches!(
                     s.menu_kind,
-                    LONG_TRIM_MENU | QUICK_SAVE_MENU | LONG_AXIS_MENU
+                    LONG_TRIM_MENU | QUICK_SAVE_MENU | LONG_AXIS_MENU | WINDOW_PIN_MENU
                 )
         })
     {

@@ -2390,3 +2390,30 @@ msgstr "裁掉当前画面右侧"
 
 msgid "Scroll right to extend the image"
 msgstr "向右滚动以扩展图片"
+
+msgid "More"
+msgstr "更多"
+
+msgid "Window pin"
+msgstr "窗口贴图"
+
+msgid "Freeze as ordinary pin"
+msgstr "冻结为普通贴图"
+
+msgid "Freeze or close the existing window pin first"
+msgstr "请先冻结或关闭已有窗口贴图"
+
+msgid "The live image comes from the source window. Screenshot annotations will not be included."
+msgstr "实时画面来自源窗口，不包含截图标注。"
+
+msgid "Window capture is unavailable"
+msgstr "无法采集窗口"
+
+msgid "Select an area entirely inside one window’s content"
+msgstr "请将选区完整放在一个窗口的内容区内"
+
+msgid "The source window changed. Take another screenshot"
+msgstr "源窗口已变化，请重新截图"
+
+msgid "The window is too large to capture live"
+msgstr "窗口太大，无法实时采集"

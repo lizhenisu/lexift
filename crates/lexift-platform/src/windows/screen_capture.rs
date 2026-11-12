@@ -135,6 +135,15 @@ fn screenshot_surfaces_retired(excluded: &[lexift_core::ports::magnifier::Window
 }
 
 impl ScreenCapturePort for WindowsScreenCapturePort {
+    fn run_window_pin(
+        &self,
+        request: lexift_core::ports::screen_capture::WindowPinCapture,
+        stop: &std::sync::atomic::AtomicBool,
+        publish: &mut dyn FnMut(lexift_core::ports::screen_capture::WindowPinUpdate),
+    ) -> std::result::Result<(), lexift_core::domain::pinned_image::live::Failure> {
+        capture::window_pin::run(request, stop, publish)
+    }
+
     fn supports_long_scroll(&self) -> bool {
         true
     }

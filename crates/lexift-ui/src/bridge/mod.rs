@@ -666,6 +666,37 @@ impl UiHandle {
             crate::annotation::screenshot::show(session, frames, capture, windows)
         });
     }
+    pub fn window_pin_frame(
+        &self,
+        source: (u64, u64),
+        pull: Box<
+            dyn FnOnce() -> Option<Arc<lexift_core::ports::screen_capture::CapturedRegion>> + Send,
+        >,
+    ) -> bool {
+        slint::invoke_from_event_loop(move || {
+            if let Some(image) = pull() {
+                crate::pinned_screenshot::live_frame(source, image);
+            }
+        })
+        .is_ok()
+    }
+    pub fn window_pin_ended(
+        &self,
+        source: (u64, u64),
+        reason: lexift_core::domain::pinned_image::live::Failure,
+    ) -> bool {
+        slint::invoke_from_event_loop(move || crate::pinned_screenshot::live_ended(source, reason))
+            .is_ok()
+    }
+    pub fn window_pin_installed(
+        &self,
+        id: u64,
+        image: lexift_core::domain::image_history::ImageSnapshot,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::pinned_screenshot::live_installed(id, image)
+        });
+    }
     pub fn show_restored_pin(
         &self,
         pin: lexift_core::domain::pinned_image::ClosedPin,
@@ -795,6 +826,7 @@ impl UiHandle {
             let language_changed = crate::i18n::select(state.desired_settings.ui_language);
             crate::ocr::sync(state.ocr.generation, state.ocr.phase);
             crate::annotation::sync_export(&state.annotation_export);
+            crate::annotation::screenshot::sync_window_pin(&state);
             crate::annotation::screenshot::sync(&state.screenshot);
             crate::annotation::screenshot::delay::availability(&state);
             crate::annotation::image_import::sync(&state);

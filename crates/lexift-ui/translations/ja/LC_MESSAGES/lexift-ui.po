@@ -2390,3 +2390,30 @@ msgstr "現在の表示範囲より右を切り取る"
 
 msgid "Scroll right to extend the image"
 msgstr "右にスクロールして画像を広げる"
+
+msgid "More"
+msgstr "その他"
+
+msgid "Window pin"
+msgstr "ウィンドウをライブ固定"
+
+msgid "Freeze as ordinary pin"
+msgstr "静止画像として固定"
+
+msgid "Freeze or close the existing window pin first"
+msgstr "既存のライブ固定を静止または閉じてください"
+
+msgid "The live image comes from the source window. Screenshot annotations will not be included."
+msgstr "ライブ画像は元のウィンドウから取得します。スクリーンショットの注釈は含まれません。"
+
+msgid "Window capture is unavailable"
+msgstr "ウィンドウをキャプチャできません"
+
+msgid "Select an area entirely inside one window’s content"
+msgstr "1 つのウィンドウの内容領域に完全に収まる範囲を選択してください"
+
+msgid "The source window changed. Take another screenshot"
+msgstr "元のウィンドウが変わりました。もう一度スクリーンショットを撮ってください。"
+
+msgid "The window is too large to capture live"
+msgstr "ウィンドウが大きすぎてライブキャプチャできません"

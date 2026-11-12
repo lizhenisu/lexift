@@ -1676,7 +1676,7 @@ fn ensure_native_snap_styles(hwnd: windows::Win32::Foundation::HWND) -> lexift_c
     Ok(())
 }
 
-pub(super) fn required_hwnd(
+pub(crate) fn required_hwnd(
     window: &impl raw_window_handle::HasWindowHandle,
 ) -> lexift_core::Result<windows::Win32::Foundation::HWND> {
     window_hwnd(window)?

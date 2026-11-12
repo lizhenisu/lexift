@@ -1497,3 +1497,66 @@ mod tests;
 pub(super) fn diagnostic_state() -> ScreenshotState {
     FLOW.with(|s| s.borrow().state.clone())
 }
+
+thread_local! {static WINDOW_PIN_AVAILABLE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };}
+
+pub(crate) fn sync_window_pin(state: &lexift_core::AppState) {
+    WINDOW_PIN_AVAILABLE.set(lexift_core::domain::pinned_image::live::available(state));
+}
+
+fn window_pin_available() -> bool {
+    WINDOW_PIN_AVAILABLE.get()
+}
+
+pub(crate) fn window_pin_anchor(session: u64, operation: u64) -> Option<Point> {
+    if !output_current(session, operation) {
+        return None;
+    }
+    FLOW.with(|f| {
+        f.borrow().state.bounds.map(|b| Point {
+            x: b.left,
+            y: b.top,
+        })
+    })
+}
+
+fn request_window_pin() {
+    if !window_pin_available() {
+        return;
+    }
+    keyboard::commit_current();
+    let candidate = REGISTRY.with(|r| {
+        let mut r = r.borrow_mut();
+        let r = r.as_mut()?;
+        if r.gesture.is_some() || r.screenshot.as_ref()?.region.dragging() {
+            return None;
+        }
+        finish_text_edit_registry(r, true);
+        r.finish_style_edit();
+        r.close_watermark_input();
+        r.close_panel();
+        size_input::close(r);
+        let editor = r.screenshot.as_ref()?;
+        Some((
+            editor.id,
+            editor.region.bounds()?,
+            r.document.session.has_content(),
+        ))
+    });
+    if let Some((session, bounds, confirm)) = candidate {
+        if confirm {
+            long::open_confirmation(session, bounds, true);
+        } else {
+            start_window_pin(session);
+        }
+    }
+}
+
+fn start_window_pin(session: u64) {
+    if !window_pin_available() {
+        return;
+    }
+    super::emit_pin(lexift_core::domain::pinned_image::Event::Live(
+        lexift_core::domain::pinned_image::live::Event::Start { session },
+    ));
+}

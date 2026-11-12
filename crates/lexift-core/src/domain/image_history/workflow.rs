@@ -577,6 +577,14 @@ pub(crate) fn after(
                     *target == crate::domain::screenshot::ScreenshotOutput::Pin,
                 );
             }
+            AppCommand::PinnedImage(pin::Command::Live(pin::live::Command::Install {
+                id, ..
+            })) => {
+                if let Some(origin) = h.cache.origin() {
+                    h.sources
+                        .insert(Source::Pin(*id), (origin, Kind::Screenshot));
+                }
+            }
             AppCommand::PinnedImage(pin::Command::Output { id, operation, .. }) => {
                 // Pins inherit their origin when their native preparation succeeds.
                 // Legacy pins with no associated screenshot are intentionally excluded.

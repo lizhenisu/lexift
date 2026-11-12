@@ -829,6 +829,21 @@ pub fn set_clipboard_history_dismissal(
     Ok(())
 }
 
+/// Synchronize after a visible live pin's redraw has returned to the event loop.
+pub fn confirm_window_pin_presentation(window: &impl raw_window_handle::HasWindowHandle) -> bool {
+    #[cfg(target_os = "windows")]
+    return windows::popup::required_hwnd(window).is_ok_and(|hwnd| unsafe {
+        ::windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool()
+            && ::windows::Win32::Graphics::Dwm::DwmFlush().is_ok()
+            && ::windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool()
+    });
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+        false
+    }
+}
+
 /// Wait for the same already-prepared refresh canvases to reach the desktop together.
 pub fn complete_screenshot_refresh(
     windows: &[lexift_core::ports::magnifier::WindowToken],

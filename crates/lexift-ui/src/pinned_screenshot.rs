@@ -99,6 +99,7 @@ enum Origin {
         lexift_core::domain::geometry::Point,
     ),
     Screenshot(u64, u64),
+    Live(u64, u64),
     History(
         lexift_core::domain::image_history::workflow::OutputKey,
         bool,
@@ -107,7 +108,7 @@ enum Origin {
 impl Origin {
     fn current(self) -> bool {
         match self {
-            Self::Screenshot(session, operation) => {
+            Self::Screenshot(session, operation) | Self::Live(session, operation) => {
                 crate::annotation::screenshot::output_current(session, operation)
             }
             Self::Restored(source, request, ..) => {
@@ -118,6 +119,14 @@ impl Origin {
     }
     fn complete(self, result: lexift_core::Result<SaveOutcome>) {
         match self {
+            Self::Live(session, operation) => {
+                if result != Ok(SaveOutcome::Saved) {
+                    live_event(LiveEvent::Failed {
+                        source: (session, operation),
+                        reason: LiveFailure::Unavailable,
+                    });
+                }
+            }
             Self::Restored(source, request, ..) if result != Ok(SaveOutcome::Saved) => {
                 emit_pin(lexift_core::domain::pinned_image::Event::RestoreFinished {
                     source,
@@ -173,7 +182,31 @@ impl Origin {
         }
     }
 }
+use lexift_core::domain::pinned_image::live::{Event as LiveEvent, Failure as LiveFailure};
+
+struct LiveView {
+    first_frame: slint::Timer,
+    staged: Option<Arc<CapturedRegion>>,
+    redraw: Option<Arc<CapturedRegion>>,
+    presented: bool,
+    ending: bool,
+    submitted: u64,
+    displayed: u64,
+    fence: Duration,
+}
+
+impl Drop for LiveView {
+    fn drop(&mut self) {
+        tracing::debug!(
+            submitted = self.submitted,
+            displayed = self.displayed,
+            fence_us = self.fence.as_micros(),
+            "Window pin presentation totals"
+        );
+    }
+}
 struct Pin {
+    live: Option<LiveView>,
     view: zoom::View,
     pointer_sink: Option<crate::bridge::PopupPointerSink>,
     user_hidden: bool,
@@ -322,6 +355,9 @@ pub(crate) fn apply_theme() {
     });
     for (id, window, image) in windows {
         crate::theme::apply(&window);
+        if window.get_live() {
+            continue;
+        }
         if !window.get_editing() {
             set_picture(&window, &image);
         } else if zoom::active(id) {
@@ -935,7 +971,7 @@ fn retire(id: u64, user: bool) {
             return None;
         }
         let record = content
-            .filter(|_| pin.phase == Phase::Visible)
+            .filter(|_| pin.phase == Phase::Visible && pin.live.is_none())
             .map(
                 |content| lexift_core::domain::pinned_image::ClosedGeometry {
                     content,
@@ -1073,6 +1109,15 @@ pub(crate) fn present(id: u64, revision: u64, image: Arc<CapturedRegion>) {
         }
     });
 }
+fn set_live_picture(window: &PinnedScreenshotWindow, image: &CapturedRegion) {
+    let buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
+        &image.pixels,
+        (image.bounds.right - image.bounds.left) as u32,
+        (image.bounds.bottom - image.bounds.top) as u32,
+    );
+    window.set_picture(slint::Image::from_rgba8_premultiplied(buffer));
+}
+
 fn set_picture(window: &PinnedScreenshotWindow, image: &CapturedRegion) {
     window.set_picture(display_picture(
         window,
@@ -1271,7 +1316,7 @@ fn show_from(
         return;
     }
     let (session, operation) = match origin {
-        Origin::Screenshot(s, o) => (s, o),
+        Origin::Screenshot(s, o) | Origin::Live(s, o) => (s, o),
         Origin::History(..) | Origin::Restored(..) => (0, 0),
     };
     let result = STATE.with(|slot| {
@@ -1291,13 +1336,22 @@ fn show_from(
         let window = crate::screen_interaction::create(&r.lifecycle, PinnedScreenshotWindow::new)
             .map_err(|_| ())?;
         crate::theme::apply(&window);
-        window.set_picture(display_picture(&window, &image.pixels, w as u32, h as u32));
+        let is_live = matches!(origin, Origin::Live(..));
+        if is_live {
+            set_live_picture(&window, &image);
+        } else {
+            window.set_picture(display_picture(&window, &image.pixels, w as u32, h as u32));
+        }
         r.next = r.next.checked_add(1).ok_or(())?;
         let id = r.next;
         let mut owned = Slot::default();
         owned.open(window);
         let window = owned.get().ok_or(())?;
+        window.set_live(is_live);
         window.window().on_winit_window_event(move |_, event| {
+            if is_live && matches!(event, winit::event::WindowEvent::RedrawRequested) {
+                queue_live_ack(id);
+            }
             if matches!(
                 event,
                 winit::event::WindowEvent::Resized(_)
@@ -1326,6 +1380,9 @@ fn show_from(
             EventResult::Propagate
         });
         window.on_close_requested(move || request_close(id));
+        window.on_freeze_live(move || {
+            slint::Timer::single_shot(Duration::ZERO, move || freeze_live(id))
+        });
         window.on_recognize_requested(move || request_recognition(id));
         window.on_output_requested(move |kind| request_output(id, kind));
         window.on_option_requested(move |kind, value| change_option(id, kind, value));
@@ -1430,6 +1487,7 @@ fn show_from(
             window.set_annotations_hidden(hidden);
         }
         let initial = match origin {
+            Origin::Live(s, o) => crate::annotation::screenshot::window_pin_anchor(s, o),
             Origin::Restored(_, _, geometry, _, _, anchor) => Some(restored_position(
                 geometry.content,
                 anchor,
@@ -1465,6 +1523,16 @@ fn show_from(
         r.windows.insert(
             id,
             Pin {
+                live: is_live.then(|| LiveView {
+                    first_frame: slint::Timer::default(),
+                    staged: Some(image.clone()),
+                    redraw: None,
+                    presented: false,
+                    ending: false,
+                    submitted: 1,
+                    displayed: 0,
+                    fence: Duration::ZERO,
+                }),
                 view: Default::default(),
                 pointer_sink: None,
                 user_hidden: false,
@@ -1519,7 +1587,40 @@ fn show_from(
         }
     }
     match result {
-        Ok(id) => prepare(id, 0),
+        Ok(id) => {
+            if let Origin::Live(session, operation) = origin {
+                STATE.with(|s| {
+                    if let Some(live) = s
+                        .borrow()
+                        .as_ref()
+                        .and_then(|r| r.windows.get(&id))
+                        .and_then(|p| p.live.as_ref())
+                    {
+                        live.first_frame.start(
+                            slint::TimerMode::SingleShot,
+                            Duration::from_secs(3),
+                            move || {
+                                let waiting = STATE.with(|s| {
+                                    s.borrow()
+                                        .as_ref()
+                                        .and_then(|r| r.windows.get(&id))
+                                        .and_then(|p| p.live.as_ref())
+                                        .is_some_and(|l| !l.presented)
+                                });
+                                if waiting {
+                                    close(id);
+                                    live_event(LiveEvent::Failed {
+                                        source: (session, operation),
+                                        reason: LiveFailure::Unavailable,
+                                    });
+                                }
+                            },
+                        );
+                    }
+                });
+            }
+            prepare(id, 0);
+        }
         Err(()) => origin.complete(Err(lexift_core::Error::new(crate::i18n::tr(
             "Screenshot unavailable",
         )))),
@@ -1711,8 +1812,9 @@ fn prepare(id: u64, attempt: u8) {
                     }
                 });
             }
-            if success {
+            if success && !matches!(origin, Origin::Live(..)) {
                 emit_pin(match origin {
+                    Origin::Live(..) => unreachable!(),
                     Origin::Screenshot(session, operation) => {
                         lexift_core::domain::pinned_image::Event::Opened {
                             id,
@@ -2895,5 +2997,210 @@ fn opacity_composites_content_once_and_keeps_controls_and_glow_clear() {
                 }
             }
         }
+    }
+}
+
+fn live_event(event: LiveEvent) {
+    emit_pin(lexift_core::domain::pinned_image::Event::Live(event));
+}
+
+fn live_id(source: (u64, u64)) -> Option<u64> {
+    STATE.with(|s| {
+        s.borrow().as_ref()?.windows.iter().find_map(|(&id, p)| {
+            (p.live.is_some() && (p.session, p.operation) == source).then_some(id)
+        })
+    })
+}
+
+pub(crate) fn live_frame(source: (u64, u64), image: Arc<CapturedRegion>) {
+    let Some(id) = live_id(source) else {
+        if crate::annotation::screenshot::output_current(source.0, source.1) {
+            show_from(Origin::Live(source.0, source.1), image, None);
+        }
+        return;
+    };
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        let Some(p) = s.as_mut().and_then(|r| r.windows.get_mut(&id)) else {
+            return;
+        };
+        let (Some(live), Some(w)) = (p.live.as_mut(), p.window.get()) else {
+            return;
+        };
+        if p.phase == Phase::Visible && !live.ending && w.window().is_visible() {
+            set_live_picture(w, &image);
+            live.staged = Some(image);
+            live.submitted += 1;
+        }
+    });
+}
+
+fn queue_live_ack(id: u64) {
+    let frame = STATE.with(|s| {
+        let mut slot = s.try_borrow_mut().ok()?;
+        let live = slot.as_mut()?.windows.get_mut(&id)?.live.as_mut()?;
+        let frame = live.staged.as_ref()?;
+        if live
+            .redraw
+            .as_ref()
+            .is_some_and(|drawn| Arc::ptr_eq(frame, drawn))
+        {
+            return None;
+        }
+        live.redraw = Some(frame.clone());
+        Some(Arc::downgrade(frame))
+    });
+    if let Some(frame) = frame {
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            if let Some(frame) = frame.upgrade() {
+                live_ack(id, frame);
+            }
+        });
+    }
+}
+
+fn live_ack(id: u64, image: Arc<CapturedRegion>) {
+    let candidate = STATE.with(|s| {
+        let s = s.borrow();
+        let r = s.as_ref()?;
+        let p = r.windows.get(&id)?;
+        let live = p.live.as_ref()?;
+        (p.phase == Phase::Visible
+            && !live.ending
+            && live.redraw.as_ref().is_some_and(|f| Arc::ptr_eq(f, &image)))
+        .then(|| {
+            (
+                p.window.get().unwrap().clone_strong(),
+                r.lifecycle.window_pin_presented.clone(),
+                !live.presented,
+            )
+        })
+    });
+    let Some((window, confirm, first)) = candidate else {
+        return;
+    };
+    let fence_start = std::time::Instant::now();
+    // Redraw handling and this callback share the UI thread. Ordinary updates
+    // need not block that thread on DWM; fence the first and frozen frames.
+    if !window.window().is_visible() || first && !confirm(window.window()) {
+        return;
+    }
+    let fence = if first {
+        fence_start.elapsed()
+    } else {
+        Duration::ZERO
+    };
+    let opened = STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        let p = s.as_mut()?.windows.get_mut(&id)?;
+        let live = p.live.as_mut()?;
+        if live.ending || !live.redraw.as_ref().is_some_and(|f| Arc::ptr_eq(f, &image)) {
+            return None;
+        }
+        live.redraw = None;
+        if live.staged.as_ref().is_some_and(|f| Arc::ptr_eq(f, &image)) {
+            live.staged = None;
+        }
+        live.displayed += 1;
+        live.fence += fence;
+        p.visible = image.bounds;
+        p.image = image;
+        if std::mem::replace(&mut live.presented, true) {
+            None
+        } else {
+            live.first_frame.stop();
+            Some((p.session, p.operation))
+        }
+    });
+    if let Some(source) = opened {
+        tracing::debug!(?source, id, "Window pin first frame presented");
+        live_event(LiveEvent::Opened { source, id });
+    }
+}
+
+fn freeze_live(id: u64) {
+    let fence = STATE.with(|s| {
+        let s = s.borrow();
+        let r = s.as_ref()?;
+        let p = r.windows.get(&id)?;
+        let live = p.live.as_ref()?;
+        let w = p.window.get()?;
+        (live.presented && !live.ending && w.window().is_visible())
+            .then(|| (w.clone_strong(), r.lifecycle.window_pin_presented.clone()))
+    });
+    let started = std::time::Instant::now();
+    let confirmed = fence
+        .as_ref()
+        .is_some_and(|(w, confirm)| confirm(w.window()));
+    let image = STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        let p = s.as_mut()?.windows.get_mut(&id)?;
+        let live = p.live.as_mut()?;
+        if !live.presented || live.ending || p.phase != Phase::Visible {
+            return None;
+        }
+        live.ending = true;
+        live.staged = None;
+        let last_redraw = live.redraw.take();
+        if confirmed {
+            live.fence += started.elapsed();
+            if let Some(frame) = last_redraw {
+                live.displayed += 1;
+                p.visible = frame.bounds;
+                p.image = frame;
+            }
+        }
+        let w = p.window.get()?;
+        set_picture(w, &p.image);
+        Some(p.image.clone())
+    });
+    if let Some(image) = image {
+        live_event(LiveEvent::Freeze { id, image });
+    }
+}
+
+pub(crate) fn live_ended(source: (u64, u64), reason: LiveFailure) {
+    if let Some(id) = live_id(source) {
+        let presented = STATE.with(|s| {
+            s.borrow()
+                .as_ref()
+                .and_then(|r| r.windows.get(&id))
+                .and_then(|p| p.live.as_ref())
+                .is_some_and(|l| l.presented)
+        });
+        if presented {
+            freeze_live(id);
+            return;
+        }
+        close(id);
+    }
+    live_event(LiveEvent::Failed { source, reason });
+}
+
+pub(crate) fn live_installed(id: u64, image: lexift_core::domain::image_history::ImageSnapshot) {
+    let current = STATE.with(|s| {
+        s.borrow()
+            .as_ref()
+            .and_then(|r| r.windows.get(&id))
+            .is_some_and(|p| p.phase == Phase::Visible && p.live.as_ref().is_some_and(|l| l.ending))
+    });
+    if !current {
+        return;
+    }
+    crate::annotation::pin_editor::install_history(id, image.base, image.samples, image.document);
+    let document = crate::annotation::pin_editor::retained_document(id);
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        let Some(p) = s.as_mut().and_then(|r| r.windows.get_mut(&id)) else {
+            return;
+        };
+        p.live = None;
+        p.document = document.clone();
+        if let Some(w) = p.window.get() {
+            w.set_live(false);
+        }
+    });
+    if let Some(document) = document {
+        emit_pin(lexift_core::domain::pinned_image::Event::DocumentChanged { id, document });
     }
 }

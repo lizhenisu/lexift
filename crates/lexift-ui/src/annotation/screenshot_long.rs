@@ -201,7 +201,7 @@ pub(in crate::annotation) fn request() {
     });
     if let Some((session, bounds, confirm)) = start {
         if confirm {
-            open_confirmation(session, bounds);
+            open_confirmation(session, bounds, false);
         } else {
             send(Event::Start { session, bounds });
         }
@@ -629,7 +629,7 @@ fn choose(session: u64, operation: u64, target: Option<ScreenshotOutput>) {
         });
     }
 }
-fn open_confirmation(session: u64, bounds: Rect) {
+pub(super) fn open_confirmation(session: u64, bounds: Rect, window_pin: bool) {
     clear();
     let created = REGISTRY.with(|s| {
         let s = s.borrow();
@@ -638,6 +638,10 @@ fn open_confirmation(session: u64, bounds: Rect) {
             crate::screen_interaction::create(&r.lifecycle, LongCaptureConfirmation::new).ok()?;
         crate::theme::apply(&w);
         w.set_confirmation(true);
+        if window_pin {
+            w.set_heading(crate::i18n::tr("Window pin").into());
+            w.set_message(crate::i18n::tr("The live image comes from the source window. Screenshot annotations will not be included.").into());
+        }
         Some((w, r.lifecycle.annotation_foreground.as_ref().map(|q| q())))
     });
     let Some((w, origin)) = created else { return };
@@ -659,7 +663,11 @@ fn open_confirmation(session: u64, bounds: Rect) {
             work.post(move || {
                 if current(session, 0, rev) {
                     clear();
-                    send(Event::Start { session, bounds });
+                    if window_pin {
+                        super::start_window_pin(session);
+                    } else {
+                        send(Event::Start { session, bounds });
+                    }
                 }
             })
         });

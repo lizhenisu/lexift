@@ -185,6 +185,7 @@ pub struct WindowLifecycleCallbacks {
     pub(crate) annotation_brush_cursor: AnnotationBrushCursor,
     pub(crate) image_pan_cursor: ImagePanCursor,
     pub(crate) pin_window_budget: Option<(u32, u64)>,
+    pub(crate) window_pin_presented: Rc<dyn Fn(&slint::Window) -> bool>,
     pub(crate) annotation_frame_presenter: AnnotationFramePresenter,
     pub(crate) annotation_magnifier_sync: AnnotationMagnifierSync,
     pub(crate) annotation_magnifier_refresh: AnnotationMagnifierRefresh,
@@ -273,6 +274,7 @@ impl WindowLifecycleCallbacks {
             annotation_brush_cursor: Rc::new(|_, _| false),
             image_pan_cursor: Rc::new(|_, _| false),
             pin_window_budget: None,
+            window_pin_presented: Rc::new(|_| false),
             annotation_frame_presenter: Rc::new(|_, _, _, _| false),
             recording_window: None,
             annotation_magnifier_sync: Rc::new(|_, _| false),
@@ -441,6 +443,14 @@ impl WindowLifecycleCallbacks {
 
     /// Supplies native monitor bounds and canvas hit-testing without exposing platform APIs to UI.
     /// Complete one refresh group after all existing canvas HWNDs have received new pixels.
+    pub fn with_window_pin_presentation(
+        mut self,
+        present: impl Fn(&slint::Window) -> bool + 'static,
+    ) -> Self {
+        self.window_pin_presented = Rc::new(present);
+        self
+    }
+
     pub fn with_screenshot_refresh_presentation(
         mut self,
         callback: impl Fn(&[lexift_core::ports::magnifier::WindowToken], bool) -> bool + 'static,

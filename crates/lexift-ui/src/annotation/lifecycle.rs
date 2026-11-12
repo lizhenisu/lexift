@@ -304,6 +304,15 @@ pub(crate) fn toggle(requested_at: Instant) {
             later_main(&input, generation, revision, move || history_key(action))
         });
         let input = r.toolbar_state.main.input();
+        let more_input = input.clone();
+        main.on_window_pin_menu(move || {
+            later_main(
+                &more_input,
+                generation,
+                revision,
+                screenshot::delay::window_pin_menu,
+            )
+        });
         let quick_input = input.clone();
         main.on_quick_save_menu(move || {
             later_main(

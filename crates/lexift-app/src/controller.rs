@@ -155,6 +155,26 @@ pub(crate) trait ViewPort: Send + Sync {
         _image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
     ) {
     }
+    fn window_pin_frame(
+        &self,
+        _source: (u64, u64),
+        _pull: crate::screenshot::window_pin::Pull,
+    ) -> bool {
+        false
+    }
+    fn window_pin_ended(
+        &self,
+        _source: (u64, u64),
+        _reason: lexift_core::domain::pinned_image::live::Failure,
+    ) -> bool {
+        false
+    }
+    fn window_pin_installed(
+        &self,
+        _id: u64,
+        _image: lexift_core::domain::image_history::ImageSnapshot,
+    ) {
+    }
     fn show_restored_pin(
         &self,
         _pin: lexift_core::domain::pinned_image::ClosedPin,
@@ -272,6 +292,27 @@ impl ViewPort for lexift_ui::UiHandle {
         image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
     ) {
         self.present_pinned_image(id, revision, image);
+    }
+    fn window_pin_frame(
+        &self,
+        source: (u64, u64),
+        pull: crate::screenshot::window_pin::Pull,
+    ) -> bool {
+        lexift_ui::UiHandle::window_pin_frame(self, source, pull)
+    }
+    fn window_pin_ended(
+        &self,
+        source: (u64, u64),
+        reason: lexift_core::domain::pinned_image::live::Failure,
+    ) -> bool {
+        lexift_ui::UiHandle::window_pin_ended(self, source, reason)
+    }
+    fn window_pin_installed(
+        &self,
+        id: u64,
+        image: lexift_core::domain::image_history::ImageSnapshot,
+    ) {
+        lexift_ui::UiHandle::window_pin_installed(self, id, image);
     }
     fn show_restored_pin(
         &self,
@@ -670,6 +711,7 @@ impl AppController {
                 runtime.sync_history(&snapshot.image_history);
                 runtime.sync(&snapshot.screenshot, quitting);
                 runtime.sync_closed_pin(&snapshot, &commands, quitting);
+                crate::screenshot::window_pin::sync(runtime, &snapshot, quitting);
                 runtime.sync_image_ocr(&snapshot, quitting);
             }
             if let Some(export) = &self.annotation_export {

@@ -45,7 +45,59 @@ pub struct ScreenshotCapture {
     pub windows: Vec<crate::domain::window_candidate::WindowCandidate>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WindowPinCapture {
+    pub window: crate::domain::window_candidate::WindowCandidate,
+    pub selection: Rect,
+}
+
+/// Select the frontmost frozen window touching the region, then require containment.
+pub fn window_pin_candidate(
+    windows: &[crate::domain::window_candidate::WindowCandidate],
+    selection: Rect,
+) -> Option<WindowPinCapture> {
+    let window = windows
+        .iter()
+        .copied()
+        .filter(|w| {
+            w.bounds.left < selection.right
+                && w.bounds.right > selection.left
+                && w.bounds.top < selection.bottom
+                && w.bounds.bottom > selection.top
+        })
+        .min_by_key(|w| w.order)?;
+    (selection.left >= window.bounds.left
+        && selection.top >= window.bounds.top
+        && selection.right <= window.bounds.right
+        && selection.bottom <= window.bounds.bottom
+        && selection.left < selection.right
+        && selection.top < selection.bottom)
+        .then_some(WindowPinCapture { window, selection })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowPinPause {
+    Minimized,
+    OutsideClient,
+    BufferLimit,
+}
+
+pub enum WindowPinUpdate {
+    Frame(CapturedRegion),
+    Pause(WindowPinPause),
+}
+
 pub trait ScreenCapturePort: Send + Sync {
+    /// Runs on a dedicated background worker and publishes window-local immutable crops.
+    fn run_window_pin(
+        &self,
+        _request: WindowPinCapture,
+        _stop: &std::sync::atomic::AtomicBool,
+        _publish: &mut dyn FnMut(WindowPinUpdate),
+    ) -> std::result::Result<(), crate::domain::pinned_image::live::Failure> {
+        Err(crate::domain::pinned_image::live::Failure::Unavailable)
+    }
+
     /// Schedule point-scoped accessibility work without waiting on the caller.
     /// Unsupported adapters complete with no elements, retaining whole-window selection.
     fn query_screenshot_elements(
@@ -109,4 +161,44 @@ pub trait ScreenCapturePort: Send + Sync {
     fn latest(&self) -> Result<Option<Arc<ScreenCaptureFrame>>>;
     /// Cancels sampling and releases capture sessions and retained screen pixels.
     fn clear(&self);
+}
+
+#[cfg(test)]
+#[test]
+fn window_pin_never_skips_a_partially_intersecting_front_window() {
+    use crate::domain::window_candidate::WindowCandidate;
+    use crate::ports::magnifier::WindowToken;
+    let selection = Rect {
+        left: -20,
+        top: 4,
+        right: 10,
+        bottom: 18,
+    };
+    let back = WindowCandidate {
+        window: WindowToken(1),
+        process_id: 7,
+        order: 1,
+        bounds: Rect {
+            left: -100,
+            top: 0,
+            right: 100,
+            bottom: 80,
+        },
+    };
+    let front = WindowCandidate {
+        window: WindowToken(2),
+        order: 0,
+        bounds: Rect {
+            left: 0,
+            top: 0,
+            right: 100,
+            bottom: 80,
+        },
+        ..back
+    };
+    assert!(window_pin_candidate(&[back, front], selection).is_none());
+    assert_eq!(
+        window_pin_candidate(&[back], selection).unwrap().window,
+        back
+    );
 }

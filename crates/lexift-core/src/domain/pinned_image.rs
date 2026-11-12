@@ -4,6 +4,7 @@ use crate::ports::{annotation_save::SaveOutcome, magnifier::WindowToken};
 use crate::{AppCommand, AppState, Result};
 use std::collections::BTreeMap;
 pub mod interaction;
+pub mod live;
 pub mod transform;
 pub mod visibility;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -13,6 +14,7 @@ pub enum Output {
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct State {
+    pub live: bool,
     pub user_hidden: bool,
     pub interaction: interaction::State,
     pub operation: u64,
@@ -65,6 +67,7 @@ pub fn restore_available(state: &AppState) -> bool {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    Live(live::Event),
     UserClosed {
         id: u64,
         geometry: ClosedGeometry,
@@ -192,6 +195,7 @@ pub enum Event {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    Live(live::Command),
     CheckClosed {
         id: u64,
     },
@@ -324,7 +328,19 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
         return vec![];
     }
     let command = |c| vec![AppCommand::PinnedImage(c)];
+    if let Event::Closed { id } = &event
+        && state
+            .live_pin
+            .as_ref()
+            .is_some_and(|live| live.id == Some(*id))
+    {
+        let commands = live::reduce(state, live::Event::Closed { id: *id });
+        visibility::closed(state, *id);
+        state.pinned_images.remove(id);
+        return commands;
+    }
     match event {
+        Event::Live(event) => live::reduce(state, event),
         Event::ColorRequested { id, action } => transform::color_request(state, id, action),
         Event::TransformRequested { id, action } => transform::request(state, id, action),
         Event::TransformAccepted {
@@ -690,7 +706,7 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
             let Some(pin) = state
                 .pinned_images
                 .get_mut(&id)
-                .filter(|p| !p.busy && p.proposed.is_none())
+                .filter(|p| !p.live && !p.busy && p.proposed.is_none())
             else {
                 return vec![];
             };

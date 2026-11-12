@@ -2390,3 +2390,30 @@ msgstr "Trim right of current view"
 
 msgid "Scroll right to extend the image"
 msgstr "Scroll right to extend the image"
+
+msgid "More"
+msgstr "More"
+
+msgid "Window pin"
+msgstr "Window pin"
+
+msgid "Freeze as ordinary pin"
+msgstr "Freeze as ordinary pin"
+
+msgid "Freeze or close the existing window pin first"
+msgstr "Freeze or close the existing window pin first"
+
+msgid "The live image comes from the source window. Screenshot annotations will not be included."
+msgstr "The live image comes from the source window. Screenshot annotations will not be included."
+
+msgid "Window capture is unavailable"
+msgstr "Window capture is unavailable"
+
+msgid "Select an area entirely inside one window’s content"
+msgstr "Select an area entirely inside one window’s content"
+
+msgid "The source window changed. Take another screenshot"
+msgstr "The source window changed. Take another screenshot"
+
+msgid "The window is too large to capture live"
+msgstr "The window is too large to capture live"
