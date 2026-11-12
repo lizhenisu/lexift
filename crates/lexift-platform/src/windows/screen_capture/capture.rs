@@ -603,6 +603,8 @@ impl Drop for Backend {
 }
 
 struct WindowCapture {
+    #[cfg(test)]
+    item: GraphicsCaptureItem,
     subscription: Option<super::arrival::Subscription>,
     #[cfg(test)]
     token: isize,
@@ -665,6 +667,8 @@ impl WindowCapture {
         session.StartCapture()?;
         Ok(Self {
             subscription,
+            #[cfg(test)]
+            item,
             #[cfg(test)]
             token,
             #[cfg(test)]
@@ -1612,3 +1616,6 @@ mod tests {
         }
     }
 }
+#[cfg(test)]
+#[path = "window_pin_gate.rs"]
+mod window_pin_gate;
