@@ -743,6 +743,7 @@ impl AppState {
                 change,
             } => {
                 self.settings = settings;
+                self.desired_settings.screenshot_presets = self.settings.screenshot_presets.clone();
                 if matches!(change, SettingsChange::QuickSaveDirectory { .. }) {
                     self.desired_settings.quick_save_directory =
                         self.settings.quick_save_directory.clone();
@@ -1127,7 +1128,10 @@ impl AppState {
                 feedback: change.feedback(false),
             }];
         }
-        if !matches!(change, SettingsChange::QuickSaveDirectory { .. }) {
+        if !matches!(
+            change,
+            SettingsChange::QuickSaveDirectory { .. } | SettingsChange::ScreenshotPresets { .. }
+        ) {
             change.apply_to(&mut self.desired_settings);
         }
         if self.settings_saving || self.credential_busy {
@@ -1140,6 +1144,19 @@ impl AppState {
     }
 
     fn start_settings_change(&mut self, mut change: SettingsChange) -> Vec<AppCommand> {
+        if let SettingsChange::ScreenshotPresets { edit, .. } = &change {
+            let mut presets = self.settings.screenshot_presets.clone();
+            if let Err(error) = crate::domain::screenshot_presets::apply(&mut presets, edit) {
+                self.settings_error_field = Some(change.field());
+                self.set_settings_field_error(change.field(), error.into());
+                let mut commands = vec![AppCommand::ShowSettingsFeedback {
+                    feedback: change.feedback(false),
+                }];
+                commands.extend(self.start_next_settings_change());
+                return commands;
+            }
+        }
+
         if let SettingsChange::QuickSaveDirectory {
             session, operation, ..
         } = &change
@@ -1278,6 +1295,7 @@ impl AppState {
             | SettingsField::OcrHotkey
             | SettingsField::RecordingPauseHotkey
             | SettingsField::RecordingFinishHotkey
+            | SettingsField::ScreenshotPresets
             | SettingsField::QuickSaveDirectory
             | SettingsField::ScreenshotHotkey
             | SettingsField::ClipboardHistoryEnabled
@@ -1305,6 +1323,7 @@ impl AppState {
             | SettingsField::OcrHotkey
             | SettingsField::RecordingPauseHotkey
             | SettingsField::RecordingFinishHotkey
+            | SettingsField::ScreenshotPresets
             | SettingsField::QuickSaveDirectory
             | SettingsField::ScreenshotHotkey
             | SettingsField::ClipboardHistoryEnabled
@@ -1376,6 +1395,9 @@ impl AppState {
             SettingsField::RecordingFinishHotkey => {
                 self.desired_settings.recording_finish_hotkey =
                     self.settings.recording_finish_hotkey
+            }
+            SettingsField::ScreenshotPresets => {
+                self.desired_settings.screenshot_presets = self.settings.screenshot_presets.clone();
             }
             SettingsField::QuickSaveDirectory => {
                 self.desired_settings.quick_save_directory =

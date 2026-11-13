@@ -160,6 +160,7 @@ impl RuntimeManager {
             | SettingsField::ClipboardHistoryLimit
             | SettingsField::SelectionToolbar
             | SettingsField::Theme
+            | SettingsField::ScreenshotPresets
             | SettingsField::QuickSaveDirectory
             | SettingsField::UiLanguage => {}
             SettingsField::RecordingPauseHotkey => self
@@ -211,6 +212,7 @@ impl RuntimeManager {
             | SettingsField::ClipboardHistoryLimit
             | SettingsField::SelectionToolbar
             | SettingsField::Theme
+            | SettingsField::ScreenshotPresets
             | SettingsField::QuickSaveDirectory
             | SettingsField::UiLanguage => {}
             SettingsField::RecordingPauseHotkey => {

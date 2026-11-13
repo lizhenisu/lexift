@@ -1304,6 +1304,26 @@ fn finish_submission(event: SelectionEvent) {
     finish_submission_from(event, None);
 }
 
+pub(crate) fn submit_preset(generation: u64, bounds: Rect) {
+    if STATE.with(|s| {
+        s.borrow()
+            .as_ref()
+            .is_some_and(|r| r.generation == generation && r.screenshot && !r.submitted)
+    }) {
+        finish_submission(SelectionEvent::SelectionSubmitted {
+            selection: lexift_core::domain::region_selection::RegionSelectionResult {
+                context: SelectionContext {
+                    source_session: generation,
+                    request_id: generation,
+                    snapshot_id: generation,
+                },
+                bounds,
+            },
+            focus: None,
+        });
+    }
+}
+
 fn finish_submission_from(mut event: SelectionEvent, input_screen: Option<Rect>) {
     if matches!(event, SelectionEvent::SelectionSubmitted { .. }) {
         let cancelled = STATE.with(|s| s.borrow_mut().as_mut().and_then(cancel_query));

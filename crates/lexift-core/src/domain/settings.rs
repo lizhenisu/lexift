@@ -24,6 +24,7 @@ pub enum SettingsField {
     RecordingPauseHotkey,
     RecordingFinishHotkey,
     QuickSaveDirectory,
+    ScreenshotPresets,
     OcrLanguage,
     OcrKoreanAuto,
     Provider,
@@ -43,6 +44,10 @@ pub enum SettingsField {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsFeedback {
     SettingsSaved(SettingsField),
+    ScreenshotPresetCompleted {
+        request: u64,
+        saved: bool,
+    },
     SettingsSaveFailed(SettingsField),
     TranslationSettingsCompleted {
         request_id: u64,
@@ -71,6 +76,10 @@ pub enum SettingsChange {
     ScreenshotHotkey(HotkeyConfig),
     RecordingPauseHotkey(HotkeyConfig),
     RecordingFinishHotkey(HotkeyConfig),
+    ScreenshotPresets {
+        request: u64,
+        edit: super::screenshot_presets::Edit,
+    },
     QuickSaveDirectory {
         directory: String,
         session: u64,
@@ -117,6 +126,7 @@ impl SettingsChange {
             Self::ScreenshotHotkey(_) => SettingsField::ScreenshotHotkey,
             Self::RecordingPauseHotkey(_) => SettingsField::RecordingPauseHotkey,
             Self::RecordingFinishHotkey(_) => SettingsField::RecordingFinishHotkey,
+            Self::ScreenshotPresets { .. } => SettingsField::ScreenshotPresets,
             Self::QuickSaveDirectory { .. } => SettingsField::QuickSaveDirectory,
             Self::OcrLanguage(_) => SettingsField::OcrLanguage,
             Self::OcrKoreanAuto(_) => SettingsField::OcrKoreanAuto,
@@ -221,6 +231,12 @@ impl SettingsChange {
 
     pub fn feedback(&self, saved: bool) -> SettingsFeedback {
         match self {
+            Self::ScreenshotPresets { request, .. } => {
+                SettingsFeedback::ScreenshotPresetCompleted {
+                    request: *request,
+                    saved,
+                }
+            }
             Self::ProviderEnabled {
                 request_id,
                 provider,
@@ -252,6 +268,9 @@ impl SettingsChange {
             Self::ScreenshotHotkey(value) => settings.screenshot_hotkey = *value,
             Self::RecordingPauseHotkey(value) => settings.recording_pause_hotkey = *value,
             Self::RecordingFinishHotkey(value) => settings.recording_finish_hotkey = *value,
+            Self::ScreenshotPresets { edit, .. } => {
+                let _ = super::screenshot_presets::apply(&mut settings.screenshot_presets, edit);
+            }
             Self::QuickSaveDirectory {
                 directory: value, ..
             } => settings.quick_save_directory = Some(value.clone()),
@@ -324,6 +343,7 @@ impl SettingsChange {
             Self::ScreenshotHotkey(value) => settings.screenshot_hotkey == *value,
             Self::RecordingPauseHotkey(value) => settings.recording_pause_hotkey == *value,
             Self::RecordingFinishHotkey(value) => settings.recording_finish_hotkey == *value,
+            Self::ScreenshotPresets { .. } => false,
             Self::QuickSaveDirectory {
                 directory: value, ..
             } => settings.quick_save_directory.as_ref() == Some(value),
@@ -368,6 +388,7 @@ pub struct Settings {
     pub screenshot_hotkey: HotkeyConfig,
     pub recording_pause_hotkey: HotkeyConfig,
     pub recording_finish_hotkey: HotkeyConfig,
+    pub screenshot_presets: Vec<super::screenshot_presets::Preset>,
     pub quick_save_directory: Option<String>,
     pub ocr_language: Option<String>,
     pub ocr_enabled: bool,
@@ -395,6 +416,7 @@ impl Default for Settings {
             screenshot_hotkey: HotkeyConfig::screenshot_default(),
             recording_pause_hotkey: super::recording_hotkeys::default_pause(),
             recording_finish_hotkey: super::recording_hotkeys::default_finish(),
+            screenshot_presets: vec![],
             quick_save_directory: None,
             ocr_language: Some("auto".into()),
             ocr_enabled: true,

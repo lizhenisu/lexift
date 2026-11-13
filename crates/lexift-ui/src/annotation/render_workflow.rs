@@ -742,6 +742,7 @@ pub(super) fn capture_exclusions(r: &Registry) -> Vec<lexift_core::ports::magnif
         .collect();
     windows.extend(crate::bridge::image_history::exclusions());
     windows.extend(crate::bridge::ocr_result::exclusion());
+    windows.extend(crate::bridge::screenshot_presets::exclusion());
     windows.sort_unstable_by_key(|window| window.0);
     windows.dedup();
     windows

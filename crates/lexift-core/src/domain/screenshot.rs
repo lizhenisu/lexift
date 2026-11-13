@@ -67,6 +67,7 @@ pub struct ScreenshotState {
     pub quick_directory_pending: bool,
     pub refresh: Option<refresh::State>,
     pub shortcut_sequence: u64,
+    pub preset_region: Option<LastRegion>,
     pub shortcut_pending: Option<u64>,
     pub origin: CaptureOrigin,
     pub long: Option<super::long_capture::workflow::State>,
@@ -102,13 +103,7 @@ impl ScreenshotState {
         if self.phase != ScreenshotPhase::Selecting || self.layout.is_empty() {
             return None;
         }
-        let normalize = |layout: &[Rect]| {
-            let mut layout = layout.to_vec();
-            layout.sort_by_key(|r| (r.left, r.top, r.right, r.bottom));
-            layout.dedup();
-            layout
-        };
-        (normalize(&last.layout) == normalize(&self.layout)).then_some(last.bounds)
+        super::screenshot_presets::matches_layout(&last.layout, &self.layout).then_some(last.bounds)
     }
     pub fn active(&self) -> bool {
         self.phase != ScreenshotPhase::Idle || self.shortcut_pending.is_some()
@@ -129,6 +124,11 @@ pub enum ScreenshotEvent {
     Recording(recording::Event),
     Refresh(refresh::Event),
     ShortcutRequested(ShortcutTrigger),
+    PresetRequested {
+        id: u64,
+        trigger: ShortcutTrigger,
+        layout: Vec<Rect>,
+    },
     ShortcutFrozen {
         id: u64,
         origin: CaptureOrigin,
@@ -300,6 +300,7 @@ fn start_capture(
 ) -> Vec<AppCommand> {
     let s = &mut state.screenshot;
     s.origin = origin;
+    s.preset_region = None;
     s.refresh = None;
     s.recording = None;
     s.frame_version = 0;
@@ -333,7 +334,8 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
     match event {
         ScreenshotEvent::Recording(event) => recording::reduce(s, event),
         ScreenshotEvent::Refresh(event) => refresh::reduce(s, event),
-        ScreenshotEvent::ShortcutRequested(trigger)
+        event @ (ScreenshotEvent::ShortcutRequested(trigger)
+        | ScreenshotEvent::PresetRequested { trigger, .. })
             if delay_allowed
                 && state.editor_ocr.request.is_none()
                 && !state
@@ -341,6 +343,25 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                     .values()
                     .any(|p| p.recognition.is_some() || p.interaction.pending.is_some()) =>
         {
+            s.preset_region = match event {
+                ScreenshotEvent::PresetRequested { id, layout, .. } => {
+                    let Some(preset) = state
+                        .settings
+                        .screenshot_presets
+                        .iter()
+                        .find(|p| p.id == id)
+                    else {
+                        return vec![];
+                    };
+                    if !super::screenshot_presets::matches_layout(&preset.region.layout, &layout)
+                        || !super::screenshot_presets::covers(preset.region.bounds, &layout)
+                    {
+                        return vec![];
+                    }
+                    Some(preset.region.clone())
+                }
+                _ => None,
+            };
             s.shortcut_sequence = s
                 .shortcut_sequence
                 .checked_add(1)
@@ -362,7 +383,10 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 || state.annotation_export.session == Some(request.session)) =>
         {
             s.shortcut_pending = None;
-            start_capture(state, request, origin)
+            let preset = s.preset_region.take();
+            let commands = start_capture(state, request, origin);
+            state.screenshot.preset_region = preset;
+            commands
         }
 
         ScreenshotEvent::ShortcutFrozen { id, .. } if s.shortcut_pending == Some(id) => {
@@ -566,6 +590,15 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         {
             match result {
                 Ok(layout) => {
+                    if s.preset_region.as_ref().is_some_and(|p| {
+                        !super::screenshot_presets::matches_layout(&p.layout, &layout)
+                    }) {
+                        s.phase = ScreenshotPhase::Idle;
+                        s.preset_region = None;
+                        s.error =
+                            Some("Display layout changed. Reselect the screenshot region.".into());
+                        return command(ScreenshotCommand::Restore { session });
+                    }
                     s.layout = layout;
                     s.phase = ScreenshotPhase::Selecting;
                     command(ScreenshotCommand::Show { session })
@@ -587,6 +620,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 && bounds.right > bounds.left
                 && bounds.bottom > bounds.top =>
         {
+            s.preset_region = None;
             s.bounds = Some(bounds);
             s.phase = ScreenshotPhase::Editing;
             s.element_pending = None;
@@ -788,6 +822,30 @@ mod tests {
         ));
         s
     }
+    #[test]
+    fn preset_rechecks_the_layout_of_the_actual_capture() {
+        let mut state = begin();
+        state.screenshot.preset_region = Some(LastRegion {
+            bounds: bounds(),
+            layout: vec![bounds()],
+        });
+        let mut different = bounds();
+        different.right += 1;
+        let commands = state.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
+            session: 1,
+            result: Ok(vec![different]),
+        }));
+        assert!(matches!(
+            commands.as_slice(),
+            [AppCommand::Screenshot(ScreenshotCommand::Restore {
+                session: 1
+            })]
+        ));
+        assert_eq!(state.screenshot.phase, ScreenshotPhase::Idle);
+        assert!(state.screenshot.preset_region.is_none());
+        assert!(state.screenshot.last_region.is_none());
+    }
+
     #[test]
     fn view_recognition_retires_editor_and_rejects_late_results() {
         use super::super::ocr::{Output, ResultText};

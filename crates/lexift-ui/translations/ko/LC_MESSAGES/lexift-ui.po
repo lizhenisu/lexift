@@ -2429,3 +2429,39 @@ msgstr "전체 텍스트 복사"
 
 msgid "OCR options"
 msgstr "OCR 옵션"
+
+msgid "Screenshot presets"
+msgstr "스크린샷 사전 설정"
+
+msgid "Save region as preset"
+msgstr "영역을 사전 설정으로 저장"
+
+msgid "Update existing preset"
+msgstr "기존 사전 설정 업데이트"
+
+msgid "Display layout changed. Reselect the screenshot region."
+msgstr "디스플레이 배치가 변경되었습니다. 영역을 다시 선택하세요."
+
+msgid "Could not save screenshot preset"
+msgstr "사전 설정을 저장할 수 없습니다"
+
+msgid "Delete this screenshot preset?"
+msgstr "이 사전 설정을 삭제할까요?"
+
+msgid "Preset name"
+msgstr "사전 설정 이름"
+
+msgid "Enter a name with 1–64 characters"
+msgstr "1~64자의 이름을 입력하세요"
+
+msgid "A screenshot preset with this name already exists"
+msgstr "같은 이름의 사전 설정이 있습니다"
+
+msgid "Screenshot preset no longer exists"
+msgstr "사전 설정이 더 이상 없습니다"
+
+msgid "Screenshot preset identity exhausted"
+msgstr "사전 설정 번호가 소진되었습니다"
+
+msgid "Rename"
+msgstr "이름 바꾸기"

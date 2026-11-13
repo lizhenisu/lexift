@@ -143,6 +143,10 @@ fn finish_later(key: Opening, action: Option<AppEvent>, restore: bool, reason: &
             "Finish tray menu intent"
         );
         close_with_reason(restore, reason);
+        if reason == "screenshot_presets" {
+            crate::bridge::screenshot_presets::open(None);
+            return;
+        }
         if let Some((handler, action)) = handler.zip(action) {
             handler(action);
         }
@@ -194,6 +198,10 @@ pub(crate) fn show(request: TrayMenuRequest) {
             request_id: request.request_id,
         };
         window.on_action(move |index| {
+            if index == 10 {
+                finish_later(key, None, false, "screenshot_presets");
+                return;
+            }
             if index == 8 && !crate::pinned_screenshot::closed_restore_available() {
                 return;
             }
@@ -227,6 +235,7 @@ pub(crate) fn show(request: TrayMenuRequest) {
                     &crate::i18n::tr("Hide all pins"),
                     &crate::i18n::tr("Restore hidden pins"),
                     &crate::i18n::tr("Restore last closed pin"),
+                    &crate::i18n::tr("Screenshot presets"),
                     &labels.quit,
                 ],
                 &text,
@@ -243,10 +252,17 @@ pub(crate) fn show(request: TrayMenuRequest) {
             {
                 return;
             }
+            if matches == [9] {
+                finish_later(key, None, false, "screenshot_presets");
+                return;
+            }
             if matches.len() == 1 {
                 finish_later(
                     key,
-                    action_for_index(matches[0], request.anchor),
+                    action_for_index(
+                        if matches[0] == 10 { 9 } else { matches[0] },
+                        request.anchor,
+                    ),
                     false,
                     "mnemonic_action",
                 );

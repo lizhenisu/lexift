@@ -262,6 +262,8 @@ pub(crate) struct SettingsFile {
     #[serde(default = "default_recording_finish_hotkey")]
     recording_finish_hotkey: HotkeyFile,
     #[serde(default)]
+    screenshot_presets: Vec<PresetFile>,
+    #[serde(default)]
     quick_save_directory: Option<String>,
     #[serde(default)]
     ocr_language: Option<String>,
@@ -398,6 +400,11 @@ impl ConfigFile {
                 screenshot_hotkey: settings.screenshot_hotkey.into(),
                 recording_pause_hotkey: settings.recording_pause_hotkey.into(),
                 recording_finish_hotkey: settings.recording_finish_hotkey.into(),
+                screenshot_presets: settings
+                    .screenshot_presets
+                    .iter()
+                    .map(PresetFile::from)
+                    .collect(),
                 quick_save_directory: settings.quick_save_directory.clone(),
                 ocr_language: settings.ocr_language.clone(),
                 ocr_enabled: settings.ocr_enabled,
@@ -517,6 +524,12 @@ impl ConfigFile {
                 },
                 self.settings.recording_pause_hotkey.key.parse()?,
             )?,
+            screenshot_presets: self
+                .settings
+                .screenshot_presets
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             quick_save_directory: self.settings.quick_save_directory,
             recording_finish_hotkey: HotkeyConfig::new(
                 lexift_core::domain::runtime_config::HotkeyModifiers {
@@ -728,5 +741,46 @@ mod tests {
         let encoded = toml::to_string(&ConfigFile::from_settings(&settings)).unwrap();
         let decoded: ConfigFile = toml::from_str(&encoded).unwrap();
         assert!(decoded.into_settings().unwrap().ocr_korean_auto);
+    }
+}
+
+use lexift_core::domain::{geometry::Rect, screenshot::LastRegion, screenshot_presets::Preset};
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+struct PresetFile {
+    id: u64,
+    name: String,
+    bounds: [i32; 4],
+    layout: Vec<[i32; 4]>,
+}
+
+impl From<&Preset> for PresetFile {
+    fn from(value: &Preset) -> Self {
+        let edges = |r: &Rect| [r.left, r.top, r.right, r.bottom];
+        Self {
+            id: value.id,
+            name: value.name.clone(),
+            bounds: edges(&value.region.bounds),
+            layout: value.region.layout.iter().map(edges).collect(),
+        }
+    }
+}
+
+impl From<PresetFile> for Preset {
+    fn from(value: PresetFile) -> Self {
+        let rect = |[left, top, right, bottom]: [i32; 4]| Rect {
+            left,
+            top,
+            right,
+            bottom,
+        };
+        Self {
+            id: value.id,
+            name: value.name,
+            region: LastRegion {
+                bounds: rect(value.bounds),
+                layout: value.layout.into_iter().map(rect).collect(),
+            },
+        }
     }
 }

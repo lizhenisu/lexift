@@ -2429,3 +2429,39 @@ msgstr "全文をコピー"
 
 msgid "OCR options"
 msgstr "OCR オプション"
+
+msgid "Screenshot presets"
+msgstr "スクリーンショットプリセット"
+
+msgid "Save region as preset"
+msgstr "選択範囲をプリセットに保存"
+
+msgid "Update existing preset"
+msgstr "既存プリセットを更新"
+
+msgid "Display layout changed. Reselect the screenshot region."
+msgstr "画面配置が変わりました。範囲を選択し直してください。"
+
+msgid "Could not save screenshot preset"
+msgstr "プリセットを保存できませんでした"
+
+msgid "Delete this screenshot preset?"
+msgstr "このプリセットを削除しますか？"
+
+msgid "Preset name"
+msgstr "プリセット名"
+
+msgid "Enter a name with 1–64 characters"
+msgstr "1～64 文字の名前を入力してください"
+
+msgid "A screenshot preset with this name already exists"
+msgstr "同じ名前のプリセットがあります"
+
+msgid "Screenshot preset no longer exists"
+msgstr "プリセットは存在しません"
+
+msgid "Screenshot preset identity exhausted"
+msgstr "プリセット番号の上限に達しました"
+
+msgid "Rename"
+msgstr "名前を変更"

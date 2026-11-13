@@ -443,6 +443,13 @@ pub(crate) fn show(
                 })
             {
                 crate::pinned_screenshot::set_frozen(true);
+                let preset =
+                    FLOW.with(|s| s.borrow().state.preset_region.as_ref().map(|p| p.bounds));
+                if let Some(bounds) = preset {
+                    slint::Timer::single_shot(Duration::ZERO, move || {
+                        selection_host::submit_preset(id, bounds)
+                    });
+                }
             }
         }
         selection_host::SelectionEvent::ReuseRegion {
@@ -1148,6 +1155,17 @@ fn show_feedback(state: &ScreenshotState) {
     if state.phase == ScreenshotPhase::Refreshing {
         return;
     }
+    if state.error.as_deref() == Some("Display layout changed. Reselect the screenshot region.")
+        && let Some(point) =
+            REGISTRY.with(|r| (r.borrow().as_ref()?.lifecycle.toolbar_cursor_position)())
+    {
+        crate::bridge::image_history::show_passive_feedback(
+            point,
+            "Display layout changed. Reselect the screenshot region.",
+            true,
+        );
+        return;
+    }
     let passive = state.phase == ScreenshotPhase::Recording
         || FLOW.with(|f| f.borrow().refresh_feedback == Some((state.session, state.operation)));
     let Some(message) = state.error.as_ref() else {
@@ -1591,4 +1609,29 @@ fn start_window_pin(session: u64) {
     super::emit_pin(lexift_core::domain::pinned_image::Event::Live(
         lexift_core::domain::pinned_image::live::Event::Start { session },
     ));
+}
+
+pub(super) fn save_preset() {
+    keyboard::commit_current();
+    let bounds = REGISTRY.with(|r| {
+        let r = r.borrow();
+        let r = r.as_ref()?;
+        let editor = r.screenshot.as_ref()?;
+        (r.gesture.is_none() && !editor.region.dragging())
+            .then(|| editor.region.bounds())
+            .flatten()
+    });
+    let region = FLOW.with(|f| {
+        let f = f.borrow();
+        if !f.state.editable() || f.state.long.is_some() {
+            return None;
+        }
+        Some(lexift_core::domain::screenshot::LastRegion {
+            bounds: bounds?,
+            layout: f.state.layout.clone(),
+        })
+    });
+    if let Some(region) = region {
+        crate::bridge::screenshot_presets::open(Some(region));
+    }
 }

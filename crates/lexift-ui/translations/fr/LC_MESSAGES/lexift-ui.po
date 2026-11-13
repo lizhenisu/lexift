@@ -2429,3 +2429,39 @@ msgstr "Copier tout le texte"
 
 msgid "OCR options"
 msgstr "Options OCR"
+
+msgid "Screenshot presets"
+msgstr "Préréglages de capture"
+
+msgid "Save region as preset"
+msgstr "Enregistrer la zone comme préréglage"
+
+msgid "Update existing preset"
+msgstr "Mettre à jour un préréglage existant"
+
+msgid "Display layout changed. Reselect the screenshot region."
+msgstr "La disposition des écrans a changé. Sélectionnez à nouveau la zone."
+
+msgid "Could not save screenshot preset"
+msgstr "Impossible d’enregistrer le préréglage de capture"
+
+msgid "Delete this screenshot preset?"
+msgstr "Supprimer ce préréglage de capture ?"
+
+msgid "Preset name"
+msgstr "Nom du préréglage"
+
+msgid "Enter a name with 1–64 characters"
+msgstr "Saisissez un nom de 1 à 64 caractères"
+
+msgid "A screenshot preset with this name already exists"
+msgstr "Un préréglage de capture porte déjà ce nom"
+
+msgid "Screenshot preset no longer exists"
+msgstr "Le préréglage de capture n’existe plus"
+
+msgid "Screenshot preset identity exhausted"
+msgstr "Les identifiants de préréglage sont épuisés"
+
+msgid "Rename"
+msgstr "Renommer"

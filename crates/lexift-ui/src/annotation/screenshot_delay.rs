@@ -109,6 +109,10 @@ fn choose(sequence: u64, index: Option<i32>) {
         let long_trim = VIEWS.with(|s| s.borrow().long_trim);
         let quick_owner = VIEWS.with(|s| s.borrow().quick_owner);
         clear();
+        if kind == 0 && index == Some(4) {
+            crate::bridge::screenshot_presets::open(None);
+            return;
+        }
         if kind == RECOGNITION_MENU {
             if quick_owner == quick_save_owner()
                 && let Some(index @ (0 | 1)) = index
@@ -120,6 +124,9 @@ fn choose(sequence: u64, index: Option<i32>) {
         if kind == WINDOW_PIN_MENU {
             if index == Some(0) && quick_owner == quick_save_owner() {
                 super::request_window_pin();
+            }
+            if index == Some(1) && quick_owner == quick_save_owner() {
+                super::save_preset();
             }
             return;
         }
@@ -316,10 +323,13 @@ fn menu_kind(kind: u8) {
         &["Recognize text", "View recognition result"]
     } else if kind == WINDOW_PIN_MENU {
         if super::window_pin_available() {
-            &["Window pin"]
+            &["Window pin", "Save region as preset"]
         } else {
             w.set_disabled_index(0);
-            &["Freeze or close the existing window pin first"]
+            &[
+                "Freeze or close the existing window pin first",
+                "Save region as preset",
+            ]
         }
     } else if kind == QUICK_SAVE_MENU {
         &["Quick save PNG", "Change quick save directory"]
@@ -366,6 +376,7 @@ fn menu_kind(kind: u8) {
             "Screenshot after 3 seconds",
             "Screenshot after 5 seconds",
             "Screenshot after 10 seconds",
+            "Screenshot presets",
         ]
     };
     w.set_options(slint::ModelRc::new(slint::VecModel::from(

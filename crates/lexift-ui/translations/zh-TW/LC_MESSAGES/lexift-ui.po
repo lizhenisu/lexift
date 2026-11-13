@@ -2429,3 +2429,39 @@ msgstr "複製全文"
 
 msgid "OCR options"
 msgstr "OCR 選項"
+
+msgid "Screenshot presets"
+msgstr "截圖預設"
+
+msgid "Save region as preset"
+msgstr "將選區儲存為預設"
+
+msgid "Update existing preset"
+msgstr "更新現有預設"
+
+msgid "Display layout changed. Reselect the screenshot region."
+msgstr "顯示器配置已變更，請重新框選截圖區域。"
+
+msgid "Could not save screenshot preset"
+msgstr "無法儲存截圖預設"
+
+msgid "Delete this screenshot preset?"
+msgstr "刪除此截圖預設？"
+
+msgid "Preset name"
+msgstr "預設名稱"
+
+msgid "Enter a name with 1–64 characters"
+msgstr "請輸入 1–64 個字元的名稱"
+
+msgid "A screenshot preset with this name already exists"
+msgstr "已有同名截圖預設"
+
+msgid "Screenshot preset no longer exists"
+msgstr "此截圖預設已不存在"
+
+msgid "Screenshot preset identity exhausted"
+msgstr "截圖預設編號已用盡"
+
+msgid "Rename"
+msgstr "重新命名"

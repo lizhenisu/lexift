@@ -2429,3 +2429,39 @@ msgstr "Ganzen Text kopieren"
 
 msgid "OCR options"
 msgstr "OCR-Optionen"
+
+msgid "Screenshot presets"
+msgstr "Screenshot-Vorgaben"
+
+msgid "Save region as preset"
+msgstr "Bereich als Vorgabe speichern"
+
+msgid "Update existing preset"
+msgstr "Vorhandene Vorgabe aktualisieren"
+
+msgid "Display layout changed. Reselect the screenshot region."
+msgstr "Bildschirmlayout geändert. Screenshot-Bereich erneut auswählen."
+
+msgid "Could not save screenshot preset"
+msgstr "Screenshot-Vorgabe konnte nicht gespeichert werden"
+
+msgid "Delete this screenshot preset?"
+msgstr "Diese Screenshot-Vorgabe löschen?"
+
+msgid "Preset name"
+msgstr "Name der Vorgabe"
+
+msgid "Enter a name with 1–64 characters"
+msgstr "Einen Namen mit 1–64 Zeichen eingeben"
+
+msgid "A screenshot preset with this name already exists"
+msgstr "Eine Screenshot-Vorgabe mit diesem Namen existiert bereits"
+
+msgid "Screenshot preset no longer exists"
+msgstr "Screenshot-Vorgabe existiert nicht mehr"
+
+msgid "Screenshot preset identity exhausted"
+msgstr "Nummern für Screenshot-Vorgaben sind erschöpft"
+
+msgid "Rename"
+msgstr "Umbenennen"

@@ -662,6 +662,9 @@ pub(super) fn clear_settings_toasts(
 
 pub(super) fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static str, bool) {
     match feedback {
+        SettingsFeedback::ScreenshotPresetCompleted { .. } => {
+            ("Could not save screenshot preset", true)
+        }
         SettingsFeedback::SettingsSaved(SettingsField::UiLanguage) => {
             ("Interface language saved", false)
         }
@@ -689,6 +692,7 @@ pub(super) fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static
         }
         SettingsFeedback::SettingsSaved(
             SettingsField::RecordingPauseHotkey
+            | SettingsField::ScreenshotPresets
             | SettingsField::QuickSaveDirectory
             | SettingsField::RecordingFinishHotkey
             | SettingsField::OcrHotkey
@@ -720,6 +724,7 @@ pub(super) fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static
         }
         SettingsFeedback::SettingsSaveFailed(
             SettingsField::RecordingPauseHotkey
+            | SettingsField::ScreenshotPresets
             | SettingsField::QuickSaveDirectory
             | SettingsField::RecordingFinishHotkey
             | SettingsField::OcrHotkey
@@ -920,6 +925,13 @@ impl UiHandle {
     }
     /// Show dismissible feedback owned by the current Settings window.
     pub fn show_settings_feedback(&self, feedback: SettingsFeedback) {
+        if let SettingsFeedback::ScreenshotPresetCompleted { request, saved } = feedback {
+            let _ = slint::invoke_from_event_loop(move || {
+                super::screenshot_presets::completed(request, saved)
+            });
+            return;
+        }
+
         if let SettingsFeedback::CredentialCopied { generation } = feedback {
             let current = self.credential_generation.clone();
             let _ = slint::invoke_from_event_loop(move || {

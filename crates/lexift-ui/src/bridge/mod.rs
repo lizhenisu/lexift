@@ -109,6 +109,7 @@ fn has_live_window_instances() -> bool {
         || HISTORY.with(|s| s.borrow().as_ref().is_some_and(|r| r.window.is_some()))
         || crate::ocr::active()
         || ocr_result::active()
+        || screenshot_presets::active()
         || crate::annotation::is_open()
         || crate::annotation::screenshot::active()
         || crate::pinned_screenshot::active()
@@ -130,6 +131,7 @@ fn has_live_window_instances() -> bool {
 
 mod app_window;
 pub(crate) mod ocr_result;
+pub(crate) mod screenshot_presets;
 pub use app_window::WindowRole;
 type PrepareAppWindow = Rc<dyn Fn(&slint::Window, WindowRole) -> PassiveWindowPreparation>;
 
@@ -216,6 +218,11 @@ impl Ui {
     ) -> Result<Self, slint::PlatformError> {
         crate::annotation::init(prepare_passive_window, window_lifecycle.clone());
         crate::ocr::init(prepare_passive_window, window_lifecycle.clone());
+        screenshot_presets::init(
+            prepare_passive_window,
+            window_lifecycle.clone(),
+            initial_state.settings.screenshot_presets.clone(),
+        );
         ocr_result::init(prepare_passive_window, window_lifecycle.clone());
         crate::pinned_screenshot::init(prepare_passive_window, window_lifecycle.clone());
         crate::tray_menu::init(prepare_passive_window, window_lifecycle.clone());
@@ -356,6 +363,7 @@ impl Ui {
     ) {
         let handler: Rc<dyn Fn(AppEvent)> = Rc::new(handler);
         crate::tray_menu::set_handler(Rc::clone(&handler));
+        screenshot_presets::set_handler(handler.clone());
         image_history::set_handler(Rc::clone(&handler));
         crate::ocr::set_handler(handler.clone());
         crate::annotation::set_handler(handler.clone());
@@ -844,6 +852,7 @@ impl UiHandle {
                 crate::annotation::refresh_language();
             }
             crate::theme::set_current(theme);
+            screenshot_presets::sync(&state);
             image_history::sync(&state);
             crate::annotation::history_editor::sync(state.image_history.editor.clone());
             crate::annotation::editor_ocr::sync(&state);
@@ -907,6 +916,7 @@ impl UiHandle {
                     clear_settings_toasts(settings, &toast_records);
                 }
             });
+            screenshot_presets::close();
             ocr_result::close();
             let _ = slint::quit_event_loop();
         });
@@ -915,6 +925,7 @@ impl UiHandle {
 
 fn apply_window_themes() {
     ocr_result::apply_theme();
+    screenshot_presets::apply_theme();
     APP_WINDOW_REGISTRY.with(|slot| {
         if let Some(r) = slot.borrow().as_ref() {
             if let Some(w) = &r.main {
