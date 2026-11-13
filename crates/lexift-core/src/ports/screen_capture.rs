@@ -124,6 +124,12 @@ pub trait ScreenCapturePort: Send + Sync {
     ) -> Result<Vec<crate::domain::window_candidate::WindowCandidate>> {
         Ok(Vec::new())
     }
+    fn screenshot_layers(
+        &self,
+        _excluded: &[WindowToken],
+    ) -> Result<Vec<crate::domain::screenshot_windows::Layer>> {
+        Err(crate::Error::new("Window screenshot is unavailable"))
+    }
     /// One-shot physical desktop capture, performed before selection overlays are shown.
     /// Independent instances must not disturb annotation sampling.
     fn freeze_desktop(&self) -> Result<Vec<CapturedRegion>> {

@@ -2474,3 +2474,12 @@ msgstr "Elimina area corrente"
 
 msgid "Save all PNG"
 msgstr "Salva tutto come PNG"
+
+msgid "Multi-window screenshot"
+msgstr "Cattura di più finestre"
+
+msgid "Save PNG"
+msgstr "Salva PNG"
+
+msgid "Selected windows"
+msgstr "Finestre selezionate"

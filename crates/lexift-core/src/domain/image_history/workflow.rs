@@ -560,6 +560,19 @@ pub(crate) fn after(
     }
     for command in commands {
         match command {
+            AppCommand::Screenshot(ScreenshotCommand::SaveWindows {
+                session, operation, ..
+            }) => {
+                h.start(
+                    OutputKey::Screenshot {
+                        session: *session,
+                        operation: *operation,
+                    },
+                    Source::Screenshot(*session),
+                    Kind::Screenshot,
+                    false,
+                );
+            }
             AppCommand::Screenshot(ScreenshotCommand::SaveRegions {
                 session,
                 request,
@@ -725,6 +738,21 @@ pub(crate) fn after(
 
 pub(crate) fn successful_output(state: &AppState, event: &AppEvent) -> Option<OutputKey> {
     match event {
+        AppEvent::Screenshot(ScreenshotEvent::WindowsSaved(
+            session,
+            operation,
+            Ok(SaveOutcome::Saved),
+        )) if state.screenshot.session == *session
+            && state.screenshot.operation == *operation
+            && state.screenshot.windows.is_some()
+            && state.screenshot.phase == ScreenshotPhase::Output =>
+        {
+            Some(OutputKey::Screenshot {
+                session: *session,
+                operation: *operation,
+            })
+        }
+
         AppEvent::Screenshot(ScreenshotEvent::Multi(
             session,
             crate::domain::screenshot_multi::Action::Item(request, id, Ok(())),

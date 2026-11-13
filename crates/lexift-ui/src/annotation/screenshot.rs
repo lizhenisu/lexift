@@ -66,7 +66,7 @@ pub(crate) fn active() -> bool {
         s.state.active() || s.recovery.is_some()
     })
 }
-pub(crate) fn request_multi() {
+pub(crate) fn request_multi(windows: bool) {
     let trigger = REGISTRY.with(|slot| {
         let slot = slot.borrow();
         let r = slot.as_ref()?;
@@ -80,7 +80,11 @@ pub(crate) fn request_multi() {
         })
     });
     if let Some(trigger) = trigger {
-        emit(ScreenshotEvent::MultiRequested(trigger));
+        emit(if windows {
+            ScreenshotEvent::WindowsRequested(trigger)
+        } else {
+            ScreenshotEvent::MultiRequested(trigger)
+        });
     }
 }
 
@@ -488,6 +492,7 @@ pub(crate) fn show(
         selection_host::SelectionEvent::CancelElements { session, request } => {
             emit(ScreenshotEvent::CancelElements { session, request })
         }
+        selection_host::SelectionEvent::Windows(event) => emit(event),
         selection_host::SelectionEvent::Multi(session, action) => {
             emit(ScreenshotEvent::Multi(session, action))
         }

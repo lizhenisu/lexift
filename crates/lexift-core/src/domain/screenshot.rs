@@ -67,6 +67,7 @@ pub struct ScreenshotState {
     pub quick_directory_pending: bool,
     pub refresh: Option<refresh::State>,
     pub shortcut_sequence: u64,
+    pub windows: Option<super::screenshot_windows::Selection>,
     pub multi: Option<super::screenshot_multi::Batch>,
     pub preset_region: Option<LastRegion>,
     pub shortcut_pending: Option<u64>,
@@ -101,7 +102,8 @@ impl ScreenshotState {
     /// Physical layout equality ignores enumeration order and logical DPI.
     pub fn reusable_region(&self) -> Option<Rect> {
         let last = self.last_region.as_ref()?;
-        if self.multi.is_some()
+        if self.windows.is_some()
+            || self.multi.is_some()
             || self.phase != ScreenshotPhase::Selecting
             || self.layout.is_empty()
         {
@@ -129,6 +131,11 @@ pub enum ScreenshotEvent {
     Refresh(refresh::Event),
     ShortcutRequested(ShortcutTrigger),
     MultiRequested(ShortcutTrigger),
+    WindowsRequested(ShortcutTrigger),
+    WindowLayers(u64, Vec<super::screenshot_windows::Layer>),
+    ToggleWindow(u64, Point),
+    SaveWindows(u64, Option<crate::ports::magnifier::WindowToken>, String),
+    WindowsSaved(u64, u64, Result<SaveOutcome>),
     Multi(u64, super::screenshot_multi::Action),
     PresetRequested {
         id: u64,
@@ -221,6 +228,14 @@ pub enum ScreenshotEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotCommand {
+    SaveWindows {
+        session: u64,
+        operation: u64,
+        mask: Vec<Rect>,
+        owner: Option<crate::ports::magnifier::WindowToken>,
+        title: String,
+    },
+
     SaveRegions {
         session: u64,
         request: u64,
@@ -315,6 +330,7 @@ fn start_capture(
     let s = &mut state.screenshot;
     s.origin = origin;
     s.multi = None;
+    s.windows = None;
     s.preset_region = None;
     s.refresh = None;
     s.recording = None;
@@ -347,6 +363,65 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
     let delay_allowed = delay_available(state);
     let s = &mut state.screenshot;
     match event {
+        ScreenshotEvent::WindowLayers(session, layers)
+            if s.session == session && s.phase == ScreenshotPhase::Preparing =>
+        {
+            if let Some(selection) = s.windows.as_mut() {
+                selection.layers = layers;
+            }
+            vec![]
+        }
+        ScreenshotEvent::ToggleWindow(session, point)
+            if s.session == session && s.phase == ScreenshotPhase::Selecting =>
+        {
+            if let Some(selection) = s.windows.as_mut() {
+                s.error = selection
+                    .toggle(point, &s.layout)
+                    .err()
+                    .map(|e| e.to_string());
+            }
+            vec![]
+        }
+        ScreenshotEvent::SaveWindows(session, owner, title)
+            if s.session == session && s.phase == ScreenshotPhase::Selecting =>
+        {
+            let Some(selection) = s
+                .windows
+                .as_ref()
+                .filter(|selection| !selection.mask.is_empty())
+            else {
+                return vec![];
+            };
+            s.operation += 1;
+            s.error = None;
+            s.phase = ScreenshotPhase::Output;
+            command(ScreenshotCommand::SaveWindows {
+                session,
+                operation: s.operation,
+                mask: selection.mask.clone(),
+                owner,
+                title,
+            })
+        }
+        ScreenshotEvent::WindowsSaved(session, operation, result)
+            if s.session == session
+                && s.operation == operation
+                && s.windows.is_some()
+                && s.phase == ScreenshotPhase::Output =>
+        {
+            match result {
+                Ok(SaveOutcome::Saved) => {
+                    s.windows = None;
+                    s.phase = ScreenshotPhase::Idle;
+                    command(ScreenshotCommand::Restore { session })
+                }
+                result => {
+                    s.error = result.err().map(|e| e.to_string());
+                    s.phase = ScreenshotPhase::Selecting;
+                    vec![]
+                }
+            }
+        }
         ScreenshotEvent::Multi(session, action)
             if s.session == session && s.phase == ScreenshotPhase::Selecting =>
         {
@@ -396,6 +471,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         ScreenshotEvent::Refresh(event) => refresh::reduce(s, event),
         event @ (ScreenshotEvent::ShortcutRequested(trigger)
         | ScreenshotEvent::MultiRequested(trigger)
+        | ScreenshotEvent::WindowsRequested(trigger)
         | ScreenshotEvent::PresetRequested { trigger, .. })
             if delay_allowed
                 && state.editor_ocr.request.is_none()
@@ -404,6 +480,8 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                     .values()
                     .any(|p| p.recognition.is_some() || p.interaction.pending.is_some()) =>
         {
+            s.windows =
+                matches!(event, ScreenshotEvent::WindowsRequested(_)).then(Default::default);
             s.multi = matches!(event, ScreenshotEvent::MultiRequested(_)).then(Default::default);
             s.preset_region = match event {
                 ScreenshotEvent::PresetRequested { id, layout, .. } => {
@@ -435,6 +513,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         ScreenshotEvent::ShortcutUnavailable { id } if s.shortcut_pending == Some(id) => {
             s.shortcut_pending = None;
             s.multi = None;
+            s.windows = None;
             vec![]
         }
         ScreenshotEvent::ShortcutFrozen {
@@ -448,15 +527,18 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.shortcut_pending = None;
             let preset = s.preset_region.take();
             let multi = s.multi.take();
+            let windows = s.windows.take();
             let commands = start_capture(state, request, origin);
             state.screenshot.preset_region = preset;
             state.screenshot.multi = multi;
+            state.screenshot.windows = windows;
             commands
         }
 
         ScreenshotEvent::ShortcutFrozen { id, .. } if s.shortcut_pending == Some(id) => {
             s.shortcut_pending = None;
             s.multi = None;
+            s.windows = None;
             vec![]
         }
 
@@ -472,6 +554,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.source_session = request.session;
             s.origin = CaptureOrigin::Toolbar;
             s.multi = None;
+            s.windows = None;
             s.phase = ScreenshotPhase::CountingDown;
             s.reuse_sequence = 0;
             s.element_sequence = 0;
@@ -671,6 +754,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                     command(ScreenshotCommand::Show { session })
                 }
                 Err(error) => {
+                    s.windows = None;
                     s.phase = ScreenshotPhase::Idle;
                     s.error = Some(error.to_string());
                     command(ScreenshotCommand::Restore { session })
@@ -835,6 +919,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             }
             s.shortcut_pending = None;
             s.multi = None;
+            s.windows = None;
             s.refresh = None;
             s.phase = ScreenshotPhase::Idle;
             s.element_pending = None;

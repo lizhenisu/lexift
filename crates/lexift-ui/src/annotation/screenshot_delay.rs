@@ -113,8 +113,8 @@ fn choose(sequence: u64, index: Option<i32>) {
             crate::bridge::screenshot_presets::open(None);
             return;
         }
-        if kind == 0 && index == Some(5) {
-            super::screenshot::request_multi();
+        if kind == 0 && matches!(index, Some(5 | 6)) {
+            super::screenshot::request_multi(index == Some(6));
             return;
         }
         if kind == RECOGNITION_MENU {
@@ -382,6 +382,7 @@ fn menu_kind(kind: u8) {
             "Screenshot after 10 seconds",
             "Screenshot presets",
             "Multi-region screenshot",
+            "Multi-window screenshot",
         ]
     };
     w.set_options(slint::ModelRc::new(slint::VecModel::from(

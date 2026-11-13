@@ -36,6 +36,7 @@ mod refresh;
 pub(crate) mod window_pin;
 type CaptureFactory = fn() -> Option<Arc<dyn ScreenCapturePort>>;
 struct PreparedScreenshot {
+    layers: Vec<lexift_core::domain::screenshot_windows::Layer>,
     frames: Vec<CapturedRegion>,
     windows: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
 }
@@ -751,6 +752,52 @@ impl ScreenshotRuntime {
     }
     pub fn execute(self: &Arc<Self>, controller: &Arc<AppController>, command: ScreenshotCommand) {
         match command {
+            ScreenshotCommand::SaveWindows {
+                session,
+                operation,
+                mask,
+                owner,
+                title,
+            } => {
+                let current = self
+                    .session
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .filter(|job| job.id == session)
+                    .and_then(|job| {
+                        Some((
+                            job.frames.clone()?,
+                            job.source.snapshot.name.clone(),
+                            job.cancelled.clone(),
+                        ))
+                    });
+                let controller = controller.clone();
+                let this = self.clone();
+                controller.clone().runtime.spawn_blocking(move || {
+                    let result = (|| {
+                        let (frames, default_name, cancelled) = current.ok_or_else(|| Error::new("Screenshot is unavailable"))?;
+                        let image = Arc::new(lexift_core::domain::screenshot_windows::compose(&frames, &mask)?);
+                        let mut options = crate::annotation_export::save_options(&controller);
+                        options.formats.retain(|format| *format == options.default_format);
+                        let result = this.save.save_image(ImageSaveRequest {
+                            image: (*image).clone(), owner, default_name, title, options,
+                        }, cancelled)?;
+                        if result == SaveOutcome::Saved {
+                            this.retain_history(&controller,
+                                lexift_core::domain::image_history::workflow::OutputKey::Screenshot { session, operation },
+                                lexift_core::domain::image_history::ImageSnapshot {
+                                    base: image.clone(),
+                                    samples: Arc::new(ScreenCaptureFrame { revision: 0, serial: 0, regions: vec![] }),
+                                    document: history::retained_document(None, image.bounds),
+                                    hidden: false,
+                                }, image);
+                        }
+                        Ok(result)
+                    })();
+                    controller.dispatch(AppEvent::Screenshot(ScreenshotEvent::WindowsSaved(session, operation, result)));
+                });
+            }
             ScreenshotCommand::SaveRegions {
                 session,
                 request,
@@ -1052,6 +1099,13 @@ impl ScreenshotRuntime {
             }
             ScreenshotCommand::Prepare { session, request } => {
                 let cancelled = Arc::new(AtomicBool::new(false));
+                let multi_window = controller
+                    .state
+                    .lock()
+                    .unwrap()
+                    .screenshot
+                    .windows
+                    .is_some();
                 let element_port = (self.capture)();
                 let old = self
                     .session
@@ -1094,9 +1148,23 @@ impl ScreenshotRuntime {
                             .name("screenshot-prepare".into())
                             .spawn(move || {
                                 let started = std::time::Instant::now();
-                                let result = this.prepare(&request, &cancelled, pointer, session);
+                                let result = this.prepare(
+                                    &request,
+                                    &cancelled,
+                                    pointer,
+                                    session,
+                                    multi_window,
+                                );
                                 match result {
                                     Ok(prepared) => {
+                                        if multi_window {
+                                            worker_controller.dispatch(AppEvent::Screenshot(
+                                                ScreenshotEvent::WindowLayers(
+                                                    session,
+                                                    prepared.layers,
+                                                ),
+                                            ));
+                                        }
                                         let layout =
                                             prepared.frames.iter().map(|f| f.bounds).collect();
                                         {
@@ -1375,6 +1443,7 @@ impl ScreenshotRuntime {
         cancelled: &AtomicBool,
         pointer: Option<lexift_core::domain::geometry::Point>,
         session: u64,
+        multi_window: bool,
     ) -> Result<PreparedScreenshot> {
         let snapshot = &request.snapshot;
         let prepared = crate::annotation_export::capture_screenshot_frame(
@@ -1383,9 +1452,19 @@ impl ScreenshotRuntime {
             snapshot.excluded.clone(),
             cancelled,
             pointer,
+            multi_window,
         )?
         .ok_or_else(|| Error::new("Screenshot cancelled"))?;
         let captured = prepared.capture;
+        if multi_window {
+            let frames = captured.frame.regions.clone();
+            lexift_platform::prepare_screenshot_surface_pixels(session, &frames, cancelled)?;
+            return Ok(PreparedScreenshot {
+                frames,
+                windows: Vec::new(),
+                layers: prepared.layers,
+            });
+        }
         let frames = snapshot
             .monitors
             .iter()
@@ -1402,6 +1481,7 @@ impl ScreenshotRuntime {
             .collect::<Result<Vec<_>>>()?;
         lexift_platform::prepare_screenshot_surface_pixels(session, &frames, cancelled)?;
         Ok(PreparedScreenshot {
+            layers: prepared.layers,
             frames,
             windows: captured.windows,
         })

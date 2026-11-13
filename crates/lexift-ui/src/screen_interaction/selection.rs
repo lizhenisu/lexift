@@ -48,6 +48,7 @@ pub(crate) enum SelectionEvent {
         request: u64,
     },
     Multi(u64, MultiAction),
+    Windows(lexift_core::domain::screenshot::ScreenshotEvent),
     Cancelled,
     QueryElements(lexift_core::domain::element_candidate::ElementQuery),
     CancelElements {
@@ -111,6 +112,8 @@ struct Registry {
     phase: HostPhase,
     windows: Vec<Host<OcrSelectionWindow>>,
     gesture: RegionSelection,
+    window_selection: Option<lexift_core::domain::screenshot_windows::Selection>,
+    window_busy: bool,
     multi: Option<lexift_core::domain::screenshot_multi::Batch>,
     multi_drag: Option<(u64, lexift_core::domain::region_selection::RegionEditor)>,
     multi_button: bool,
@@ -158,6 +161,8 @@ pub(crate) fn init(
             phase: HostPhase::Idle,
             windows: vec![],
             gesture: RegionSelection::default(),
+            window_selection: None,
+            window_busy: false,
             multi: None,
             multi_drag: None,
             multi_button: false,
@@ -468,6 +473,7 @@ pub(crate) fn show_with_origin(
     STATE.with(|slot| {
         if let Some(r) = slot.borrow_mut().as_mut() {
             r.multi = None;
+            r.window_selection = None;
         }
     });
     show_prepared(generation, frames, origin, None);
@@ -505,7 +511,7 @@ fn show_prepared(
             let r = slot.as_mut()?;
             r.generation = generation;
             r.candidates = candidates;
-            if r.multi.is_some() {
+            if r.multi.is_some() || r.window_selection.is_some() {
                 return None;
             }
             r.reusable = reusable;
@@ -541,7 +547,8 @@ fn show_prepared(
             let window = crate::screen_interaction::create(&r.lifecycle, OcrSelectionWindow::new)
                 .map_err(|_| ())?;
             window.set_screenshot_mode(r.screenshot);
-            window.set_multi_mode(r.multi.is_some());
+            window.set_multi_mode(r.multi.is_some() || r.window_selection.is_some());
+            window.set_window_mode(r.window_selection.is_some());
             window.set_multi_controls(r.multi_screen == Some(frame.bounds));
             let multi_weak = window.as_weak();
             window.on_multi_action(move |action| {
@@ -551,7 +558,9 @@ fn show_prepared(
                 let owner = STATE.with(|slot| {
                     let slot = slot.borrow();
                     let r = slot.as_ref().filter(|r| r.generation == generation)?;
-                    r.multi.as_ref()?;
+                    if r.multi.is_none() && r.window_selection.is_none() {
+                        return None;
+                    }
                     Some((r.lifecycle.annotation_window_token)(window.window()))
                 });
                 if let Some(owner) = owner {
@@ -1702,8 +1711,10 @@ pub(crate) fn sync_multi(state: &lexift_core::domain::screenshot::ScreenshotStat
             return;
         }
         r.multi = state.multi.clone();
+        r.window_selection = state.windows.clone();
+        r.window_busy = state.phase == lexift_core::domain::screenshot::ScreenshotPhase::Output;
         r.multi_error = state.error.clone();
-        if r.multi.is_none() {
+        if r.multi.is_none() && r.window_selection.is_none() {
             r.multi_drag = None;
             r.multi_button = false;
         }
@@ -1716,6 +1727,36 @@ pub(crate) fn sync_multi(state: &lexift_core::domain::screenshot::ScreenshotStat
 fn paint_multi(r: &Registry) {
     let error = r.multi_error.as_deref();
     use lexift_core::domain::screenshot_multi::Status;
+    if let Some(selection) = &r.window_selection {
+        for host in &r.windows {
+            let window = &host.window;
+            let scale = window.window().scale_factor();
+            let marks: Vec<_> = selection
+                .mask
+                .iter()
+                .map(|b| crate::MultiRegionMark {
+                    left: (b.left - host.bounds.left) as f32 / scale,
+                    top: (b.top - host.bounds.top) as f32 / scale,
+                    width: (b.right - b.left) as f32 / scale,
+                    height: (b.bottom - b.top) as f32 / scale,
+                    label: "".into(),
+                    current: true,
+                })
+                .collect();
+            window.set_multi_marks(slint::ModelRc::new(slint::VecModel::from(marks)));
+            window.set_multi_can_save(!r.window_busy && !selection.mask.is_empty());
+            window.set_multi_feedback(
+                format!(
+                    "{}  {}{}",
+                    crate::i18n::tr("Selected windows"),
+                    selection.selected.len(),
+                    error.map_or(String::new(), |e| format!("  {e}"))
+                )
+                .into(),
+            );
+        }
+        return;
+    }
     let Some(batch) = &r.multi else { return };
     let draft = r
         .multi_drag
@@ -1800,6 +1841,25 @@ fn multi_action(
     action: i32,
     owner: Option<lexift_core::ports::magnifier::WindowToken>,
 ) {
+    use lexift_core::domain::screenshot::ScreenshotEvent;
+    let windows = STATE.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .filter(|r| r.generation == generation)
+            .and_then(|r| r.window_selection.as_ref().map(|_| r.window_busy))
+    });
+    if let Some(busy) = windows {
+        match action {
+            1 if !busy => emit(SelectionEvent::Windows(ScreenshotEvent::SaveWindows(
+                generation,
+                owner,
+                crate::i18n::tr("Save image").to_string(),
+            ))),
+            2 if !busy => emit(SelectionEvent::Cancelled),
+            _ => {}
+        }
+        return;
+    }
     let running = STATE.with(|slot| {
         slot.borrow()
             .as_ref()
@@ -1829,12 +1889,16 @@ fn multi_pointer(generation: u64, screen: Rect, event: PopupPointerInput) -> boo
     use lexift_core::domain::region_selection::RegionEditor;
     let mut action = None;
     let mut button = None;
+    let mut window_point = None;
     let handled = STATE.with(|slot| {
         let mut slot = slot.borrow_mut();
         let Some(r) = slot.as_mut().filter(|r| r.generation == generation) else {
             return false;
         };
-        let Some(batch) = &r.multi else { return false };
+        let batch = r.multi.as_ref();
+        if batch.is_none() && r.window_selection.is_none() {
+            return false;
+        }
         let Some(host) = r.windows.iter().find(|h| h.bounds == screen) else {
             return true;
         };
@@ -1862,7 +1926,18 @@ fn multi_pointer(generation: u64, screen: Rect, event: PopupPointerInput) -> boo
                 };
                 button = Some((host.window.as_weak(), event));
             }
-            PopupPointerInput::LeftPressed { x, y } if !batch.running && !batch.sealed => {
+            PopupPointerInput::LeftReleased { x, y }
+                if r.window_selection.is_some() && !r.window_busy =>
+            {
+                window_point = Some(Point {
+                    x: screen.left + x.round() as i32,
+                    y: screen.top + y.round() as i32,
+                });
+            }
+            PopupPointerInput::LeftPressed { x, y }
+                if batch.is_some_and(|batch| !batch.running && !batch.sealed) =>
+            {
+                let batch = batch.unwrap();
                 let p = Point {
                     x: screen.left + x.round() as i32,
                     y: screen.top + y.round() as i32,
@@ -1927,6 +2002,11 @@ fn multi_pointer(generation: u64, screen: Rect, event: PopupPointerInput) -> boo
         && let Some(window) = window.upgrade()
     {
         window.window().dispatch_event(event);
+    }
+    if let Some(point) = window_point {
+        emit(SelectionEvent::Windows(
+            lexift_core::domain::screenshot::ScreenshotEvent::ToggleWindow(generation, point),
+        ));
     }
     if let Some(action) = action {
         emit(SelectionEvent::Multi(generation, action));

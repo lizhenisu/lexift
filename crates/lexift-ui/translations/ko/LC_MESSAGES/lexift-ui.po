@@ -2474,3 +2474,12 @@ msgstr "현재 영역 삭제"
 
 msgid "Save all PNG"
 msgstr "모두 PNG로 저장"
+
+msgid "Multi-window screenshot"
+msgstr "다중 창 스크린샷"
+
+msgid "Save PNG"
+msgstr "PNG 저장"
+
+msgid "Selected windows"
+msgstr "선택한 창"

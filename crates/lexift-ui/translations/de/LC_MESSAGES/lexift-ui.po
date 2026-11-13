@@ -2474,3 +2474,12 @@ msgstr "Aktuellen Bereich löschen"
 
 msgid "Save all PNG"
 msgstr "Alle als PNG speichern"
+
+msgid "Multi-window screenshot"
+msgstr "Mehrere Fenster aufnehmen"
+
+msgid "Save PNG"
+msgstr "PNG speichern"
+
+msgid "Selected windows"
+msgstr "Ausgewählte Fenster"

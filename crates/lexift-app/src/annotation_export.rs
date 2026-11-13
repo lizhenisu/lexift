@@ -185,6 +185,7 @@ fn capture_with_timeout(
 
 /// Preparation contains only frozen pixels and stable top-level window geometry.
 pub(crate) struct PreparedCapture {
+    pub layers: Vec<lexift_core::domain::screenshot_windows::Layer>,
     pub capture: lexift_core::ports::screen_capture::ScreenshotCapture,
 }
 pub(crate) fn capture_screenshot_frame(
@@ -193,22 +194,57 @@ pub(crate) fn capture_screenshot_frame(
     excluded_windows: Vec<WindowToken>,
     cancelled: &AtomicBool,
     _pointer: Option<lexift_core::domain::geometry::Point>,
+    multi_window: bool,
 ) -> Result<Option<PreparedCapture>> {
     if cancelled.load(Ordering::Acquire) {
         return Ok(None);
     }
     let started = Instant::now();
     let port = factory().ok_or_else(|| Error::new("Screen capture unavailable"))?;
-    let before = port
-        .screenshot_windows(&excluded_windows)
-        .unwrap_or_default();
+    let before = if multi_window {
+        Vec::new()
+    } else {
+        port.screenshot_windows(&excluded_windows)
+            .unwrap_or_default()
+    };
+    let layers = if multi_window {
+        port.screenshot_layers(&excluded_windows)?
+    } else {
+        Vec::new()
+    };
     let window_ms = started.elapsed().as_millis();
-    let (frame, fast_path) =
-        capture_frozen_pixels(port.clone(), regions, excluded_windows.clone(), cancelled)?;
-    let after = port
-        .screenshot_windows(&excluded_windows)
-        .unwrap_or_default();
-    let windows = lexift_core::domain::window_candidate::stable(&before, &after);
+    let (frame, fast_path) = if multi_window {
+        // Only a desktop snapshot includes the compositor's actual occlusion.
+        let request = ScreenCaptureRequest {
+            revision: 1,
+            regions,
+            paused_regions: vec![],
+            excluded_windows: excluded_windows.clone(),
+        };
+        let frame = port.try_freeze_screenshot(&request, cancelled)?;
+        (frame, true)
+    } else {
+        capture_frozen_pixels(port.clone(), regions, excluded_windows.clone(), cancelled)?
+    };
+    let windows = if multi_window {
+        let after = port.screenshot_layers(&excluded_windows)?;
+        if frame.is_none() || !lexift_core::domain::screenshot_windows::stable(&layers, &after) {
+            tracing::warn!(
+                snapshot_available = frame.is_some(),
+                before = layers.len(),
+                after = after.len(),
+                before_layers = ?layers, after_layers = ?after,
+                "Multi-window screenshot could not freeze consistent geometry"
+            );
+            return Err(Error::new("Windows changed during capture. Try again."));
+        }
+        Vec::new()
+    } else {
+        let after = port
+            .screenshot_windows(&excluded_windows)
+            .unwrap_or_default();
+        lexift_core::domain::window_candidate::stable(&before, &after)
+    };
     if cancelled.load(Ordering::Acquire) {
         return Ok(None);
     }
@@ -219,6 +255,7 @@ pub(crate) fn capture_screenshot_frame(
         "Screenshot frozen pixels ready"
     );
     Ok(frame.map(|frame| PreparedCapture {
+        layers,
         capture: lexift_core::ports::screen_capture::ScreenshotCapture {
             frame,
             windows: windows.clone(),
@@ -233,7 +270,7 @@ pub(crate) fn capture_screenshot(
     cancelled: &AtomicBool,
 ) -> Result<Option<lexift_core::ports::screen_capture::ScreenshotCapture>> {
     Ok(
-        capture_screenshot_frame(factory, regions, excluded, cancelled, None)?
+        capture_screenshot_frame(factory, regions, excluded, cancelled, None, false)?
             .map(|prepared| prepared.capture),
     )
 }
@@ -538,6 +575,7 @@ mod tests {
                 vec![],
                 &AtomicBool::new(false),
                 Some(lexift_core::domain::geometry::Point { x: -1, y: -1 }),
+                false,
             )
             .unwrap()
             .unwrap();

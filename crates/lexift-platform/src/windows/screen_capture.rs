@@ -185,6 +185,13 @@ impl ScreenCapturePort for WindowsScreenCapturePort {
         elements::cancel(session);
     }
 
+    fn screenshot_layers(
+        &self,
+        excluded: &[lexift_core::ports::magnifier::WindowToken],
+    ) -> lexift_core::Result<Vec<lexift_core::domain::screenshot_windows::Layer>> {
+        capture::screenshot_layers(excluded, true)
+    }
+
     fn screenshot_windows(
         &self,
         excluded: &[lexift_core::ports::magnifier::WindowToken],

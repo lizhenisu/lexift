@@ -2474,3 +2474,12 @@ msgstr "刪除目前區域"
 
 msgid "Save all PNG"
 msgstr "儲存所有 PNG"
+
+msgid "Multi-window screenshot"
+msgstr "多視窗截圖"
+
+msgid "Save PNG"
+msgstr "儲存 PNG"
+
+msgid "Selected windows"
+msgstr "已選視窗"

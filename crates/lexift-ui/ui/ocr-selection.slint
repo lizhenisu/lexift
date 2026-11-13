@@ -8,6 +8,7 @@ import { Metrics } from "design/metrics.slint";
 import { RegionPreview, ScreenInteractionHint } from "screen-interaction.slint";
 export component OcrSelectionWindow inherits Window {
     in property <bool> multi-mode;
+    in property <bool> window-mode;
     in property <bool> multi-controls;
     in property <bool> multi-retry;
     in property <bool> multi-finished;
@@ -79,14 +80,14 @@ export component OcrSelectionWindow inherits Window {
         selecting: root.selecting; left: root.selection-left; top: root.selection-top;
         selection-width: root.selection-width; selection-height: root.selection-height;
     }
-    if root.screenshot-mode && root.help-visible: ScreenshotHelp {
+    if root.screenshot-mode && !root.window-mode && root.help-visible: ScreenshotHelp {
         x: root.help-left; y: root.help-top; width: root.help-width; height: root.help-height; stage: 0; reuse-available: root.reuse-available;
     }
-    if root.screenshot-mode && root.picker-visible: ScreenshotPixelPicker {
+    if root.screenshot-mode && !root.window-mode && root.picker-visible: ScreenshotPixelPicker {
         x:root.picker-left;y:root.picker-top;width:root.picker-width;height:root.picker-height;
         grid:root.picker-grid;coordinates:root.picker-coordinates;hex:root.picker-hex;rgb:root.picker-rgb;status:root.picker-status;
     }
-    if root.screenshot-mode && root.size-visible: ScreenshotSizeLabel {
+    if root.screenshot-mode && !root.window-mode && root.size-visible: ScreenshotSizeLabel {
         x:root.size-left; y:root.size-top; width:root.size-width; height:root.size-height; text:root.size-text;
     }
     if !root.screenshot-mode: ScreenInteractionHint {
@@ -108,8 +109,8 @@ export component OcrSelectionWindow inherits Window {
     for mark in root.multi-marks: Rectangle {
         x: mark.left; y: mark.top; width: mark.width; height: mark.height;
         border-width: mark.current ? 3px : 1px;
-        border-color: Colors.primary; background: transparent;
-        Rectangle {
+        border-color: Colors.primary; background: root.window-mode ? Colors.primary.with-alpha(0.16) : transparent;
+        if !root.window-mode: Rectangle {
             x: 0px; y: 0px; height: 24px; width: label.preferred-width + 12px;
             background: Colors.screen-help-background;
             label := Text { x: 6px; height: parent.height; vertical-alignment: center; color: Colors.screen-help-foreground; text: mark.label; }
@@ -122,8 +123,8 @@ export component OcrSelectionWindow inherits Window {
             padding: 6px; spacing: 4px;
             HorizontalLayout {
                 spacing: 6px;
-                Button { text: @tr("Delete current region"); enabled: root.multi-can-delete; clicked => { root.multi-action(0); } }
-                Button { text: root.multi-retry ? @tr("Retry") : @tr("Save all PNG"); enabled: root.multi-can-save; clicked => { root.multi-action(1); } }
+                if !root.window-mode: Button { text: @tr("Delete current region"); enabled: root.multi-can-delete; clicked => { root.multi-action(0); } }
+                Button { text: root.window-mode ? @tr("Save PNG") : root.multi-retry ? @tr("Retry") : @tr("Save all PNG"); enabled: root.multi-can-save; clicked => { root.multi-action(1); } }
                 Button { text: root.multi-finished ? @tr("Close") : @tr("Cancel"); clicked => { root.multi-action(2); } }
             }
             Text { text: root.multi-feedback; color: Colors.foreground; overflow: elide; }

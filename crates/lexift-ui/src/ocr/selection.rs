@@ -80,6 +80,7 @@ pub(crate) fn show(generation: u64, frames: Arc<Vec<CapturedRegion>>) {
     host::set_handler(Rc::new(|event| {
         emit(match event {
             host::SelectionEvent::Ready { .. }
+            | host::SelectionEvent::Windows(_)
             | host::SelectionEvent::Multi(..)
             | host::SelectionEvent::ReuseRegion { .. }
             | host::SelectionEvent::QueryElements(_)

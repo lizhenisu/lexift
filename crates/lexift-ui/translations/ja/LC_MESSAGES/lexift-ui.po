@@ -2474,3 +2474,12 @@ msgstr "現在の領域を削除"
 
 msgid "Save all PNG"
 msgstr "すべて PNG で保存"
+
+msgid "Multi-window screenshot"
+msgstr "複数ウィンドウのスクリーンショット"
+
+msgid "Save PNG"
+msgstr "PNG で保存"
+
+msgid "Selected windows"
+msgstr "選択したウィンドウ"

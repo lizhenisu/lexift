@@ -143,9 +143,10 @@ fn windows(request: &ScreenCaptureRequest) -> windows::core::Result<Vec<WindowIn
 }
 
 /// Reuse capture's visibility, cloak, physical DWM frame and overlay exclusions.
-pub(super) fn screenshot_windows(
+pub(super) fn screenshot_layers(
     excluded: &[lexift_core::ports::magnifier::WindowToken],
-) -> lexift_core::Result<Vec<lexift_core::domain::window_candidate::WindowCandidate>> {
+    strict: bool,
+) -> lexift_core::Result<Vec<lexift_core::domain::screenshot_windows::Layer>> {
     use windows::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, GetClassNameW, GetWindowLongPtrW};
     let request = ScreenCaptureRequest {
         revision: 0,
@@ -167,10 +168,8 @@ pub(super) fn screenshot_windows(
             let mut name = [0u16; 128];
             let length = unsafe { GetClassNameW(hwnd, &mut name) }.max(0) as usize;
             let class = String::from_utf16_lossy(&name[..length]);
-            if length == 0
-                || frame.opacity == 0
-                || !candidate_class(unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) }, &class)
-            {
+            let style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
+            if frame.opacity == 0 || matches!(class.as_str(), "Progman" | "WorkerW") {
                 return None;
             }
             let mut process_id = 0;
@@ -178,20 +177,118 @@ pub(super) fn screenshot_windows(
                 GetWindowThreadProcessId(hwnd, Some(&mut process_id));
             }
             let b = frame.bounds;
+            let foreign = process_id != std::process::id();
+            let (coverage, reliable) = if strict {
+                window_shape(hwnd, b)
+            } else {
+                (vec![b], true)
+            };
             (b.right > b.left && b.bottom > b.top).then_some(
-                lexift_core::domain::window_candidate::WindowCandidate {
-                    process_id,
-                    window: lexift_core::ports::magnifier::WindowToken(frame.token),
-                    bounds: b,
-                    order: 0,
+                lexift_core::domain::screenshot_windows::Layer {
+                    coverage,
+                    selectable: length > 0
+                        && (!strict || foreign)
+                        && reliable
+                        && candidate_class(style, &class)
+                        && (!strict
+                            || (frame.opacity == 255
+                                && style
+                                    & windows::Win32::UI::WindowsAndMessaging::WS_EX_LAYERED.0
+                                        as isize
+                                    == 0)),
+                    candidate: lexift_core::domain::window_candidate::WindowCandidate {
+                        process_id,
+                        window: lexift_core::ports::magnifier::WindowToken(frame.token),
+                        bounds: b,
+                        order: 0,
+                    },
                 },
             )
         })
         .enumerate()
         .map(|(order, mut candidate)| {
-            candidate.order = order as u32;
+            candidate.candidate.order = order as u32;
             candidate
         })
+        .collect())
+}
+
+/// Region rectangles are relative to the native window origin, not the DWM frame.
+fn window_shape(hwnd: HWND, bounds: Rect) -> (Vec<Rect>, bool) {
+    use windows::Win32::{
+        Graphics::Gdi::{
+            CreateRectRgn, DeleteObject, GetRegionData, GetWindowRgn, RGNDATA, RGNDATAHEADER,
+        },
+        UI::WindowsAndMessaging::GetWindowRect,
+    };
+    let fallback = || (vec![bounds], false);
+    let region = unsafe { CreateRectRgn(0, 0, 0, 0) };
+    if region.is_invalid() {
+        return fallback();
+    }
+    let result = (|| {
+        if unsafe { GetWindowRgn(hwnd, region) }.0 == 0 {
+            return Some((vec![bounds], true));
+        }
+        let size = unsafe { GetRegionData(region, 0, None) } as usize;
+        let header = size_of::<RGNDATAHEADER>();
+        if size < header || size > header + 4096 * size_of::<RECT>() {
+            return None;
+        }
+        let mut data = vec![0u32; size.div_ceil(4)];
+        if unsafe {
+            GetRegionData(
+                region,
+                size as u32,
+                Some(data.as_mut_ptr().cast::<RGNDATA>()),
+            )
+        } as usize
+            != size
+        {
+            return None;
+        }
+        let count = unsafe { (*data.as_ptr().cast::<RGNDATAHEADER>()).nCount } as usize;
+        if count > (size - header) / size_of::<RECT>() {
+            return None;
+        }
+        let mut origin = RECT::default();
+        unsafe { GetWindowRect(hwnd, &mut origin) }.ok()?;
+        let parts = unsafe {
+            std::slice::from_raw_parts(data.as_ptr().cast::<u8>().add(header).cast::<RECT>(), count)
+        };
+        Some((
+            parts
+                .iter()
+                .filter_map(|r| {
+                    let b = Rect {
+                        left: origin.left.saturating_add(r.left).max(bounds.left),
+                        top: origin.top.saturating_add(r.top).max(bounds.top),
+                        right: origin.left.saturating_add(r.right).min(bounds.right),
+                        bottom: origin.top.saturating_add(r.bottom).min(bounds.bottom),
+                    };
+                    (b.left < b.right && b.top < b.bottom).then_some(b)
+                })
+                .collect(),
+            true,
+        ))
+    })();
+    let _ = unsafe { DeleteObject(region.into()) };
+    result.unwrap_or_else(fallback)
+}
+
+pub(super) fn screenshot_windows(
+    excluded: &[lexift_core::ports::magnifier::WindowToken],
+) -> lexift_core::Result<Vec<lexift_core::domain::window_candidate::WindowCandidate>> {
+    Ok(screenshot_layers(excluded, false)?
+        .into_iter()
+        .filter(|layer| layer.selectable)
+        .enumerate()
+        .map(
+            |(order, layer)| lexift_core::domain::window_candidate::WindowCandidate {
+                order: order as u32,
+                ..layer.candidate
+            },
+        )
         .collect())
 }
 

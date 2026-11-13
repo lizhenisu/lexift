@@ -47,3 +47,4 @@ pub mod screen_recording;
 
 pub mod recording_hotkeys;
 pub mod screenshot_multi;
+pub mod screenshot_windows;

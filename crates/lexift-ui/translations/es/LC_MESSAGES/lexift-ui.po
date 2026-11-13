@@ -2474,3 +2474,12 @@ msgstr "Eliminar región actual"
 
 msgid "Save all PNG"
 msgstr "Guardar todo como PNG"
+
+msgid "Multi-window screenshot"
+msgstr "Captura de varias ventanas"
+
+msgid "Save PNG"
+msgstr "Guardar PNG"
+
+msgid "Selected windows"
+msgstr "Ventanas seleccionadas"
