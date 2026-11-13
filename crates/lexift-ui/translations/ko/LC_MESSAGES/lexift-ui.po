@@ -2465,3 +2465,12 @@ msgstr "사전 설정 번호가 소진되었습니다"
 
 msgid "Rename"
 msgstr "이름 바꾸기"
+
+msgid "Multi-region screenshot"
+msgstr "다중 영역 스크린샷"
+
+msgid "Delete current region"
+msgstr "현재 영역 삭제"
+
+msgid "Save all PNG"
+msgstr "모두 PNG로 저장"

@@ -11,6 +11,11 @@ mod tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OutputKey {
+    MultiRegion {
+        session: u64,
+        request: u64,
+        id: u64,
+    },
     Import {
         operation: u64,
     },
@@ -37,6 +42,7 @@ pub enum OutputKey {
 enum Source {
     Import(u64),
     Screenshot(u64),
+    MultiRegion(u64, u64),
     LongImage(u64, u64),
     Pin(u64),
 }
@@ -554,6 +560,25 @@ pub(crate) fn after(
     }
     for command in commands {
         match command {
+            AppCommand::Screenshot(ScreenshotCommand::SaveRegions {
+                session,
+                request,
+                areas,
+                ..
+            }) => {
+                for (_, area) in areas {
+                    h.start(
+                        OutputKey::MultiRegion {
+                            session: *session,
+                            request: *request,
+                            id: area.id,
+                        },
+                        Source::MultiRegion(*session, area.id),
+                        Kind::Screenshot,
+                        false,
+                    );
+                }
+            }
             AppCommand::Screenshot(ScreenshotCommand::Output {
                 session,
                 operation,
@@ -626,6 +651,22 @@ pub(crate) fn after(
     h.pending.retain(|key, pending| {
         let keep = pending.success
             || match *key {
+                OutputKey::MultiRegion {
+                    session,
+                    request,
+                    id,
+                } => {
+                    state.screenshot.session == session
+                        && state.screenshot.multi.as_ref().is_some_and(|batch| {
+                            batch.running
+                                && batch.request == request
+                                && batch.areas.iter().any(|area| {
+                                    area.id == id
+                                        && area.status
+                                            == crate::domain::screenshot_multi::Status::Pending
+                                })
+                        })
+                }
                 OutputKey::Import { operation } => {
                     state.image_import.request.as_ref().is_some_and(|r| {
                         r.id == operation && r.phase == super::super::image_import::Phase::Preparing
@@ -658,9 +699,9 @@ pub(crate) fn after(
         keep
     });
     h.sources.retain(|source, _| match source {
-        Source::Screenshot(session) | Source::LongImage(session, _) => {
-            *session == state.screenshot.session
-        }
+        Source::Screenshot(session)
+        | Source::MultiRegion(session, _)
+        | Source::LongImage(session, _) => *session == state.screenshot.session,
         Source::Pin(id) => {
             state.pinned_images.contains_key(id)
                 || state.closed_pin.as_ref().is_some_and(|pin| pin.id == *id)
@@ -684,6 +725,26 @@ pub(crate) fn after(
 
 pub(crate) fn successful_output(state: &AppState, event: &AppEvent) -> Option<OutputKey> {
     match event {
+        AppEvent::Screenshot(ScreenshotEvent::Multi(
+            session,
+            crate::domain::screenshot_multi::Action::Item(request, id, Ok(())),
+        )) if state.screenshot.session == *session
+            && state.screenshot.multi.as_ref().is_some_and(|batch| {
+                batch.running
+                    && batch.request == *request
+                    && batch.areas.iter().any(|area| {
+                        area.id == *id
+                            && area.status == crate::domain::screenshot_multi::Status::Pending
+                    })
+            }) =>
+        {
+            Some(OutputKey::MultiRegion {
+                session: *session,
+                request: *request,
+                id: *id,
+            })
+        }
+
         AppEvent::ImageImport(super::super::image_import::Event::Completed {
             id,
             result: Ok(SaveOutcome::Saved),

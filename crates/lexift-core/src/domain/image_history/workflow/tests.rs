@@ -72,6 +72,14 @@ fn prepared(state: &mut AppState, key: OutputKey) -> Ticket {
 }
 fn finish(state: &mut AppState, key: OutputKey, result: crate::Result<SaveOutcome>) {
     let event = match key {
+        OutputKey::MultiRegion {
+            session,
+            request,
+            id,
+        } => AppEvent::Screenshot(ScreenshotEvent::Multi(
+            session,
+            crate::domain::screenshot_multi::Action::Item(request, id, Ok(())),
+        )),
         OutputKey::Import { operation } => {
             AppEvent::ImageImport(crate::domain::image_import::Event::Completed {
                 id: operation,
@@ -327,4 +335,66 @@ fn preparation_blocks_window_but_active_edit_allows_browsing_only() {
             "capture and refresh both retire the history browser"
         );
     }
+}
+
+#[test]
+fn multi_region_history_records_only_published_regions_and_preserves_reuse() {
+    use crate::domain::{screenshot::LastRegion, screenshot_multi::Action};
+    let mut state = AppState::default();
+    state.screenshot.session = 1;
+    state.screenshot.phase = ScreenshotPhase::Selecting;
+    state.screenshot.layout = vec![bounds()];
+    let last = LastRegion {
+        bounds: bounds(),
+        layout: vec![bounds()],
+    };
+    state.screenshot.last_region = Some(last.clone());
+    state.screenshot.multi = Some(Default::default());
+    let dispatch = |state: &mut AppState, action| {
+        state.reduce(AppEvent::Screenshot(ScreenshotEvent::Multi(1, action)))
+    };
+    dispatch(&mut state, Action::Put(None, bounds()));
+    dispatch(&mut state, Action::Put(None, bounds()));
+    dispatch(&mut state, Action::Save(None, String::new()));
+    let first = OutputKey::MultiRegion {
+        session: 1,
+        request: 1,
+        id: 1,
+    };
+    let first_ticket = prepared(&mut state, first);
+    finish(&mut state, first, Ok(SaveOutcome::Saved));
+    dispatch(&mut state, Action::Item(1, 2, Err("write error".into())));
+    dispatch(&mut state, Action::Finished(1, None));
+    dispatch(&mut state, Action::Save(None, String::new()));
+    let second = OutputKey::MultiRegion {
+        session: 1,
+        request: 2,
+        id: 2,
+    };
+    let second_ticket = prepared(&mut state, second);
+    assert_ne!(first_ticket.origin, second_ticket.origin);
+    dispatch(&mut state, Action::Item(1, 2, Ok(())));
+    assert!(
+        state
+            .image_history
+            .cache
+            .entry(second_ticket.origin)
+            .is_none()
+    );
+    finish(&mut state, second, Ok(SaveOutcome::Saved));
+    assert!(
+        state
+            .image_history
+            .cache
+            .entry(second_ticket.origin)
+            .is_some()
+    );
+    assert!(
+        state
+            .image_history
+            .cache
+            .entry(first_ticket.origin)
+            .is_some()
+    );
+    assert_eq!(state.screenshot.last_region, Some(last));
 }

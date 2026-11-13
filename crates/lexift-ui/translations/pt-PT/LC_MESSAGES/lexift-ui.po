@@ -2465,3 +2465,12 @@ msgstr "Identificadores de predefinição esgotados"
 
 msgid "Rename"
 msgstr "Renomear"
+
+msgid "Multi-region screenshot"
+msgstr "Captura de várias regiões"
+
+msgid "Delete current region"
+msgstr "Eliminar região atual"
+
+msgid "Save all PNG"
+msgstr "Guardar tudo como PNG"

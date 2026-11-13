@@ -39,6 +39,8 @@ struct PreparedScreenshot {
     frames: Vec<CapturedRegion>,
     windows: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
 }
+type MultiSaveJob = (u64, u64, Arc<AtomicBool>);
+
 struct Session {
     id: u64,
     source: ExportRequest,
@@ -63,6 +65,7 @@ mod image_ocr;
 pub(crate) struct ScreenshotRuntime {
     recording: Mutex<recording::Runtime>,
     imports: Mutex<BTreeMap<u64, import::Job>>,
+    multi_save: Mutex<Option<MultiSaveJob>>,
     delay: Mutex<Option<(u64, tokio::task::JoinHandle<()>)>>,
     refresh: Mutex<Option<refresh::Job>>,
     history: Mutex<history::Cache>,
@@ -97,6 +100,7 @@ impl ScreenshotRuntime {
         Self {
             recording: Default::default(),
             imports: Default::default(),
+            multi_save: Default::default(),
             delay: Default::default(),
             refresh: Default::default(),
             history: Default::default(),
@@ -206,6 +210,16 @@ impl ScreenshotRuntime {
         );
     }
     pub fn sync(&self, state: &lexift_core::domain::screenshot::ScreenshotState, quitting: bool) {
+        if let Some((session, request, stop)) = self.multi_save.lock().unwrap().as_ref()
+            && (quitting
+                || *session != state.session
+                || state
+                    .multi
+                    .as_ref()
+                    .is_none_or(|batch| !batch.running || batch.request != *request))
+        {
+            stop.store(true, Ordering::Release);
+        }
         {
             let mut delay = self.delay.lock().unwrap();
             if delay.as_ref().is_some_and(|(id, _)| {
@@ -737,6 +751,130 @@ impl ScreenshotRuntime {
     }
     pub fn execute(self: &Arc<Self>, controller: &Arc<AppController>, command: ScreenshotCommand) {
         match command {
+            ScreenshotCommand::SaveRegions {
+                session,
+                request,
+                areas,
+                owner,
+                title,
+            } => {
+                use lexift_core::domain::screenshot_multi::Action;
+                let current = self
+                    .session
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .filter(|job| job.id == session)
+                    .and_then(|job| Some((job.frames.clone()?, job.source.clone())));
+                let Some((frames, source)) = current else {
+                    controller.dispatch(AppEvent::Screenshot(ScreenshotEvent::Multi(
+                        session,
+                        Action::Finished(request, Some("Screenshot is unavailable".into())),
+                    )));
+                    return;
+                };
+                let stop = Arc::new(AtomicBool::new(false));
+                *self.multi_save.lock().unwrap() = Some((session, request, stop.clone()));
+                let this = self.clone();
+                let controller = controller.clone();
+                controller.clone().runtime.spawn_blocking(move || {
+                    let emit = |action| {
+                        controller.dispatch(AppEvent::Screenshot(ScreenshotEvent::Multi(
+                            session, action,
+                        )))
+                    };
+                    let directory = this.save.choose_directory(
+                        lexift_core::ports::annotation_save::ImageOpenRequest {
+                            owner,
+                            title: title.clone(),
+                        },
+                        stop.clone(),
+                    );
+                    let mut error = None;
+                    match directory {
+                        Ok(Some(directory)) if !stop.load(Ordering::Acquire) => {
+                            emit(Action::DirectoryAccepted(request));
+                            let stem = std::path::Path::new(&source.snapshot.name)
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("Lexift");
+                            for (number, area) in areas {
+                                if stop.load(Ordering::Acquire) {
+                                    break;
+                                }
+                                let result = crop_frames(&frames, area.bounds).and_then(|image| {
+                                    let image = Arc::new(image);
+                                    this.save
+                                        .quick_save_png(
+                                            ImageSaveRequest {
+                                                image: (*image).clone(),
+                                                owner,
+                                                default_name: format!("{stem}-{number}.png"),
+                                                title: title.clone(),
+                                                options: crate::annotation_export::save_options(
+                                                    &controller,
+                                                ),
+                                            },
+                                            &directory,
+                                            stop.clone(),
+                                        )
+                                        .map(|outcome| (outcome, image))
+                                });
+                                match result {
+                                    Ok((SaveOutcome::Saved, image)) => {
+                                        this.retain_history(
+                                            &controller,
+                                            lexift_core::domain::image_history::workflow::OutputKey::MultiRegion {
+                                                session,
+                                                request,
+                                                id: area.id,
+                                            },
+                                            lexift_core::domain::image_history::ImageSnapshot {
+                                                base: image.clone(),
+                                                samples: Arc::new(ScreenCaptureFrame { revision: 0, serial: 0, regions: vec![] }),
+                                                document: history::retained_document(
+                                                    None,
+                                                    area.bounds,
+                                                ),
+                                                hidden: false,
+                                            },
+                                            image,
+                                        );
+                                        emit(Action::Item(request, area.id, Ok(())))
+                                    }
+                                    Ok((SaveOutcome::Cancelled, _)) => break,
+                                    Err(error) => {
+                                        emit(Action::Item(request, area.id, Err(error.to_string())))
+                                    }
+                                }
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(failure) => error = Some(failure.to_string()),
+                    }
+                    {
+                        let mut job = this.multi_save.lock().unwrap();
+                        if job
+                            .as_ref()
+                            .is_some_and(|(s, r, _)| (*s, *r) == (session, request))
+                        {
+                            job.take();
+                        }
+                    }
+                    emit(Action::Finished(request, error));
+                });
+            }
+            ScreenshotCommand::StopRegions(session, request) => {
+                if let Some((_, _, stop)) = self
+                    .multi_save
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .filter(|(s, r, _)| (*s, *r) == (session, request))
+                {
+                    stop.store(true, Ordering::Release);
+                }
+            }
             ScreenshotCommand::Recording(command) => recording::execute(self, controller, command),
             ScreenshotCommand::Refresh(command) => refresh::execute(self, controller, command),
             ScreenshotCommand::FreezeShortcut { id, trigger } => {
@@ -861,6 +999,15 @@ impl ScreenshotRuntime {
                 controller.ui.update_screenshot_elements(result);
             }
             ScreenshotCommand::Restore { session } => {
+                if let Some((_, _, stop)) = self
+                    .multi_save
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .filter(|(s, _, _)| *s == session)
+                {
+                    stop.store(true, Ordering::Release);
+                }
                 controller.ui.restore_screenshot(session);
             }
             ScreenshotCommand::Show { session } => {

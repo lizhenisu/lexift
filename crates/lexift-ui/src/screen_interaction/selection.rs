@@ -47,6 +47,7 @@ pub(crate) enum SelectionEvent {
         host: u64,
         request: u64,
     },
+    Multi(u64, MultiAction),
     Cancelled,
     QueryElements(lexift_core::domain::element_candidate::ElementQuery),
     CancelElements {
@@ -110,6 +111,11 @@ struct Registry {
     phase: HostPhase,
     windows: Vec<Host<OcrSelectionWindow>>,
     gesture: RegionSelection,
+    multi: Option<lexift_core::domain::screenshot_multi::Batch>,
+    multi_drag: Option<(u64, lexift_core::domain::region_selection::RegionEditor)>,
+    multi_button: bool,
+    multi_screen: Option<Rect>,
+    multi_error: Option<String>,
     frames: Option<Arc<Vec<CapturedRegion>>>,
     native_handoff: Vec<bool>,
     presented_hosts: Vec<Rect>,
@@ -152,6 +158,11 @@ pub(crate) fn init(
             phase: HostPhase::Idle,
             windows: vec![],
             gesture: RegionSelection::default(),
+            multi: None,
+            multi_drag: None,
+            multi_button: false,
+            multi_screen: None,
+            multi_error: None,
             frames: None,
             native_handoff: vec![],
             presented_hosts: vec![],
@@ -414,6 +425,8 @@ pub(crate) fn close() {
             r.reusable = false;
             r.reuse_pending = None;
             r.gesture.cancel();
+            r.multi_drag = None;
+            r.multi_button = false;
             r.candidates.clear();
             r.elements = Default::default();
             r.navigation = Default::default();
@@ -452,6 +465,11 @@ pub(crate) fn show_with_origin(
     frames: Arc<Vec<CapturedRegion>>,
     origin: Option<Option<lexift_core::ports::magnifier::WindowToken>>,
 ) {
+    STATE.with(|slot| {
+        if let Some(r) = slot.borrow_mut().as_mut() {
+            r.multi = None;
+        }
+    });
     show_prepared(generation, frames, origin, None);
 }
 pub(crate) fn show_screenshot_with_candidates(
@@ -487,6 +505,9 @@ fn show_prepared(
             let r = slot.as_mut()?;
             r.generation = generation;
             r.candidates = candidates;
+            if r.multi.is_some() {
+                return None;
+            }
             r.reusable = reusable;
             let p = (r.lifecycle.toolbar_cursor_position)()?;
             point_query(r, p)
@@ -505,10 +526,38 @@ fn show_prepared(
         r.activation_done = false;
         r.attempts = 0;
         r.frames = Some(frames.clone());
+        r.multi_screen = (r.lifecycle.toolbar_cursor_position)()
+            .and_then(|p| {
+                frames.iter().find(|f| {
+                    p.x >= f.bounds.left
+                        && p.x < f.bounds.right
+                        && p.y >= f.bounds.top
+                        && p.y < f.bounds.bottom
+                })
+            })
+            .or_else(|| frames.first())
+            .map(|f| f.bounds);
         for frame in frames.iter() {
             let window = crate::screen_interaction::create(&r.lifecycle, OcrSelectionWindow::new)
                 .map_err(|_| ())?;
             window.set_screenshot_mode(r.screenshot);
+            window.set_multi_mode(r.multi.is_some());
+            window.set_multi_controls(r.multi_screen == Some(frame.bounds));
+            let multi_weak = window.as_weak();
+            window.on_multi_action(move |action| {
+                let Some(window) = multi_weak.upgrade() else {
+                    return;
+                };
+                let owner = STATE.with(|slot| {
+                    let slot = slot.borrow();
+                    let r = slot.as_ref().filter(|r| r.generation == generation)?;
+                    r.multi.as_ref()?;
+                    Some((r.lifecycle.annotation_window_token)(window.window()))
+                });
+                if let Some(owner) = owner {
+                    multi_action(generation, action, owner);
+                }
+            });
             window.set_reuse_available(r.reusable);
             let b = frame.bounds;
             let key_weak = window.as_weak();
@@ -578,8 +627,14 @@ fn show_prepared(
                     })
                 });
                 if current {
-                    close();
-                    emit(SelectionEvent::Cancelled);
+                    let multi = STATE
+                        .with(|slot| slot.borrow().as_ref().is_some_and(|r| r.multi.is_some()));
+                    if multi {
+                        multi_action(generation, 2, None);
+                    } else {
+                        close();
+                        emit(SelectionEvent::Cancelled);
+                    }
                 }
             });
             let width = (b.right - b.left) as u32;
@@ -631,6 +686,7 @@ fn show_prepared(
             r.native_handoff.push(!installed);
             r.windows.push(Host::new(window, b));
         }
+        paint_multi(r);
         r.timer.start(
             slint::TimerMode::Repeated,
             Duration::from_millis(16),
@@ -998,6 +1054,9 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
                 .dispatch_event(slint::platform::WindowEvent::PointerExited),
             _ => {}
         }
+    }
+    if multi_pointer(generation, bounds, event) {
+        return;
     }
     let mut outcome = None;
     let mut input_screen = bounds;
@@ -1629,6 +1688,250 @@ pub(crate) fn diagnostic_visible() -> bool {
             !r.windows.is_empty() && r.windows.iter().all(|w| w.window.window().is_visible())
         })
     })
+}
+
+type MultiAction = lexift_core::domain::screenshot_multi::Action;
+
+pub(crate) fn sync_multi(state: &lexift_core::domain::screenshot::ScreenshotState) {
+    STATE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot.as_mut() else { return };
+        if r.generation != state.session
+            && state.phase != lexift_core::domain::screenshot::ScreenshotPhase::Preparing
+        {
+            return;
+        }
+        r.multi = state.multi.clone();
+        r.multi_error = state.error.clone();
+        if r.multi.is_none() {
+            r.multi_drag = None;
+            r.multi_button = false;
+        }
+        if r.generation == state.session {
+            paint_multi(r);
+        }
+    });
+}
+
+fn paint_multi(r: &Registry) {
+    let error = r.multi_error.as_deref();
+    use lexift_core::domain::screenshot_multi::Status;
+    let Some(batch) = &r.multi else { return };
+    let draft = r
+        .multi_drag
+        .as_ref()
+        .and_then(|(id, editor)| Some((*id, editor.bounds()?)));
+    let feedback = batch
+        .areas
+        .iter()
+        .enumerate()
+        .map(|(i, area)| {
+            let label = match area.status {
+                Status::Pending => "–",
+                Status::Saved => "+",
+                Status::Failed => "!",
+            };
+            format!(
+                "#{} {} {}",
+                i + 1,
+                label,
+                area.error.as_deref().unwrap_or_default()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("   ");
+    for host in &r.windows {
+        let window = &host.window;
+        let scale = window.window().scale_factor();
+        let local = |bounds: Rect, label: String, current| crate::MultiRegionMark {
+            left: (bounds.left - host.bounds.left) as f32 / scale,
+            top: (bounds.top - host.bounds.top) as f32 / scale,
+            width: (bounds.right - bounds.left) as f32 / scale,
+            height: (bounds.bottom - bounds.top) as f32 / scale,
+            label: label.into(),
+            current,
+        };
+        let mut marks: Vec<_> = batch
+            .areas
+            .iter()
+            .enumerate()
+            .map(|(index, area)| {
+                let b = draft
+                    .filter(|(id, _)| *id == area.id)
+                    .map_or(area.bounds, |(_, b)| b);
+                local(
+                    b,
+                    format!(
+                        "#{}  {} × {} px",
+                        index + 1,
+                        b.right - b.left,
+                        b.bottom - b.top
+                    ),
+                    draft.map(|(id, _)| id).or(batch.selected) == Some(area.id),
+                )
+            })
+            .collect();
+        if let Some(b) = r.gesture.bounds() {
+            marks.push(local(
+                b,
+                format!(
+                    "#{}  {} × {} px",
+                    batch.areas.len() + 1,
+                    b.right - b.left,
+                    b.bottom - b.top
+                ),
+                true,
+            ));
+        }
+        window.set_multi_marks(slint::ModelRc::new(slint::VecModel::from(marks)));
+        window.set_multi_retry(batch.sealed);
+        window.set_multi_finished(batch.sealed && !batch.running);
+
+        window.set_multi_can_save(
+            !batch.running && batch.areas.iter().any(|area| area.status != Status::Saved),
+        );
+        window.set_multi_can_delete(!batch.running && !batch.sealed && batch.selected.is_some());
+        window.set_multi_feedback(format!("{feedback} {}", error.unwrap_or_default()).into());
+    }
+}
+
+fn multi_action(
+    generation: u64,
+    action: i32,
+    owner: Option<lexift_core::ports::magnifier::WindowToken>,
+) {
+    let running = STATE.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .filter(|r| {
+                r.generation == generation
+                    && !r.gesture.active()
+                    && r.multi_drag.is_none()
+                    && !r.multi_button
+            })
+            .and_then(|r| r.multi.as_ref().map(|b| b.running))
+    });
+    let Some(running) = running else { return };
+    let action = match action {
+        0 => MultiAction::Delete,
+        1 => MultiAction::Save(owner, crate::i18n::tr("Save all PNG").to_string()),
+        2 if running => MultiAction::Stop,
+        2 => {
+            emit(SelectionEvent::Cancelled);
+            return;
+        }
+        _ => return,
+    };
+    emit(SelectionEvent::Multi(generation, action));
+}
+
+fn multi_pointer(generation: u64, screen: Rect, event: PopupPointerInput) -> bool {
+    use lexift_core::domain::region_selection::RegionEditor;
+    let mut action = None;
+    let mut button = None;
+    let handled = STATE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot.as_mut().filter(|r| r.generation == generation) else {
+            return false;
+        };
+        let Some(batch) = &r.multi else { return false };
+        let Some(host) = r.windows.iter().find(|h| h.bounds == screen) else {
+            return true;
+        };
+        let scale = host.window.window().scale_factor();
+        match event {
+            PopupPointerInput::LeftPressed { x, y } | PopupPointerInput::LeftReleased { x, y }
+                if r.multi_button
+                    || matches!(event, PopupPointerInput::LeftPressed { .. })
+                        && r.multi_screen == Some(screen)
+                        && (0.0..76.0).contains(&(y / scale))
+                        && (0.0..660.0).contains(&(x / scale)) =>
+            {
+                r.multi_button = matches!(event, PopupPointerInput::LeftPressed { .. });
+                let position = slint::LogicalPosition::new(x / scale, y / scale);
+                let event = if r.multi_button {
+                    slint::platform::WindowEvent::PointerPressed {
+                        position,
+                        button: slint::platform::PointerEventButton::Left,
+                    }
+                } else {
+                    slint::platform::WindowEvent::PointerReleased {
+                        position,
+                        button: slint::platform::PointerEventButton::Left,
+                    }
+                };
+                button = Some((host.window.as_weak(), event));
+            }
+            PopupPointerInput::LeftPressed { x, y } if !batch.running && !batch.sealed => {
+                let p = Point {
+                    x: screen.left + x.round() as i32,
+                    y: screen.top + y.round() as i32,
+                };
+                if let Some(area) = batch.hit(p, scale) {
+                    let mut editor = RegionEditor::new(area.bounds);
+                    editor.begin(p, scale, true);
+                    r.multi_drag = Some((area.id, editor));
+                } else {
+                    r.gesture.begin(p);
+                }
+            }
+            PopupPointerInput::Moved { x, y } | PopupPointerInput::LeftReleased { x, y } => {
+                let p = Point {
+                    x: screen.left + x.round() as i32,
+                    y: screen.top + y.round() as i32,
+                };
+                let release = matches!(event, PopupPointerInput::LeftReleased { .. });
+                if let Some((id, editor)) = r.multi_drag.as_mut() {
+                    let desktop = r.windows.iter().fold(screen, |a, h| Rect {
+                        left: a.left.min(h.bounds.left),
+                        top: a.top.min(h.bounds.top),
+                        right: a.right.max(h.bounds.right),
+                        bottom: a.bottom.max(h.bounds.bottom),
+                    });
+                    editor.update(p, desktop);
+                    if release {
+                        action = editor
+                            .bounds()
+                            .map(|bounds| MultiAction::Put(Some(*id), bounds));
+                        r.multi_drag = None;
+                    }
+                } else if r.gesture.active() {
+                    r.gesture.update(p);
+                    if release {
+                        action = r
+                            .gesture
+                            .bounds()
+                            .map(|bounds| MultiAction::Put(None, bounds));
+                        r.gesture.cancel();
+                    }
+                }
+            }
+            PopupPointerInput::LeftCancelled { .. } => {
+                r.multi_drag = None;
+                r.multi_button = false;
+                r.gesture.cancel();
+            }
+            _ => {}
+        }
+        if button.is_none()
+            && (action.is_some()
+                || r.gesture.active()
+                || r.multi_drag.is_some()
+                || matches!(event, PopupPointerInput::LeftCancelled { .. }))
+        {
+            paint_multi(r);
+        }
+        true
+    });
+    if let Some((window, event)) = button
+        && let Some(window) = window.upgrade()
+    {
+        window.window().dispatch_event(event);
+    }
+    if let Some(action) = action {
+        emit(SelectionEvent::Multi(generation, action));
+    }
+    handled
 }
 
 #[cfg(test)]

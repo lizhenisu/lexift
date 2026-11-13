@@ -2465,3 +2465,12 @@ msgstr "プリセット番号の上限に達しました"
 
 msgid "Rename"
 msgstr "名前を変更"
+
+msgid "Multi-region screenshot"
+msgstr "複数領域のスクリーンショット"
+
+msgid "Delete current region"
+msgstr "現在の領域を削除"
+
+msgid "Save all PNG"
+msgstr "すべて PNG で保存"

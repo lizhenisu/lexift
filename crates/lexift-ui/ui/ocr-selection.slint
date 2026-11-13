@@ -1,9 +1,21 @@
+import { Button } from "std-widgets.slint";
+import { Colors } from "design/colors.slint";
+export struct MultiRegionMark { left: length, top: length, width: length, height: length, label: string, current: bool }
 import { ScreenshotPixelPicker } from "screenshot-pixel-picker.slint";
 import { ScreenshotSizeLabel, SizeLabelStyle } from "screenshot-size-label.slint";
 import { ScreenshotHelp } from "screenshot-help.slint";
 import { Metrics } from "design/metrics.slint";
 import { RegionPreview, ScreenInteractionHint } from "screen-interaction.slint";
 export component OcrSelectionWindow inherits Window {
+    in property <bool> multi-mode;
+    in property <bool> multi-controls;
+    in property <bool> multi-retry;
+    in property <bool> multi-finished;
+    in property <bool> multi-can-save;
+    in property <bool> multi-can-delete;
+    in property <[MultiRegionMark]> multi-marks;
+    in property <string> multi-feedback;
+    callback multi-action(int);
     in property <bool> screenshot-mode: false;
     in property <bool> picker-visible;
     in property <length> picker-left;
@@ -21,6 +33,12 @@ export component OcrSelectionWindow inherits Window {
     forward-focus: keys;
     keys := FocusScope {
         key-pressed(event) => {
+            if root.multi-mode {
+                if event.text == Key.Return { root.multi-action(1); return accept; }
+                if event.text == Key.Delete { root.multi-action(0); return accept; }
+                if event.text == Key.Escape { root.multi-action(2); return accept; }
+                return reject;
+            }
             if root.screenshot-mode && event.text == Key.Escape {
                 root.cancelled();
                 return accept;
@@ -56,7 +74,7 @@ export component OcrSelectionWindow inherits Window {
     in property <length> selection-width;
     in property <length> selection-height;
     Image { source: root.frozen-image; width: parent.width; height: parent.height; image-fit: fill; }
-    RegionPreview {
+    if !root.multi-mode: RegionPreview {
         width: parent.width; height: parent.height;
         selecting: root.selecting; left: root.selection-left; top: root.selection-top;
         selection-width: root.selection-width; selection-height: root.selection-height;
@@ -87,5 +105,29 @@ export component OcrSelectionWindow inherits Window {
     out property <float> measured-picker-width: measure-picker.content-width / 1px;
     out property <float> measured-picker-height: 184;
     callback cancelled();
-    TouchArea { mouse-cursor: crosshair; pointer-event(event) => { if event.button == PointerEventButton.right && event.kind == PointerEventKind.down { root.cancelled(); } } }
+    for mark in root.multi-marks: Rectangle {
+        x: mark.left; y: mark.top; width: mark.width; height: mark.height;
+        border-width: mark.current ? 3px : 1px;
+        border-color: Colors.primary; background: transparent;
+        Rectangle {
+            x: 0px; y: 0px; height: 24px; width: label.preferred-width + 12px;
+            background: Colors.screen-help-background;
+            label := Text { x: 6px; height: parent.height; vertical-alignment: center; color: Colors.screen-help-foreground; text: mark.label; }
+        }
+    }
+    if root.multi-mode && root.multi-controls: Rectangle {
+        x: 0px; y: 0px; height: 76px; width: min(parent.width, 660px);
+        background: Colors.surface;
+        VerticalLayout {
+            padding: 6px; spacing: 4px;
+            HorizontalLayout {
+                spacing: 6px;
+                Button { text: @tr("Delete current region"); enabled: root.multi-can-delete; clicked => { root.multi-action(0); } }
+                Button { text: root.multi-retry ? @tr("Retry") : @tr("Save all PNG"); enabled: root.multi-can-save; clicked => { root.multi-action(1); } }
+                Button { text: root.multi-finished ? @tr("Close") : @tr("Cancel"); clicked => { root.multi-action(2); } }
+            }
+            Text { text: root.multi-feedback; color: Colors.foreground; overflow: elide; }
+        }
+    }
+    if !root.multi-mode: TouchArea { mouse-cursor: crosshair; pointer-event(event) => { if event.button == PointerEventButton.right && event.kind == PointerEventKind.down { root.cancelled(); } } }
 }

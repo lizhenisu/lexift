@@ -2465,3 +2465,12 @@ msgstr "Nummern für Screenshot-Vorgaben sind erschöpft"
 
 msgid "Rename"
 msgstr "Umbenennen"
+
+msgid "Multi-region screenshot"
+msgstr "Mehrere Bereiche aufnehmen"
+
+msgid "Delete current region"
+msgstr "Aktuellen Bereich löschen"
+
+msgid "Save all PNG"
+msgstr "Alle als PNG speichern"

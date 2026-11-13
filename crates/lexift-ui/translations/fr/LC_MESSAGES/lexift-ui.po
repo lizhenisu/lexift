@@ -2465,3 +2465,12 @@ msgstr "Les identifiants de préréglage sont épuisés"
 
 msgid "Rename"
 msgstr "Renommer"
+
+msgid "Multi-region screenshot"
+msgstr "Capture de plusieurs zones"
+
+msgid "Delete current region"
+msgstr "Supprimer la zone actuelle"
+
+msgid "Save all PNG"
+msgstr "Tout enregistrer en PNG"

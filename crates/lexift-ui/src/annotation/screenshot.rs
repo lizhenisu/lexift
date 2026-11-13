@@ -66,6 +66,24 @@ pub(crate) fn active() -> bool {
         s.state.active() || s.recovery.is_some()
     })
 }
+pub(crate) fn request_multi() {
+    let trigger = REGISTRY.with(|slot| {
+        let slot = slot.borrow();
+        let r = slot.as_ref()?;
+        Some(lexift_core::domain::screenshot::ShortcutTrigger {
+            point: (r.lifecycle.toolbar_cursor_position)(),
+            foreground: r
+                .lifecycle
+                .annotation_foreground
+                .as_ref()
+                .and_then(|query| query()),
+        })
+    });
+    if let Some(trigger) = trigger {
+        emit(ScreenshotEvent::MultiRequested(trigger));
+    }
+}
+
 pub(crate) fn emit(event: ScreenshotEvent) {
     let handler = EXPORT_HANDLER.with(|h| h.borrow().clone());
     if let Some(handler) = handler {
@@ -155,6 +173,7 @@ pub(crate) fn freeze_shortcut(id: u64, trigger: lexift_core::domain::screenshot:
     }
 }
 pub(crate) fn sync(state: &ScreenshotState) {
+    selection_host::sync_multi(state);
     delay::sync(state);
     crate::screen_interaction::pixel_picker::sync(state);
     let view_finished = FLOW.with(|slot| {
@@ -468,6 +487,9 @@ pub(crate) fn show(
         }
         selection_host::SelectionEvent::CancelElements { session, request } => {
             emit(ScreenshotEvent::CancelElements { session, request })
+        }
+        selection_host::SelectionEvent::Multi(session, action) => {
+            emit(ScreenshotEvent::Multi(session, action))
         }
         selection_host::SelectionEvent::Cancelled => cancel(),
         selection_host::SelectionEvent::Failed { error, .. } => {

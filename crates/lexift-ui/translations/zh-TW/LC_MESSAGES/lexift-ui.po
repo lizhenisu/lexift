@@ -2465,3 +2465,12 @@ msgstr "截圖預設編號已用盡"
 
 msgid "Rename"
 msgstr "重新命名"
+
+msgid "Multi-region screenshot"
+msgstr "多區域截圖"
+
+msgid "Delete current region"
+msgstr "刪除目前區域"
+
+msgid "Save all PNG"
+msgstr "儲存所有 PNG"

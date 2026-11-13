@@ -2465,3 +2465,12 @@ msgstr "Screenshot preset identity exhausted"
 
 msgid "Rename"
 msgstr "Rename"
+
+msgid "Multi-region screenshot"
+msgstr "Multi-region screenshot"
+
+msgid "Delete current region"
+msgstr "Delete current region"
+
+msgid "Save all PNG"
+msgstr "Save all PNG"
