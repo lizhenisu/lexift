@@ -157,6 +157,13 @@ pub(crate) fn freeze_shortcut(id: u64, trigger: lexift_core::domain::screenshot:
 pub(crate) fn sync(state: &ScreenshotState) {
     delay::sync(state);
     crate::screen_interaction::pixel_picker::sync(state);
+    let view_finished = FLOW.with(|slot| {
+        let previous = &slot.borrow().state;
+        previous.session == state.session
+            && previous.phase == ScreenshotPhase::Recognizing
+            && state.phase == ScreenshotPhase::Editing
+            && state.ocr_output == lexift_core::domain::ocr::Output::View
+    });
     let feedback = FLOW.with(|slot| {
         let mut slot = slot.borrow_mut();
         if slot.state.session != state.session {
@@ -188,6 +195,14 @@ pub(crate) fn sync(state: &ScreenshotState) {
         slot.state = state.clone();
         changed && state.error.is_some()
     });
+    if view_finished {
+        if state.ocr_result.is_some() {
+            let id = state.session;
+            slint::Timer::single_shot(Duration::ZERO, move || show_ocr_feedback(id));
+        } else {
+            FLOW.with(|s| s.borrow_mut().ocr_context = None);
+        }
+    }
     if feedback && state.long.is_none() && state.phase != ScreenshotPhase::Refreshing {
         let state = state.clone();
         slint::Timer::single_shot(Duration::ZERO, move || show_feedback(&state));
@@ -589,8 +604,14 @@ pub(super) fn recognizing() -> bool {
 }
 /// Freeze only crop identity here; OCR pixels are owned by the App capture session.
 pub(super) fn recognize_text() {
+    request_recognition(false);
+}
+
+pub(super) fn request_recognition(view: bool) {
     if long::image_editing() {
-        editor_ocr::request();
+        if !view {
+            editor_ocr::request();
+        }
         return;
     }
     if image_crop::active() {
@@ -647,9 +668,16 @@ pub(super) fn recognize_text() {
         r.close_panel();
         deselect_object(r);
         FLOW.with(|s| s.borrow_mut().ocr_context = Some(context));
-        Some(ScreenshotEvent::Recognize {
-            session: id,
-            bounds,
+        Some(if view {
+            ScreenshotEvent::ViewRecognition {
+                session: id,
+                bounds,
+            }
+        } else {
+            ScreenshotEvent::Recognize {
+                session: id,
+                bounds,
+            }
         })
     });
     if let Some(event) = request {
@@ -1076,7 +1104,11 @@ pub(crate) fn output_current(session: u64, operation: u64) -> bool {
 fn show_ocr_feedback(id: u64) {
     let context = FLOW.with(|slot| {
         let mut s = slot.borrow_mut();
-        if s.state.session != id || s.state.phase != ScreenshotPhase::Idle {
+        if s.state.session != id
+            || !(s.state.phase == ScreenshotPhase::Idle
+                || s.state.phase == ScreenshotPhase::Editing
+                    && s.state.ocr_output == lexift_core::domain::ocr::Output::View)
+        {
             return None;
         }
         let OcrFeedbackContext {

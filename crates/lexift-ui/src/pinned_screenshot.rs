@@ -500,7 +500,7 @@ pub(crate) fn cancel_recognition(id: u64) -> bool {
     emit_pin(lexift_core::domain::pinned_image::Event::CancelRecognition { id });
     true
 }
-fn request_recognition(id: u64) {
+fn request_recognition(id: u64, view: bool) {
     if !visibility::operable(id) {
         return;
     }
@@ -516,7 +516,12 @@ fn request_recognition(id: u64) {
         })
     });
     if allowed && crate::annotation::pin_editor::prepare_recognition(id) {
-        emit_pin(lexift_core::domain::pinned_image::Event::Recognize { id });
+        use lexift_core::domain::pinned_image::Event;
+        emit_pin(if view {
+            Event::ViewRecognition { id }
+        } else {
+            Event::Recognize { id }
+        });
     }
 }
 /// Keep the temporary browsing policy until a native move loop has returned.
@@ -1383,7 +1388,8 @@ fn show_from(
         window.on_freeze_live(move || {
             slint::Timer::single_shot(Duration::ZERO, move || freeze_live(id))
         });
-        window.on_recognize_requested(move || request_recognition(id));
+        window.on_recognize_requested(move || request_recognition(id, false));
+        window.on_view_recognition_requested(move || request_recognition(id, true));
         window.on_output_requested(move |kind| request_output(id, kind));
         window.on_option_requested(move |kind, value| change_option(id, kind, value));
         window.on_annotate_requested(move || {

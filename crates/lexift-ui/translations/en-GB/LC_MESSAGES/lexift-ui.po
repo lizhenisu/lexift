@@ -2417,3 +2417,15 @@ msgstr "The source window changed. Take another screenshot"
 
 msgid "The window is too large to capture live"
 msgstr "The window is too large to capture live"
+
+msgid "OCR result"
+msgstr "OCR result"
+
+msgid "View recognition result"
+msgstr "View recognition result"
+
+msgid "Copy all text"
+msgstr "Copy all text"
+
+msgid "OCR options"
+msgstr "OCR options"

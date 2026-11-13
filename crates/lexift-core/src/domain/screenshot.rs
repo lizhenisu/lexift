@@ -80,6 +80,7 @@ pub struct ScreenshotState {
     pub reuse_sequence: u64,
     pub error: Option<String>,
     pub ocr_result: Option<OcrOutcome>,
+    pub ocr_output: super::ocr::Output,
     pub element_sequence: u64,
     pub element_pending: Option<super::element_candidate::ElementQuery>,
     pub color_sequence: u64,
@@ -153,6 +154,15 @@ pub enum ScreenshotEvent {
     Recognize {
         session: u64,
         bounds: Rect,
+    },
+    ViewRecognition {
+        session: u64,
+        bounds: Rect,
+    },
+    RecognitionText {
+        session: u64,
+        operation: u64,
+        text: super::ocr::ResultText,
     },
     Recognized {
         session: u64,
@@ -234,7 +244,9 @@ pub enum ScreenshotCommand {
     CancelElements {
         session: u64,
     },
+    PresentRecognition(super::ocr::ResultText),
     Recognize {
+        output: super::ocr::Output,
         session: u64,
         operation: u64,
         bounds: Rect,
@@ -416,7 +428,8 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 bounds: s.reusable_region(),
             })
         }
-        ScreenshotEvent::Recognize { session, bounds }
+        event @ (ScreenshotEvent::Recognize { session, bounds }
+        | ScreenshotEvent::ViewRecognition { session, bounds })
             if s.session == session && s.editable() && s.bounds == Some(bounds) =>
         {
             let strategy = super::ocr::copy_strategy(&state.settings);
@@ -429,12 +442,33 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.color_result = None;
             s.error = None;
             s.ocr_result = None;
+            s.ocr_output = if matches!(event, ScreenshotEvent::ViewRecognition { .. }) {
+                super::ocr::Output::View
+            } else {
+                super::ocr::Output::Copy
+            };
             command(ScreenshotCommand::Recognize {
+                output: s.ocr_output,
                 session,
                 operation: s.operation,
                 bounds,
                 strategy,
             })
+        }
+        ScreenshotEvent::RecognitionText {
+            session,
+            operation,
+            text,
+        } if s.session == session
+            && s.operation == operation
+            && s.phase == ScreenshotPhase::Recognizing
+            && s.ocr_output == super::ocr::Output::View =>
+        {
+            s.phase = ScreenshotPhase::Idle;
+            vec![
+                AppCommand::Screenshot(ScreenshotCommand::Restore { session }),
+                AppCommand::Screenshot(ScreenshotCommand::PresentRecognition(text)),
+            ]
         }
         ScreenshotEvent::Recognized {
             session,
@@ -444,8 +478,12 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             && s.operation == operation
             && s.phase == ScreenshotPhase::Recognizing =>
         {
-            s.phase = ScreenshotPhase::Idle;
             s.ocr_result = Some(outcome);
+            if s.ocr_output == super::ocr::Output::View {
+                s.phase = ScreenshotPhase::Editing;
+                return vec![];
+            }
+            s.phase = ScreenshotPhase::Idle;
             s.long = None;
             command(ScreenshotCommand::Restore { session })
         }
@@ -749,6 +787,39 @@ mod tests {
             AppCommand::Screenshot(ScreenshotCommand::Prepare { session: 1, .. })
         ));
         s
+    }
+    #[test]
+    fn view_recognition_retires_editor_and_rejects_late_results() {
+        use super::super::ocr::{Output, ResultText};
+        let mut state = begin();
+        state.screenshot.phase = ScreenshotPhase::Editing;
+        state.screenshot.bounds = Some(bounds());
+        assert!(matches!(
+            state
+                .reduce(AppEvent::Screenshot(ScreenshotEvent::ViewRecognition {
+                    session: 1,
+                    bounds: bounds(),
+                }))
+                .as_slice(),
+            [AppCommand::Screenshot(ScreenshotCommand::Recognize {
+                output: Output::View,
+                ..
+            })]
+        ));
+        let event = ScreenshotEvent::RecognitionText {
+            session: 1,
+            operation: state.screenshot.operation,
+            text: ResultText("第一行\nSecond line".into()),
+        };
+        assert!(matches!(
+            state.reduce(AppEvent::Screenshot(event.clone())).as_slice(),
+            [
+                AppCommand::Screenshot(ScreenshotCommand::Restore { session: 1 }),
+                AppCommand::Screenshot(ScreenshotCommand::PresentRecognition(_))
+            ]
+        ));
+        assert_eq!(state.screenshot.phase, ScreenshotPhase::Idle);
+        assert!(state.reduce(AppEvent::Screenshot(event)).is_empty());
     }
     #[test]
     fn windowless_shortcut_requires_its_current_freeze_and_deduplicates() {
@@ -1381,6 +1452,7 @@ mod tests {
                     session: 1,
                     operation: 1,
                     strategy: super::super::ocr::OcrRecognitionStrategy::AutomaticKorean,
+                    output: super::super::ocr::Output::Copy,
                     ..
                 })]
             ));

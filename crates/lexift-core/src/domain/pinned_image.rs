@@ -35,6 +35,7 @@ pub struct State {
 /// Immutable input identity; geometry changes of the pin window do not change it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Recognition {
+    pub output: super::ocr::Output,
     pub scale: super::image_resize::ImageScale,
     pub color: super::image_color::Color,
     pub orientation: super::image_transform::Orientation,
@@ -118,6 +119,14 @@ pub enum Event {
     },
     CancelRecognition {
         id: u64,
+    },
+    ViewRecognition {
+        id: u64,
+    },
+    RecognitionText {
+        id: u64,
+        request: Recognition,
+        text: super::ocr::ResultText,
     },
     Recognized {
         id: u64,
@@ -219,6 +228,7 @@ pub enum Command {
         id: u64,
         ticket: super::image_history::Ticket,
     },
+    PresentRecognition(super::ocr::ResultText),
     Recognize {
         id: u64,
         request: Recognition,
@@ -311,6 +321,7 @@ pub(crate) fn before_event(pins: &mut States, event: &crate::AppEvent) {
 pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
     let input_id = match &event {
         Event::Recognize { id }
+        | Event::ViewRecognition { id }
         | Event::TransformRequested { id, .. }
         | Event::ColorRequested { id, .. }
         | Event::Requested { id, .. }
@@ -364,7 +375,7 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
             interaction::complete(state, id, request, result);
             vec![]
         }
-        Event::Recognize { id } => {
+        event @ (Event::Recognize { id } | Event::ViewRecognition { id }) => {
             if state.screenshot.active()
                 || matches!(
                     state.ocr.phase,
@@ -387,6 +398,11 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
                 .as_ref()
                 .map_or(p.source.unwrap(), |d| d.snapshot.monitor);
             let request = Recognition {
+                output: if matches!(event, Event::ViewRecognition { .. }) {
+                    super::ocr::Output::View
+                } else {
+                    super::ocr::Output::Copy
+                },
                 scale: p
                     .document
                     .as_ref()
@@ -418,6 +434,18 @@ pub(crate) fn reduce(state: &mut AppState, event: Event) -> Vec<AppCommand> {
                 cancel_one(p);
             }
             vec![]
+        }
+        Event::RecognitionText { id, request, text } => {
+            let Some(p) = state.pinned_images.get_mut(&id).filter(|p| {
+                p.recognition == Some(request)
+                    && p.revision == request.revision
+                    && request.output == super::ocr::Output::View
+            }) else {
+                return vec![];
+            };
+            p.recognition = None;
+            p.busy = false;
+            command(Command::PresentRecognition(text))
         }
         Event::Recognized {
             id,

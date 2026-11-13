@@ -2417,3 +2417,15 @@ msgstr "元のウィンドウが変わりました。もう一度スクリーン
 
 msgid "The window is too large to capture live"
 msgstr "ウィンドウが大きすぎてライブキャプチャできません"
+
+msgid "OCR result"
+msgstr "OCR 結果"
+
+msgid "View recognition result"
+msgstr "認識結果を表示"
+
+msgid "Copy all text"
+msgstr "全文をコピー"
+
+msgid "OCR options"
+msgstr "OCR オプション"

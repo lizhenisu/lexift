@@ -7,6 +7,7 @@ const LONG_TRIM_MENU: u8 = 6;
 const QUICK_SAVE_MENU: u8 = 7;
 const LONG_AXIS_MENU: u8 = 8;
 const WINDOW_PIN_MENU: u8 = 9;
+const RECOGNITION_MENU: u8 = 10;
 #[derive(Default)]
 struct Views {
     recording: Option<(lexift_core::domain::screen_recording::Identity, u64)>,
@@ -55,7 +56,10 @@ pub(crate) fn sync(state: &ScreenshotState) {
             s.menu.is_some()
                 && super::recording::audio_selection().map(|(id, revision, _)| (id, revision))
                     != s.recording
-        } else if matches!(s.menu_kind, QUICK_SAVE_MENU | WINDOW_PIN_MENU) {
+        } else if matches!(
+            s.menu_kind,
+            QUICK_SAVE_MENU | WINDOW_PIN_MENU | RECOGNITION_MENU
+        ) {
             s.menu.is_some()
                 && (s.quick_owner != Some((state.session, state.operation))
                     || state.phase != ScreenshotPhase::Editing)
@@ -105,6 +109,14 @@ fn choose(sequence: u64, index: Option<i32>) {
         let long_trim = VIEWS.with(|s| s.borrow().long_trim);
         let quick_owner = VIEWS.with(|s| s.borrow().quick_owner);
         clear();
+        if kind == RECOGNITION_MENU {
+            if quick_owner == quick_save_owner()
+                && let Some(index @ (0 | 1)) = index
+            {
+                super::request_recognition(index == 1);
+            }
+            return;
+        }
         if kind == WINDOW_PIN_MENU {
             if index == Some(0) && quick_owner == quick_save_owner() {
                 super::request_window_pin();
@@ -249,6 +261,10 @@ pub(in crate::annotation) fn window_pin_menu() {
     menu_kind(WINDOW_PIN_MENU);
 }
 
+pub(in crate::annotation) fn recognition_menu() {
+    menu_kind(RECOGNITION_MENU);
+}
+
 fn quick_save_owner() -> Option<(u64, u64)> {
     FLOW.with(|flow| {
         let flow = flow.borrow();
@@ -258,7 +274,7 @@ fn quick_save_owner() -> Option<(u64, u64)> {
 }
 
 fn menu_kind(kind: u8) {
-    if matches!(kind, QUICK_SAVE_MENU | WINDOW_PIN_MENU) {
+    if matches!(kind, QUICK_SAVE_MENU | WINDOW_PIN_MENU | RECOGNITION_MENU) {
         if quick_save_owner().is_none() || super::history_editor::active() || pin_editor::active() {
             return;
         }
@@ -296,7 +312,9 @@ fn menu_kind(kind: u8) {
         return;
     };
     crate::theme::apply(&w);
-    let labels: &[&str] = if kind == WINDOW_PIN_MENU {
+    let labels: &[&str] = if kind == RECOGNITION_MENU {
+        &["Recognize text", "View recognition result"]
+    } else if kind == WINDOW_PIN_MENU {
         if super::window_pin_available() {
             &["Window pin"]
         } else {
@@ -405,7 +423,7 @@ fn menu_kind(kind: u8) {
         let mut s = s.borrow_mut();
         s.sequence += 1;
         s.menu_kind = kind;
-        s.quick_owner = matches!(kind, QUICK_SAVE_MENU | WINDOW_PIN_MENU)
+        s.quick_owner = matches!(kind, QUICK_SAVE_MENU | WINDOW_PIN_MENU | RECOGNITION_MENU)
             .then(quick_save_owner)
             .flatten();
         s.recording = selection.map(|(identity, revision, _)| (identity, revision));
@@ -463,7 +481,7 @@ fn prepare_menu(seq: u64, attempt: u8) {
                 || VIEWS.with(|views| {
                     matches!(
                         views.borrow().menu_kind,
-                        QUICK_SAVE_MENU | LONG_AXIS_MENU | WINDOW_PIN_MENU
+                        QUICK_SAVE_MENU | LONG_AXIS_MENU | WINDOW_PIN_MENU | RECOGNITION_MENU
                     )
                 }) && super::long::busy()
                     && !super::long::image_editing())
@@ -740,7 +758,11 @@ pub(crate) fn availability(state: &lexift_core::AppState) {
             s.menu.is_some()
                 && !matches!(
                     s.menu_kind,
-                    LONG_TRIM_MENU | QUICK_SAVE_MENU | LONG_AXIS_MENU | WINDOW_PIN_MENU
+                    LONG_TRIM_MENU
+                        | QUICK_SAVE_MENU
+                        | LONG_AXIS_MENU
+                        | WINDOW_PIN_MENU
+                        | RECOGNITION_MENU
                 )
         })
     {

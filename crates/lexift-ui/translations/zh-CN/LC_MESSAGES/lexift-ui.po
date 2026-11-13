@@ -2417,3 +2417,15 @@ msgstr "源窗口已变化，请重新截图"
 
 msgid "The window is too large to capture live"
 msgstr "窗口太大，无法实时采集"
+
+msgid "OCR result"
+msgstr "OCR 结果"
+
+msgid "View recognition result"
+msgstr "查看识别结果"
+
+msgid "Copy all text"
+msgstr "复制全文"
+
+msgid "OCR options"
+msgstr "OCR 选项"

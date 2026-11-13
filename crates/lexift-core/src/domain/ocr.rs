@@ -593,7 +593,24 @@ pub(crate) fn reduce(state: &mut AppState, event: OcrEvent) -> Vec<AppCommand> {
     }
 }
 
-/// Terminal copy-only OCR feedback never retains recognized text.
+/// Delivery policy for image OCR.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Output {
+    #[default]
+    Copy,
+    View,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct ResultText(pub String);
+
+impl std::fmt::Debug for ResultText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ResultText([redacted])")
+    }
+}
+
+/// Terminal OCR feedback never retains recognized text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OcrOutcome {
     Copied,

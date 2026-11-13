@@ -155,8 +155,16 @@ impl ScreenshotRuntime {
                 }
             };
             let started = std::time::Instant::now();
-            let outcome =
-                self.recognize_text(task.frames.frames(), task.bounds, &task.cancel, |image| {
+            let output = match task.identity {
+                Identity::Pin { request, .. } => request.output,
+                Identity::Editor(_) => Default::default(),
+            };
+            let outcome = self.deliver_recognition(
+                task.frames.frames(),
+                task.bounds,
+                &task.cancel,
+                output,
+                |image| {
                     let color = match task.identity {
                         Identity::Editor(r) => r.color,
                         Identity::Pin { request, .. } => request.color,
@@ -182,19 +190,26 @@ impl ScreenshotRuntime {
                         .as_ref()
                         .ok_or(OcrOutcome::ResourcesUnavailable)?
                         .recognize_for_copy(c, image, &task.strategy, &task.cancel)
-                });
+                },
+            );
             tracing::debug!(?task.identity, elapsed_ms = started.elapsed().as_millis(), ?outcome, "Image OCR finished");
             if let Some(outcome) = outcome {
-                c.dispatch(match task.identity {
-                    Identity::Editor(request) => {
+                c.dispatch(match (task.identity, outcome) {
+                    (Identity::Editor(request), Err(outcome)) => {
                         AppEvent::EditorOcr(editor::Event::Completed { request, outcome })
                     }
-                    Identity::Pin { id, request } => AppEvent::PinnedImage(PinEvent::Recognized {
-                        id,
-                        operation: request.operation,
-                        revision: request.revision,
-                        outcome,
-                    }),
+                    (Identity::Pin { id, request }, Ok(text)) => {
+                        AppEvent::PinnedImage(PinEvent::RecognitionText { id, request, text })
+                    }
+                    (Identity::Editor(_), Ok(_)) => unreachable!("editor OCR is copy-only"),
+                    (Identity::Pin { id, request }, Err(outcome)) => {
+                        AppEvent::PinnedImage(PinEvent::Recognized {
+                            id,
+                            operation: request.operation,
+                            revision: request.revision,
+                            outcome,
+                        })
+                    }
                 });
             }
         }

@@ -69,3 +69,5 @@ pub fn quick_save_directory_title(
 ) -> String {
     i18n::quick_save_directory_title(language)
 }
+
+pub use bridge::ocr_result::CopyResultText;

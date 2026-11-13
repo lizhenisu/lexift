@@ -2417,3 +2417,15 @@ msgstr "A janela de origem mudou. Faça outra captura de tela."
 
 msgid "The window is too large to capture live"
 msgstr "A janela é grande demais para a captura ao vivo"
+
+msgid "OCR result"
+msgstr "Resultado do OCR"
+
+msgid "View recognition result"
+msgstr "Ver resultado do reconhecimento"
+
+msgid "Copy all text"
+msgstr "Copiar todo o texto"
+
+msgid "OCR options"
+msgstr "Opções de OCR"

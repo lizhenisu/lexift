@@ -2417,3 +2417,15 @@ msgstr "La fenêtre source a changé. Faites une nouvelle capture."
 
 msgid "The window is too large to capture live"
 msgstr "La fenêtre est trop grande pour une capture en direct"
+
+msgid "OCR result"
+msgstr "Résultat OCR"
+
+msgid "View recognition result"
+msgstr "Afficher le résultat de la reconnaissance"
+
+msgid "Copy all text"
+msgstr "Copier tout le texte"
+
+msgid "OCR options"
+msgstr "Options OCR"

@@ -155,6 +155,12 @@ pub(crate) trait ViewPort: Send + Sync {
         _image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
     ) {
     }
+    fn show_recognition_result(
+        &self,
+        _text: lexift_core::domain::ocr::ResultText,
+        _copy: lexift_ui::CopyResultText,
+    ) {
+    }
     fn window_pin_frame(
         &self,
         _source: (u64, u64),
@@ -292,6 +298,13 @@ impl ViewPort for lexift_ui::UiHandle {
         image: Arc<lexift_core::ports::screen_capture::CapturedRegion>,
     ) {
         self.present_pinned_image(id, revision, image);
+    }
+    fn show_recognition_result(
+        &self,
+        text: lexift_core::domain::ocr::ResultText,
+        copy: lexift_ui::CopyResultText,
+    ) {
+        lexift_ui::UiHandle::show_recognition_result(self, text, copy);
     }
     fn window_pin_frame(
         &self,

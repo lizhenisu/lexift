@@ -120,6 +120,7 @@ impl ScreenshotRuntime {
         }
     }
     /// Crop the immutable capture, infer off-thread, then serialize the final clipboard write.
+    #[cfg(test)]
     fn recognize_text(
         &self,
         frames: &[CapturedRegion],
@@ -132,7 +133,33 @@ impl ScreenshotRuntime {
             lexift_core::domain::screenshot::OcrOutcome,
         >,
     ) -> Option<lexift_core::domain::screenshot::OcrOutcome> {
-        use lexift_core::domain::screenshot::OcrOutcome;
+        self.deliver_recognition(
+            frames,
+            bounds,
+            cancel,
+            lexift_core::domain::ocr::Output::Copy,
+            recognize,
+        )
+        .map(|result| result.expect_err("copy-only OCR cannot produce a view"))
+    }
+
+    fn deliver_recognition(
+        &self,
+        frames: &[CapturedRegion],
+        bounds: lexift_core::domain::geometry::Rect,
+        cancel: &AtomicBool,
+        output: lexift_core::domain::ocr::Output,
+        recognize: impl FnOnce(
+            CapturedRegion,
+        )
+            -> std::result::Result<String, lexift_core::domain::ocr::OcrOutcome>,
+    ) -> Option<
+        std::result::Result<
+            lexift_core::domain::ocr::ResultText,
+            lexift_core::domain::ocr::OcrOutcome,
+        >,
+    > {
+        use lexift_core::domain::ocr::{OcrOutcome, Output, ResultText};
         if cancel.load(Ordering::Acquire) {
             return None;
         }
@@ -142,21 +169,41 @@ impl ScreenshotRuntime {
         if cancel.load(Ordering::Acquire) {
             return None;
         }
-        let outcome = match recognized {
-            Ok(text) if text.trim().is_empty() => OcrOutcome::Empty,
-            Ok(text) => {
-                let _serial = self.color_serial.blocking_lock();
-                if cancel.load(Ordering::Acquire) {
-                    return None;
-                }
-                match self.clipboard.write_text(&text) {
-                    Ok(()) => OcrOutcome::Copied,
-                    Err(_) => OcrOutcome::CopyFailed,
-                }
-            }
-            Err(outcome) => outcome,
+        let result = match recognized {
+            Ok(text) if text.trim().is_empty() => Err(OcrOutcome::Empty),
+            Ok(text) if output == Output::View => Ok(ResultText(text)),
+            Ok(text) => Err(match self.copy_recognition(&text, cancel)? {
+                true => OcrOutcome::Copied,
+                false => OcrOutcome::CopyFailed,
+            }),
+            Err(outcome) => Err(outcome),
         };
-        (!cancel.load(Ordering::Acquire)).then_some(outcome)
+        (!cancel.load(Ordering::Acquire)).then_some(result)
+    }
+
+    fn copy_recognition(&self, text: &str, cancel: &AtomicBool) -> Option<bool> {
+        let _serial = self.color_serial.blocking_lock();
+        (!cancel.load(Ordering::Acquire)).then(|| self.clipboard.write_text(text).is_ok())
+    }
+
+    fn present_recognition(
+        self: &Arc<Self>,
+        c: &Arc<AppController>,
+        text: lexift_core::domain::ocr::ResultText,
+    ) {
+        let owner = self.clone();
+        let runtime = c.runtime.clone();
+        c.ui.show_recognition_result(
+            text,
+            Arc::new(move |text, cancel, done| {
+                let owner = owner.clone();
+                runtime.spawn_blocking(move || {
+                    if let Some(success) = owner.copy_recognition(&text, &cancel) {
+                        done(success);
+                    }
+                });
+            }),
+        );
     }
     pub fn sync(&self, state: &lexift_core::domain::screenshot::ScreenshotState, quitting: bool) {
         {
@@ -410,6 +457,7 @@ impl ScreenshotRuntime {
                     }));
                 }
             }
+            PinCommand::PresentRecognition(text) => self.present_recognition(controller, text),
             PinCommand::Recognize {
                 id,
                 request,
@@ -695,7 +743,11 @@ impl ScreenshotRuntime {
                 controller.ui.freeze_screenshot_shortcut(id, trigger)
             }
             ScreenshotCommand::Long(command) => long::execute(self, controller, command),
+            ScreenshotCommand::PresentRecognition(text) => {
+                self.present_recognition(controller, text)
+            }
             ScreenshotCommand::Recognize {
+                output,
                 session,
                 operation,
                 bounds,
@@ -714,19 +766,27 @@ impl ScreenshotRuntime {
                 let this = self.clone();
                 let c = controller.clone();
                 controller.runtime.spawn_blocking(move || {
-                    let outcome = this.recognize_text(&frames, bounds, &cancel, |image| {
-                        c.ocr
+                    let outcome =
+                        this.deliver_recognition(&frames, bounds, &cancel, output, |image| {
+                            c.ocr
                             .as_ref()
                             .ok_or(
                                 lexift_core::domain::screenshot::OcrOutcome::ResourcesUnavailable,
                             )
                             .and_then(|ocr| ocr.recognize_for_copy(&c, image, &strategy, &cancel))
-                    });
+                        });
                     if let Some(outcome) = outcome {
-                        c.dispatch(AppEvent::Screenshot(ScreenshotEvent::Recognized {
-                            session,
-                            operation,
-                            outcome,
+                        c.dispatch(AppEvent::Screenshot(match outcome {
+                            Ok(text) => ScreenshotEvent::RecognitionText {
+                                session,
+                                operation,
+                                text,
+                            },
+                            Err(outcome) => ScreenshotEvent::Recognized {
+                                session,
+                                operation,
+                                outcome,
+                            },
                         }));
                     }
                 });
@@ -1424,6 +1484,17 @@ mod tests {
             },
         ];
         let cancel = AtomicBool::new(false);
+        let viewed = runtime.deliver_recognition(
+            &frames,
+            bounds,
+            &cancel,
+            lexift_core::domain::ocr::Output::View,
+            |_| Ok("前\nOCR".into()),
+        );
+        assert_eq!(
+            viewed,
+            Some(Ok(lexift_core::domain::ocr::ResultText("前\nOCR".into())))
+        );
         let result = runtime.recognize_text(&frames, bounds, &cancel, |image| {
             assert_eq!(image.bounds, bounds);
             assert_eq!(image.pixels, [10, 20, 30, 255, 40, 50, 60, 255]);

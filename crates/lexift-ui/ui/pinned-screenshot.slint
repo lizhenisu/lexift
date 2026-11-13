@@ -53,6 +53,7 @@ export component PinnedScreenshotWindow inherits Window {
     in property <bool> recognition-enabled:true;
     in property <bool> browsing:false;
     callback recognize-requested();
+    callback view-recognition-requested();
     in property <bool> editing:false;
     in property <bool> cropping:false;
     in property <float> crop-left;
@@ -125,6 +126,7 @@ export component PinnedScreenshotWindow inherits Window {
                 MenuItem { title:@tr("Copy image"); enabled:!root.live && !root.output-busy && !root.cropping; activated=>{root.output-requested(0);} }
                 MenuItem { title:@tr("Save image"); enabled:!root.live && !root.output-busy && !root.cropping; activated=>{root.output-requested(1);} }
                 MenuItem { title:root.recognizing ? @tr("Recognizing text…") : @tr("Recognize text"); enabled:!root.live && root.recognition-enabled && !root.output-busy && !root.cropping; activated=>{root.recognize-requested();} }
+                MenuItem { title:@tr("View recognition result"); enabled:!root.live && root.recognition-enabled && !root.output-busy && !root.cropping; activated=>{root.view-recognition-requested();} }
                 MenuSeparator {}
                 MenuItem { title:@tr("Annotate"); enabled:!root.live && !root.output-busy && !root.editing; activated=>{root.annotate-requested();} }
                 MenuItem { title:@tr("Hide annotations"); enabled:!root.live && !root.output-busy && !root.cropping; checkable:true; checked:root.annotations-hidden; activated=>{root.visibility-requested(!root.annotations-hidden);} }

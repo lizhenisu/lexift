@@ -2417,3 +2417,15 @@ msgstr "來源視窗已變更，請重新擷取畫面"
 
 msgid "The window is too large to capture live"
 msgstr "視窗太大，無法即時擷取"
+
+msgid "OCR result"
+msgstr "OCR 結果"
+
+msgid "View recognition result"
+msgstr "檢視辨識結果"
+
+msgid "Copy all text"
+msgstr "複製全文"
+
+msgid "OCR options"
+msgstr "OCR 選項"

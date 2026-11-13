@@ -401,6 +401,15 @@ pub(crate) fn toggle(requested_at: Instant) {
             later_main(&input, generation, revision, screenshot::recognize_text)
         });
         let input = r.toolbar_state.main.input();
+        main.on_recognition_menu(move || {
+            later_main(
+                &input,
+                generation,
+                revision,
+                screenshot::delay::recognition_menu,
+            )
+        });
+        let input = r.toolbar_state.main.input();
         main.on_crop_requested(move || later_main(&input, generation, revision, image_crop::begin));
         let input = r.toolbar_state.main.input();
         main.on_transform_requested(move || {

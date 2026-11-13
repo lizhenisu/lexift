@@ -2417,3 +2417,15 @@ msgstr "원본 창이 변경되었습니다. 다시 캡처하세요."
 
 msgid "The window is too large to capture live"
 msgstr "창이 너무 커서 실시간으로 캡처할 수 없습니다"
+
+msgid "OCR result"
+msgstr "OCR 결과"
+
+msgid "View recognition result"
+msgstr "인식 결과 보기"
+
+msgid "Copy all text"
+msgstr "전체 텍스트 복사"
+
+msgid "OCR options"
+msgstr "OCR 옵션"

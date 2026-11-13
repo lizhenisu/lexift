@@ -108,6 +108,7 @@ fn has_live_window_instances() -> bool {
     app_window_exists
         || HISTORY.with(|s| s.borrow().as_ref().is_some_and(|r| r.window.is_some()))
         || crate::ocr::active()
+        || ocr_result::active()
         || crate::annotation::is_open()
         || crate::annotation::screenshot::active()
         || crate::pinned_screenshot::active()
@@ -128,6 +129,7 @@ fn has_live_window_instances() -> bool {
 }
 
 mod app_window;
+pub(crate) mod ocr_result;
 pub use app_window::WindowRole;
 type PrepareAppWindow = Rc<dyn Fn(&slint::Window, WindowRole) -> PassiveWindowPreparation>;
 
@@ -214,6 +216,7 @@ impl Ui {
     ) -> Result<Self, slint::PlatformError> {
         crate::annotation::init(prepare_passive_window, window_lifecycle.clone());
         crate::ocr::init(prepare_passive_window, window_lifecycle.clone());
+        ocr_result::init(prepare_passive_window, window_lifecycle.clone());
         crate::pinned_screenshot::init(prepare_passive_window, window_lifecycle.clone());
         crate::tray_menu::init(prepare_passive_window, window_lifecycle.clone());
         image_history::init(prepare_passive_window, window_lifecycle.clone());
@@ -885,6 +888,14 @@ impl UiHandle {
         });
     }
 
+    pub fn show_recognition_result(
+        &self,
+        text: lexift_core::domain::ocr::ResultText,
+        copy: ocr_result::CopyResultText,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || ocr_result::show(text, copy));
+    }
+
     pub fn quit(&self) {
         let credential_generation = Arc::clone(&self.credential_generation);
         let toast_records = Arc::clone(&self.toast_records);
@@ -896,12 +907,14 @@ impl UiHandle {
                     clear_settings_toasts(settings, &toast_records);
                 }
             });
+            ocr_result::close();
             let _ = slint::quit_event_loop();
         });
     }
 }
 
 fn apply_window_themes() {
+    ocr_result::apply_theme();
     APP_WINDOW_REGISTRY.with(|slot| {
         if let Some(r) = slot.borrow().as_ref() {
             if let Some(w) = &r.main {

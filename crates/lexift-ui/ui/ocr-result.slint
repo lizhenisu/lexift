@@ -1,0 +1,72 @@
+import { ScrollView } from "std-widgets.slint";
+import { Colors } from "design/colors.slint";
+import { Spacing } from "design/spacing.slint";
+import { Typography } from "design/typography.slint";
+import { SettingsButton } from "settings-controls.slint";
+
+export component OcrResultWindow inherits Window {
+    title: @tr("OCR result");
+    always-on-top: true;
+    background: Colors.surface;
+    preferred-width: 640px;
+    preferred-height: 420px;
+    min-width: 240px;
+    min-height: 160px;
+    in property <string> result-text;
+    in property <string> feedback;
+    callback copy-selection(int, int);
+    callback copy-all();
+    callback close-result();
+    forward-focus: keys;
+    keys := FocusScope {
+        forward-focus: body;
+        capture-key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.close-result();
+                return accept;
+            }
+            return reject;
+        }
+        VerticalLayout {
+            padding: Spacing.medium;
+            spacing: Spacing.small;
+            viewport := ScrollView {
+                content-height: max(self.height, body.preferred-height + 12px);
+                content-width: self.width;
+                body := TextInput {
+                    x: 6px; y: 6px;
+                    width: max(1px, viewport.width - 22px);
+                    height: max(self.preferred-height, viewport.height - 12px);
+                    text: root.result-text;
+                    read-only: true;
+                    single-line: false;
+                    wrap: word-wrap;
+                    color: Colors.foreground;
+                    font-size: Typography.body-size;
+                    accessible-role: text-input;
+                    accessible-label: @tr("OCR result");
+                    cursor-position-changed(pos) => {
+                        if pos.y + viewport.content-y < 0px {
+                            viewport.content-y = -pos.y;
+                        } else if pos.y + viewport.content-y > viewport.height - 24px {
+                            viewport.content-y = viewport.height - 24px - pos.y;
+                        }
+                    }
+                    key-pressed(event) => {
+                        if event.modifiers.control && !event.modifiers.alt && (event.text == "c" || event.text == "C") {
+                            root.copy-selection(self.anchor-position-byte-offset, self.cursor-position-byte-offset);
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: Spacing.small;
+                Text { text: root.feedback; color: Colors.secondary-foreground; vertical-alignment: center; wrap: word-wrap; horizontal-stretch: 1; }
+                SettingsButton { label: @tr("Copy all text"); clicked => { root.copy-all(); } }
+                SettingsButton { label: @tr("Close"); clicked => { root.close-result(); } }
+            }
+        }
+    }
+}
