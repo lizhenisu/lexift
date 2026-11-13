@@ -77,6 +77,10 @@ impl Geometry {
     }
 
     fn crop(self, local: Rect, initial_dpi: u32) -> Option<Rect> {
+        // Rounding a negative offset toward zero could admit a pixel outside the client.
+        if local.left < 0 || local.top < 0 {
+            return None;
+        }
         let scale = |edge| {
             ((i64::from(edge) * i64::from(self.dpi) + i64::from(initial_dpi / 2))
                 / i64::from(initial_dpi)) as i32
@@ -374,6 +378,46 @@ fn capture(
         thread::park_timeout(wait);
     }
     Ok(())
+}
+
+#[test]
+fn window_pin_accepts_exact_client_edges_and_rejects_one_pixel_overflow() {
+    let geometry = Geometry {
+        frame: RECT {
+            left: 2560,
+            top: 0,
+            right: 4480,
+            bottom: 1080,
+        },
+        client: RECT {
+            right: 1920,
+            bottom: 1080,
+            ..Default::default()
+        },
+        origin: POINT { x: 2560, y: 0 },
+        dpi: 96,
+    };
+    let full = Rect {
+        left: 0,
+        top: 0,
+        right: 1920,
+        bottom: 1080,
+    };
+    assert_eq!(geometry.crop(full, 96), Some(full));
+    for outside in [
+        Rect { left: -1, ..full },
+        Rect { top: -1, ..full },
+        Rect {
+            right: 1921,
+            ..full
+        },
+        Rect {
+            bottom: 1081,
+            ..full
+        },
+    ] {
+        assert_eq!(geometry.crop(outside, 96), None);
+    }
 }
 
 #[test]
