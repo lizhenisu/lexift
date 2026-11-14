@@ -142,20 +142,32 @@ mod tests {
         assert_eq!(state.screenshot.polygon, confirmed);
         run(
             &mut state,
-            ScreenshotEvent::SaveMaskedPng(1, None, String::new()),
+            ScreenshotEvent::OutputMask(
+                1,
+                crate::domain::screenshot::MaskTarget::Save {
+                    owner: None,
+                    title: String::new(),
+                },
+            ),
         );
         run(
             &mut state,
-            ScreenshotEvent::MaskedPngSaved(1, 1, Ok(SaveOutcome::Cancelled)),
+            ScreenshotEvent::MaskedOutputFinished(1, 1, Ok(SaveOutcome::Cancelled)),
         );
         assert_eq!(state.screenshot.polygon, confirmed);
         run(
             &mut state,
-            ScreenshotEvent::SaveMaskedPng(1, None, String::new()),
+            ScreenshotEvent::OutputMask(
+                1,
+                crate::domain::screenshot::MaskTarget::Save {
+                    owner: None,
+                    title: String::new(),
+                },
+            ),
         );
         run(
             &mut state,
-            ScreenshotEvent::MaskedPngSaved(1, 1, Ok(SaveOutcome::Saved)),
+            ScreenshotEvent::MaskedOutputFinished(1, 1, Ok(SaveOutcome::Saved)),
         );
         assert_eq!(state.screenshot.phase, ScreenshotPhase::Output);
     }

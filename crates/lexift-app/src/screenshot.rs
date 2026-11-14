@@ -752,12 +752,11 @@ impl ScreenshotRuntime {
     }
     pub fn execute(self: &Arc<Self>, controller: &Arc<AppController>, command: ScreenshotCommand) {
         match command {
-            ScreenshotCommand::SaveMaskedPng {
+            ScreenshotCommand::OutputMask {
                 session,
                 operation,
                 mask,
-                owner,
-                title,
+                target,
             } => {
                 let current = self
                     .session
@@ -778,11 +777,20 @@ impl ScreenshotRuntime {
                     let result = (|| {
                         let (frames, default_name, cancelled) = current.ok_or_else(|| Error::new("Screenshot is unavailable"))?;
                         let image = Arc::new(lexift_core::domain::screenshot_windows::compose(&frames, &mask)?);
-                        let mut options = crate::annotation_export::save_options(&controller);
-                        options.formats.retain(|format| *format == options.default_format);
-                        let result = this.save.save_image(ImageSaveRequest {
-                            image: (*image).clone(), owner, default_name, title, options,
-                        }, cancelled)?;
+                        use lexift_core::domain::screenshot::MaskTarget;
+                        let result = match target {
+                            MaskTarget::Copy => {
+                                this.write_image(&image, &cancelled)?;
+                                SaveOutcome::Saved
+                            }
+                            MaskTarget::Save { owner, title } => {
+                                let mut options = crate::annotation_export::save_options(&controller);
+                                options.formats.retain(|format| *format == options.default_format);
+                                this.save.save_image(ImageSaveRequest {
+                                    image: (*image).clone(), owner, default_name, title, options,
+                                }, cancelled)?
+                            }
+                        };
                         if result == SaveOutcome::Saved {
                             this.retain_history(&controller,
                                 lexift_core::domain::image_history::workflow::OutputKey::Screenshot { session, operation },
@@ -795,7 +803,7 @@ impl ScreenshotRuntime {
                         }
                         Ok(result)
                     })();
-                    controller.dispatch(AppEvent::Screenshot(ScreenshotEvent::MaskedPngSaved(session, operation, result)));
+                    controller.dispatch(AppEvent::Screenshot(ScreenshotEvent::MaskedOutputFinished(session, operation, result)));
                 });
             }
             ScreenshotCommand::SaveRegions {

@@ -122,6 +122,15 @@ impl ScreenshotState {
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MaskTarget {
+    Copy,
+    Save {
+        owner: Option<crate::ports::magnifier::WindowToken>,
+        title: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotEvent {
     ChooseQuickDirectory {
         session: u64,
@@ -146,8 +155,8 @@ pub enum ScreenshotEvent {
     PolygonEdit(u64, super::screenshot_polygon::Edit),
     WindowLayers(u64, Vec<super::screenshot_windows::Layer>),
     ToggleWindow(u64, Point),
-    SaveMaskedPng(u64, Option<crate::ports::magnifier::WindowToken>, String),
-    MaskedPngSaved(u64, u64, Result<SaveOutcome>),
+    OutputMask(u64, MaskTarget),
+    MaskedOutputFinished(u64, u64, Result<SaveOutcome>),
     Multi(u64, super::screenshot_multi::Action),
     PresetRequested {
         id: u64,
@@ -240,12 +249,11 @@ pub enum ScreenshotEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotCommand {
-    SaveMaskedPng {
+    OutputMask {
         session: u64,
         operation: u64,
         mask: Vec<Rect>,
-        owner: Option<crate::ports::magnifier::WindowToken>,
-        title: String,
+        target: MaskTarget,
     },
 
     SaveRegions {
@@ -431,7 +439,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             }
             vec![]
         }
-        ScreenshotEvent::SaveMaskedPng(session, owner, title)
+        ScreenshotEvent::OutputMask(session, target)
             if s.session == session && s.phase == ScreenshotPhase::Selecting =>
         {
             let Some(mask) = s
@@ -447,15 +455,14 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.operation += 1;
             s.error = None;
             s.phase = ScreenshotPhase::Output;
-            command(ScreenshotCommand::SaveMaskedPng {
+            command(ScreenshotCommand::OutputMask {
                 session,
                 operation: s.operation,
                 mask: mask.clone(),
-                owner,
-                title,
+                target,
             })
         }
-        ScreenshotEvent::MaskedPngSaved(session, operation, result)
+        ScreenshotEvent::MaskedOutputFinished(session, operation, result)
             if s.session == session
                 && s.operation == operation
                 && (s.windows.is_some() || s.polygon.is_some() || s.combine.is_some())

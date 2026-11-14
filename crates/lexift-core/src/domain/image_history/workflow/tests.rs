@@ -417,15 +417,22 @@ fn combined_mask_save_failure_and_stale_success_preserve_history_and_reuse() {
         &mut state,
         ScreenshotEvent::CombineEdit(1, Edit::Apply(bounds())),
     );
-    let save = ScreenshotEvent::SaveMaskedPng(1, None, String::new());
-    assert_eq!(run(&mut state, save.clone()).len(), 1);
+    let copy = ScreenshotEvent::OutputMask(1, crate::domain::screenshot::MaskTarget::Copy);
+    let save = ScreenshotEvent::OutputMask(
+        1,
+        crate::domain::screenshot::MaskTarget::Save {
+            owner: None,
+            title: String::new(),
+        },
+    );
+    assert_eq!(run(&mut state, copy.clone()).len(), 1);
     assert!(run(&mut state, save.clone()).is_empty());
     run(
         &mut state,
-        ScreenshotEvent::MaskedPngSaved(1, 1, Err(crate::Error::new("write failure"))),
+        ScreenshotEvent::MaskedOutputFinished(1, 1, Err(crate::Error::new("write failure"))),
     );
     assert!(state.screenshot.combine.as_ref().unwrap().can_undo());
-    assert_eq!(run(&mut state, save).len(), 1);
+    assert_eq!(run(&mut state, copy).len(), 1);
     let key = OutputKey::Screenshot {
         session: 1,
         operation: 2,
@@ -433,12 +440,12 @@ fn combined_mask_save_failure_and_stale_success_preserve_history_and_reuse() {
     let ticket = prepared(&mut state, key);
     run(
         &mut state,
-        ScreenshotEvent::MaskedPngSaved(1, 1, Ok(SaveOutcome::Saved)),
+        ScreenshotEvent::MaskedOutputFinished(1, 1, Ok(SaveOutcome::Saved)),
     );
     assert!(state.image_history.cache.entry(ticket.origin).is_none());
     run(
         &mut state,
-        ScreenshotEvent::MaskedPngSaved(1, 2, Ok(SaveOutcome::Saved)),
+        ScreenshotEvent::MaskedOutputFinished(1, 2, Ok(SaveOutcome::Saved)),
     );
     assert!(state.image_history.cache.entry(ticket.origin).is_some());
     assert_eq!(state.screenshot.last_region, Some(last));

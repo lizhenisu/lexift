@@ -233,23 +233,29 @@ mod tests {
             );
         }
         run(&mut state, ScreenshotEvent::PolygonEdit(1, Edit::Close));
-        let save = ScreenshotEvent::SaveMaskedPng(1, None, String::new());
+        let save = ScreenshotEvent::OutputMask(
+            1,
+            crate::domain::screenshot::MaskTarget::Save {
+                owner: None,
+                title: String::new(),
+            },
+        );
         assert_eq!(run(&mut state, save.clone()).len(), 1);
         assert!(run(&mut state, save.clone()).is_empty());
         run(
             &mut state,
-            ScreenshotEvent::MaskedPngSaved(1, 1, Err(Error::new("write failure"))),
+            ScreenshotEvent::MaskedOutputFinished(1, 1, Err(Error::new("write failure"))),
         );
         assert!(state.screenshot.polygon.as_ref().unwrap().mask.is_some());
         assert_eq!(run(&mut state, save).len(), 1);
         run(
             &mut state,
-            ScreenshotEvent::MaskedPngSaved(1, 1, Ok(SaveOutcome::Saved)),
+            ScreenshotEvent::MaskedOutputFinished(1, 1, Ok(SaveOutcome::Saved)),
         );
         assert_eq!(state.screenshot.phase, ScreenshotPhase::Output);
         run(
             &mut state,
-            ScreenshotEvent::MaskedPngSaved(1, 2, Ok(SaveOutcome::Saved)),
+            ScreenshotEvent::MaskedOutputFinished(1, 2, Ok(SaveOutcome::Saved)),
         );
         assert_eq!(state.screenshot.phase, ScreenshotPhase::Idle);
         assert_eq!(state.screenshot.last_region, Some(last));

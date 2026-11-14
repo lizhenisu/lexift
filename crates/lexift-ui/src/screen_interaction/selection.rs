@@ -577,6 +577,12 @@ fn show_prepared(
                     || r.combine.is_some(),
             );
             window.set_window_mode(r.window_selection.is_some());
+            window.set_mask_copy_mode(
+                r.window_selection.is_some()
+                    || r.polygon.is_some()
+                    || r.combine.is_some()
+                    || r.freehand,
+            );
             window.set_combine_mode(r.combine.is_some());
             window.set_polygon_mode(r.polygon.is_some() || r.freehand);
             window.set_freehand_mode(r.freehand);
@@ -586,7 +592,7 @@ fn show_prepared(
             let multi_repeat = Rc::new(Cell::new(false));
             let button_repeat = multi_repeat.clone();
             window.on_multi_action(move |action| {
-                if polygon_mode && button_repeat.get() && action == 1 {
+                if polygon_mode && button_repeat.get() && matches!(action, 1 | 5) {
                     return;
                 }
                 let Some(window) = multi_weak.upgrade() else {
@@ -1872,7 +1878,28 @@ fn paint_polygon(
     }
 }
 
+fn can_copy_mask(r: &Registry) -> bool {
+    !r.window_busy
+        && !r.gesture.active()
+        && !r.redraw
+        && r.stroke.is_none()
+        && (r
+            .polygon
+            .as_ref()
+            .and_then(|polygon| polygon.mask.as_ref())
+            .is_some_and(|mask| !mask.is_empty())
+            || r.window_selection
+                .as_ref()
+                .is_some_and(|selection| !selection.mask.is_empty())
+            || r.combine
+                .as_ref()
+                .is_some_and(|selection| !selection.mask.is_empty()))
+}
+
 fn paint_multi(r: &Registry) {
+    for host in &r.windows {
+        host.window.set_mask_copy_enabled(can_copy_mask(r));
+    }
     let error = r.multi_error.as_deref();
     use lexift_core::domain::screenshot_multi::Status;
     if let Some(selection) = &r.combine {
@@ -2071,7 +2098,30 @@ fn multi_action(
     action: i32,
     owner: Option<lexift_core::ports::magnifier::WindowToken>,
 ) {
-    use lexift_core::domain::screenshot::ScreenshotEvent;
+    use lexift_core::domain::screenshot::{MaskTarget, ScreenshotEvent};
+    let save = || {
+        ScreenshotEvent::OutputMask(
+            generation,
+            MaskTarget::Save {
+                owner,
+                title: crate::i18n::tr("Save image"),
+            },
+        )
+    };
+    if action == 5 {
+        let allowed = STATE.with(|slot| {
+            slot.borrow()
+                .as_ref()
+                .is_some_and(|r| r.generation == generation && can_copy_mask(r))
+        });
+        if allowed {
+            emit(SelectionEvent::Windows(ScreenshotEvent::OutputMask(
+                generation,
+                MaskTarget::Copy,
+            )));
+        }
+        return;
+    }
     let freehand = STATE.with(|slot| {
         let mut slot = slot.borrow_mut();
         let r = slot
@@ -2087,9 +2137,7 @@ fn multi_action(
                 paint_multi(r);
                 None
             }
-            1 if !drafting && r.polygon.is_some() => Some(SelectionEvent::Windows(
-                ScreenshotEvent::SaveMaskedPng(generation, owner, crate::i18n::tr("Save image")),
-            )),
+            1 if !drafting && r.polygon.is_some() => Some(SelectionEvent::Windows(save())),
             2 if drafting => {
                 r.stroke = None;
                 r.redraw = false;
@@ -2123,9 +2171,7 @@ fn multi_action(
         if !busy {
             let event = match action {
                 0 => ScreenshotEvent::CombineEdit(generation, CombineEdit::Undo),
-                1 => {
-                    ScreenshotEvent::SaveMaskedPng(generation, owner, crate::i18n::tr("Save image"))
-                }
+                1 => save(),
                 2 => {
                     emit(SelectionEvent::Cancelled);
                     return;
@@ -2154,9 +2200,7 @@ fn multi_action(
             let event = match action {
                 0 => ScreenshotEvent::PolygonEdit(generation, Edit::Back),
                 1 if !closed => ScreenshotEvent::PolygonEdit(generation, Edit::Close),
-                1 => {
-                    ScreenshotEvent::SaveMaskedPng(generation, owner, crate::i18n::tr("Save image"))
-                }
+                1 => save(),
                 2 => {
                     emit(SelectionEvent::Cancelled);
                     return;
@@ -2175,11 +2219,7 @@ fn multi_action(
     });
     if let Some(busy) = windows {
         match action {
-            1 if !busy => emit(SelectionEvent::Windows(ScreenshotEvent::SaveMaskedPng(
-                generation,
-                owner,
-                crate::i18n::tr("Save image").to_string(),
-            ))),
+            1 if !busy => emit(SelectionEvent::Windows(save())),
             2 if !busy => emit(SelectionEvent::Cancelled),
             _ => {}
         }

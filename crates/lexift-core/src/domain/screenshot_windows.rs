@@ -271,7 +271,13 @@ mod tests {
         assert_eq!(
             run(
                 &mut state,
-                ScreenshotEvent::SaveMaskedPng(1, None, String::new())
+                ScreenshotEvent::OutputMask(
+                    1,
+                    crate::domain::screenshot::MaskTarget::Save {
+                        owner: None,
+                        title: String::new()
+                    }
+                )
             )
             .len(),
             1
@@ -279,13 +285,19 @@ mod tests {
         assert!(
             run(
                 &mut state,
-                ScreenshotEvent::SaveMaskedPng(1, None, String::new())
+                ScreenshotEvent::OutputMask(
+                    1,
+                    crate::domain::screenshot::MaskTarget::Save {
+                        owner: None,
+                        title: String::new()
+                    }
+                )
             )
             .is_empty()
         );
         run(
             &mut state,
-            ScreenshotEvent::MaskedPngSaved(1, 1, Ok(SaveOutcome::Cancelled)),
+            ScreenshotEvent::MaskedOutputFinished(1, 1, Ok(SaveOutcome::Cancelled)),
         );
         assert_eq!(
             state.screenshot.windows.as_ref().unwrap().mask,
@@ -293,16 +305,22 @@ mod tests {
         );
         run(
             &mut state,
-            ScreenshotEvent::SaveMaskedPng(1, None, String::new()),
+            ScreenshotEvent::OutputMask(
+                1,
+                crate::domain::screenshot::MaskTarget::Save {
+                    owner: None,
+                    title: String::new(),
+                },
+            ),
         );
         run(
             &mut state,
-            ScreenshotEvent::MaskedPngSaved(1, 1, Ok(SaveOutcome::Saved)),
+            ScreenshotEvent::MaskedOutputFinished(1, 1, Ok(SaveOutcome::Saved)),
         );
         assert_eq!(state.screenshot.phase, ScreenshotPhase::Output);
         run(
             &mut state,
-            ScreenshotEvent::MaskedPngSaved(1, 2, Ok(SaveOutcome::Saved)),
+            ScreenshotEvent::MaskedOutputFinished(1, 2, Ok(SaveOutcome::Saved)),
         );
         assert_eq!(state.screenshot.phase, ScreenshotPhase::Idle);
         assert_eq!(state.screenshot.last_region, last);

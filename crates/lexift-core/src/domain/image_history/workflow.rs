@@ -560,7 +560,7 @@ pub(crate) fn after(
     }
     for command in commands {
         match command {
-            AppCommand::Screenshot(ScreenshotCommand::SaveMaskedPng {
+            AppCommand::Screenshot(ScreenshotCommand::OutputMask {
                 session, operation, ..
             }) => {
                 h.start(
@@ -738,7 +738,7 @@ pub(crate) fn after(
 
 pub(crate) fn successful_output(state: &AppState, event: &AppEvent) -> Option<OutputKey> {
     match event {
-        AppEvent::Screenshot(ScreenshotEvent::MaskedPngSaved(
+        AppEvent::Screenshot(ScreenshotEvent::MaskedOutputFinished(
             session,
             operation,
             Ok(SaveOutcome::Saved),
