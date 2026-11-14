@@ -113,7 +113,7 @@ fn choose(sequence: u64, index: Option<i32>) {
             crate::bridge::screenshot_presets::open(None);
             return;
         }
-        if kind == 0 && matches!(index, Some(5..=8)) {
+        if kind == 0 && matches!(index, Some(5..=9)) {
             super::screenshot::request_multi(index.unwrap_or_default());
             return;
         }
@@ -385,6 +385,7 @@ fn menu_kind(kind: u8) {
             "Multi-window screenshot",
             "Polygon screenshot",
             "Combine screenshot regions",
+            "Freehand screenshot",
         ]
     };
     w.set_options(slint::ModelRc::new(slint::VecModel::from(

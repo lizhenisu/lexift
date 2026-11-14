@@ -2525,3 +2525,9 @@ msgstr "Subtrair"
 
 msgid "Selection is too complex"
 msgstr "Seleção demasiado complexa"
+
+msgid "Freehand screenshot"
+msgstr "Captura à mão livre"
+
+msgid "Redraw contour"
+msgstr "Redesenhar"

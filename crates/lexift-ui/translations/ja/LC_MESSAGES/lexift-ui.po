@@ -2525,3 +2525,9 @@ msgstr "除外"
 
 msgid "Selection is too complex"
 msgstr "選択範囲が複雑すぎます"
+
+msgid "Freehand screenshot"
+msgstr "フリーハンドスクリーンショット"
+
+msgid "Redraw contour"
+msgstr "描き直す"

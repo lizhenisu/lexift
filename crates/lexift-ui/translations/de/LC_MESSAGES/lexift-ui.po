@@ -2525,3 +2525,9 @@ msgstr "Abziehen"
 
 msgid "Selection is too complex"
 msgstr "Auswahl zu komplex"
+
+msgid "Freehand screenshot"
+msgstr "Freihandaufnahme"
+
+msgid "Redraw contour"
+msgstr "Neu zeichnen"

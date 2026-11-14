@@ -2525,3 +2525,9 @@ msgstr "减选"
 
 msgid "Selection is too complex"
 msgstr "选区过于复杂"
+
+msgid "Freehand screenshot"
+msgstr "自由手绘截图"
+
+msgid "Redraw contour"
+msgstr "重画"

@@ -2525,3 +2525,9 @@ msgstr "Subtract selection"
 
 msgid "Selection is too complex"
 msgstr "Selection is too complex"
+
+msgid "Freehand screenshot"
+msgstr "Freehand screenshot"
+
+msgid "Redraw contour"
+msgstr "Redraw contour"

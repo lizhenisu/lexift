@@ -2525,3 +2525,9 @@ msgstr "Restar"
 
 msgid "Selection is too complex"
 msgstr "Selección demasiado compleja"
+
+msgid "Freehand screenshot"
+msgstr "Captura a mano alzada"
+
+msgid "Redraw contour"
+msgstr "Volver a dibujar"

@@ -15,7 +15,7 @@ pub enum Edit {
     Back,
 }
 
-fn side(a: Point, b: Point, c: Point) -> i128 {
+pub(super) fn side(a: Point, b: Point, c: Point) -> i128 {
     (i128::from(b.x) - i128::from(a.x)) * (i128::from(c.y) - i128::from(a.y))
         - (i128::from(b.y) - i128::from(a.y)) * (i128::from(c.x) - i128::from(a.x))
 }
@@ -99,7 +99,7 @@ pub fn bounds(mask: &[Rect]) -> Option<Rect> {
 }
 
 /// The left crossing is inclusive and the right crossing is exclusive at pixel centers.
-fn raster(points: &[Point], displays: &[Rect]) -> Result<Vec<Rect>> {
+pub(super) fn raster(points: &[Point], displays: &[Rect]) -> Result<Vec<Rect>> {
     let min_y = points.iter().map(|p| p.y).min().unwrap();
     let max_y = points.iter().map(|p| p.y).max().unwrap();
     let edges: Vec<_> = points

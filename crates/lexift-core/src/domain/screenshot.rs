@@ -68,6 +68,7 @@ pub struct ScreenshotState {
     pub refresh: Option<refresh::State>,
     pub shortcut_sequence: u64,
     pub combine: Option<super::screenshot_combine::Selection>,
+    pub freehand: bool,
     pub polygon: Option<super::screenshot_polygon::Polygon>,
     pub windows: Option<super::screenshot_windows::Selection>,
     pub multi: Option<super::screenshot_multi::Batch>,
@@ -104,7 +105,8 @@ impl ScreenshotState {
     /// Physical layout equality ignores enumeration order and logical DPI.
     pub fn reusable_region(&self) -> Option<Rect> {
         let last = self.last_region.as_ref()?;
-        if self.combine.is_some()
+        if self.freehand
+            || self.combine.is_some()
             || self.polygon.is_some()
             || self.windows.is_some()
             || self.multi.is_some()
@@ -137,6 +139,8 @@ pub enum ScreenshotEvent {
     MultiRequested(ShortcutTrigger),
     WindowsRequested(ShortcutTrigger),
     PolygonRequested(ShortcutTrigger),
+    FreehandRequested(ShortcutTrigger),
+    FreehandStroke(u64, super::screenshot_freehand::Stroke),
     CombineRequested(ShortcutTrigger),
     CombineEdit(u64, super::screenshot_combine::Edit),
     PolygonEdit(u64, super::screenshot_polygon::Edit),
@@ -340,6 +344,7 @@ fn start_capture(
     s.multi = None;
     s.windows = None;
     s.polygon = None;
+    s.freehand = false;
     s.combine = None;
     s.preset_region = None;
     s.refresh = None;
@@ -403,8 +408,20 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             }
             vec![]
         }
+        ScreenshotEvent::FreehandStroke(session, stroke)
+            if s.session == session && s.freehand && s.phase == ScreenshotPhase::Selecting =>
+        {
+            match stroke.finish(&s.layout) {
+                Ok(polygon) => {
+                    s.polygon = Some(polygon);
+                    s.error = None;
+                }
+                Err(error) => s.error = Some(error.to_string()),
+            }
+            vec![]
+        }
         ScreenshotEvent::PolygonEdit(session, edit)
-            if s.session == session && s.phase == ScreenshotPhase::Selecting =>
+            if s.session == session && !s.freehand && s.phase == ScreenshotPhase::Selecting =>
         {
             if let Some(polygon) = s.polygon.as_mut() {
                 s.error = polygon
@@ -448,6 +465,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 Ok(SaveOutcome::Saved) => {
                     s.windows = None;
                     s.polygon = None;
+                    s.freehand = false;
                     s.combine = None;
                     s.phase = ScreenshotPhase::Idle;
                     command(ScreenshotCommand::Restore { session })
@@ -510,6 +528,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         | ScreenshotEvent::MultiRequested(trigger)
         | ScreenshotEvent::WindowsRequested(trigger)
         | ScreenshotEvent::PolygonRequested(trigger)
+        | ScreenshotEvent::FreehandRequested(trigger)
         | ScreenshotEvent::CombineRequested(trigger)
         | ScreenshotEvent::PresetRequested { trigger, .. })
             if delay_allowed
@@ -521,6 +540,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         {
             s.combine =
                 matches!(event, ScreenshotEvent::CombineRequested(_)).then(Default::default);
+            s.freehand = matches!(event, ScreenshotEvent::FreehandRequested(_));
             s.polygon =
                 matches!(event, ScreenshotEvent::PolygonRequested(_)).then(Default::default);
             s.windows =
@@ -558,6 +578,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.multi = None;
             s.windows = None;
             s.polygon = None;
+            s.freehand = false;
             s.combine = None;
             vec![]
         }
@@ -574,12 +595,14 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             let multi = s.multi.take();
             let windows = s.windows.take();
             let polygon = s.polygon.take();
+            let freehand = s.freehand;
             let combine = s.combine.take();
             let commands = start_capture(state, request, origin);
             state.screenshot.preset_region = preset;
             state.screenshot.multi = multi;
             state.screenshot.windows = windows;
             state.screenshot.polygon = polygon;
+            state.screenshot.freehand = freehand;
             state.screenshot.combine = combine;
             commands
         }
@@ -589,6 +612,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.multi = None;
             s.windows = None;
             s.polygon = None;
+            s.freehand = false;
             s.combine = None;
             vec![]
         }
@@ -607,6 +631,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.multi = None;
             s.windows = None;
             s.polygon = None;
+            s.freehand = false;
             s.combine = None;
             s.phase = ScreenshotPhase::CountingDown;
             s.reuse_sequence = 0;
@@ -809,6 +834,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 Err(error) => {
                     s.windows = None;
                     s.polygon = None;
+                    s.freehand = false;
                     s.combine = None;
                     s.phase = ScreenshotPhase::Idle;
                     s.error = Some(error.to_string());
@@ -818,6 +844,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         }
         ScreenshotEvent::Selected { session, bounds }
             if s.multi.is_none()
+                && !s.freehand
                 && s.polygon.is_none()
                 && s.combine.is_none()
                 && s.windows.is_none()
@@ -979,6 +1006,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.multi = None;
             s.windows = None;
             s.polygon = None;
+            s.freehand = false;
             s.combine = None;
             s.refresh = None;
             s.phase = ScreenshotPhase::Idle;

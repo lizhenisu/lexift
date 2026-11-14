@@ -2525,3 +2525,9 @@ msgstr "빼기"
 
 msgid "Selection is too complex"
 msgstr "선택 영역이 너무 복잡합니다"
+
+msgid "Freehand screenshot"
+msgstr "자유형 스크린샷"
+
+msgid "Redraw contour"
+msgstr "다시 그리기"

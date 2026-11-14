@@ -113,6 +113,9 @@ struct Registry {
     windows: Vec<Host<OcrSelectionWindow>>,
     gesture: RegionSelection,
     combine: Option<lexift_core::domain::screenshot_combine::Selection>,
+    freehand: bool,
+    redraw: bool,
+    stroke: Option<lexift_core::domain::screenshot_freehand::Stroke>,
     polygon: Option<lexift_core::domain::screenshot_polygon::Polygon>,
     polygon_pointer: Option<Point>,
     window_selection: Option<lexift_core::domain::screenshot_windows::Selection>,
@@ -165,6 +168,9 @@ pub(crate) fn init(
             windows: vec![],
             gesture: RegionSelection::default(),
             combine: None,
+            freehand: false,
+            redraw: false,
+            stroke: None,
             polygon: None,
             polygon_pointer: None,
             window_selection: None,
@@ -436,6 +442,8 @@ pub(crate) fn close() {
             r.reusable = false;
             r.reuse_pending = None;
             r.gesture.cancel();
+            r.stroke = None;
+            r.redraw = false;
             r.multi_drag = None;
             r.multi_button = false;
             r.candidates.clear();
@@ -481,6 +489,7 @@ pub(crate) fn show_with_origin(
             r.multi = None;
             r.window_selection = None;
             r.polygon = None;
+            r.freehand = false;
             r.combine = None;
         }
     });
@@ -522,6 +531,7 @@ fn show_prepared(
             if r.multi.is_some()
                 || r.window_selection.is_some()
                 || r.polygon.is_some()
+                || r.freehand
                 || r.combine.is_some()
             {
                 return None;
@@ -563,14 +573,16 @@ fn show_prepared(
                 r.multi.is_some()
                     || r.window_selection.is_some()
                     || r.polygon.is_some()
+                    || r.freehand
                     || r.combine.is_some(),
             );
             window.set_window_mode(r.window_selection.is_some());
             window.set_combine_mode(r.combine.is_some());
-            window.set_polygon_mode(r.polygon.is_some());
+            window.set_polygon_mode(r.polygon.is_some() || r.freehand);
+            window.set_freehand_mode(r.freehand);
             window.set_multi_controls(r.multi_screen == Some(frame.bounds));
             let multi_weak = window.as_weak();
-            let polygon_mode = r.polygon.is_some() || r.combine.is_some();
+            let polygon_mode = r.polygon.is_some() || r.combine.is_some() || r.freehand;
             let multi_repeat = Rc::new(Cell::new(false));
             let button_repeat = multi_repeat.clone();
             window.on_multi_action(move |action| {
@@ -586,6 +598,7 @@ fn show_prepared(
                     if r.multi.is_none()
                         && r.window_selection.is_none()
                         && r.polygon.is_none()
+                        && !r.freehand
                         && r.combine.is_none()
                     {
                         return None;
@@ -612,7 +625,14 @@ fn show_prepared(
                     winit::event::WindowEvent::ModifiersChanged(m) => {
                         modified.set(!m.state().is_empty())
                     }
-                    winit::event::WindowEvent::Focused(false) => modified.set(false),
+                    winit::event::WindowEvent::Focused(false) => {
+                        modified.set(false);
+                        if polygon_mode {
+                            slint::Timer::single_shot(Duration::ZERO, move || {
+                                cancel_freehand_draft(generation)
+                            });
+                        }
+                    }
                     _ => {}
                 }
                 EventResult::Propagate
@@ -1749,6 +1769,7 @@ pub(crate) fn sync_multi(state: &lexift_core::domain::screenshot::ScreenshotStat
         r.multi = state.multi.clone();
         r.window_selection = state.windows.clone();
         r.polygon = state.polygon.clone();
+        r.freehand = state.freehand;
         r.combine = state.combine.clone();
         if r.polygon.is_none() {
             r.polygon_pointer = None;
@@ -1758,6 +1779,7 @@ pub(crate) fn sync_multi(state: &lexift_core::domain::screenshot::ScreenshotStat
         if r.multi.is_none()
             && r.window_selection.is_none()
             && r.polygon.is_none()
+            && !r.freehand
             && r.combine.is_none()
         {
             r.multi_drag = None;
@@ -1769,11 +1791,7 @@ pub(crate) fn sync_multi(state: &lexift_core::domain::screenshot::ScreenshotStat
     });
 }
 
-fn paint_polygon_lines(
-    r: &Registry,
-    polygon: &lexift_core::domain::screenshot_polygon::Polygon,
-    vertices_changed: bool,
-) {
+fn paint_polygon_lines(r: &Registry, points: &[Point], closed: bool, vertices_changed: bool) {
     use std::fmt::Write;
     for host in &r.windows {
         let scale = host.window.window().scale_factor();
@@ -1784,13 +1802,13 @@ fn paint_polygon_lines(
             )
         };
         let mut path = String::from("M0 0");
-        for (i, &p) in polygon.points.iter().enumerate() {
+        for (i, &p) in points.iter().enumerate() {
             let (x, y) = local(p);
             let _ = write!(path, "{}{x} {y}", if i == 0 { "M" } else { "L" });
         }
-        if polygon.mask.is_some() {
+        if closed {
             path.push('Z');
-        } else if !polygon.points.is_empty()
+        } else if !points.is_empty()
             && let Some(p) = r.polygon_pointer
         {
             let (x, y) = local(p);
@@ -1800,8 +1818,7 @@ fn paint_polygon_lines(
         if vertices_changed {
             host.window
                 .set_polygon_vertices(slint::ModelRc::new(slint::VecModel::from(
-                    polygon
-                        .points
+                    points
                         .iter()
                         .map(|&p| {
                             let (x, y) = local(p);
@@ -1819,7 +1836,7 @@ fn paint_polygon(
     error: Option<&str>,
 ) {
     use std::fmt::Write;
-    paint_polygon_lines(r, polygon, true);
+    paint_polygon_lines(r, &polygon.points, polygon.mask.is_some(), !r.freehand);
     for host in &r.windows {
         let scale = host.window.window().scale_factor();
         let mut fill = String::from("M0 0");
@@ -1892,6 +1909,22 @@ fn paint_multi(r: &Registry) {
                 .map(|b| format!("{} × {} px", b.right - b.left, b.bottom - b.top))
                 .unwrap_or_default();
             window.set_multi_feedback(error.map_or(size, crate::i18n::tr).into());
+        }
+        return;
+    }
+    if r.freehand {
+        paint_polygon(r, r.polygon.as_ref().unwrap_or(&Default::default()), error);
+        for host in &r.windows {
+            host.window.set_multi_can_delete(
+                !r.window_busy && r.polygon.is_some() && !r.redraw && r.stroke.is_none(),
+            );
+            host.window.set_multi_can_save(
+                !r.window_busy && r.polygon.is_some() && !r.redraw && r.stroke.is_none(),
+            );
+            if let Some(stroke) = &r.stroke {
+                paint_polygon_lines(r, &stroke.points, false, false);
+                break;
+            }
         }
         return;
     }
@@ -2008,12 +2041,71 @@ fn paint_multi(r: &Registry) {
     }
 }
 
+fn cancel_freehand_draft(generation: u64) {
+    STATE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if let Some(r) = slot
+            .as_mut()
+            .filter(|r| r.generation == generation && r.freehand)
+            && !r
+                .lifecycle
+                .annotation_foreground
+                .as_ref()
+                .and_then(|query| query())
+                .is_some_and(|foreground| {
+                    r.windows.iter().any(|host| {
+                        (r.lifecycle.annotation_window_token)(host.window.window())
+                            == Some(foreground)
+                    })
+                })
+            && (r.stroke.take().is_some() || r.redraw)
+        {
+            r.redraw = false;
+            paint_multi(r);
+        }
+    });
+}
+
 fn multi_action(
     generation: u64,
     action: i32,
     owner: Option<lexift_core::ports::magnifier::WindowToken>,
 ) {
     use lexift_core::domain::screenshot::ScreenshotEvent;
+    let freehand = STATE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let r = slot
+            .as_mut()
+            .filter(|r| r.generation == generation && r.freehand)?;
+        if r.window_busy {
+            return Some(None);
+        }
+        let drafting = r.stroke.is_some() || r.redraw;
+        Some(match action {
+            0 if !drafting && r.polygon.is_some() => {
+                r.redraw = true;
+                paint_multi(r);
+                None
+            }
+            1 if !drafting && r.polygon.is_some() => Some(SelectionEvent::Windows(
+                ScreenshotEvent::SaveMaskedPng(generation, owner, crate::i18n::tr("Save image")),
+            )),
+            2 if drafting => {
+                r.stroke = None;
+                r.redraw = false;
+                paint_multi(r);
+                None
+            }
+            2 => Some(SelectionEvent::Cancelled),
+            _ => None,
+        })
+    });
+    if let Some(event) = freehand {
+        if let Some(event) = event {
+            emit(event);
+        }
+        return;
+    }
     use lexift_core::domain::screenshot_combine::{Edit as CombineEdit, Mode};
     let combine = STATE.with(|slot| {
         let mut slot = slot.borrow_mut();
@@ -2124,6 +2216,7 @@ fn multi_pointer(generation: u64, screen: Rect, event: PopupPointerInput) -> boo
     let mut button = None;
     let mut window_point = None;
     let mut polygon_edit = None;
+    let mut freehand_stroke = None;
     let mut combine_rect = None;
     let handled = STATE.with(|slot| {
         let mut slot = slot.borrow_mut();
@@ -2134,7 +2227,7 @@ fn multi_pointer(generation: u64, screen: Rect, event: PopupPointerInput) -> boo
         if batch.is_none()
             && r.window_selection.is_none()
             && r.polygon.is_none()
-            && r.combine.is_none()
+            && !r.freehand
             && r.combine.is_none()
         {
             return false;
@@ -2166,6 +2259,40 @@ fn multi_pointer(generation: u64, screen: Rect, event: PopupPointerInput) -> boo
                 };
                 button = Some((host.window.as_weak(), event));
             }
+            PopupPointerInput::LeftPressed { x, y }
+                if r.freehand && !r.window_busy && (r.redraw || r.polygon.is_none()) =>
+            {
+                let mut stroke = lexift_core::domain::screenshot_freehand::Stroke::default();
+                stroke.push(Point {
+                    x: screen.left + x.round() as i32,
+                    y: screen.top + y.round() as i32,
+                });
+                r.stroke = Some(stroke);
+                paint_multi(r);
+            }
+            PopupPointerInput::Moved { x, y } | PopupPointerInput::LeftReleased { x, y }
+                if r.stroke.is_some() =>
+            {
+                let stroke = r.stroke.as_mut().unwrap();
+                stroke.push(Point {
+                    x: screen.left + x.round() as i32,
+                    y: screen.top + y.round() as i32,
+                });
+                if matches!(event, PopupPointerInput::LeftReleased { .. }) {
+                    freehand_stroke = r.stroke.take();
+                    r.redraw = false;
+                    paint_multi(r);
+                } else {
+                    paint_polygon_lines(r, &r.stroke.as_ref().unwrap().points, false, false);
+                }
+            }
+            PopupPointerInput::LeftCancelled { .. } if r.freehand => {
+                r.stroke = None;
+                r.redraw = false;
+                r.multi_button = false;
+                paint_multi(r);
+            }
+            _ if r.freehand => {}
             PopupPointerInput::LeftPressed { x, y } if r.combine.is_some() && !r.window_busy => {
                 r.gesture.begin(Point {
                     x: screen.left + x.round() as i32,
@@ -2193,7 +2320,7 @@ fn multi_pointer(generation: u64, screen: Rect, event: PopupPointerInput) -> boo
                     x: screen.left + x.round() as i32,
                     y: screen.top + y.round() as i32,
                 });
-                paint_polygon_lines(r, r.polygon.as_ref().unwrap(), false);
+                paint_polygon_lines(r, &r.polygon.as_ref().unwrap().points, false, false);
             }
             PopupPointerInput::LeftReleased { x, y }
                 if r.polygon.as_ref().is_some_and(|p| p.mask.is_none()) && !r.window_busy =>
@@ -2291,6 +2418,11 @@ fn multi_pointer(generation: u64, screen: Rect, event: PopupPointerInput) -> boo
         && let Some(window) = window.upgrade()
     {
         window.window().dispatch_event(event);
+    }
+    if let Some(stroke) = freehand_stroke {
+        emit(SelectionEvent::Windows(
+            lexift_core::domain::screenshot::ScreenshotEvent::FreehandStroke(generation, stroke),
+        ));
     }
     if let Some(rect) = combine_rect {
         emit(SelectionEvent::Windows(

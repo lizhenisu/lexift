@@ -81,6 +81,7 @@ pub(crate) fn request_multi(mode: i32) {
     });
     if let Some(trigger) = trigger {
         emit(match mode {
+            9 => ScreenshotEvent::FreehandRequested(trigger),
             8 => ScreenshotEvent::CombineRequested(trigger),
             7 => ScreenshotEvent::PolygonRequested(trigger),
             6 => ScreenshotEvent::WindowsRequested(trigger),
