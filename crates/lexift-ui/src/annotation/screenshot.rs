@@ -432,6 +432,7 @@ pub(crate) fn show(
     frames: Arc<Vec<CapturedRegion>>,
     capture: Arc<dyn lexift_core::ports::screen_capture::ScreenCapturePort>,
     windows: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
+    raw_frames: Option<Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>>,
 ) {
     if !FLOW.with(|s| {
         let s = s.borrow();
@@ -547,7 +548,9 @@ pub(crate) fn show(
     let frames = FLOW.with(|s| s.borrow().frames.clone().unwrap());
     let origin = FLOW.with(|s| s.borrow().activation);
     let reusable = FLOW.with(|s| s.borrow().state.reusable_region().is_some());
-    selection_host::show_screenshot_with_candidates(id, frames, origin, windows, reusable);
+    selection_host::show_screenshot_with_candidates(
+        id, frames, origin, windows, reusable, raw_frames,
+    );
 }
 pub(crate) fn cancel() {
     if recording::active() {

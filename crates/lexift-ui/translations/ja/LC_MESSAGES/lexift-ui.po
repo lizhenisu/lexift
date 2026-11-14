@@ -2531,3 +2531,12 @@ msgstr "フリーハンドスクリーンショット"
 
 msgid "Redraw contour"
 msgstr "描き直す"
+
+msgid "Screenshot mode"
+msgstr "スクリーンショットモード"
+
+msgid "Start a new screenshot"
+msgstr "新しくスクリーンショットを撮る"
+
+msgid "Discard the current selection?"
+msgstr "現在の選択範囲を破棄しますか？"

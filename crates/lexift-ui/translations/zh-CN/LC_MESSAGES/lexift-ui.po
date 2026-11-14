@@ -2531,3 +2531,12 @@ msgstr "自由手绘截图"
 
 msgid "Redraw contour"
 msgstr "重画"
+
+msgid "Screenshot mode"
+msgstr "截图模式"
+
+msgid "Start a new screenshot"
+msgstr "请重新截图"
+
+msgid "Discard the current selection?"
+msgstr "放弃当前选区？"

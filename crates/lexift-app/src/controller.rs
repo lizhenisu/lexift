@@ -129,6 +129,7 @@ pub(crate) trait ViewPort: Send + Sync {
         _frames: Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>,
         _capture: Arc<dyn lexift_core::ports::screen_capture::ScreenCapturePort>,
         _windows: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
+        _raw_frames: Option<Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>>,
     ) {
     }
     fn close_pinned_image(&self, _id: u64) {}
@@ -408,8 +409,9 @@ impl ViewPort for lexift_ui::UiHandle {
         frames: Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>,
         capture: Arc<dyn lexift_core::ports::screen_capture::ScreenCapturePort>,
         windows: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
+        raw_frames: Option<Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>>,
     ) {
-        self.show_screenshot_capture(session, frames, capture, windows);
+        self.show_screenshot_capture(session, frames, capture, windows, raw_frames);
     }
     fn close_pinned_image(&self, id: u64) {
         self.close_pinned_image(id);

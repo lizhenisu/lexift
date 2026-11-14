@@ -2531,3 +2531,12 @@ msgstr "Freehand screenshot"
 
 msgid "Redraw contour"
 msgstr "Redraw contour"
+
+msgid "Screenshot mode"
+msgstr "Screenshot mode"
+
+msgid "Start a new screenshot"
+msgstr "Start a new screenshot"
+
+msgid "Discard the current selection?"
+msgstr "Discard the current selection?"

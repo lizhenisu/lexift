@@ -9,6 +9,13 @@ import { ScreenshotHelp } from "screenshot-help.slint";
 import { Metrics } from "design/metrics.slint";
 import { RegionPreview, ScreenInteractionHint } from "screen-interaction.slint";
 export component OcrSelectionWindow inherits Window {
+    in property <bool> mode-control;
+    in property <bool> mode-windows-available;
+    in property <bool> mode-busy;
+    in property <bool> mode-confirm;
+    in property <int> selection-mode;
+    out property <float> mode-control-width: mode-strip.width / 1px;
+    callback mode-action(int);
     in property <bool> multi-mode;
     in property <bool> mask-copy-mode;
     in property <bool> mask-copy-enabled;
@@ -47,6 +54,15 @@ export component OcrSelectionWindow inherits Window {
     forward-focus: keys;
     keys := FocusScope {
         key-pressed(event) => {
+            if root.mode-confirm {
+                if event.text == Key.Escape { root.mode-action(5); }
+                if event.text == Key.Return { root.mode-action(6); }
+                return accept;
+            }
+            if root.mode-control && !root.mode-busy && event.text == Key.F2 {
+                mode-menu.show({x: 0px, y: 38px});
+                return accept;
+            }
             if root.multi-mode {
                 if root.mask-copy-mode && event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt && !event.modifiers.meta && (event.text == "c" || event.text == "C") { root.multi-action(5); return accept; }
                 if event.text == Key.Return { root.multi-action(1); return accept; }
@@ -166,4 +182,30 @@ export component OcrSelectionWindow inherits Window {
         }
     }
     if !root.multi-mode: TouchArea { mouse-cursor: crosshair; pointer-event(event) => { if event.button == PointerEventButton.right && event.kind == PointerEventKind.down { root.cancelled(); } } }
+    mode-strip := Rectangle {
+        visible: root.mode-control;
+        width: min(parent.width, root.mode-confirm ? 660px : 38px); height: 38px;
+        x: 0px; y: 76px; background: Colors.surface; border-radius: 6px;
+        if !root.mode-confirm: ToolButton {
+            kind: 35; label: @tr("Screenshot mode"); enabled: !root.mode-busy;
+            clicked => { mode-menu.show({ x: 0px, y: 38px }); }
+        }
+        mode-menu := ContextMenuArea {
+            x: 0px; y: 0px; width: parent.width; height: parent.height;
+            enabled: false;
+            Menu {
+                MenuItem { title: @tr("Rectangle"); checkable: true; checked: root.selection-mode == 0; activated => { root.mode-action(0); } }
+                MenuItem { title: root.mode-windows-available ? @tr("Multi-window screenshot") : @tr("Multi-window screenshot") + " — " + @tr("Start a new screenshot"); enabled: root.mode-windows-available; checkable: true; checked: root.selection-mode == 1; activated => { root.mode-action(1); } }
+                MenuItem { title: @tr("Polygon screenshot"); checkable: true; checked: root.selection-mode == 2; activated => { root.mode-action(2); } }
+                MenuItem { title: @tr("Combine screenshot regions"); checkable: true; checked: root.selection-mode == 3; activated => { root.mode-action(3); } }
+                MenuItem { title: @tr("Freehand screenshot"); checkable: true; checked: root.selection-mode == 4; activated => { root.mode-action(4); } }
+            }
+        }
+        if root.mode-confirm: HorizontalLayout {
+            padding-left: 8px; padding-right: 6px; spacing: 6px;
+            Text { text: @tr("Discard the current selection?"); color: Colors.foreground; vertical-alignment: center; wrap: word-wrap; }
+            Button { text: @tr("Cancel"); clicked => { root.mode-action(5); } }
+            Button { text: @tr("Discard"); clicked => { root.mode-action(6); } }
+        }
+    }
 }

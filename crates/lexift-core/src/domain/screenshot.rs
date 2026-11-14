@@ -60,10 +60,21 @@ pub enum CaptureOrigin {
     Toolbar,
     Background,
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SelectionMode {
+    #[default]
+    Rectangle,
+    Windows,
+    Polygon,
+    Combine,
+    Freehand,
+}
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ScreenshotState {
     pub recording: Option<recording::Session>,
     pub frame_version: u64,
+    pub mode_version: u64,
+    pub frozen_layers: Option<std::sync::Arc<Vec<super::screenshot_windows::Layer>>>,
     pub quick_directory_pending: bool,
     pub refresh: Option<refresh::State>,
     pub shortcut_sequence: u64,
@@ -94,6 +105,38 @@ pub struct ScreenshotState {
     pub color_result: Option<ColorResult>,
 }
 impl ScreenshotState {
+    pub fn selection_mode(&self) -> SelectionMode {
+        if self.windows.is_some() {
+            SelectionMode::Windows
+        } else if self.freehand {
+            SelectionMode::Freehand
+        } else if self.polygon.is_some() {
+            SelectionMode::Polygon
+        } else if self.combine.is_some() {
+            SelectionMode::Combine
+        } else {
+            SelectionMode::Rectangle
+        }
+    }
+
+    pub fn has_selection_to_discard(&self) -> bool {
+        self.windows
+            .as_ref()
+            .is_some_and(|w| !w.selected.is_empty())
+            || self.polygon.as_ref().is_some_and(|p| !p.points.is_empty())
+            || self
+                .combine
+                .as_ref()
+                .is_some_and(|c| c.can_undo() || !c.mask.is_empty())
+    }
+
+    pub fn can_switch_mode(&self) -> bool {
+        self.phase == ScreenshotPhase::Selecting
+            && self.multi.is_none()
+            && self.preset_region.is_none()
+            && self.color_pending.is_none()
+    }
+
     pub fn editable(&self) -> bool {
         self.phase == ScreenshotPhase::Editing
             && !self.quick_directory_pending
@@ -154,6 +197,12 @@ pub enum ScreenshotEvent {
     CombineRequested(ShortcutTrigger),
     CombineEdit(u64, super::screenshot_combine::Edit),
     PolygonEdit(u64, super::screenshot_polygon::Edit),
+    SwitchMode {
+        session: u64,
+        version: u64,
+        mode: SelectionMode,
+        discard: bool,
+    },
     WindowLayers(u64, Vec<super::screenshot_windows::Layer>),
     ToggleWindow(u64, Point),
     OutputMask(u64, MaskTarget),
@@ -254,6 +303,7 @@ pub enum ScreenshotCommand {
         session: u64,
         operation: u64,
         mask: Vec<Rect>,
+        mode: SelectionMode,
         target: MaskTarget,
     },
 
@@ -359,6 +409,8 @@ fn start_capture(
     s.refresh = None;
     s.recording = None;
     s.frame_version = 0;
+    s.mode_version = 0;
+    s.frozen_layers = None;
     s.session = s
         .session
         .checked_add(1)
@@ -401,9 +453,38 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             if s.session == session && s.phase == ScreenshotPhase::Preparing =>
         {
             if let Some(selection) = s.windows.as_mut() {
-                selection.layers = layers;
+                selection.layers.clone_from(&layers);
             }
+            s.frozen_layers = Some(std::sync::Arc::new(layers));
             vec![]
+        }
+        ScreenshotEvent::SwitchMode {
+            session,
+            version,
+            mode,
+            discard,
+        } if s.session == session
+            && s.mode_version == version
+            && s.can_switch_mode()
+            && s.selection_mode() != mode
+            && (discard || !s.has_selection_to_discard())
+            && (mode != SelectionMode::Windows || s.frozen_layers.is_some()) =>
+        {
+            s.windows =
+                (mode == SelectionMode::Windows).then(|| super::screenshot_windows::Selection {
+                    layers: s.frozen_layers.as_ref().unwrap().as_ref().clone(),
+                    ..Default::default()
+                });
+            s.polygon = (mode == SelectionMode::Polygon).then(Default::default);
+            s.combine = (mode == SelectionMode::Combine).then(Default::default);
+            s.freehand = mode == SelectionMode::Freehand;
+            s.mode_version += 1;
+            s.error = None;
+            if s.element_pending.take().is_some() {
+                command(ScreenshotCommand::CancelElements { session })
+            } else {
+                vec![]
+            }
         }
         ScreenshotEvent::ToggleWindow(session, point)
             if s.session == session && s.phase == ScreenshotPhase::Selecting =>
@@ -470,6 +551,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 session,
                 operation: s.operation,
                 mask: mask.clone(),
+                mode: s.selection_mode(),
                 target,
             })
         }
@@ -482,6 +564,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             match result {
                 Ok(SaveOutcome::Saved) => {
                     s.windows = None;
+                    s.frozen_layers = None;
                     s.polygon = None;
                     s.freehand = false;
                     s.combine = None;
@@ -811,6 +894,8 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         ScreenshotEvent::QueryElements(query)
             if query.session == s.session
                 && s.phase == ScreenshotPhase::Selecting
+                && s.multi.is_none()
+                && s.selection_mode() == SelectionMode::Rectangle
                 && query.request > s.element_sequence =>
         {
             s.element_sequence = query.request;
@@ -851,6 +936,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 }
                 Err(error) => {
                     s.windows = None;
+                    s.frozen_layers = None;
                     s.polygon = None;
                     s.freehand = false;
                     s.combine = None;
@@ -877,6 +963,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         {
             s.preset_region = None;
             s.bounds = Some(bounds);
+            s.frozen_layers = None;
             s.phase = ScreenshotPhase::Editing;
             s.element_pending = None;
             vec![]
@@ -1050,6 +1137,41 @@ mod tests {
         },
     };
     use std::sync::Arc;
+    #[test]
+    fn selection_switch_checks_version_content_and_frozen_window_evidence() {
+        let mut state = begin();
+        state.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
+            session: 1,
+            result: Ok(vec![bounds()]),
+        }));
+        let switch = |version, mode, discard| {
+            AppEvent::Screenshot(ScreenshotEvent::SwitchMode {
+                session: 1,
+                version,
+                mode,
+                discard,
+            })
+        };
+        state.reduce(switch(0, SelectionMode::Windows, false));
+        assert_eq!(state.screenshot.mode_version, 0);
+        state.reduce(switch(0, SelectionMode::Polygon, false));
+        state.reduce(AppEvent::Screenshot(ScreenshotEvent::PolygonEdit(
+            1,
+            super::super::screenshot_polygon::Edit::Add(Point { x: 0, y: 0 }),
+        )));
+        state.reduce(switch(1, SelectionMode::Combine, false));
+        assert_eq!(state.screenshot.selection_mode(), SelectionMode::Polygon);
+        state.reduce(switch(0, SelectionMode::Combine, true));
+        assert_eq!(state.screenshot.selection_mode(), SelectionMode::Polygon);
+        state.reduce(switch(1, SelectionMode::Combine, true));
+        assert_eq!(state.screenshot.selection_mode(), SelectionMode::Combine);
+        assert!(state.screenshot.polygon.is_none());
+        assert_eq!(state.screenshot.session, 1);
+        state.reduce(switch(2, SelectionMode::Rectangle, false));
+        assert_eq!(state.screenshot.selection_mode(), SelectionMode::Rectangle);
+        assert_eq!(state.screenshot.layout, vec![bounds()]);
+    }
+
     fn request(session: u64, operation: u64, bounds: Rect) -> ExportRequest {
         ExportRequest {
             session,

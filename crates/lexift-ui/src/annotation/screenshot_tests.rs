@@ -278,6 +278,7 @@ fn screenshot_toolbars_are_exclusive_and_restore_document_undo_after_failed_outp
         frames.clone(),
         Arc::new(crate::FrozenCapture::new(frames.clone())),
         Vec::new(),
+        None,
     );
     assert!(!super::super::is_open());
     selection_host::pointer(
@@ -796,6 +797,7 @@ fn screenshot_toolbars_are_exclusive_and_restore_document_undo_after_failed_outp
         cancelled_frames.clone(),
         Arc::new(crate::FrozenCapture::new(cancelled_frames.clone())),
         Vec::new(),
+        None,
     );
     let last = core.borrow().screenshot.last_region.clone().unwrap();
     assert_eq!(

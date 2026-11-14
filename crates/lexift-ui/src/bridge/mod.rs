@@ -672,9 +672,10 @@ impl UiHandle {
         frames: Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>,
         capture: Arc<dyn lexift_core::ports::screen_capture::ScreenCapturePort>,
         windows: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
+        raw_frames: Option<Arc<Vec<lexift_core::ports::screen_capture::CapturedRegion>>>,
     ) {
         let _ = slint::invoke_from_event_loop(move || {
-            crate::annotation::screenshot::show(session, frames, capture, windows)
+            crate::annotation::screenshot::show(session, frames, capture, windows, raw_frames)
         });
     }
     pub fn window_pin_frame(

@@ -7,6 +7,7 @@ use lexift_core::{
     domain::{
         geometry::{Point, Rect},
         region_selection::{RegionSelection, SelectionContext},
+        screenshot::SelectionMode,
     },
     ports::screen_capture::CapturedRegion,
 };
@@ -125,6 +126,15 @@ struct Registry {
     multi_button: bool,
     multi_screen: Option<Rect>,
     multi_error: Option<String>,
+    mode_version: u64,
+    mode_available: bool,
+    mode_has_layers: bool,
+    mode_has_selection: bool,
+    mode_confirm: Option<SelectionMode>,
+    mode_button_down: Option<Rect>,
+    mode_selecting: bool,
+    raw_mode_frames: Option<Arc<Vec<CapturedRegion>>>,
+    normal_mode_frames: Option<Arc<Vec<CapturedRegion>>>,
     frames: Option<Arc<Vec<CapturedRegion>>>,
     native_handoff: Vec<bool>,
     presented_hosts: Vec<Rect>,
@@ -180,6 +190,15 @@ pub(crate) fn init(
             multi_button: false,
             multi_screen: None,
             multi_error: None,
+            mode_version: 0,
+            mode_available: false,
+            mode_has_layers: false,
+            mode_has_selection: false,
+            mode_confirm: None,
+            mode_button_down: None,
+            mode_selecting: false,
+            raw_mode_frames: None,
+            normal_mode_frames: None,
             frames: None,
             native_handoff: vec![],
             presented_hosts: vec![],
@@ -473,6 +492,10 @@ pub(crate) fn close() {
             r.hover = None;
             r.help = Default::default();
             r.frames = None;
+            r.raw_mode_frames = None;
+            r.normal_mode_frames = None;
+            r.mode_confirm = None;
+            r.mode_button_down = None;
             r.native_handoff.clear();
             r.presented_hosts.clear();
             r.feedback_hosts.clear();
@@ -513,7 +536,7 @@ pub(crate) fn show_with_origin(
             r.combine = None;
         }
     });
-    show_prepared(generation, frames, origin, None);
+    show_prepared(generation, frames, origin, None, None);
 }
 pub(crate) fn show_screenshot_with_candidates(
     generation: u64,
@@ -521,8 +544,15 @@ pub(crate) fn show_screenshot_with_candidates(
     origin: Option<Option<lexift_core::ports::magnifier::WindowToken>>,
     windows: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
     reusable: bool,
+    raw_frames: Option<Arc<Vec<CapturedRegion>>>,
 ) {
-    show_prepared(generation, frames, origin, Some((windows, reusable)));
+    show_prepared(
+        generation,
+        frames,
+        origin,
+        Some((windows, reusable)),
+        raw_frames,
+    );
 }
 fn show_prepared(
     generation: u64,
@@ -532,6 +562,7 @@ fn show_prepared(
         Vec<lexift_core::domain::window_candidate::WindowCandidate>,
         bool,
     )>,
+    raw_frames: Option<Arc<Vec<CapturedRegion>>>,
 ) {
     let started = std::time::Instant::now();
     if !STATE.with(|s| {
@@ -574,6 +605,8 @@ fn show_prepared(
         r.activation_done = false;
         r.attempts = 0;
         r.frames = Some(frames.clone());
+        r.normal_mode_frames = raw_frames.as_ref().map(|_| frames.clone());
+        r.raw_mode_frames = raw_frames;
         r.multi_screen = (r.lifecycle.toolbar_cursor_position)()
             .and_then(|p| {
                 frames.iter().find(|f| {
@@ -589,21 +622,7 @@ fn show_prepared(
             let window = crate::screen_interaction::create(&r.lifecycle, OcrSelectionWindow::new)
                 .map_err(|_| ())?;
             window.set_screenshot_mode(r.screenshot);
-            window.set_multi_mode(
-                r.multi.is_some()
-                    || r.window_selection.is_some()
-                    || r.polygon.is_some()
-                    || r.freehand
-                    || r.combine.is_some(),
-            );
-            window.set_window_mode(r.window_selection.is_some());
-            window.set_mask_copy_mode(
-                r.window_selection.is_some()
-                    || r.polygon.is_some()
-                    || r.combine.is_some()
-                    || r.freehand,
-            );
-            if window.get_mask_copy_mode() {
+            if r.screenshot && r.multi.is_none() {
                 crate::annotation::hints::wire_mask_selection(
                     &window,
                     generation,
@@ -611,16 +630,19 @@ fn show_prepared(
                     frame.bounds,
                 );
             }
-            window.set_combine_mode(r.combine.is_some());
-            window.set_polygon_mode(r.polygon.is_some() || r.freehand);
-            window.set_freehand_mode(r.freehand);
+            let mode_weak = window.as_weak();
+            window.on_mode_action(move |action| {
+                let Some(window) = mode_weak.upgrade() else {
+                    return;
+                };
+                mode_action(generation, window.window(), action);
+            });
             window.set_multi_controls(r.multi_screen == Some(frame.bounds));
             let multi_weak = window.as_weak();
-            let polygon_mode = r.polygon.is_some() || r.combine.is_some() || r.freehand;
             let multi_repeat = Rc::new(Cell::new(false));
             let button_repeat = multi_repeat.clone();
             window.on_multi_action(move |action| {
-                if polygon_mode && button_repeat.get() && matches!(action, 1 | 5) {
+                if button_repeat.get() && matches!(action, 1 | 5) {
                     return;
                 }
                 let Some(window) = multi_weak.upgrade() else {
@@ -661,11 +683,9 @@ fn show_prepared(
                     }
                     winit::event::WindowEvent::Focused(false) => {
                         modified.set(false);
-                        if polygon_mode {
-                            slint::Timer::single_shot(Duration::ZERO, move || {
-                                cancel_freehand_draft(generation)
-                            });
-                        }
+                        slint::Timer::single_shot(Duration::ZERO, move || {
+                            cancel_freehand_draft(generation)
+                        });
                     }
                     _ => {}
                 }
@@ -733,12 +753,15 @@ fn show_prepared(
             let width = (b.right - b.left) as u32;
             let height = (b.bottom - b.top) as u32;
             let copy_started = std::time::Instant::now();
-            let pixels = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
-                &frame.pixels,
-                width,
-                height,
-            );
-            window.set_frozen_image(slint::Image::from_rgba8(pixels));
+            let pixels = if r.window_selection.is_some() {
+                r.raw_mode_frames
+                    .as_ref()
+                    .and_then(|frames| frames.iter().find(|raw| raw.bounds == frame.bounds))
+                    .unwrap_or(frame)
+            } else {
+                frame
+            };
+            set_mode_image(&window, pixels);
             tracing::debug!(
                 elapsed_us = copy_started.elapsed().as_micros(),
                 "Screenshot Slint pixel copy completed"
@@ -813,6 +836,7 @@ fn prepare(generation: u64) {
             return None;
         }
         r.attempts += 1;
+        sync_mode_controls(r);
         for Host { window, .. } in &r.windows {
             match (r.prepare)(window.window()) {
                 PassiveWindowPreparation::Ready => {}
@@ -841,6 +865,8 @@ fn prepare(generation: u64) {
                     let hover = (event == PopupPointerInput::FeedbackFramePresented)
                         .then(|| hover_snapshot(generation, bounds))
                         .flatten();
+                    let mode_version =
+                        STATE.with(|slot| slot.try_borrow().ok()?.as_ref().map(|r| r.mode_version));
                     let _ =
                         slint::invoke_from_event_loop(move || {
                             let Some(window) = weak.upgrade() else { return };
@@ -848,6 +874,7 @@ fn prepare(generation: u64) {
                                 STATE.with(|s| {
                                     s.borrow().as_ref().is_some_and(|r| {
                                         r.generation == generation
+                                && mode_version.is_none_or(|version| version == r.mode_version)
                                 && r.windows.iter().any(|Host {window: w, bounds: b, ..}| {
                                     *b == bounds && std::ptr::eq(w.window(), window.window())
                                 })
@@ -1148,7 +1175,7 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
             _ => {}
         }
     }
-    if multi_pointer(generation, bounds, event) {
+    if mode_pointer(generation, bounds, event) || multi_pointer(generation, bounds, event) {
         return;
     }
     let mut outcome = None;
@@ -1293,6 +1320,14 @@ pub(crate) fn pointer(generation: u64, bounds: Rect, _scale: f32, event: PopupPo
         if r.screenshot {
             sync_help(r);
             sync_picker(r);
+        }
+        if matches!(
+            event,
+            PopupPointerInput::LeftPressed { .. }
+                | PopupPointerInput::LeftReleased { .. }
+                | PopupPointerInput::LeftCancelled { .. }
+        ) {
+            sync_mode_controls(r);
         }
     });
     if let Some(event) = query_event {
@@ -1794,9 +1829,17 @@ pub(crate) fn sync_multi(state: &lexift_core::domain::screenshot::ScreenshotStat
         {
             return;
         }
+        let mode_changed = r.generation == state.session && r.mode_version != state.mode_version;
+        let was_windows = r.window_selection.is_some();
+        r.mode_version = state.mode_version;
+        r.mode_available = state.multi.is_none() && state.preset_region.is_none();
+        r.mode_has_layers = state.frozen_layers.is_some();
+        r.mode_has_selection = state.has_selection_to_discard();
+        r.mode_selecting = state.can_switch_mode();
         let polygon_changed = r.polygon != state.polygon;
         let busy = state.phase == lexift_core::domain::screenshot::ScreenshotPhase::Output;
-        let repaint = state.polygon.is_none()
+        let repaint = mode_changed
+            || state.polygon.is_none()
             || polygon_changed
             || r.window_busy != busy
             || r.multi_error != state.error;
@@ -1819,10 +1862,230 @@ pub(crate) fn sync_multi(state: &lexift_core::domain::screenshot::ScreenshotStat
             r.multi_drag = None;
             r.multi_button = false;
         }
+        if mode_changed {
+            r.gesture.cancel();
+            r.hover = None;
+            r.scheduled_hover = None;
+            r.hover_revision = r.hover_revision.wrapping_add(1);
+            r.presented_hover = None;
+            r.hover_paints.clear();
+            r.polygon_pointer = None;
+            r.reuse_pending = None;
+            r.query_pending = None;
+            r.query_point = None;
+            r.query_cache = None;
+            r.elements = Default::default();
+            r.navigation = Default::default();
+            r.help = Default::default();
+            r.stroke = None;
+            r.redraw = false;
+            r.multi_button = false;
+            r.mode_confirm = None;
+            r.reusable = state.reusable_region().is_some();
+            if was_windows != r.window_selection.is_some() {
+                let frames = if r.window_selection.is_some() {
+                    &r.raw_mode_frames
+                } else {
+                    &r.normal_mode_frames
+                };
+                if let Some(frames) = frames {
+                    for host in &r.windows {
+                        if let Some(frame) = frames.iter().find(|frame| frame.bounds == host.bounds)
+                        {
+                            set_mode_image(&host.window, frame);
+                        }
+                    }
+                }
+            }
+            for host in &r.windows {
+                host.window.set_reuse_available(r.reusable);
+                host.window.set_selecting(false);
+                host.window.set_multi_marks(Default::default());
+                host.window.set_help_visible(false);
+                host.window.set_size_visible(false);
+                host.window.set_picker_visible(false);
+            }
+        }
+        sync_mode_controls(r);
         if r.generation == state.session && repaint {
             paint_multi(r);
         }
     });
+}
+
+fn set_mode_image(window: &OcrSelectionWindow, frame: &CapturedRegion) {
+    let pixels = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
+        &frame.pixels,
+        (frame.bounds.right - frame.bounds.left) as u32,
+        (frame.bounds.bottom - frame.bounds.top) as u32,
+    );
+    window.set_frozen_image(slint::Image::from_rgba8(pixels));
+}
+
+fn sync_mode_controls(r: &Registry) {
+    for host in &r.windows {
+        let w = &host.window;
+        let mode = if r.window_selection.is_some() {
+            1
+        } else if r.freehand {
+            4
+        } else if r.polygon.is_some() {
+            2
+        } else if r.combine.is_some() {
+            3
+        } else {
+            0
+        };
+        let masked = mode != 0;
+        w.set_multi_mode(masked || r.multi.is_some());
+        w.set_mask_copy_mode(masked);
+        w.set_window_mode(mode == 1);
+        w.set_polygon_mode(mode == 2 || mode == 4);
+        w.set_freehand_mode(mode == 4);
+        w.set_combine_mode(mode == 3);
+        w.set_selection_mode(mode);
+        w.set_mode_control(r.screenshot && r.mode_available && r.multi_screen == Some(host.bounds));
+        w.set_mode_windows_available(r.mode_has_layers);
+        w.set_mode_busy(
+            !r.mode_selecting || r.submitted || r.gesture.active() || r.stroke.is_some(),
+        );
+        w.set_mode_confirm(r.mode_confirm.is_some());
+    }
+}
+
+fn mode_action(generation: u64, window: &slint::Window, action: i32) {
+    let event = STATE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let r = slot.as_mut().filter(|r| {
+            r.generation == generation
+                && r.windows
+                    .iter()
+                    .any(|host| std::ptr::eq(host.window.window(), window))
+                && r.mode_selecting
+                && !r.gesture.active()
+                && r.stroke.is_none()
+                && !r.window_busy
+                && !r.submitted
+                && r.reuse_pending.is_none()
+        })?;
+        let (mode, discard) = match action {
+            5 => {
+                r.mode_confirm = None;
+                sync_mode_controls(r);
+                return None;
+            }
+            6 => (r.mode_confirm.take()?, true),
+            _ if r.mode_confirm.is_some() => return None,
+            0 => (SelectionMode::Rectangle, false),
+            1 if r.mode_has_layers => (SelectionMode::Windows, false),
+            2 => (SelectionMode::Polygon, false),
+            3 => (SelectionMode::Combine, false),
+            4 => (SelectionMode::Freehand, false),
+            _ => return None,
+        };
+        if !discard && r.mode_has_selection {
+            let current = r
+                .windows
+                .iter()
+                .find(|h| h.window.get_mode_control())?
+                .window
+                .get_selection_mode();
+            if current == action {
+                return None;
+            }
+            r.mode_confirm = Some(mode);
+            sync_mode_controls(r);
+            return None;
+        }
+        sync_mode_controls(r);
+        Some(
+            lexift_core::domain::screenshot::ScreenshotEvent::SwitchMode {
+                session: generation,
+                version: r.mode_version,
+                mode,
+                discard,
+            },
+        )
+    });
+    if let Some(event) = event {
+        emit(SelectionEvent::Windows(event));
+    }
+}
+
+fn mode_pointer(generation: u64, screen: Rect, event: PopupPointerInput) -> bool {
+    let (handled, delivery) = STATE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot.as_mut().filter(|r| r.generation == generation) else {
+            return (false, None);
+        };
+        let Some(host) = r.windows.iter().find(|h| h.bounds == screen) else {
+            return (false, None);
+        };
+        let control = host.window.get_mode_control();
+        let scale = host.window.window().scale_factor();
+        let confirm = r.mode_confirm.is_some();
+        let (x, y, pressed) = match event {
+            PopupPointerInput::LeftPressed { x, y } => (x / scale, y / scale, true),
+            PopupPointerInput::LeftReleased { x, y } => (x / scale, y / scale, false),
+            PopupPointerInput::LeftCancelled { .. } if r.mode_button_down.is_some() => {
+                r.mode_button_down = None;
+                return (
+                    true,
+                    Some((
+                        host.window.as_weak(),
+                        slint::platform::WindowEvent::PointerReleased {
+                            position: slint::LogicalPosition::new(-1., -1.),
+                            button: slint::platform::PointerEventButton::Left,
+                        },
+                    )),
+                );
+            }
+            _ => return (confirm, None),
+        };
+        let in_control =
+            x >= 0. && x < host.window.get_mode_control_width() && (76. ..116.).contains(&y);
+        if !confirm
+            && !(control && in_control && !r.gesture.active() && r.stroke.is_none()
+                || !pressed && r.mode_button_down.is_some())
+        {
+            return (false, None);
+        }
+        let owner = if pressed {
+            r.mode_button_down = Some(screen);
+            screen
+        } else {
+            r.mode_button_down.take().unwrap_or(screen)
+        };
+        let position = if owner == screen {
+            slint::LogicalPosition::new(x, y)
+        } else {
+            slint::LogicalPosition::new(-1., -1.)
+        };
+        let event = if pressed {
+            slint::platform::WindowEvent::PointerPressed {
+                position,
+                button: slint::platform::PointerEventButton::Left,
+            }
+        } else {
+            slint::platform::WindowEvent::PointerReleased {
+                position,
+                button: slint::platform::PointerEventButton::Left,
+            }
+        };
+        (
+            true,
+            r.windows
+                .iter()
+                .find(|h| h.bounds == owner && h.window.get_mode_control())
+                .map(|h| (h.window.as_weak(), event)),
+        )
+    });
+    if let Some((window, event)) = delivery
+        && let Some(window) = window.upgrade()
+    {
+        window.window().dispatch_event(event);
+    }
+    handled
 }
 
 fn paint_polygon_lines(r: &Registry, points: &[Point], closed: bool, vertices_changed: bool) {
@@ -2475,6 +2738,14 @@ fn multi_pointer(generation: u64, screen: Rect, event: PopupPointerInput) -> boo
                 r.gesture.cancel();
             }
             _ => {}
+        }
+        if matches!(
+            event,
+            PopupPointerInput::LeftPressed { .. }
+                | PopupPointerInput::LeftReleased { .. }
+                | PopupPointerInput::LeftCancelled { .. }
+        ) {
+            sync_mode_controls(r);
         }
         if button.is_none()
             && (action.is_some()

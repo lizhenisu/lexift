@@ -188,17 +188,27 @@ pub(crate) struct PreparedCapture {
     pub layers: Vec<lexift_core::domain::screenshot_windows::Layer>,
     pub capture: lexift_core::ports::screen_capture::ScreenshotCapture,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowEvidence {
+    #[cfg(test)]
+    Rectangles,
+    Switchable,
+    RequiredLayers,
+}
+
 pub(crate) fn capture_screenshot_frame(
     factory: CaptureFactory,
     regions: Vec<Rect>,
     excluded_windows: Vec<WindowToken>,
     cancelled: &AtomicBool,
     _pointer: Option<lexift_core::domain::geometry::Point>,
-    multi_window: bool,
+    evidence: WindowEvidence,
 ) -> Result<Option<PreparedCapture>> {
     if cancelled.load(Ordering::Acquire) {
         return Ok(None);
     }
+    let multi_window = evidence == WindowEvidence::RequiredLayers;
+    let switchable = evidence == WindowEvidence::Switchable;
     let started = Instant::now();
     let port = factory().ok_or_else(|| Error::new("Screen capture unavailable"))?;
     let before = if multi_window {
@@ -207,8 +217,11 @@ pub(crate) fn capture_screenshot_frame(
         port.screenshot_windows(&excluded_windows)
             .unwrap_or_default()
     };
-    let layers = if multi_window {
+    let mut layers = if multi_window {
         port.screenshot_layers(&excluded_windows)?
+    } else if switchable {
+        port.screenshot_layers(&excluded_windows)
+            .unwrap_or_default()
     } else {
         Vec::new()
     };
@@ -226,6 +239,18 @@ pub(crate) fn capture_screenshot_frame(
     } else {
         capture_frozen_pixels(port.clone(), regions, excluded_windows.clone(), cancelled)?
     };
+    if !multi_window
+        && !layers.is_empty()
+        && (!fast_path
+            || port
+                .screenshot_layers(&excluded_windows)
+                .ok()
+                .is_none_or(|after| {
+                    !lexift_core::domain::screenshot_windows::stable(&layers, &after)
+                }))
+    {
+        layers.clear();
+    }
     let windows = if multi_window {
         let after = port.screenshot_layers(&excluded_windows)?;
         if frame.is_none() || !lexift_core::domain::screenshot_windows::stable(&layers, &after) {
@@ -233,12 +258,11 @@ pub(crate) fn capture_screenshot_frame(
                 snapshot_available = frame.is_some(),
                 before = layers.len(),
                 after = after.len(),
-                before_layers = ?layers, after_layers = ?after,
                 "Multi-window screenshot could not freeze consistent geometry"
             );
             return Err(Error::new("Windows changed during capture. Try again."));
         }
-        Vec::new()
+        rectangle_candidates(&layers)
     } else {
         let after = port
             .screenshot_windows(&excluded_windows)
@@ -262,6 +286,16 @@ pub(crate) fn capture_screenshot_frame(
         },
     }))
 }
+fn rectangle_candidates(
+    layers: &[lexift_core::domain::screenshot_windows::Layer],
+) -> Vec<lexift_core::domain::window_candidate::WindowCandidate> {
+    layers
+        .iter()
+        .filter(|layer| layer.selectable)
+        .map(|layer| layer.candidate)
+        .collect()
+}
+
 #[cfg(test)]
 pub(crate) fn capture_screenshot(
     factory: CaptureFactory,
@@ -269,10 +303,15 @@ pub(crate) fn capture_screenshot(
     excluded: Vec<WindowToken>,
     cancelled: &AtomicBool,
 ) -> Result<Option<lexift_core::ports::screen_capture::ScreenshotCapture>> {
-    Ok(
-        capture_screenshot_frame(factory, regions, excluded, cancelled, None, false)?
-            .map(|prepared| prepared.capture),
-    )
+    Ok(capture_screenshot_frame(
+        factory,
+        regions,
+        excluded,
+        cancelled,
+        None,
+        WindowEvidence::Rectangles,
+    )?
+    .map(|prepared| prepared.capture))
 }
 
 /// Fresh one-shot pixels only; refresh must not enumerate window/UIA candidates.
@@ -510,6 +549,75 @@ mod tests {
         }
     }
     #[test]
+    fn switchable_capture_keeps_only_stable_layers_from_its_desktop_frame() {
+        use lexift_core::domain::{screenshot_windows::Layer, window_candidate::WindowCandidate};
+        use std::sync::atomic::AtomicUsize;
+        struct Capture {
+            changes: bool,
+            snapshots: AtomicUsize,
+        }
+        impl ScreenCapturePort for Capture {
+            fn request(&self, _: ScreenCaptureRequest) -> Result<()> {
+                unreachable!()
+            }
+            fn latest(&self) -> Result<Option<Arc<ScreenCaptureFrame>>> {
+                unreachable!()
+            }
+            fn clear(&self) {}
+            fn is_available(&self) -> bool {
+                true
+            }
+            fn screenshot_layers(&self, _: &[WindowToken]) -> Result<Vec<Layer>> {
+                let count = self.snapshots.fetch_add(1, Ordering::Relaxed);
+                let bounds = fixture().monitor;
+                Ok(vec![Layer {
+                    candidate: WindowCandidate {
+                        process_id: 7,
+                        window: WindowToken(1 + isize::from(self.changes && count != 0)),
+                        bounds,
+                        order: 0,
+                    },
+                    coverage: vec![bounds],
+                    selectable: true,
+                }])
+            }
+            fn try_freeze_screenshot(
+                &self,
+                _: &ScreenCaptureRequest,
+                _: &AtomicBool,
+            ) -> Result<Option<Arc<ScreenCaptureFrame>>> {
+                Ok(Some(frame(fixture().monitor, [1, 2, 3, 255])))
+            }
+        }
+        fn stable() -> Option<Arc<dyn ScreenCapturePort>> {
+            Some(Arc::new(Capture {
+                changes: false,
+                snapshots: AtomicUsize::new(0),
+            }))
+        }
+        fn changes() -> Option<Arc<dyn ScreenCapturePort>> {
+            Some(Arc::new(Capture {
+                changes: true,
+                snapshots: AtomicUsize::new(0),
+            }))
+        }
+        for (factory, retained) in [(stable as CaptureFactory, true), (changes, false)] {
+            let prepared = capture_screenshot_frame(
+                factory,
+                vec![fixture().monitor],
+                vec![],
+                &AtomicBool::new(false),
+                None,
+                WindowEvidence::Switchable,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(!prepared.layers.is_empty(), retained);
+            assert_eq!(prepared.capture.frame.regions[0].pixels[0], 1);
+        }
+    }
+
+    #[test]
     fn pixel_preparation_never_queries_accessibility_and_fast_path_failure_falls_back() {
         use lexift_core::domain::window_candidate::WindowCandidate;
         use std::sync::atomic::AtomicUsize;
@@ -575,7 +683,7 @@ mod tests {
                 vec![],
                 &AtomicBool::new(false),
                 Some(lexift_core::domain::geometry::Point { x: -1, y: -1 }),
-                false,
+                WindowEvidence::Rectangles,
             )
             .unwrap()
             .unwrap();

@@ -36,6 +36,7 @@ mod refresh;
 pub(crate) mod window_pin;
 type CaptureFactory = fn() -> Option<Arc<dyn ScreenCapturePort>>;
 struct PreparedScreenshot {
+    raw_frames: Option<Arc<Vec<CapturedRegion>>>,
     layers: Vec<lexift_core::domain::screenshot_windows::Layer>,
     frames: Vec<CapturedRegion>,
     windows: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
@@ -47,6 +48,7 @@ struct Session {
     source: ExportRequest,
     cancelled: Arc<AtomicBool>,
     frames: Option<Arc<Vec<CapturedRegion>>>,
+    raw_frames: Option<Arc<Vec<CapturedRegion>>>,
     long_source_frames: Option<Arc<Vec<CapturedRegion>>>,
     element_port: Option<Arc<dyn ScreenCapturePort>>,
     windows: Vec<lexift_core::domain::window_candidate::WindowCandidate>,
@@ -756,9 +758,11 @@ impl ScreenshotRuntime {
                 session,
                 operation,
                 mask,
+                mode,
                 target,
             } => {
                 let pin = matches!(target, lexift_core::domain::screenshot::MaskTarget::Pin);
+                let multi_window = mode == lexift_core::domain::screenshot::SelectionMode::Windows;
                 let current = self
                     .session
                     .lock()
@@ -767,7 +771,11 @@ impl ScreenshotRuntime {
                     .filter(|job| job.id == session)
                     .and_then(|job| {
                         Some((
-                            job.frames.clone()?,
+                            if multi_window {
+                                job.raw_frames.as_ref().or(job.frames.as_ref())?.clone()
+                            } else {
+                                job.frames.clone()?
+                            },
                             job.source.clone(),
                             job.cancelled.clone(),
                         ))
@@ -1099,12 +1107,16 @@ impl ScreenshotRuntime {
                     .unwrap_or_else(|p| p.into_inner())
                     .as_ref()
                     .filter(|s| s.id == session)
-                    .and_then(|s| s.frames.clone().map(|f| (f, s.windows.clone())));
-                if let Some((frames, windows)) = frames {
+                    .and_then(|s| {
+                        s.frames
+                            .clone()
+                            .map(|f| (f, s.windows.clone(), s.raw_frames.clone()))
+                    });
+                if let Some((frames, windows, raw_frames)) = frames {
                     let capture = Arc::new(lexift_ui::FrozenCapture::new(frames.clone()));
                     controller
                         .ui
-                        .show_screenshot_capture(session, frames, capture, windows);
+                        .show_screenshot_capture(session, frames, capture, windows, raw_frames);
                 }
             }
             ScreenshotCommand::Countdown {
@@ -1151,6 +1163,7 @@ impl ScreenshotRuntime {
                         id: session,
                         cancelled: cancelled.clone(),
                         frames: None,
+                        raw_frames: None,
                         long_source_frames: None,
                         element_port,
                         windows: Vec::new(),
@@ -1192,7 +1205,7 @@ impl ScreenshotRuntime {
                                 );
                                 match result {
                                     Ok(prepared) => {
-                                        if multi_window {
+                                        if !prepared.layers.is_empty() || multi_window {
                                             worker_controller.dispatch(AppEvent::Screenshot(
                                                 ScreenshotEvent::WindowLayers(
                                                     session,
@@ -1214,6 +1227,7 @@ impl ScreenshotRuntime {
                                                 return;
                                             };
                                             s.frames = Some(Arc::new(prepared.frames));
+                                            s.raw_frames = prepared.raw_frames;
                                             s.windows = prepared.windows;
                                         }
                                         tracing::debug!(
@@ -1487,36 +1501,64 @@ impl ScreenshotRuntime {
             snapshot.excluded.clone(),
             cancelled,
             pointer,
-            multi_window,
+            if multi_window {
+                crate::annotation_export::WindowEvidence::RequiredLayers
+            } else {
+                crate::annotation_export::WindowEvidence::Switchable
+            },
         )?
         .ok_or_else(|| Error::new("Screenshot cancelled"))?;
         let captured = prepared.capture;
-        if multi_window {
-            let frames = captured.frame.regions.clone();
-            lexift_platform::prepare_screenshot_surface_pixels(session, &frames, cancelled)?;
-            return Ok(PreparedScreenshot {
-                frames,
-                windows: Vec::new(),
-                layers: prepared.layers,
-            });
+        let mut has_annotations = !snapshot.session.objects.is_empty();
+        let bytes: usize = captured.frame.regions.iter().map(|r| r.pixels.len()).sum();
+        const DUAL_BACKDROP_BUDGET: usize = 512 * 1024 * 1024;
+        if multi_window && bytes > DUAL_BACKDROP_BUDGET / 4 {
+            has_annotations = false;
         }
-        let frames = snapshot
-            .monitors
-            .iter()
-            .map(|(bounds, scale)| {
-                if cancelled.load(Ordering::Acquire) {
-                    return Err(Error::new("Screenshot cancelled"));
-                }
-                let mut snapshot = (**snapshot).clone();
-                snapshot.monitor = *bounds;
-                snapshot.scale = *scale;
-                self.render
-                    .compose(&snapshot, captured.frame.clone(), cancelled)
-            })
-            .collect::<Result<Vec<_>>>()?;
-        lexift_platform::prepare_screenshot_surface_pixels(session, &frames, cancelled)?;
+        let full_displays = captured.frame.regions.len() == snapshot.monitors.len()
+            && snapshot
+                .monitors
+                .iter()
+                .all(|(bounds, _)| captured.frame.regions.iter().any(|f| f.bounds == *bounds));
+        let frames = if has_annotations || !full_displays {
+            snapshot
+                .monitors
+                .iter()
+                .map(|(bounds, scale)| {
+                    if cancelled.load(Ordering::Acquire) {
+                        return Err(Error::new("Screenshot cancelled"));
+                    }
+                    let mut snapshot = (**snapshot).clone();
+                    snapshot.monitor = *bounds;
+                    snapshot.scale = *scale;
+                    self.render
+                        .compose(&snapshot, captured.frame.clone(), cancelled)
+                })
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            captured.frame.regions.clone()
+        };
+        // Raw and annotated sources each coexist with a full UI or native presentation copy.
+        let layers = if !multi_window
+            && (!full_displays || has_annotations && bytes > DUAL_BACKDROP_BUDGET / 4)
+        {
+            Vec::new()
+        } else {
+            prepared.layers
+        };
+        let raw_frames = (has_annotations && !layers.is_empty())
+            .then(|| Arc::new(captured.frame.regions.clone()));
+        lexift_platform::prepare_screenshot_surface_pixels(
+            session,
+            raw_frames
+                .as_deref()
+                .filter(|_| multi_window)
+                .map_or(&frames, |raw| raw),
+            cancelled,
+        )?;
         Ok(PreparedScreenshot {
-            layers: prepared.layers,
+            layers,
+            raw_frames,
             frames,
             windows: captured.windows,
         })

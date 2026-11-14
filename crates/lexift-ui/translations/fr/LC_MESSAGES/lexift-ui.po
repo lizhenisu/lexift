@@ -2531,3 +2531,12 @@ msgstr "Capture à main levée"
 
 msgid "Redraw contour"
 msgstr "Redessiner"
+
+msgid "Screenshot mode"
+msgstr "Mode de capture"
+
+msgid "Start a new screenshot"
+msgstr "Démarrer une nouvelle capture"
+
+msgid "Discard the current selection?"
+msgstr "Ignorer la sélection actuelle ?"
