@@ -2,26 +2,46 @@
 use lexift_core::{Result, domain::screen_snapshot::crop_frames, ports::screen_capture::*};
 use std::sync::{Arc, Mutex};
 pub struct FrozenCapture {
-    frames: Arc<Vec<CapturedRegion>>,
+    frames: FrozenFrames,
     latest: Mutex<Option<Arc<ScreenCaptureFrame>>>,
+}
+enum FrozenFrames {
+    Regions(Arc<Vec<CapturedRegion>>),
+    Frame(Arc<ScreenCaptureFrame>),
+}
+impl FrozenFrames {
+    fn regions(&self) -> &[CapturedRegion] {
+        match self {
+            Self::Regions(regions) => regions,
+            Self::Frame(frame) => &frame.regions,
+        }
+    }
 }
 impl FrozenCapture {
     pub fn new(frames: Arc<Vec<CapturedRegion>>) -> Self {
         Self {
-            frames,
+            frames: FrozenFrames::Regions(frames),
+            latest: Mutex::new(None),
+        }
+    }
+}
+impl FrozenCapture {
+    pub(crate) fn from_frame(frame: Arc<ScreenCaptureFrame>) -> Self {
+        Self {
+            frames: FrozenFrames::Frame(frame),
             latest: Mutex::new(None),
         }
     }
 }
 impl ScreenCapturePort for FrozenCapture {
     fn is_available(&self) -> bool {
-        !self.frames.is_empty()
+        !self.frames.regions().is_empty()
     }
     fn request(&self, request: ScreenCaptureRequest) -> Result<()> {
         let regions = request
             .regions
             .iter()
-            .map(|b| crop_frames(&self.frames, *b))
+            .map(|b| crop_frames(self.frames.regions(), *b))
             .collect::<Result<Vec<_>>>()?;
         *self.latest.lock().unwrap_or_else(|p| p.into_inner()) =
             Some(Arc::new(ScreenCaptureFrame {

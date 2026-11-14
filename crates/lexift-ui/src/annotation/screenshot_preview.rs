@@ -54,6 +54,7 @@ fn content_matches(a: &ExportSnapshot, b: &ExportSnapshot) -> bool {
         && a.session.spotlight_erased == b.session.spotlight_erased
         && a.session.displays == b.session.displays
         && a.session.image_source == b.session.image_source
+        && a.session.image_mask == b.session.image_mask
 }
 impl ImageBase {
     fn matches(&self, input: &Input) -> bool {
@@ -177,13 +178,27 @@ fn paint_cached(
         copy_crop(&mut masked, &pixmap, bounds, monitor, cancelled)?;
         pixmap = masked;
     }
+    if input.crop_border && snapshot.session.image_mask.is_some() {
+        let dark = cache.base.as_ref()?.dark.as_ref();
+        for (pixel, background) in pixmap
+            .data_mut()
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(dark.data().as_chunks::<4>().0)
+        {
+            if pixel[3] == 0 {
+                *pixel = *background;
+            }
+        }
+    }
     let geometry = Bounds {
         left: bounds.left as f32,
         top: bounds.top as f32,
         right: bounds.right as f32,
         bottom: bounds.bottom as f32,
     };
-    if input.crop_border {
+    if input.crop_border && snapshot.session.image_mask.is_none() {
         crate::annotation_render::draw_erase_interaction(
             &mut pixmap,
             lexift_core::domain::annotation_erase::RoundedRectangle {
@@ -315,6 +330,7 @@ fn compose_base(
             tiny_skia::Transform::identity(),
             None,
         );
+        crate::annotation_export_render::clip(snapshot, frame.data_mut(), cancelled).ok()?;
         frame
     };
     Some(pixmap)

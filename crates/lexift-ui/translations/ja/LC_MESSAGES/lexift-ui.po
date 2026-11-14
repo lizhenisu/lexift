@@ -2540,3 +2540,9 @@ msgstr "新しくスクリーンショットを撮る"
 
 msgid "Discard the current selection?"
 msgstr "現在の選択範囲を破棄しますか？"
+
+msgid "Return to selection"
+msgstr "選択範囲に戻る"
+
+msgid "Discard the current annotations?"
+msgstr "現在の注釈を破棄しますか？"

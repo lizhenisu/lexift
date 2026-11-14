@@ -2540,3 +2540,9 @@ msgstr "Start a new screenshot"
 
 msgid "Discard the current selection?"
 msgstr "Discard the current selection?"
+
+msgid "Return to selection"
+msgstr "Return to selection"
+
+msgid "Discard the current annotations?"
+msgstr "Discard the current annotations?"

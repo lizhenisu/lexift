@@ -69,11 +69,20 @@ pub enum SelectionMode {
     Combine,
     Freehand,
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MaskedEdit {
+    pub mask: std::sync::Arc<Vec<Rect>>,
+    pub bounds: Rect,
+    pub request: u64,
+    pub preparing: bool,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ScreenshotState {
     pub recording: Option<recording::Session>,
     pub frame_version: u64,
     pub mode_version: u64,
+    pub masked_edit: Option<MaskedEdit>,
     pub frozen_layers: Option<std::sync::Arc<Vec<super::screenshot_windows::Layer>>>,
     pub quick_directory_pending: bool,
     pub refresh: Option<refresh::State>,
@@ -130,15 +139,30 @@ impl ScreenshotState {
                 .is_some_and(|c| c.can_undo() || !c.mask.is_empty())
     }
 
+    pub fn confirmed_mask(&self) -> Option<std::sync::Arc<Vec<Rect>>> {
+        self.polygon
+            .as_ref()
+            .and_then(|p| p.mask.clone())
+            .or_else(|| self.combine.as_ref().map(|p| p.mask.clone()))
+            .or_else(|| {
+                self.windows
+                    .as_ref()
+                    .map(|p| std::sync::Arc::new(p.mask.clone()))
+            })
+            .filter(|mask| !mask.is_empty())
+    }
+
     pub fn can_switch_mode(&self) -> bool {
         self.phase == ScreenshotPhase::Selecting
+            && self.masked_edit.is_none()
             && self.multi.is_none()
             && self.preset_region.is_none()
             && self.color_pending.is_none()
     }
 
     pub fn editable(&self) -> bool {
-        self.phase == ScreenshotPhase::Editing
+        self.masked_edit.is_none()
+            && self.phase == ScreenshotPhase::Editing
             && !self.quick_directory_pending
             && self
                 .long
@@ -205,6 +229,23 @@ pub enum ScreenshotEvent {
     },
     WindowLayers(u64, Vec<super::screenshot_windows::Layer>),
     ToggleWindow(u64, Point),
+    AnnotateMask {
+        session: u64,
+        version: u64,
+    },
+    MaskEditorPrepared {
+        session: u64,
+        request: u64,
+        result: Result<()>,
+    },
+    MaskEditorUnavailable {
+        session: u64,
+        request: u64,
+    },
+    ReturnToMask {
+        session: u64,
+        request: u64,
+    },
     OutputMask(u64, MaskTarget),
     MaskedOutputFinished(u64, u64, Result<SaveOutcome>),
     Multi(u64, super::screenshot_multi::Action),
@@ -299,6 +340,11 @@ pub enum ScreenshotEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotCommand {
+    PrepareMaskEditor {
+        session: u64,
+        mode: SelectionMode,
+        edit: MaskedEdit,
+    },
     OutputMask {
         session: u64,
         operation: u64,
@@ -410,6 +456,7 @@ fn start_capture(
     s.recording = None;
     s.frame_version = 0;
     s.mode_version = 0;
+    s.masked_edit = None;
     s.frozen_layers = None;
     s.session = s
         .session
@@ -443,7 +490,9 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             session,
             operation,
             result,
-        } if s.windows.is_some() || s.polygon.is_some() || s.combine.is_some() => {
+        } if s.masked_edit.is_none()
+            && (s.windows.is_some() || s.polygon.is_some() || s.combine.is_some()) =>
+        {
             ScreenshotEvent::MaskedOutputFinished(session, operation, result)
         }
         event => event,
@@ -487,7 +536,9 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             }
         }
         ScreenshotEvent::ToggleWindow(session, point)
-            if s.session == session && s.phase == ScreenshotPhase::Selecting =>
+            if s.session == session
+                && s.phase == ScreenshotPhase::Selecting
+                && s.masked_edit.is_none() =>
         {
             if let Some(selection) = s.windows.as_mut() {
                 s.error = selection
@@ -498,7 +549,9 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             vec![]
         }
         ScreenshotEvent::CombineEdit(session, edit)
-            if s.session == session && s.phase == ScreenshotPhase::Selecting =>
+            if s.session == session
+                && s.phase == ScreenshotPhase::Selecting
+                && s.masked_edit.is_none() =>
         {
             if let Some(selection) = s.combine.as_mut() {
                 s.error = selection
@@ -509,7 +562,10 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             vec![]
         }
         ScreenshotEvent::FreehandStroke(session, stroke)
-            if s.session == session && s.freehand && s.phase == ScreenshotPhase::Selecting =>
+            if s.session == session
+                && s.freehand
+                && s.phase == ScreenshotPhase::Selecting
+                && s.masked_edit.is_none() =>
         {
             match stroke.finish(&s.layout) {
                 Ok(polygon) => {
@@ -521,7 +577,10 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             vec![]
         }
         ScreenshotEvent::PolygonEdit(session, edit)
-            if s.session == session && !s.freehand && s.phase == ScreenshotPhase::Selecting =>
+            if s.session == session
+                && !s.freehand
+                && s.phase == ScreenshotPhase::Selecting
+                && s.masked_edit.is_none() =>
         {
             if let Some(polygon) = s.polygon.as_mut() {
                 s.error = polygon
@@ -531,8 +590,84 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             }
             vec![]
         }
+        ScreenshotEvent::AnnotateMask { session, version }
+            if session == s.session && version == s.mode_version && s.can_switch_mode() =>
+        {
+            let Some(mask) = s.confirmed_mask() else {
+                return vec![];
+            };
+            let Some(bounds) = super::screenshot_polygon::bounds(&mask) else {
+                return vec![];
+            };
+            let width = i64::from(bounds.right) - i64::from(bounds.left);
+            let height = i64::from(bounds.bottom) - i64::from(bounds.top);
+            if width <= 0 || height <= 0 || width.checked_mul(height).is_none_or(|n| n > 40_000_000)
+            {
+                s.error = Some("Window selection is too large".into());
+                return vec![];
+            }
+            s.operation += 1;
+            let edit = MaskedEdit {
+                mask,
+                bounds,
+                request: s.operation,
+                preparing: true,
+            };
+            s.masked_edit = Some(edit.clone());
+            s.error = None;
+            command(ScreenshotCommand::PrepareMaskEditor {
+                session,
+                mode: s.selection_mode(),
+                edit,
+            })
+        }
+        ScreenshotEvent::MaskEditorPrepared {
+            session,
+            request,
+            result,
+        } if s.session == session
+            && s.phase == ScreenshotPhase::Selecting
+            && s.masked_edit
+                .as_ref()
+                .is_some_and(|e| e.request == request && e.preparing) =>
+        {
+            match result {
+                Ok(()) => {
+                    let edit = s.masked_edit.as_mut().unwrap();
+                    edit.preparing = false;
+                    s.bounds = Some(edit.bounds);
+                    s.phase = ScreenshotPhase::Editing;
+                }
+                Err(error) => {
+                    s.masked_edit = None;
+                    s.error = Some(error.to_string());
+                }
+            }
+            vec![]
+        }
+        ScreenshotEvent::MaskEditorUnavailable { session, request }
+            if s.session == session
+                && s.operation == request
+                && s.phase == ScreenshotPhase::Selecting =>
+        {
+            s.error = Some("Screenshot unavailable".into());
+            vec![]
+        }
+        ScreenshotEvent::ReturnToMask { session, request }
+            if s.session == session
+                && s.phase == ScreenshotPhase::Editing
+                && s.masked_edit.as_ref().is_some_and(|e| e.request == request) =>
+        {
+            s.masked_edit = None;
+            s.bounds = None;
+            s.error = None;
+            s.phase = ScreenshotPhase::Selecting;
+            command(ScreenshotCommand::Show { session })
+        }
         ScreenshotEvent::OutputMask(session, target)
-            if s.session == session && s.phase == ScreenshotPhase::Selecting =>
+            if s.session == session
+                && s.phase == ScreenshotPhase::Selecting
+                && s.masked_edit.is_none() =>
         {
             let Some(mask) = s
                 .polygon
@@ -1014,10 +1149,15 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             request,
         } if s.session == session
             && (s.editable()
+                || (s.phase == ScreenshotPhase::Editing && s.masked_edit.is_some())
                 || s.phase == ScreenshotPhase::Editing
                     && s.long.as_ref().is_some_and(|l| {
                         l.phase == super::long_capture::workflow::Phase::Frozen
                     }))
+            && s.masked_edit.as_ref().is_none_or(|edit| {
+                kind != ScreenshotOutput::QuickSave
+                    && request.snapshot.session.image_mask.as_ref() == Some(&edit.mask)
+            })
             && !s.quick_directory_pending
             && operation > s.operation
             && request.session == session
@@ -1059,14 +1199,20 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         {
             match result {
                 Ok(SaveOutcome::Saved) => {
-                    if let Some(bounds) = s
-                        .bounds
-                        .filter(|_| !s.layout.is_empty() && s.long.is_none())
-                    {
+                    if let Some(bounds) = s.bounds.filter(|_| {
+                        !s.layout.is_empty() && s.long.is_none() && s.masked_edit.is_none()
+                    }) {
                         s.last_region = Some(LastRegion {
                             bounds,
                             layout: s.layout.clone(),
                         });
+                    }
+                    if s.masked_edit.take().is_some() {
+                        s.windows = None;
+                        s.polygon = None;
+                        s.freehand = false;
+                        s.combine = None;
+                        s.frozen_layers = None;
                     }
                     s.phase = ScreenshotPhase::Idle;
                     s.long = None;
@@ -1109,6 +1255,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             }
             s.shortcut_pending = None;
             s.multi = None;
+            s.masked_edit = None;
             s.windows = None;
             s.polygon = None;
             s.freehand = false;
@@ -1137,6 +1284,73 @@ mod tests {
         },
     };
     use std::sync::Arc;
+    #[test]
+    fn masked_editor_roundtrip_preserves_shape_and_r_and_rejects_old_preparation() {
+        let mut state = begin();
+        let mask = Arc::new(vec![bounds()]);
+        state.screenshot.phase = ScreenshotPhase::Selecting;
+        state.screenshot.layout = vec![bounds()];
+        state.screenshot.freehand = true;
+        let polygon = super::super::screenshot_polygon::Polygon {
+            points: vec![Point { x: -1, y: -1 }],
+            mask: Some(mask.clone()),
+        };
+        state.screenshot.polygon = Some(polygon.clone());
+        let last = LastRegion {
+            bounds: bounds(),
+            layout: vec![bounds()],
+        };
+        state.screenshot.last_region = Some(last.clone());
+        let start = || {
+            AppEvent::Screenshot(ScreenshotEvent::AnnotateMask {
+                session: 1,
+                version: 0,
+            })
+        };
+        let ready = |request| {
+            AppEvent::Screenshot(ScreenshotEvent::MaskEditorPrepared {
+                session: 1,
+                request,
+                result: Ok(()),
+            })
+        };
+        assert!(matches!(
+            state.reduce(start()).as_slice(),
+            [AppCommand::Screenshot(
+                ScreenshotCommand::PrepareMaskEditor { .. }
+            )]
+        ));
+        assert!(state.reduce(start()).is_empty());
+        let first = state.screenshot.operation;
+        state.reduce(ready(first));
+        assert_eq!(state.screenshot.phase, ScreenshotPhase::Editing);
+        state.reduce(AppEvent::Screenshot(ScreenshotEvent::ReturnToMask {
+            session: 1,
+            request: first,
+        }));
+        assert_eq!(state.screenshot.polygon, Some(polygon));
+        state.reduce(start());
+        let second = state.screenshot.operation;
+        state.reduce(ready(first));
+        assert_eq!(state.screenshot.phase, ScreenshotPhase::Selecting);
+        state.reduce(ready(second));
+        state.screenshot.phase = ScreenshotPhase::Output;
+        state.reduce(AppEvent::Screenshot(ScreenshotEvent::Completed {
+            session: 1,
+            operation: second,
+            result: Ok(SaveOutcome::Cancelled),
+        }));
+        assert_eq!(state.screenshot.phase, ScreenshotPhase::Editing);
+        state.screenshot.phase = ScreenshotPhase::Output;
+        state.reduce(AppEvent::Screenshot(ScreenshotEvent::Completed {
+            session: 1,
+            operation: second,
+            result: Ok(SaveOutcome::Saved),
+        }));
+        assert_eq!(state.screenshot.last_region, Some(last));
+        assert!(state.screenshot.masked_edit.is_none());
+    }
+
     #[test]
     fn selection_switch_checks_version_content_and_frozen_window_evidence() {
         let mut state = begin();

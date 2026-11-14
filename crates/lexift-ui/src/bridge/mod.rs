@@ -666,6 +666,16 @@ impl UiHandle {
             crate::annotation::screenshot::recording::execute(command)
         });
     }
+    pub fn prepare_mask_editor(
+        &self,
+        session: u64,
+        request: u64,
+        result: lexift_core::Result<Arc<lexift_core::ports::screen_capture::ScreenCaptureFrame>>,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            crate::annotation::screenshot::mask_editor_prepared(session, request, result)
+        });
+    }
     pub fn show_screenshot_capture(
         &self,
         session: u64,

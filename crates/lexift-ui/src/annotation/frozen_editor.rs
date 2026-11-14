@@ -25,15 +25,25 @@ pub(super) struct Editing {
 }
 impl Editing {
     pub(super) fn image(id: u64, bounds: Rect, frames: Arc<Vec<CapturedRegion>>) -> Self {
+        let capture = Arc::new(ScreenCaptureFrame {
+            revision: id,
+            serial: 1,
+            regions: frames.as_ref().clone(),
+        });
+        Self::with_capture(id, bounds, frames, capture)
+    }
+
+    pub(super) fn with_capture(
+        id: u64,
+        bounds: Rect,
+        frames: Arc<Vec<CapturedRegion>>,
+        capture: Arc<ScreenCaptureFrame>,
+    ) -> Self {
         Self {
             pin: None,
             id,
             region: RegionEditor::new(bounds),
-            capture: Arc::new(ScreenCaptureFrame {
-                revision: id,
-                serial: 1,
-                regions: frames.as_ref().clone(),
-            }),
+            capture,
             frames,
             preview: None,
             revision: 0,
@@ -100,7 +110,8 @@ fn input(r: &Registry, index: usize) -> Option<screenshot_preview::Input> {
             })
             .and_then(|_| screenshot::picker_feedback(r)),
         hovered: r.hovered,
-        crop_handles: r.document.mode.is_mouse()
+        crop_handles: r.document.session.image_mask.is_none()
+            && r.document.mode.is_mouse()
             && editing.pin.is_none()
             && !screenshot::long::image_editing(),
         crop_border: editing.pin.is_none() && !screenshot::long::image_editing(),
@@ -372,7 +383,7 @@ pub(super) fn present_shared(
     }
 }
 fn report_failure(id: u64) {
-    if screenshot::refresh::render_failed(id) {
+    if screenshot::mask_editor_failed(id) || screenshot::refresh::render_failed(id) {
         return;
     }
     tracing::debug!(session = id, "Frozen editor presentation failed");

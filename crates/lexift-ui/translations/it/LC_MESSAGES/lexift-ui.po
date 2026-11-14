@@ -2540,3 +2540,9 @@ msgstr "Avvia una nuova cattura"
 
 msgid "Discard the current selection?"
 msgstr "Scartare la selezione corrente?"
+
+msgid "Return to selection"
+msgstr "Torna alla selezione"
+
+msgid "Discard the current annotations?"
+msgstr "Scartare le annotazioni correnti?"

@@ -1364,7 +1364,12 @@ fn show_from(
         let is_live = matches!(origin, Origin::Live(..));
         let masked = matches!(origin, Origin::Screenshot(session, operation)
             if crate::annotation::screenshot::masked_output_current(session, operation));
-        window.set_preserve_picture_alpha(masked);
+        window.set_preserve_picture_alpha(
+            masked
+                || document
+                    .as_ref()
+                    .is_some_and(|(_, _, document)| document.snapshot.session.image_mask.is_some()),
+        );
         if is_live {
             set_live_picture(&window, &image);
         } else {

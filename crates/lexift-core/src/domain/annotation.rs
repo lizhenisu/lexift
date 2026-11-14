@@ -1054,6 +1054,8 @@ pub struct Session {
     pub image_crop: Option<Rect>,
     /// Immutable editable image extent; extra effect samples are not editable pixels.
     pub image_source: Option<Rect>,
+    /// Immutable source-space coverage for an editable shaped image.
+    pub image_mask: Option<std::sync::Arc<Vec<Rect>>>,
     pub next_sequence: i32,
     pub objects: Vec<Object>,
     pub selected: Option<usize>,
@@ -1073,6 +1075,14 @@ pub struct Session {
 }
 
 impl Session {
+    pub fn image_contains(&self, point: super::geometry::Point) -> bool {
+        self.image_mask.as_ref().is_none_or(|mask| {
+            mask.iter().any(|b| {
+                point.x >= b.left && point.x < b.right && point.y >= b.top && point.y < b.bottom
+            })
+        })
+    }
+
     /// Allocation charge for an undo-free image snapshot, including variable-size
     /// object payloads. Call on `restored_image`, whose transaction buffers are empty.
     pub fn image_snapshot_bytes(&self) -> u64 {
@@ -1093,6 +1103,10 @@ impl Session {
             t.content.capacity() + t.font_family.capacity()
         }
         (size_of::<Self>()
+            + self
+                .image_mask
+                .as_ref()
+                .map_or(0, |mask| mask.capacity() * size_of::<Rect>())
             + self.objects.capacity() * size_of::<Object>()
             + self.displays.capacity() * size_of::<Rect>()
             + erased_bytes(&self.watermark_erased)
@@ -1125,6 +1139,7 @@ impl Session {
             image_orientation: self.image_orientation,
             image_crop: self.image_crop,
             image_source: self.image_source,
+            image_mask: self.image_mask.clone(),
             image_pixel_parameters: self.image_pixel_parameters,
             next_sequence: self.next_sequence,
             objects: self.objects.clone(),

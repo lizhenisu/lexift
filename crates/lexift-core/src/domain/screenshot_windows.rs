@@ -139,6 +139,56 @@ impl Selection {
     }
 }
 
+/// Clear unselected pixels in a source-coordinate raster, without copying its backing buffer.
+pub fn clip_pixels(
+    pixels: &mut [u8],
+    bounds: Rect,
+    mask: &[Rect],
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<()> {
+    use std::sync::atomic::Ordering;
+    let stride = usize::try_from(i64::from(bounds.right) - i64::from(bounds.left))
+        .ok()
+        .and_then(|width| width.checked_mul(4))
+        .filter(|&n| n != 0)
+        .ok_or_else(|| Error::new("Invalid masked image"))?;
+    if !pixels.len().is_multiple_of(stride)
+        || i64::try_from(pixels.len() / stride).ok()
+            != Some(i64::from(bounds.bottom) - i64::from(bounds.top))
+    {
+        return Err(Error::new("Invalid masked image"));
+    }
+    let mut pending: Vec<_> = mask
+        .iter()
+        .filter_map(|&part| intersection(bounds, part))
+        .collect();
+    pending.sort_unstable_by_key(|part| part.top);
+    let mut pending = pending.into_iter().peekable();
+    let mut active: Vec<Rect> = Vec::new();
+    for (y, row) in (bounds.top..bounds.bottom).zip(pixels.chunks_exact_mut(stride)) {
+        if cancelled.load(Ordering::Acquire) {
+            return Err(Error::new("Annotation export cancelled"));
+        }
+        active.retain(|part| part.bottom > y);
+        while pending.peek().is_some_and(|part| part.top == y) {
+            let part = pending.next().unwrap();
+            let at = active.partition_point(|old| old.left < part.left);
+            active.insert(at, part);
+        }
+        let mut left = 0;
+        for part in &active {
+            let start = (i64::from(part.left) - i64::from(bounds.left)) as usize * 4;
+            let end = (i64::from(part.right) - i64::from(bounds.left)) as usize * 4;
+            if start > left {
+                row[left..start].fill(0);
+            }
+            left = left.max(end);
+        }
+        row[left..].fill(0);
+    }
+    Ok(())
+}
+
 pub fn compose(frames: &[CapturedRegion], mask: &[Rect]) -> Result<CapturedRegion> {
     let bounds = mask
         .iter()
@@ -209,6 +259,37 @@ mod tests {
             coverage: vec![span(left, right)],
             selectable,
         }
+    }
+
+    #[test]
+    fn annotation_clip_matches_frozen_composite_for_holes_and_negative_origin() {
+        let bounds = Rect {
+            left: -3,
+            top: -2,
+            right: 3,
+            bottom: 2,
+        };
+        let original = CapturedRegion {
+            bounds,
+            pixels: [9, 27, 81, 255].repeat(24),
+        };
+        let mask = [
+            Rect {
+                right: -1,
+                ..bounds
+            },
+            Rect { left: 1, ..bounds },
+            Rect {
+                bottom: -1,
+                ..bounds
+            },
+            Rect { top: 1, ..bounds },
+        ];
+        let expected = compose(std::slice::from_ref(&original), &mask).unwrap();
+        let mut actual = original;
+        clip_pixels(&mut actual.pixels, bounds, &mask, &Default::default()).unwrap();
+        assert_eq!(actual, expected);
+        assert!(actual.pixels.as_chunks::<4>().0.contains(&[0; 4]));
     }
 
     #[test]

@@ -67,7 +67,9 @@ pub(crate) fn compose_frozen(
     if rendered.len() == 1 && rendered[0].bounds == snapshot.monitor {
         return Ok(rendered.pop().unwrap());
     }
-    lexift_core::domain::screen_snapshot::crop_frames(&rendered, snapshot.monitor)
+    let mut image = lexift_core::domain::screen_snapshot::crop_frames(&rendered, snapshot.monitor)?;
+    clip(snapshot, &mut image.pixels, cancelled)?;
+    Ok(image)
 }
 
 pub(crate) fn compose(
@@ -81,16 +83,16 @@ pub(crate) fn compose(
         if cancelled.load(Ordering::Acquire) {
             return Err(Error::new("Annotation export cancelled"));
         }
-        return lexift_core::domain::screen_snapshot::crop_frames(
-            &capture.regions,
-            snapshot.monitor,
-        );
+        let mut image =
+            lexift_core::domain::screen_snapshot::crop_frames(&capture.regions, snapshot.monitor)?;
+        clip(snapshot, &mut image.pixels, cancelled)?;
+        return Ok(image);
     }
     if super::font_service::document_needs_fonts(&snapshot.session) && !super::font_service::ready()
     {
         return Err(Error::new("annotation fonts are not ready"));
     }
-    let cancelled = || cancelled.load(Ordering::Acquire);
+    let is_cancelled = || cancelled.load(Ordering::Acquire);
     let job = mosaic_worker::Job {
         key: 1,
         context: 1,
@@ -99,7 +101,7 @@ pub(crate) fn compose(
         monitors: snapshot.monitors.clone(),
         capture: capture.clone(),
     };
-    let effects = mosaic_worker::process_once(&job, &cancelled)
+    let effects = mosaic_worker::process_once(&job, &is_cancelled)
         .ok_or_else(|| Error::new("Incomplete annotation effects"))?;
     let overlay = annotation_render::render_export(
         &snapshot.session,
@@ -142,8 +144,21 @@ pub(crate) fn compose(
         tiny_skia::Transform::identity(),
         None,
     );
+    clip(snapshot, output.data_mut(), cancelled)?;
     Ok(CapturedRegion {
         bounds: snapshot.monitor,
         pixels: output.take(),
     })
+}
+
+pub(super) fn clip(snapshot: &Snapshot, pixels: &mut [u8], cancelled: &AtomicBool) -> Result<()> {
+    if let Some(mask) = &snapshot.session.image_mask {
+        lexift_core::domain::screenshot_windows::clip_pixels(
+            pixels,
+            snapshot.monitor,
+            mask,
+            cancelled,
+        )?;
+    }
+    Ok(())
 }

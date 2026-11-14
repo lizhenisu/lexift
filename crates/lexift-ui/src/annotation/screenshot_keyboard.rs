@@ -29,7 +29,10 @@ fn current(r: &Registry, generation: u64, owner: Owner) -> bool {
         }
 }
 fn allowed(r: &Registry) -> bool {
-    if super::long::busy() || super::long::image_editing() {
+    if r.document.session.image_mask.is_some()
+        || super::long::busy()
+        || super::long::image_editing()
+    {
         return false;
     }
     r.screenshot.as_ref().is_some_and(|e| {

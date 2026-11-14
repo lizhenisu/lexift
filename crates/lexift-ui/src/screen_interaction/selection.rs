@@ -1518,60 +1518,60 @@ fn finish_submission_from(mut event: SelectionEvent, input_screen: Option<Rect>)
             emit(cancelled);
         }
     }
-    let retained = matches!(event, SelectionEvent::SelectionSubmitted { .. })
-        && STATE.with(|s| {
-            let mut slot = s.borrow_mut();
-            let Some(r) = slot.as_mut().filter(|r| r.screenshot) else {
-                return false;
-            };
-            r.submitted = true;
-            if let SelectionEvent::SelectionSubmitted { focus, .. } = &mut event {
-                let source = r.lifecycle.annotation_foreground.as_ref().and_then(|q| q());
-                let host = r
-                    .windows
-                    .iter()
-                    .find(|h| {
-                        source.is_some()
-                            && (r.lifecycle.annotation_window_token)(h.window.window()) == source
-                    })
-                    .or_else(|| r.windows.iter().find(|h| h.revision() == r.query_host))
-                    .or_else(|| r.windows.first());
-                *focus = host.map(|h| SubmissionFocus {
-                    session: r.generation,
-                    host: h.revision(),
-                    input_host: r
-                        .windows
-                        .iter()
-                        .find(|input| Some(input.bounds) == input_screen)
-                        .map_or(h.revision(), |input| input.revision()),
-                    screen: input_screen.unwrap_or(h.bounds),
-                    source: (r.lifecycle.annotation_window_token)(h.window.window()),
-                    observed: r.lifecycle.annotation_foreground.is_some(),
-                    started: std::time::Instant::now(),
-                });
-                tracing::debug!(
-                    session = r.generation,
-                    ?source,
-                    ?focus,
-                    "Screenshot selection focus captured before retirement"
-                );
-            }
-            r.reuse_pending = None;
-            r.timer.stop();
-            r.candidates.clear();
-            r.elements = Default::default();
-            r.navigation = Default::default();
-            r.hover = None;
-            r.modified = Rc::new(Cell::new(false));
-            for h in &r.windows {
-                h.retire_input();
-            }
-            true
-        });
+    let retained = if let SelectionEvent::SelectionSubmitted { focus, .. } = &mut event {
+        *focus = retire_for_editor(input_screen);
+        focus.is_some()
+    } else {
+        false
+    };
     if !retained {
         close();
     }
     emit(event);
+}
+
+pub(crate) fn retire_for_editor(input_screen: Option<Rect>) -> Option<SubmissionFocus> {
+    STATE.with(|s| {
+        let mut slot = s.borrow_mut();
+        let r = slot.as_mut().filter(|r| r.screenshot && !r.submitted)?;
+        let focus = {
+            let source = r.lifecycle.annotation_foreground.as_ref().and_then(|q| q());
+            let host = r
+                .windows
+                .iter()
+                .find(|h| {
+                    source.is_some()
+                        && (r.lifecycle.annotation_window_token)(h.window.window()) == source
+                })
+                .or_else(|| r.windows.iter().find(|h| h.revision() == r.query_host))
+                .or_else(|| r.windows.first());
+            host.map(|h| SubmissionFocus {
+                session: r.generation,
+                host: h.revision(),
+                input_host: r
+                    .windows
+                    .iter()
+                    .find(|input| Some(input.bounds) == input_screen)
+                    .map_or(h.revision(), |input| input.revision()),
+                screen: input_screen.unwrap_or(h.bounds),
+                source: (r.lifecycle.annotation_window_token)(h.window.window()),
+                observed: r.lifecycle.annotation_foreground.is_some(),
+                started: std::time::Instant::now(),
+            })
+        };
+        r.submitted = true;
+        r.reuse_pending = None;
+        r.timer.stop();
+        r.candidates.clear();
+        r.elements = Default::default();
+        r.navigation = Default::default();
+        r.hover = None;
+        r.modified = Rc::new(Cell::new(false));
+        for h in &r.windows {
+            h.retire_input();
+        }
+        focus
+    })
 }
 
 fn sync_region(r: &mut Registry) {
@@ -1837,7 +1837,8 @@ pub(crate) fn sync_multi(state: &lexift_core::domain::screenshot::ScreenshotStat
         r.mode_has_selection = state.has_selection_to_discard();
         r.mode_selecting = state.can_switch_mode();
         let polygon_changed = r.polygon != state.polygon;
-        let busy = state.phase == lexift_core::domain::screenshot::ScreenshotPhase::Output;
+        let busy = state.phase == lexift_core::domain::screenshot::ScreenshotPhase::Output
+            || state.masked_edit.as_ref().is_some_and(|e| e.preparing);
         let repaint = mode_changed
             || state.polygon.is_none()
             || polygon_changed
@@ -1851,7 +1852,7 @@ pub(crate) fn sync_multi(state: &lexift_core::domain::screenshot::ScreenshotStat
         if r.polygon.is_none() {
             r.polygon_pointer = None;
         }
-        r.window_busy = state.phase == lexift_core::domain::screenshot::ScreenshotPhase::Output;
+        r.window_busy = busy;
         r.multi_error = state.error.clone();
         if r.multi.is_none()
             && r.window_selection.is_none()
@@ -1920,6 +1921,23 @@ fn set_mode_image(window: &OcrSelectionWindow, frame: &CapturedRegion) {
         (frame.bounds.bottom - frame.bounds.top) as u32,
     );
     window.set_frozen_image(slint::Image::from_rgba8(pixels));
+}
+
+pub(crate) fn place_mask_controls(session: u64, bounds: Rect) {
+    STATE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot.as_mut().filter(|r| r.generation == session) else {
+            return;
+        };
+        if !r.windows.iter().any(|h| h.bounds == bounds) {
+            return;
+        }
+        r.multi_screen = Some(bounds);
+        for host in &r.windows {
+            host.window.set_multi_controls(host.bounds == bounds);
+        }
+        sync_mode_controls(r);
+    });
 }
 
 fn sync_mode_controls(r: &Registry) {
@@ -2399,6 +2417,20 @@ fn multi_action(
             },
         )
     };
+    if action == 7 {
+        if let Some(version) = STATE.with(|slot| {
+            slot.borrow()
+                .as_ref()
+                .filter(|r| r.generation == generation && can_copy_mask(r))
+                .map(|r| r.mode_version)
+        }) {
+            emit(SelectionEvent::Windows(ScreenshotEvent::AnnotateMask {
+                session: generation,
+                version,
+            }));
+        }
+        return;
+    }
     if matches!(action, 5 | 6) {
         let allowed = STATE.with(|slot| {
             slot.borrow()

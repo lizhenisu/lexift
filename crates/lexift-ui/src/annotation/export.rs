@@ -80,6 +80,7 @@ pub(super) fn snapshot_at(r: &Registry, monitor: Rect, scale: f32) -> Option<Sna
     session.image_color = r.document.session.image_color;
     session.image_orientation = r.document.session.image_orientation;
     session.image_source = r.document.session.image_source;
+    session.image_mask = r.document.session.image_mask.clone();
     session.objects = r.document.session.objects.clone();
     session.displays = r.document.session.displays.clone();
     session.watermark = r.document.session.watermark.clone();

@@ -182,7 +182,9 @@ pub(super) fn escape_from(origin: focus::Origin) {
         } else if history_editor::active() {
             history_editor::close();
         } else if screenshot::active() {
-            screenshot::cancel();
+            if !screenshot::return_to_mask() {
+                screenshot::cancel();
+            }
         } else {
             close();
         }
@@ -261,6 +263,11 @@ pub(crate) fn toggle(requested_at: Instant) {
         };
         crate::theme::apply(&main);
         main.set_screenshot_mode(r.screenshot.is_some());
+        main.set_masked_screenshot(
+            r.screenshot.as_ref().is_some_and(|e| e.pin.is_none())
+                && r.document.session.image_mask.is_some()
+                && !history_editor::active(),
+        );
         main.set_image_edit_mode(history_editor::active());
         main.set_history_image(history_editor::active());
         main.set_pin_edit_mode(r.screenshot.as_ref().is_some_and(|e| e.pin.is_some()));
@@ -453,7 +460,9 @@ pub(crate) fn toggle(requested_at: Instant) {
                 if pin_editor::active() {
                     pin_editor::finish();
                 } else if screenshot::active() {
-                    screenshot::cancel();
+                    if !screenshot::return_to_mask() {
+                        screenshot::cancel();
+                    }
                 } else {
                     close();
                 }
@@ -550,6 +559,9 @@ impl Registry {
                 pin_editor::retain_closing(self, id, edit);
             } else {
                 slint::Timer::single_shot(Duration::ZERO, move || {
+                    if screenshot::mask_editor_failed(editing.id) {
+                        return;
+                    }
                     screenshot::emit(lexift_core::domain::screenshot::ScreenshotEvent::Failed {
                         session: editing.id,
                         error: crate::i18n::tr("Screenshot unavailable"),

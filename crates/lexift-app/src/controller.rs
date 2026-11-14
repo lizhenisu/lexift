@@ -123,6 +123,13 @@ pub(crate) trait ViewPort: Send + Sync {
     }
     fn restore_screenshot(&self, _session: u64) {}
     fn long_screenshot(&self, _command: lexift_core::domain::long_capture::workflow::Command) {}
+    fn prepare_mask_editor(
+        &self,
+        _session: u64,
+        _request: u64,
+        _result: lexift_core::Result<Arc<lexift_core::ports::screen_capture::ScreenCaptureFrame>>,
+    ) {
+    }
     fn show_screenshot_capture(
         &self,
         _session: u64,
@@ -402,6 +409,14 @@ impl ViewPort for lexift_ui::UiHandle {
     }
     fn screen_recording(&self, command: lexift_core::domain::screenshot::recording::Command) {
         self.screen_recording(command);
+    }
+    fn prepare_mask_editor(
+        &self,
+        session: u64,
+        request: u64,
+        result: lexift_core::Result<Arc<lexift_core::ports::screen_capture::ScreenCaptureFrame>>,
+    ) {
+        self.prepare_mask_editor(session, request, result);
     }
     fn show_screenshot_capture(
         &self,

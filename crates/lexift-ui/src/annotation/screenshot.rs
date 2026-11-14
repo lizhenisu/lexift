@@ -58,6 +58,8 @@ struct Flow {
     toast_operation: Option<u64>,
     refresh_feedback: Option<(u64, u64)>,
     ocr_context: Option<OcrFeedbackContext>,
+    mask_confirmation: window::Slot<crate::LongCaptureConfirmation>,
+    mask_input_screen: Option<Rect>,
 }
 thread_local! { static FLOW:RefCell<Flow>=RefCell::new(Flow::default()); }
 pub(crate) fn active() -> bool {
@@ -551,7 +553,318 @@ pub(crate) fn show(
     selection_host::show_screenshot_with_candidates(
         id, frames, origin, windows, reusable, raw_frames,
     );
+    if let Some(screen) = FLOW.with(|f| f.borrow().mask_input_screen) {
+        selection_host::place_mask_controls(id, screen);
+    }
 }
+pub(super) fn mask_confirmation_open() -> bool {
+    FLOW.with(|s| s.borrow().mask_confirmation.get().is_some())
+}
+
+pub(crate) fn mask_editor_prepared(
+    session: u64,
+    request: u64,
+    result: lexift_core::Result<Arc<ScreenCaptureFrame>>,
+) {
+    let Some(edit) = FLOW.with(|slot| {
+        let flow = slot.borrow();
+        (flow.state.session == session && flow.state.phase == ScreenshotPhase::Selecting)
+            .then_some(flow.state.masked_edit.as_ref())
+            .flatten()
+            .filter(|e| e.request == request && e.preparing)
+            .cloned()
+    }) else {
+        return;
+    };
+    let capture = match result {
+        Ok(capture) => capture,
+        Err(error) => {
+            emit(ScreenshotEvent::MaskEditorPrepared {
+                session,
+                request,
+                result: Err(error),
+            });
+            return;
+        }
+    };
+    let Some(frames) = FLOW.with(|s| s.borrow().frames.clone()) else {
+        return;
+    };
+    let Some(focus) = selection_host::retire_for_editor(None) else {
+        emit(ScreenshotEvent::MaskEditorPrepared {
+            session,
+            request,
+            result: Err(lexift_core::Error::new("Screenshot unavailable")),
+        });
+        return;
+    };
+    FLOW.with(|s| s.borrow_mut().mask_input_screen = Some(focus.screen));
+    emit(ScreenshotEvent::MaskEditorPrepared {
+        session,
+        request,
+        result: Ok(()),
+    });
+    crate::pinned_screenshot::set_frozen(true);
+    crate::screen_interaction::pixel_picker::clear();
+    REGISTRY.with(|slot| {
+        if let Some(r) = slot.borrow_mut().as_mut() {
+            let mut editor = Editing::with_capture(session, edit.bounds, frames, capture.clone());
+            editor.initial_focus = Some(focus);
+            r.screenshot = Some(editor);
+            r.document = Default::default();
+            r.document.session.image_mask = Some(edit.mask);
+            r.document.mode = InteractionMode::Mouse;
+            r.sync_edit_scope();
+            r.lifecycle.annotation_screen_capture =
+                Some(Arc::new(crate::FrozenCapture::from_frame(capture)));
+            r.lifecycle.annotation_renderer = None;
+        }
+    });
+    toggle(Instant::now());
+}
+
+pub(super) fn masked_editing() -> bool {
+    FLOW.with(|s| {
+        let s = s.borrow();
+        s.state.masked_edit.as_ref().is_some_and(|e| !e.preparing)
+    })
+}
+
+pub(super) fn return_to_mask() -> bool {
+    let Some((session, request)) = FLOW.with(|s| {
+        let s = s.borrow();
+        (s.state.phase == ScreenshotPhase::Editing)
+            .then(|| Some((s.state.session, s.state.masked_edit.as_ref()?.request)))
+            .flatten()
+    }) else {
+        return masked_editing();
+    };
+    if REGISTRY.with(|slot| {
+        slot.borrow().as_ref().is_some_and(|r| {
+            r.document.session.can_undo()
+                || !r.document.session.objects.is_empty()
+                || r.document.session.watermark.is_some()
+                || r.editor.window().is_some()
+        })
+    }) {
+        confirm_return_to_mask(session, request);
+    } else {
+        finish_return_to_mask(session, request);
+    }
+    true
+}
+
+fn confirm_return_to_mask(session: u64, request: u64) {
+    if FLOW.with(|s| s.borrow().mask_confirmation.get().is_some()) {
+        return;
+    }
+    let Some((lifecycle, prepare, origin, position, toolbar_size, scale)) = REGISTRY.with(|slot| {
+        let slot = slot.borrow();
+        let r = slot.as_ref()?;
+        let toolbar = r.toolbar_state.main.get()?;
+        Some((
+            r.lifecycle.clone(),
+            r.prepare,
+            r.lifecycle
+                .annotation_foreground
+                .as_ref()
+                .and_then(|get| get()),
+            toolbar.window().position(),
+            toolbar.window().size(),
+            toolbar.window().scale_factor(),
+        ))
+    }) else {
+        return;
+    };
+    let Ok(dialog) =
+        crate::screen_interaction::create(&lifecycle, crate::LongCaptureConfirmation::new)
+    else {
+        return;
+    };
+    crate::theme::apply(&dialog);
+    dialog.set_minimum_content_width(320.);
+    dialog.set_heading(crate::i18n::tr("Return to selection").into());
+    dialog.set_message(crate::i18n::tr("Discard the current annotations?").into());
+    dialog.set_confirm_label(crate::i18n::tr("Discard").into());
+    let width = (dialog.get_content_width() * scale).round() as u32;
+    let height = (dialog.get_content_height() * scale).round() as u32;
+    dialog
+        .window()
+        .set_size(slint::PhysicalSize::new(width, height));
+    let bounds = Rect {
+        left: position.x,
+        top: position.y,
+        right: position.x + toolbar_size.width as i32,
+        bottom: position.y + toolbar_size.height as i32,
+    };
+    let work = (lifecycle.popup_work_area)(Point {
+        x: bounds.left,
+        y: bounds.top,
+    });
+    let target = placement::place_toolbar_popup(
+        bounds,
+        width,
+        height,
+        work,
+        (8. * scale) as i32,
+        placement::Side::Before,
+    );
+    dialog
+        .window()
+        .set_position(slint::PhysicalPosition::new(target.x, target.y));
+    let revision = FLOW.with(|slot| {
+        let mut flow = slot.borrow_mut();
+        let revision = flow.mask_confirmation.open(dialog);
+        let dlg = flow.mask_confirmation.get().unwrap();
+        for accept in [false, true] {
+            let work = flow.mask_confirmation.input();
+            let finish = move || {
+                work.post(move || complete_mask_confirmation(session, request, revision, accept))
+            };
+            if accept {
+                dlg.on_confirm(finish)
+            } else {
+                dlg.on_cancel(finish)
+            }
+        }
+        let work = flow.mask_confirmation.input();
+        dlg.window().on_close_requested(move || {
+            work.post(move || complete_mask_confirmation(session, request, revision, false));
+            slint::CloseRequestResponse::KeepWindowShown
+        });
+        revision
+    });
+    prepare_mask_confirmation(session, request, revision, lifecycle, prepare, origin, 0);
+}
+
+fn prepare_mask_confirmation(
+    session: u64,
+    request: u64,
+    revision: u64,
+    lifecycle: WindowLifecycleCallbacks,
+    prepare: fn(&slint::Window) -> PassiveWindowPreparation,
+    origin: Option<lexift_core::ports::magnifier::WindowToken>,
+    attempt: u8,
+) {
+    let candidate = FLOW.with(|slot| {
+        let flow = slot.borrow();
+        if flow.mask_confirmation.revision() != revision {
+            return None;
+        }
+        Some((
+            flow.mask_confirmation.get()?.clone_strong(),
+            flow.mask_confirmation.input(),
+        ))
+    });
+    let Some((dialog, input)) = candidate else {
+        return;
+    };
+    match prepare(dialog.window()) {
+        PassiveWindowPreparation::Ready => {
+            let weak = dialog.as_weak();
+            let sink = input.pointer_sink(move |event| {
+                if let Some(w) = weak.upgrade() {
+                    crate::bridge::dispatch_pointer_input(w.window(), event);
+                }
+            });
+            if !(lifecycle.configure_menu_window)(dialog.window())
+                || dialog.show().is_err()
+                || !(lifecycle.complete_passive_window_show)(dialog.window(), sink)
+            {
+                complete_mask_confirmation(session, request, revision, false);
+            } else if origin.is_some()
+                && lifecycle
+                    .annotation_foreground
+                    .as_ref()
+                    .and_then(|get| get())
+                    == origin
+            {
+                (lifecycle.activate_user_requested_window)(dialog.window());
+            }
+        }
+        PassiveWindowPreparation::Pending if attempt < 20 => {
+            slint::Timer::single_shot(Duration::from_millis(16), move || {
+                prepare_mask_confirmation(
+                    session,
+                    request,
+                    revision,
+                    lifecycle,
+                    prepare,
+                    origin,
+                    attempt + 1,
+                )
+            });
+        }
+        _ => complete_mask_confirmation(session, request, revision, false),
+    }
+}
+
+fn complete_mask_confirmation(session: u64, request: u64, revision: u64, accept: bool) {
+    let current = FLOW.with(|slot| {
+        let mut flow = slot.borrow_mut();
+        if flow.mask_confirmation.revision() != revision {
+            return false;
+        }
+        flow.mask_confirmation.clear();
+        true
+    });
+    if current && accept {
+        finish_return_to_mask(session, request);
+    }
+}
+
+pub(super) fn mask_editor_failed(session: u64) -> bool {
+    let request = FLOW.with(|slot| {
+        let flow = slot.borrow();
+        (flow.state.session == session && flow.state.phase == ScreenshotPhase::Editing)
+            .then(|| flow.state.masked_edit.as_ref().map(|edit| edit.request))
+            .flatten()
+    });
+    if let Some(request) = request {
+        finish_return_to_mask(session, request);
+        emit(ScreenshotEvent::MaskEditorUnavailable { session, request });
+    }
+    request.is_some()
+}
+
+fn finish_return_to_mask(session: u64, request: u64) {
+    if !FLOW.with(|s| {
+        let s = s.borrow();
+        s.state.session == session
+            && s.state.phase == ScreenshotPhase::Editing
+            && s.state
+                .masked_edit
+                .as_ref()
+                .is_some_and(|e| e.request == request)
+    }) {
+        return;
+    }
+    let origin =
+        REGISTRY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let r = slot.as_mut()?;
+            let foreground = r.lifecycle.annotation_foreground.clone();
+            let current = foreground.as_ref().and_then(|get| get());
+            let owned =
+                current.is_some()
+                    && (r.canvas_state.canvases.iter().any(|c| {
+                        (r.lifecycle.annotation_window_token)(c.window.window()) == current
+                    }) || r.toolbar_state.main.get().is_some_and(|w| {
+                        (r.lifecycle.annotation_window_token)(w.window()) == current
+                    }));
+            r.screenshot = None;
+            r.close();
+            r.document = Default::default();
+            if owned {
+                foreground.and_then(|get| get())
+            } else {
+                None
+            }
+        });
+    FLOW.with(|s| s.borrow_mut().activation = Some(origin));
+    emit(ScreenshotEvent::ReturnToMask { session, request });
+}
+
 pub(crate) fn cancel() {
     if recording::active() {
         recording::cancel();
@@ -574,6 +887,8 @@ pub(crate) fn restore(id: u64) {
             return None;
         };
         s.frames = None;
+        s.mask_confirmation.clear();
+        s.mask_input_screen = None;
         s.recovery.take()
     });
     let Some(recovery) = recovery else { return };
@@ -746,7 +1061,9 @@ pub(super) fn output(kind: ScreenshotOutput) {
     });
     keyboard::commit_current();
     let state = FLOW.with(|s| s.borrow().state.clone());
-    if state.phase != ScreenshotPhase::Editing {
+    if state.phase != ScreenshotPhase::Editing
+        || FLOW.with(|s| s.borrow().mask_confirmation.get().is_some())
+    {
         return;
     }
     let request = REGISTRY.with(|slot| {
@@ -794,7 +1111,7 @@ pub(super) fn pointer(r: &mut Registry, index: usize, event: i32, x: f32, y: f32
     if recording::active() {
         return !recording::can_annotate() || r.document.mode.is_mouse();
     }
-    if recognizing() {
+    if recognizing() || mask_confirmation_open() {
         return true;
     }
     if long::image_editing() {
@@ -805,7 +1122,9 @@ pub(super) fn pointer(r: &mut Registry, index: usize, event: i32, x: f32, y: f32
     }
     // Keep the input host/pointer current even while the numeric popup consumes
     // gestures, so dismissed input cannot restore a hint underneath the cursor.
-    pointer_help(r, index, event, x, y);
+    if r.document.session.image_mask.is_none() {
+        pointer_help(r, index, event, x, y);
+    }
     if size_input::pointer(r, index, event, x, y) {
         return true;
     }
@@ -836,7 +1155,8 @@ pub(super) fn pointer(r: &mut Registry, index: usize, event: i32, x: f32, y: f32
         }
         let bounds = editing.region.bounds().unwrap();
         return event == 0
-            && (point.x < bounds.left
+            && (!r.document.session.image_contains(point)
+                || point.x < bounds.left
                 || point.x >= bounds.right
                 || point.y < bounds.top
                 || point.y >= bounds.bottom);
@@ -844,6 +1164,11 @@ pub(super) fn pointer(r: &mut Registry, index: usize, event: i32, x: f32, y: f32
     let output = FLOW.with(|s| s.borrow().state.phase == ScreenshotPhase::Output);
     if output {
         return true;
+    }
+    if r.document.session.image_mask.is_some() {
+        return FLOW.with(|s| s.borrow().mask_confirmation.get().is_some())
+            || r.document.mode.is_mouse()
+            || event == 0 && !r.document.session.image_contains(point);
     }
     let mut desktop = editing.frames[0].bounds;
     for frame in editing.frames.iter() {
@@ -948,6 +1273,9 @@ fn pointer_help(r: &mut Registry, index: usize, event: i32, x: f32, y: f32) {
 pub(super) fn help_feedback(
     r: &Registry,
 ) -> Option<crate::screen_interaction::screenshot_help::Feedback> {
+    if r.document.session.image_mask.is_some() {
+        return None;
+    }
     if long::busy() || long::image_editing() {
         return None;
     }
@@ -1026,6 +1354,9 @@ pub(super) fn refresh_help(r: &mut Registry) {
 pub(super) fn picker_feedback(
     r: &Registry,
 ) -> Option<crate::screen_interaction::pixel_picker::Feedback> {
+    if r.document.session.image_mask.is_some() {
+        return None;
+    }
     if long::busy() || long::image_editing() {
         return None;
     }
@@ -1114,6 +1445,9 @@ pub(super) fn label_feedback(
     r: &Registry,
 ) -> Option<crate::screen_interaction::size_label::Feedback> {
     if long::busy() || long::image_editing() {
+        return None;
+    }
+    if r.document.session.image_mask.is_some() {
         return None;
     }
     let editing = r.screenshot.as_ref().filter(|e| e.pin.is_none())?;

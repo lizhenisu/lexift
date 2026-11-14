@@ -691,8 +691,17 @@ impl ScreenshotRuntime {
             snapshot.scale = scale;
             rendered.push(self.render.compose(&snapshot, capture.clone(), cancel)?);
         }
+        let mut image = crop_frames(&rendered, visible)?;
+        if let Some(mask) = &snapshot.session.image_mask {
+            lexift_core::domain::screenshot_windows::clip_pixels(
+                &mut image.pixels,
+                visible,
+                mask,
+                cancel,
+            )?;
+        }
         lexift_core::domain::image_transform::finish_scaled(
-            crop_frames(&rendered, visible)?,
+            image,
             base.bounds,
             orientation,
             color,
@@ -754,6 +763,61 @@ impl ScreenshotRuntime {
     }
     pub fn execute(self: &Arc<Self>, controller: &Arc<AppController>, command: ScreenshotCommand) {
         match command {
+            ScreenshotCommand::PrepareMaskEditor {
+                session,
+                mode,
+                edit,
+            } => {
+                let source = self
+                    .session
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .filter(|s| s.id == session)
+                    .and_then(|s| {
+                        Some((
+                            if mode == lexift_core::domain::screenshot::SelectionMode::Windows {
+                                s.raw_frames.as_ref().or(s.frames.as_ref())?.clone()
+                            } else {
+                                s.frames.clone()?
+                            },
+                            s.cancelled.clone(),
+                        ))
+                    });
+                let controller = controller.clone();
+                controller.clone().runtime.spawn_blocking(move || {
+                    let result = (|| {
+                        let (frames, cancelled) =
+                            source.ok_or_else(|| Error::new("Screenshot unavailable"))?;
+                        let bytes = frames.iter().map(|frame| frame.pixels.len()).sum::<usize>();
+                        if bytes.checked_mul(5).is_none_or(|n| n > 512 * 1024 * 1024) {
+                            return Err(Error::new("Window selection is too large"));
+                        }
+                        let mut regions = Vec::with_capacity(frames.len());
+                        for frame in frames.iter() {
+                            if cancelled.load(Ordering::Acquire) {
+                                return Err(Error::new("Screenshot unavailable"));
+                            }
+                            let mut frame = frame.clone();
+                            lexift_core::domain::screenshot_windows::clip_pixels(
+                                &mut frame.pixels,
+                                frame.bounds,
+                                &edit.mask,
+                                &cancelled,
+                            )?;
+                            regions.push(frame);
+                        }
+                        Ok(Arc::new(ScreenCaptureFrame {
+                            revision: session,
+                            serial: edit.request,
+                            regions,
+                        }))
+                    })();
+                    controller
+                        .ui
+                        .prepare_mask_editor(session, edit.request, result);
+                });
+            }
             ScreenshotCommand::OutputMask {
                 session,
                 operation,
@@ -1306,13 +1370,29 @@ impl ScreenshotRuntime {
                 kind,
                 request,
             } => {
+                let shaped = request.snapshot.session.image_mask.is_some();
+                let use_raw = shaped
+                    && controller
+                        .state
+                        .lock()
+                        .unwrap()
+                        .screenshot
+                        .windows
+                        .is_some();
                 let job = self
                     .session
                     .lock()
                     .unwrap_or_else(|p| p.into_inner())
                     .as_ref()
                     .filter(|s| s.id == session)
-                    .and_then(|s| s.frames.clone().map(|frames| (frames, s.cancelled.clone())));
+                    .and_then(|s| {
+                        if use_raw {
+                            s.raw_frames.as_ref().or(s.frames.as_ref())
+                        } else {
+                            s.frames.as_ref()
+                        }
+                        .map(|frames| (frames.clone(), s.cancelled.clone()))
+                    });
                 let Some((frames, cancelled)) = job else {
                     return;
                 };
@@ -1339,7 +1419,11 @@ impl ScreenshotRuntime {
                                             owner: request.snapshot.owner,
                                             default_name: request.snapshot.name.clone(),
                                             title: request.snapshot.title.clone(),
-                                            options: crate::annotation_export::save_options(&worker_controller),
+                                            options: {
+                                                let mut options = crate::annotation_export::save_options(&worker_controller);
+                                                if shaped { options.formats.retain(|format| *format == options.default_format); }
+                                                options
+                                            },
                                         },
                                         cancelled.clone(),
                                     ),
@@ -1440,18 +1524,24 @@ impl ScreenshotRuntime {
         request: &ExportRequest,
         operation: u64,
     ) -> Result<(Arc<CapturedRegion>, Arc<ScreenCaptureFrame>, ExportRequest)> {
-        let base = Arc::new(crop_frames(
-            frames,
-            if request.snapshot.session.image_crop.is_some() {
-                request
-                    .snapshot
-                    .session
-                    .image_source
-                    .unwrap_or(request.snapshot.monitor)
-            } else {
-                request.snapshot.monitor
-            },
-        )?);
+        let base = if let Some(mask) = &request.snapshot.session.image_mask {
+            Arc::new(lexift_core::domain::screenshot_windows::compose(
+                frames, mask,
+            )?)
+        } else {
+            Arc::new(crop_frames(
+                frames,
+                if request.snapshot.session.image_crop.is_some() {
+                    request
+                        .snapshot
+                        .session
+                        .image_source
+                        .unwrap_or(request.snapshot.monitor)
+                } else {
+                    request.snapshot.monitor
+                },
+            )?)
+        };
         let mut pin_snapshot = (*request.snapshot).clone();
         if request.snapshot.session.image_crop.is_none() {
             pin_snapshot.monitors = lexift_core::domain::screen_snapshot::render_partitions(
@@ -1465,7 +1555,11 @@ impl ScreenshotRuntime {
             request: request.request,
             snapshot: Arc::new(pin_snapshot),
         };
-        let mut required = self.render.regions(&pin_request.snapshot);
+        let mut required = if pin_request.snapshot.session.image_mask.is_some() {
+            Vec::new()
+        } else {
+            self.render.regions(&pin_request.snapshot)
+        };
         // Keep complete frozen sampling pixels for effects crossing a crop edge.
         if request.snapshot.session.image_crop.is_some() {
             required.extend(frames.iter().map(|f| f.bounds));
@@ -1572,20 +1666,52 @@ impl ScreenshotRuntime {
         let capture = Arc::new(ScreenCaptureFrame {
             revision: request.request,
             serial: request.request,
-            regions: frames.as_ref().clone(),
+            regions: frames
+                .iter()
+                .map(|source| {
+                    let mut frame = source.clone();
+                    if let Some(mask) = &request.snapshot.session.image_mask {
+                        lexift_core::domain::screenshot_windows::clip_pixels(
+                            &mut frame.pixels,
+                            frame.bounds,
+                            mask,
+                            cancelled,
+                        )?;
+                    }
+                    Ok(frame)
+                })
+                .collect::<Result<_>>()?,
         });
+        let partitions = if request.snapshot.session.image_mask.is_some() {
+            lexift_core::domain::screen_snapshot::render_partitions(
+                request.snapshot.monitor,
+                &request.snapshot.monitors,
+                request.snapshot.scale,
+            )
+        } else {
+            request.snapshot.monitors.clone()
+        };
         let mut rendered = Vec::new();
-        for (monitor, scale) in &request.snapshot.monitors {
+        for (monitor, scale) in partitions {
             if cancelled.load(Ordering::Acquire) {
                 return Err(Error::new("Screenshot cancelled"));
             }
             let mut snapshot = (*request.snapshot).clone();
-            snapshot.monitor = *monitor;
-            snapshot.scale = *scale;
+            snapshot.monitor = monitor;
+            snapshot.scale = scale;
             rendered.push(self.render.compose(&snapshot, capture.clone(), cancelled)?);
         }
+        let mut cropped = crop_frames(&rendered, request.snapshot.monitor)?;
+        if let Some(mask) = &request.snapshot.session.image_mask {
+            lexift_core::domain::screenshot_windows::clip_pixels(
+                &mut cropped.pixels,
+                cropped.bounds,
+                mask,
+                cancelled,
+            )?;
+        }
         lexift_core::domain::image_transform::finish_scaled(
-            crop_frames(&rendered, request.snapshot.monitor)?,
+            cropped,
             request
                 .snapshot
                 .session
