@@ -15,6 +15,11 @@ pub(super) enum Owner {
         operation: u64,
         revision: u64,
     },
+    MaskSelection {
+        generation: u64,
+        host: u64,
+        bounds: Rect,
+    },
     Toolbar(u64),
     Panel(u64),
     SizeInput(u64),
@@ -108,6 +113,13 @@ fn with_owner_window<T>(
             operation,
             revision,
         } => screenshot::recording::with_hint_window(session, operation, revision, f),
+        Owner::MaskSelection {
+            generation,
+            host,
+            bounds,
+        } => {
+            crate::screen_interaction::selection::with_mask_hint_window(generation, host, bounds, f)
+        }
         Owner::Toolbar(id) if id == r.toolbar_state.main.revision() => {
             r.toolbar_state.main.get().map(|v| f(v.window()))
         }
@@ -158,6 +170,40 @@ bind!(bind_long_control, crate::LongCaptureControl);
 bind!(bind_recording_preview, crate::RecordingPreview);
 bind!(bind_recording_control, crate::RecordingControl);
 bind!(bind_image_editor, crate::AnnotationCanvas);
+bind!(bind_mask_selection, crate::OcrSelectionWindow);
+
+pub(crate) fn wire_mask_selection(
+    view: &crate::OcrSelectionWindow,
+    session: u64,
+    host: u64,
+    bounds: Rect,
+) {
+    if let Some(generation) =
+        REGISTRY.with(|slot| slot.try_borrow().ok()?.as_ref().map(|r| r.generation))
+    {
+        bind_mask_selection(
+            view,
+            generation,
+            Owner::MaskSelection {
+                generation: session,
+                host,
+                bounds,
+            },
+        );
+    }
+}
+
+pub(crate) fn clear_mask_selection(session: u64, host: u64) {
+    REGISTRY.with(|slot| {
+        if let Ok(mut slot) = slot.try_borrow_mut()
+            && let Some(r) = slot.as_mut()
+            && r.hints.pending.as_ref().is_some_and(|p| matches!(p.owner,
+                Owner::MaskSelection { generation, host: id, .. } if generation == session && id == host))
+        {
+            r.hints.clear();
+        }
+    });
+}
 fn request(generation: u64, owner: Owner, text: slint::SharedString, anchor: [f32; 4]) {
     REGISTRY.with(|slot| {
         let mut slot = slot.borrow_mut();

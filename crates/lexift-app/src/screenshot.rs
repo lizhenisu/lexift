@@ -758,6 +758,7 @@ impl ScreenshotRuntime {
                 mask,
                 target,
             } => {
+                let pin = matches!(target, lexift_core::domain::screenshot::MaskTarget::Pin);
                 let current = self
                     .session
                     .lock()
@@ -767,7 +768,7 @@ impl ScreenshotRuntime {
                     .and_then(|job| {
                         Some((
                             job.frames.clone()?,
-                            job.source.snapshot.name.clone(),
+                            job.source.clone(),
                             job.cancelled.clone(),
                         ))
                     });
@@ -775,10 +776,34 @@ impl ScreenshotRuntime {
                 let this = self.clone();
                 controller.clone().runtime.spawn_blocking(move || {
                     let result = (|| {
-                        let (frames, default_name, cancelled) = current.ok_or_else(|| Error::new("Screenshot is unavailable"))?;
+                        let (frames, source, cancelled) = current.ok_or_else(|| Error::new("Screenshot is unavailable"))?;
                         let image = Arc::new(lexift_core::domain::screenshot_windows::compose(&frames, &mask)?);
                         use lexift_core::domain::screenshot::MaskTarget;
                         let result = match target {
+                            MaskTarget::Pin => {
+                                let mut document = history::retained_document(None, image.bounds);
+                                let snapshot = Arc::make_mut(&mut document.snapshot);
+                                snapshot.scale = source.snapshot.scale;
+                                // The masked image is a single editable surface, including
+                                // transparent holes between physical displays.
+                                snapshot.monitors = vec![(image.bounds, snapshot.scale)];
+                                let samples = Arc::new(ScreenCaptureFrame { revision: 0, serial: 0, regions: vec![] });
+                                this.retain_history(&controller,
+                                    lexift_core::domain::image_history::workflow::OutputKey::Screenshot { session, operation },
+                                    lexift_core::domain::image_history::ImageSnapshot {
+                                        base: image.clone(), samples: samples.clone(),
+                                        document: document.clone(), hidden: false,
+                                    }, image.clone());
+                                let current = this.session.lock().unwrap();
+                                if current.as_ref().is_some_and(|job| job.id == session && !cancelled.load(Ordering::Acquire)) {
+                                    this.pin_pending.lock().unwrap().insert((session, operation), image.clone());
+                                    this.pin_pending_samples.lock().unwrap().insert((session, operation), samples.clone());
+                                    drop(current);
+                                    controller.ui.show_editable_pinned_screenshot(session, operation,
+                                        image.clone(), image, samples, document);
+                                }
+                                return Ok(SaveOutcome::Cancelled);
+                            }
                             MaskTarget::Copy => {
                                 this.write_image(&image, &cancelled)?;
                                 SaveOutcome::Saved
@@ -787,7 +812,7 @@ impl ScreenshotRuntime {
                                 let mut options = crate::annotation_export::save_options(&controller);
                                 options.formats.retain(|format| *format == options.default_format);
                                 this.save.save_image(ImageSaveRequest {
-                                    image: (*image).clone(), owner, default_name, title, options,
+                                    image: (*image).clone(), owner, default_name: source.snapshot.name.clone(), title, options,
                                 }, cancelled)?
                             }
                         };
@@ -803,7 +828,9 @@ impl ScreenshotRuntime {
                         }
                         Ok(result)
                     })();
-                    controller.dispatch(AppEvent::Screenshot(ScreenshotEvent::MaskedOutputFinished(session, operation, result)));
+                    if !pin || result.is_err() {
+                        controller.dispatch(AppEvent::Screenshot(ScreenshotEvent::MaskedOutputFinished(session, operation, result)));
+                    }
                 });
             }
             ScreenshotCommand::SaveRegions {

@@ -1128,6 +1128,16 @@ pub(super) fn label_feedback(
     crate::screen_interaction::size_label::layout(bounds, &screens, area)
 }
 
+pub(crate) fn masked_output_current(session: u64, operation: u64) -> bool {
+    output_current(session, operation)
+        && FLOW.with(|slot| {
+            let flow = slot.borrow();
+            flow.state.windows.is_some()
+                || flow.state.polygon.is_some()
+                || flow.state.combine.is_some()
+        })
+}
+
 pub(crate) fn output_current(session: u64, operation: u64) -> bool {
     FLOW.with(|s| {
         let s = s.borrow();

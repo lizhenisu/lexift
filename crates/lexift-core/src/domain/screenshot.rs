@@ -124,6 +124,7 @@ impl ScreenshotState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MaskTarget {
     Copy,
+    Pin,
     Save {
         owner: Option<crate::ports::magnifier::WindowToken>,
         title: String,
@@ -385,6 +386,16 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
     let command = |command| vec![AppCommand::Screenshot(command)];
     let delay_allowed = delay_available(state);
     let s = &mut state.screenshot;
+    let event = match event {
+        ScreenshotEvent::Completed {
+            session,
+            operation,
+            result,
+        } if s.windows.is_some() || s.polygon.is_some() || s.combine.is_some() => {
+            ScreenshotEvent::MaskedOutputFinished(session, operation, result)
+        }
+        event => event,
+    };
     match event {
         ScreenshotEvent::WindowLayers(session, layers)
             if s.session == session && s.phase == ScreenshotPhase::Preparing =>

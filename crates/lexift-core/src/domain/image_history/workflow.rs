@@ -561,7 +561,10 @@ pub(crate) fn after(
     for command in commands {
         match command {
             AppCommand::Screenshot(ScreenshotCommand::OutputMask {
-                session, operation, ..
+                session,
+                operation,
+                target,
+                ..
             }) => {
                 h.start(
                     OutputKey::Screenshot {
@@ -570,7 +573,7 @@ pub(crate) fn after(
                     },
                     Source::Screenshot(*session),
                     Kind::Screenshot,
-                    false,
+                    matches!(target, crate::domain::screenshot::MaskTarget::Pin),
                 );
             }
             AppCommand::Screenshot(ScreenshotCommand::SaveRegions {

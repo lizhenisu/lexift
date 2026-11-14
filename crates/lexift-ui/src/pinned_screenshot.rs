@@ -206,6 +206,7 @@ impl Drop for LiveView {
     }
 }
 struct Pin {
+    awaiting_masked_frame: bool,
     live: Option<LiveView>,
     view: zoom::View,
     pointer_sink: Option<crate::bridge::PopupPointerSink>,
@@ -976,7 +977,9 @@ fn retire(id: u64, user: bool) {
             return None;
         }
         let record = content
-            .filter(|_| pin.phase == Phase::Visible && pin.live.is_none())
+            .filter(|_| {
+                pin.phase == Phase::Visible && pin.live.is_none() && !pin.awaiting_masked_frame
+            })
             .map(
                 |content| lexift_core::domain::pinned_image::ClosedGeometry {
                     content,
@@ -1010,7 +1013,14 @@ fn close(id: u64) {
     });
     emit_pin(lexift_core::domain::pinned_image::Event::Closed { id });
     if let Some((pin, lifecycle)) = retired {
+        let cancelled =
+            (pin.awaiting_masked_frame && pin.phase == Phase::Closing).then_some(pin.origin);
         destroy(id, pin, &lifecycle);
+        if let Some(origin) = cancelled
+            && origin.current()
+        {
+            origin.complete(Ok(SaveOutcome::Cancelled));
+        }
     }
     crate::bridge::schedule_idle_memory_trim();
 }
@@ -1142,6 +1152,16 @@ fn display_picture(
 ) -> slint::Image {
     let mut buffer =
         slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(pixels, width, height);
+    if window.get_preserve_picture_alpha() {
+        // A layered HWND skips zero-alpha pixels during hit testing. The
+        // smallest nonzero alpha keeps the rectangular surface interactive.
+        for pixel in buffer.make_mut_slice() {
+            if pixel.a == 0 {
+                pixel.a = 1;
+            }
+        }
+        return slint::Image::from_rgba8_premultiplied(buffer);
+    }
     let bg = window.global::<crate::Colors>().get_surface();
     for p in buffer.make_mut_slice() {
         if p.a != 255 {
@@ -1342,6 +1362,9 @@ fn show_from(
             .map_err(|_| ())?;
         crate::theme::apply(&window);
         let is_live = matches!(origin, Origin::Live(..));
+        let masked = matches!(origin, Origin::Screenshot(session, operation)
+            if crate::annotation::screenshot::masked_output_current(session, operation));
+        window.set_preserve_picture_alpha(masked);
         if is_live {
             set_live_picture(&window, &image);
         } else {
@@ -1356,6 +1379,9 @@ fn show_from(
         window.window().on_winit_window_event(move |_, event| {
             if is_live && matches!(event, winit::event::WindowEvent::RedrawRequested) {
                 queue_live_ack(id);
+            }
+            if masked && matches!(event, winit::event::WindowEvent::RedrawRequested) {
+                slint::Timer::single_shot(Duration::ZERO, move || finish_masked_pin(id));
             }
             if matches!(
                 event,
@@ -1529,6 +1555,7 @@ fn show_from(
         r.windows.insert(
             id,
             Pin {
+                awaiting_masked_frame: masked,
                 live: is_live.then(|| LiveView {
                     first_frame: slint::Timer::default(),
                     staged: Some(image.clone()),
@@ -1682,6 +1709,84 @@ fn begin_drag(id: u64, serial: u64) {
         }
     }
 }
+fn publish_opened_pin(id: u64, origin: Origin) {
+    if !matches!(origin, Origin::Live(..)) {
+        emit_pin(match origin {
+            Origin::Live(..) => unreachable!(),
+            Origin::Screenshot(session, operation) => {
+                lexift_core::domain::pinned_image::Event::Opened {
+                    id,
+                    source: (session, operation),
+                }
+            }
+            Origin::Restored(source, request, ..) => {
+                lexift_core::domain::pinned_image::Event::RestoreFinished {
+                    source,
+                    request,
+                    id: Some(id),
+                }
+            }
+            Origin::History(key, hidden) => {
+                lexift_core::domain::pinned_image::Event::HistoryOpened { id, key, hidden }
+            }
+        });
+        let document = STATE.with(|s| {
+            s.borrow()
+                .as_ref()
+                .and_then(|r| r.windows.get(&id))
+                .and_then(|p| p.document.clone())
+        });
+        if let Some(document) = document {
+            emit_pin(lexift_core::domain::pinned_image::Event::DocumentChanged { id, document });
+        }
+    }
+    zoom::settled(id);
+}
+
+fn take_masked_pin(id: u64) -> Option<Origin> {
+    STATE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let pin = slot.as_mut()?.windows.get_mut(&id)?;
+        if !std::mem::take(&mut pin.awaiting_masked_frame) {
+            return None;
+        }
+        Some(pin.origin)
+    })
+}
+
+fn fail_masked_pin(id: u64) {
+    if let Some(origin) = take_masked_pin(id) {
+        close(id);
+        origin.complete(Err(lexift_core::Error::new(crate::i18n::tr(
+            "Screenshot unavailable",
+        ))));
+    }
+}
+
+fn finish_masked_pin(id: u64) {
+    let candidate = STATE.with(|slot| {
+        let slot = slot.borrow();
+        let r = slot.as_ref()?;
+        let pin = r.windows.get(&id)?;
+        (pin.awaiting_masked_frame && pin.phase == Phase::Visible).then(|| {
+            (
+                pin.window.get().unwrap().clone_strong(),
+                r.lifecycle.window_pin_presented.clone(),
+                pin.origin,
+            )
+        })
+    });
+    let Some((window, confirm, origin)) = candidate else {
+        return;
+    };
+    if !origin.current() {
+        fail_masked_pin(id);
+    } else if confirm(window.window()) && take_masked_pin(id).is_some() {
+        publish_opened_pin(id, origin);
+        origin.complete(Ok(SaveOutcome::Saved));
+    }
+}
+
 fn prepare(id: u64, attempt: u8) {
     let value = STATE.with(|slot| {
         let slot = slot.borrow();
@@ -1818,41 +1923,20 @@ fn prepare(id: u64, attempt: u8) {
                     }
                 });
             }
-            if success && !matches!(origin, Origin::Live(..)) {
-                emit_pin(match origin {
-                    Origin::Live(..) => unreachable!(),
-                    Origin::Screenshot(session, operation) => {
-                        lexift_core::domain::pinned_image::Event::Opened {
-                            id,
-                            source: (session, operation),
-                        }
-                    }
-                    Origin::Restored(source, request, ..) => {
-                        lexift_core::domain::pinned_image::Event::RestoreFinished {
-                            source,
-                            request,
-                            id: Some(id),
-                        }
-                    }
-                    Origin::History(key, hidden) => {
-                        lexift_core::domain::pinned_image::Event::HistoryOpened { id, key, hidden }
+            if success
+                && matches!(origin, Origin::Screenshot(session, operation)
+                if crate::annotation::screenshot::masked_output_current(session, operation))
+            {
+                STATE.with(|slot| {
+                    if let Some(pin) = slot.borrow().as_ref().and_then(|r| r.windows.get(&id)) {
+                        pin.window
+                            .prepare_after(Duration::from_secs(3), move || fail_masked_pin(id));
                     }
                 });
-                let document = STATE.with(|s| {
-                    s.borrow()
-                        .as_ref()
-                        .and_then(|r| r.windows.get(&id))
-                        .and_then(|p| p.document.clone())
-                });
-                if let Some(document) = document {
-                    emit_pin(lexift_core::domain::pinned_image::Event::DocumentChanged {
-                        id,
-                        document,
-                    });
-                }
+                return;
             }
             if success {
-                zoom::settled(id);
+                publish_opened_pin(id, origin);
             }
             origin.complete(if success {
                 Ok(SaveOutcome::Saved)
@@ -1929,7 +2013,19 @@ fn fit(id: u64, zoom: Option<(f32, f32, f32)>) {
     } else {
         margin
     };
-    let (inner_pos, inner_size, restoring) = match origin {
+    let (inner_pos, inner_size, keep_smaller_size) = match origin {
+        Origin::Screenshot(..)
+            if phase == Phase::Preparing && window.get_preserve_picture_alpha() =>
+        {
+            (
+                slint::PhysicalPosition::new(image.left, image.top),
+                slint::PhysicalSize::new(
+                    (image.right - image.left) as u32,
+                    (image.bottom - image.top) as u32,
+                ),
+                true,
+            )
+        }
         Origin::Restored(_, _, geometry, _, _, anchor) if phase == Phase::Preparing => {
             let position =
                 restored_position(geometry.content, anchor, &(lifecycle.annotation_displays)());
@@ -1979,7 +2075,15 @@ fn fit(id: u64, zoom: Option<(f32, f32, f32)>) {
             y - window.get_frame_inset(),
         )
     });
-    let (size, position) = placement(inner_pos, inner_size, image, area, scale, zoom, restoring);
+    let (size, position) = placement(
+        inner_pos,
+        inner_size,
+        image,
+        area,
+        scale,
+        zoom,
+        keep_smaller_size,
+    );
     let size = zoom::initial_size(size, margin, lifecycle.pin_window_budget);
     window.window().set_size(slint::PhysicalSize::new(
         size.width + 2 * margin as u32,

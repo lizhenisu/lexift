@@ -450,3 +450,47 @@ fn combined_mask_save_failure_and_stale_success_preserve_history_and_reuse() {
     assert!(state.image_history.cache.entry(ticket.origin).is_some());
     assert_eq!(state.screenshot.last_region, Some(last));
 }
+
+#[test]
+fn masked_pin_inherits_source_before_screenshot_completion() {
+    use crate::domain::{
+        screenshot::{LastRegion, MaskTarget},
+        screenshot_combine::Edit,
+    };
+    let mut state = AppState::default();
+    state.screenshot.session = 1;
+    state.screenshot.phase = ScreenshotPhase::Selecting;
+    state.screenshot.layout = vec![bounds()];
+    let last = LastRegion {
+        bounds: bounds(),
+        layout: vec![bounds()],
+    };
+    state.screenshot.last_region = Some(last.clone());
+    state.screenshot.combine = Some(Default::default());
+    state.reduce(AppEvent::Screenshot(ScreenshotEvent::CombineEdit(
+        1,
+        Edit::Apply(bounds()),
+    )));
+    state.reduce(AppEvent::Screenshot(ScreenshotEvent::OutputMask(
+        1,
+        MaskTarget::Pin,
+    )));
+    let key = OutputKey::Screenshot {
+        session: 1,
+        operation: 1,
+    };
+    let ticket = prepared(&mut state, key);
+    assert!(state.image_history.cache.entry(ticket.origin).is_none());
+    state.reduce(AppEvent::PinnedImage(pin::Event::Opened {
+        id: 1,
+        source: (1, 1),
+    }));
+    finish(&mut state, key, Ok(SaveOutcome::Saved));
+    assert_eq!(state.screenshot.phase, ScreenshotPhase::Idle);
+    assert_eq!(state.screenshot.last_region, Some(last));
+    assert!(state.image_history.cache.entry(ticket.origin).is_some());
+    assert_eq!(
+        state.image_history.sources.get(&Source::Pin(1)).unwrap().0,
+        ticket.origin
+    );
+}

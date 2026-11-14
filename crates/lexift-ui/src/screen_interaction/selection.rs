@@ -413,6 +413,22 @@ pub(crate) fn shutdown() {
     let retired = STATE.with(|s| s.borrow_mut().take());
     drop(retired);
 }
+pub(crate) fn with_mask_hint_window<T>(
+    generation: u64,
+    host: u64,
+    bounds: Rect,
+    f: impl FnOnce(&slint::Window) -> T,
+) -> Option<T> {
+    STATE.with(|slot| {
+        let slot = slot.borrow();
+        let r = slot
+            .as_ref()
+            .filter(|r| r.generation == generation && r.query_host == host)?;
+        let window = r.windows.iter().find(|w| w.bounds == bounds)?;
+        Some(f(window.window.window()))
+    })
+}
+
 pub(crate) fn close() {
     STATE.with(|s| {
         if let Some(r) = s
@@ -429,6 +445,10 @@ pub(crate) fn close() {
     });
     STATE.with(|s| {
         if let Some(r) = s.borrow_mut().as_mut() {
+            let (generation, host) = (r.generation, r.query_host);
+            slint::Timer::single_shot(Duration::ZERO, move || {
+                crate::annotation::hints::clear_mask_selection(generation, host);
+            });
             r.timer.stop();
             r.query_host = r.query_host.wrapping_add(1);
             r.query_pending = None;
@@ -583,6 +603,14 @@ fn show_prepared(
                     || r.combine.is_some()
                     || r.freehand,
             );
+            if window.get_mask_copy_mode() {
+                crate::annotation::hints::wire_mask_selection(
+                    &window,
+                    generation,
+                    r.query_host,
+                    frame.bounds,
+                );
+            }
             window.set_combine_mode(r.combine.is_some());
             window.set_polygon_mode(r.polygon.is_some() || r.freehand);
             window.set_freehand_mode(r.freehand);
@@ -2108,7 +2136,7 @@ fn multi_action(
             },
         )
     };
-    if action == 5 {
+    if matches!(action, 5 | 6) {
         let allowed = STATE.with(|slot| {
             slot.borrow()
                 .as_ref()
@@ -2117,7 +2145,11 @@ fn multi_action(
         if allowed {
             emit(SelectionEvent::Windows(ScreenshotEvent::OutputMask(
                 generation,
-                MaskTarget::Copy,
+                if action == 6 {
+                    MaskTarget::Pin
+                } else {
+                    MaskTarget::Copy
+                },
             )));
         }
         return;

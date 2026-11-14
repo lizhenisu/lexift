@@ -69,6 +69,7 @@ export component PinnedScreenshotWindow inherits Window {
     in-out property <bool> topmost:true;
     out property <float> frame-inset: MenuMetrics.shadow-inset / 1px;
     in property <bool> live;
+    in property <bool> preserve-picture-alpha;
     callback freeze-live();
     callback press-changed(bool); callback drag-requested(); callback close-requested(); callback zoom-requested(float,float,float);
     callback output-requested(int); callback option-requested(int,bool);

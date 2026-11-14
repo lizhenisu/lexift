@@ -72,7 +72,7 @@ mod font_service;
 mod font_workflow;
 mod fonts;
 mod frame;
-mod hints;
+pub(crate) mod hints;
 #[cfg(test)]
 mod history_tests;
 mod image_crop;

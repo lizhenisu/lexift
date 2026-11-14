@@ -1,3 +1,4 @@
+import { ToolButton } from "annotation.slint";
 export struct PolygonVertex { x: length, y: length }
 import { Button } from "std-widgets.slint";
 import { Colors } from "design/colors.slint";
@@ -158,6 +159,7 @@ export component OcrSelectionWindow inherits Window {
                 if !root.window-mode: Button { text: root.freehand-mode ? @tr("Redraw contour") : root.combine-mode ? @tr("Undo") : root.polygon-mode ? (root.polygon-closed ? @tr("Continue editing polygon") : @tr("Remove last vertex")) : @tr("Delete current region"); enabled: root.multi-can-delete; clicked => { root.multi-action(0); } }
                 Button { text: root.freehand-mode ? @tr("Save PNG") : root.polygon-mode ? (root.polygon-closed ? @tr("Save PNG") : @tr("Close polygon")) : (root.window-mode || root.combine-mode) ? @tr("Save PNG") : root.multi-retry ? @tr("Retry") : @tr("Save all PNG"); enabled: root.multi-can-save; clicked => { root.multi-action(1); } }
                 if root.mask-copy-mode: Button { text: @tr("Copy image"); enabled: root.mask-copy-enabled; clicked => { root.multi-action(5); } }
+                if root.mask-copy-mode: ToolButton { kind: 24; label: @tr("Pin screenshot"); enabled: root.mask-copy-enabled; clicked => { root.multi-action(6); } }
                 Button { text: root.multi-finished ? @tr("Close") : @tr("Cancel"); clicked => { root.multi-action(2); } }
             }
             Text { text: root.multi-feedback; color: Colors.foreground; overflow: elide; }
