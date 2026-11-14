@@ -64,6 +64,9 @@ pub(super) fn escape_from(origin: focus::Origin) {
         return;
     }
     if screenshot::recognizing() {
+        if screenshot::cancel_mask_recognition() || screenshot::masked_editing() {
+            return;
+        }
         screenshot::cancel();
         return;
     }

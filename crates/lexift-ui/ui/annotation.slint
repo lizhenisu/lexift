@@ -115,7 +115,7 @@ export component AnnotationToolbar inherits Window {
     callback crop-requested();
     callback transform-requested();
     in property <string> feedback;
-    private property <int> action-count: root.recording-mode ? 2 : root.screenshot-mode && !root.pin-edit-mode ? (root.masked-screenshot ? 7 : 9 + (!root.image-edit-mode ? 3 : 0)) : 6;
+    private property <int> action-count: root.recording-mode ? 2 : root.screenshot-mode && !root.pin-edit-mode ? (root.masked-screenshot ? 8 : 9 + (!root.image-edit-mode ? 3 : 0)) : 6;
     in property <bool> history-image;
     private property <bool> quick-save-visible: !root.masked-screenshot && !root.history-image && root.screenshot-mode && !root.recording-mode && !root.pin-edit-mode;
     out property <length> toolbar-width: root.collapsed ? 80px : 34px + 38px + 7 * 38px + 5 * 18px + 1px + (root.action-count + (root.image-edit-mode ? 1 : 0)) * 38px + (9 + root.action-count + (root.image-edit-mode ? 1 : 0)) * 7px + 51px + (root.quick-save-visible ? 27px : 0px) + (root.recognition-menu-visible ? 27px : 0px) + (!root.screenshot-mode ? 99px : 0px) + (root.pin-edit-mode ? 45px : 0px) + (root.pin-edit-mode && root.image-cropping ? 230px : 0px);
@@ -130,7 +130,7 @@ export component AnnotationToolbar inherits Window {
     in property <bool> delay-available:true;
     callback recognize-text-requested();
     callback recognition-menu();
-    private property <bool> recognition-menu-visible: !root.masked-screenshot && root.screenshot-mode && !root.pin-edit-mode && !root.recording-mode && !root.image-edit-mode;
+    private property <bool> recognition-menu-visible: root.screenshot-mode && !root.pin-edit-mode && !root.recording-mode && !root.image-edit-mode;
     callback long-capture-requested();
     callback copy-screenshot-requested();
     callback pin-screenshot-requested();
@@ -246,7 +246,7 @@ export component AnnotationToolbar inherits Window {
                 AnnotationHintTarget {text:@tr("Quick save options");hovered:quick.has-hover;pressed:quick.pressed;}
             }
             if root.screenshot-mode && !root.recording-mode: ToolButton { kind:23; label:@tr("Copy screenshot"); enabled:!root.output-busy && !root.image-cropping; clicked => { root.copy-screenshot-requested(); } }
-            if root.screenshot-mode && !root.masked-screenshot && !root.pin-edit-mode && !root.recording-mode: ToolButton { kind:26; busy:root.output-busy; label:root.recognition-busy ? @tr("Recognizing text…") : root.output-busy ? @tr("Processing screenshot") : @tr("Recognize text"); enabled:root.recognize-text-available && !root.output-busy && !root.image-cropping; clicked => { root.recognize-text-requested(); } }
+            if root.screenshot-mode && !root.pin-edit-mode && !root.recording-mode: ToolButton { kind:26; busy:root.output-busy; label:root.recognition-busy ? @tr("Recognizing text…") : root.output-busy ? @tr("Processing screenshot") : @tr("Recognize text"); enabled:root.recognize-text-available && !root.output-busy && !root.image-cropping; clicked => { root.recognize-text-requested(); } }
             if root.recognition-menu-visible: Rectangle {
                 width:20px; height:38px; border-radius:5px;
                 background: ocr-options.has-hover && ocr-options.enabled ? Colors.icon-button-hover : transparent;

@@ -68,6 +68,7 @@ mod image_ocr;
 pub(crate) struct ScreenshotRuntime {
     recording: Mutex<recording::Runtime>,
     imports: Mutex<BTreeMap<u64, import::Job>>,
+    recognition: Mutex<Option<MultiSaveJob>>,
     multi_save: Mutex<Option<MultiSaveJob>>,
     delay: Mutex<Option<(u64, tokio::task::JoinHandle<()>)>>,
     refresh: Mutex<Option<refresh::Job>>,
@@ -90,6 +91,68 @@ pub(crate) struct ScreenshotRuntime {
     pin_previews: Mutex<BTreeMap<u64, (u64, Arc<AtomicBool>)>>,
     image_ocr: Mutex<image_ocr::Queue>,
 }
+fn ocr_image(
+    frames: &[CapturedRegion],
+    bounds: lexift_core::domain::geometry::Rect,
+    mask: Option<&[lexift_core::domain::geometry::Rect]>,
+    cancel: &AtomicBool,
+) -> Result<CapturedRegion> {
+    if cancel.load(Ordering::Acquire) {
+        return Err(Error::new("Screenshot cancelled"));
+    }
+    let Some(mask) = mask else {
+        return crop_frames(frames, bounds);
+    };
+    let mut image =
+        lexift_core::domain::screenshot_windows::compose_cancellable(frames, mask, cancel)?;
+    let stride = (image.bounds.right - image.bounds.left) as usize * 4;
+    for row in image.pixels.chunks_exact_mut(stride) {
+        if cancel.load(Ordering::Acquire) {
+            return Err(Error::new("Screenshot cancelled"));
+        }
+        for [r, g, b, a] in row.as_chunks_mut::<4>().0 {
+            let white = 255 - *a;
+            *r = r.saturating_add(white);
+            *g = g.saturating_add(white);
+            *b = b.saturating_add(white);
+            *a = 255;
+        }
+    }
+    Ok(image)
+}
+
+#[cfg(test)]
+#[test]
+fn masked_ocr_flattens_only_visible_source_pixels_over_white() {
+    use lexift_core::domain::geometry::Rect;
+    let span = |left, right| Rect {
+        left,
+        right,
+        top: -7,
+        bottom: -6,
+    };
+    let frames = [
+        CapturedRegion {
+            bounds: span(-3, 0),
+            pixels: vec![10, 20, 30, 255, 0, 0, 0, 255, 20, 30, 40, 128],
+        },
+        CapturedRegion {
+            bounds: span(1, 2),
+            pixels: vec![90, 80, 70, 255],
+        },
+    ];
+    let mask = [span(-3, -2), span(-1, 0), span(1, 2)];
+    let result = ocr_image(&frames, span(-3, 2), Some(&mask), &AtomicBool::new(false)).unwrap();
+    assert_eq!(result.bounds, span(-3, 2));
+    assert_eq!(
+        result.pixels,
+        [
+            10, 20, 30, 255, 255, 255, 255, 255, 147, 157, 167, 255, 255, 255, 255, 255, 90, 80,
+            70, 255
+        ]
+    );
+}
+
 impl ScreenshotRuntime {
     pub async fn wait_for_recording_shutdown(&self) {
         recording::wait_for_shutdown(self).await;
@@ -103,6 +166,7 @@ impl ScreenshotRuntime {
         Self {
             recording: Default::default(),
             imports: Default::default(),
+            recognition: Default::default(),
             multi_save: Default::default(),
             delay: Default::default(),
             refresh: Default::default(),
@@ -166,11 +230,34 @@ impl ScreenshotRuntime {
             lexift_core::domain::ocr::OcrOutcome,
         >,
     > {
+        self.deliver_recognition_image(
+            ocr_image(frames, bounds, None, cancel),
+            cancel,
+            output,
+            recognize,
+        )
+    }
+
+    fn deliver_recognition_image(
+        &self,
+        image: Result<CapturedRegion>,
+        cancel: &AtomicBool,
+        output: lexift_core::domain::ocr::Output,
+        recognize: impl FnOnce(
+            CapturedRegion,
+        )
+            -> std::result::Result<String, lexift_core::domain::ocr::OcrOutcome>,
+    ) -> Option<
+        std::result::Result<
+            lexift_core::domain::ocr::ResultText,
+            lexift_core::domain::ocr::OcrOutcome,
+        >,
+    > {
         use lexift_core::domain::ocr::{OcrOutcome, Output, ResultText};
         if cancel.load(Ordering::Acquire) {
             return None;
         }
-        let recognized = crop_frames(frames, bounds)
+        let recognized = image
             .map_err(|_| OcrOutcome::RecognitionFailed)
             .and_then(recognize);
         if cancel.load(Ordering::Acquire) {
@@ -197,22 +284,37 @@ impl ScreenshotRuntime {
         self: &Arc<Self>,
         c: &Arc<AppController>,
         text: lexift_core::domain::ocr::ResultText,
+        masked: Option<(u64, u64)>,
     ) {
         let owner = self.clone();
         let runtime = c.runtime.clone();
-        c.ui.show_recognition_result(
-            text,
-            Arc::new(move |text, cancel, done| {
-                let owner = owner.clone();
-                runtime.spawn_blocking(move || {
-                    if let Some(success) = owner.copy_recognition(&text, &cancel) {
-                        done(success);
-                    }
-                });
-            }),
-        );
+        let copy: lexift_ui::CopyResultText = Arc::new(move |text, cancel, done| {
+            let owner = owner.clone();
+            runtime.spawn_blocking(move || {
+                if let Some(success) = owner.copy_recognition(&text, &cancel) {
+                    done(success);
+                }
+            });
+        });
+        if let Some(identity) = masked {
+            c.ui.show_masked_recognition_result(identity, text, copy);
+        } else {
+            c.ui.show_recognition_result(text, copy);
+        }
     }
     pub fn sync(&self, state: &lexift_core::domain::screenshot::ScreenshotState, quitting: bool) {
+        {
+            let mut job = self.recognition.lock().unwrap();
+            if job.as_ref().is_some_and(|(session, operation, _)| {
+                quitting
+                    || state.session != *session
+                    || state.operation != *operation
+                    || state.phase != lexift_core::domain::screenshot::ScreenshotPhase::Recognizing
+            }) && let Some((_, _, cancel)) = job.take()
+            {
+                cancel.store(true, Ordering::Release);
+            }
+        }
         if let Some((session, request, stop)) = self.multi_save.lock().unwrap().as_ref()
             && (quitting
                 || *session != state.session
@@ -474,7 +576,9 @@ impl ScreenshotRuntime {
                     }));
                 }
             }
-            PinCommand::PresentRecognition(text) => self.present_recognition(controller, text),
+            PinCommand::PresentRecognition(text) => {
+                self.present_recognition(controller, text, None)
+            }
             PinCommand::Recognize {
                 id,
                 request,
@@ -1036,7 +1140,10 @@ impl ScreenshotRuntime {
             }
             ScreenshotCommand::Long(command) => long::execute(self, controller, command),
             ScreenshotCommand::PresentRecognition(text) => {
-                self.present_recognition(controller, text)
+                self.present_recognition(controller, text, None)
+            }
+            ScreenshotCommand::PresentMaskedRecognition(session, operation, text) => {
+                self.present_recognition(controller, text, Some((session, operation)));
             }
             ScreenshotCommand::Recognize {
                 output,
@@ -1044,6 +1151,8 @@ impl ScreenshotRuntime {
                 operation,
                 bounds,
                 strategy,
+                mask,
+                raw,
             } => {
                 let job = self
                     .session
@@ -1051,22 +1160,50 @@ impl ScreenshotRuntime {
                     .unwrap_or_else(|p| p.into_inner())
                     .as_ref()
                     .filter(|s| s.id == session)
-                    .and_then(|s| s.frames.clone().map(|f| (f, s.cancelled.clone())));
-                let Some((frames, cancel)) = job else {
+                    .and_then(|s| {
+                        if raw {
+                            s.raw_frames.as_ref().or(s.frames.as_ref())
+                        } else {
+                            s.frames.as_ref()
+                        }
+                    })
+                    .cloned();
+                let Some(frames) = job else {
+                    controller.dispatch(AppEvent::Screenshot(ScreenshotEvent::Recognized {
+                        session,
+                        operation,
+                        outcome: lexift_core::domain::ocr::OcrOutcome::RecognitionFailed,
+                    }));
                     return;
                 };
+                let cancel = Arc::new(AtomicBool::new(false));
+                {
+                    let state = controller.state.lock().unwrap();
+                    if state.screenshot.session != session
+                        || state.screenshot.operation != operation
+                        || state.screenshot.phase
+                            != lexift_core::domain::screenshot::ScreenshotPhase::Recognizing
+                    {
+                        return;
+                    }
+                    *self.recognition.lock().unwrap() = Some((session, operation, cancel.clone()));
+                }
                 let this = self.clone();
                 let c = controller.clone();
                 controller.runtime.spawn_blocking(move || {
-                    let outcome =
-                        this.deliver_recognition(&frames, bounds, &cancel, output, |image| {
+                    let outcome = this.deliver_recognition_image(
+                        ocr_image(&frames, bounds, mask.as_deref().map(Vec::as_slice), &cancel),
+                        &cancel,
+                        output,
+                        |image| {
                             c.ocr
                             .as_ref()
                             .ok_or(
                                 lexift_core::domain::screenshot::OcrOutcome::ResourcesUnavailable,
                             )
                             .and_then(|ocr| ocr.recognize_for_copy(&c, image, &strategy, &cancel))
-                        });
+                        },
+                    );
                     if let Some(outcome) = outcome {
                         c.dispatch(AppEvent::Screenshot(match outcome {
                             Ok(text) => ScreenshotEvent::RecognitionText {

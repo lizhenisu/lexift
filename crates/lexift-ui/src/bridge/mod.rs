@@ -850,6 +850,7 @@ impl UiHandle {
             crate::annotation::sync_export(&state.annotation_export);
             crate::annotation::screenshot::sync_window_pin(&state);
             crate::annotation::screenshot::sync(&state.screenshot);
+            ocr_result::sync_mask_owner();
             crate::annotation::screenshot::delay::availability(&state);
             crate::annotation::image_import::sync(&state);
             crate::pinned_screenshot::sync_closed_restore(&state);
@@ -908,6 +909,18 @@ impl UiHandle {
         });
     }
 
+    pub fn show_masked_recognition_result(
+        &self,
+        identity: (u64, u64),
+        text: lexift_core::domain::ocr::ResultText,
+        copy: ocr_result::CopyResultText,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            if crate::annotation::screenshot::masked_recognition_current(identity) {
+                ocr_result::show_owned(text, copy, Some(identity));
+            }
+        });
+    }
     pub fn show_recognition_result(
         &self,
         text: lexift_core::domain::ocr::ResultText,

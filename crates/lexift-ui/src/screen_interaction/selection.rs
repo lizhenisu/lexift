@@ -121,6 +121,7 @@ struct Registry {
     polygon_pointer: Option<Point>,
     window_selection: Option<lexift_core::domain::screenshot_windows::Selection>,
     window_busy: bool,
+    recognizing_mask: bool,
     multi: Option<lexift_core::domain::screenshot_multi::Batch>,
     multi_drag: Option<(u64, lexift_core::domain::region_selection::RegionEditor)>,
     multi_button: bool,
@@ -185,6 +186,7 @@ pub(crate) fn init(
             polygon_pointer: None,
             window_selection: None,
             window_busy: false,
+            recognizing_mask: false,
             multi: None,
             multi_drag: None,
             multi_button: false,
@@ -1837,7 +1839,13 @@ pub(crate) fn sync_multi(state: &lexift_core::domain::screenshot::ScreenshotStat
         r.mode_has_selection = state.has_selection_to_discard();
         r.mode_selecting = state.can_switch_mode();
         let polygon_changed = r.polygon != state.polygon;
-        let busy = state.phase == lexift_core::domain::screenshot::ScreenshotPhase::Output
+        r.recognizing_mask = state.masked_ocr_from
+            == Some(lexift_core::domain::screenshot::ScreenshotPhase::Selecting);
+        for host in &r.windows {
+            host.window.set_mask_recognizing(r.recognizing_mask);
+        }
+        let busy = r.recognizing_mask
+            || state.phase == lexift_core::domain::screenshot::ScreenshotPhase::Output
             || state.masked_edit.as_ref().is_some_and(|e| e.preparing);
         let repaint = mode_changed
             || state.polygon.is_none()
@@ -2417,6 +2425,28 @@ fn multi_action(
             },
         )
     };
+    let recognizing = STATE.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|r| r.generation == generation && r.recognizing_mask)
+    });
+    if recognizing {
+        if action == 2 {
+            crate::annotation::screenshot::cancel_mask_recognition();
+        }
+        return;
+    }
+    if matches!(action, 8 | 9) {
+        let allowed = STATE.with(|slot| {
+            slot.borrow()
+                .as_ref()
+                .is_some_and(|r| r.generation == generation && can_copy_mask(r))
+        });
+        if allowed {
+            crate::annotation::screenshot::request_mask_recognition(action == 9, true);
+        }
+        return;
+    }
     if action == 7 {
         if let Some(version) = STATE.with(|slot| {
             slot.borrow()

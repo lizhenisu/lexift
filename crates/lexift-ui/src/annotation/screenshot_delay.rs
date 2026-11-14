@@ -324,7 +324,11 @@ fn menu_kind(kind: u8) {
     };
     crate::theme::apply(&w);
     let labels: &[&str] = if kind == RECOGNITION_MENU {
-        &["Recognize text", "View recognition result"]
+        if super::masked_editing() {
+            &["Recognize and copy", "View recognition result"]
+        } else {
+            &["Recognize text", "View recognition result"]
+        }
     } else if kind == WINDOW_PIN_MENU {
         if super::window_pin_available() {
             &["Window pin", "Save region as preset"]

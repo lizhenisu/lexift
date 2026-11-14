@@ -222,6 +222,16 @@ pub(crate) fn sync(state: &ScreenshotState) {
         slot.state = state.clone();
         changed && state.error.is_some()
     });
+    if state.ocr_result.is_some()
+        && matches!(
+            state.phase,
+            ScreenshotPhase::Selecting | ScreenshotPhase::Editing
+        )
+        && (state.masked_edit.is_some() || state.confirmed_mask().is_some())
+    {
+        let id = state.session;
+        slint::Timer::single_shot(Duration::ZERO, move || show_ocr_feedback(id));
+    }
     if view_finished {
         if state.ocr_result.is_some() {
             let id = state.session;
@@ -237,6 +247,9 @@ pub(crate) fn sync(state: &ScreenshotState) {
     REGISTRY.with(|slot| {
         if let Some(r) = slot.borrow_mut().as_mut() {
             if let Some(main) = r.toolbar_state.main.get() {
+                if main.get_masked_screenshot() {
+                    main.set_recognition_busy(state.masked_ocr_from.is_some());
+                }
                 main.set_output_busy(
                     state.quick_directory_pending
                         || matches!(
@@ -943,6 +956,85 @@ pub(super) fn editor_ocr_owner() -> Option<lexift_core::domain::editor_ocr::Owne
         })
     })
 }
+pub(crate) fn masked_recognition_current((session, operation): (u64, u64)) -> bool {
+    FLOW.with(|s| {
+        let s = s.borrow();
+        s.state.session == session
+            && s.state.operation == operation
+            && s.state.masked_ocr_view
+            && s.state.phase == ScreenshotPhase::Recognizing
+    })
+}
+pub(crate) fn close_mask_recognition((session, operation): (u64, u64)) {
+    emit(ScreenshotEvent::CloseMaskRecognition { session, operation });
+}
+pub(crate) fn cancel_mask_recognition() -> bool {
+    let identity = FLOW.with(|s| {
+        let s = s.borrow();
+        (s.state.masked_ocr_from.is_some() && !s.state.masked_ocr_view)
+            .then_some((s.state.session, s.state.operation))
+    });
+    if let Some(identity) = identity {
+        close_mask_recognition(identity);
+    }
+    identity.is_some()
+}
+pub(crate) fn request_mask_recognition(view: bool, selecting: bool) {
+    let Some((session, version)) = FLOW.with(|s| {
+        let s = s.borrow();
+        (s.state.phase
+            == if selecting {
+                ScreenshotPhase::Selecting
+            } else {
+                ScreenshotPhase::Editing
+            })
+        .then_some((s.state.session, s.state.mode_version))
+    }) else {
+        return;
+    };
+    let ready = REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot.as_mut() else { return false };
+        if !selecting {
+            if r.gesture.is_some()
+                || !r.pending_drawing.is_none()
+                || r.parameter_edit.dragging()
+                || mask_confirmation_open()
+            {
+                return false;
+            }
+            finish_text_edit_registry(r, true);
+            r.finish_style_edit();
+            r.close_panel();
+        }
+        let point = (r.lifecycle.toolbar_cursor_position)().unwrap_or_default();
+        FLOW.with(|s| {
+            s.borrow_mut().ocr_context = Some(OcrFeedbackContext {
+                prepare: r.prepare,
+                lifecycle: r.lifecycle.clone(),
+                bounds: Rect {
+                    left: point.x,
+                    top: point.y,
+                    right: point.x.saturating_add(1),
+                    bottom: point.y.saturating_add(1),
+                },
+            })
+        });
+        true
+    });
+    if ready {
+        emit(ScreenshotEvent::RecognizeMask {
+            session,
+            version,
+            output: if view {
+                lexift_core::domain::ocr::Output::View
+            } else {
+                lexift_core::domain::ocr::Output::Copy
+            },
+        });
+    }
+}
+
 pub(super) fn recognizing() -> bool {
     (recording::active() && !recording::can_annotate())
         || image_resize::busy()
@@ -962,6 +1054,10 @@ pub(super) fn recognize_text() {
 }
 
 pub(super) fn request_recognition(view: bool) {
+    if masked_editing() {
+        request_mask_recognition(view, false);
+        return;
+    }
     if long::image_editing() {
         if !view {
             editor_ocr::request();
@@ -1489,6 +1585,10 @@ fn show_ocr_feedback(id: u64) {
         let mut s = slot.borrow_mut();
         if s.state.session != id
             || !(s.state.phase == ScreenshotPhase::Idle
+                || matches!(
+                    s.state.phase,
+                    ScreenshotPhase::Selecting | ScreenshotPhase::Editing
+                ) && s.state.confirmed_mask().is_some()
                 || s.state.phase == ScreenshotPhase::Editing
                     && s.state.ocr_output == lexift_core::domain::ocr::Output::View)
         {

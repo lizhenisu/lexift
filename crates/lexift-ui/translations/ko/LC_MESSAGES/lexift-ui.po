@@ -2546,3 +2546,6 @@ msgstr "선택 영역으로 돌아가기"
 
 msgid "Discard the current annotations?"
 msgstr "현재 주석을 버리시겠습니까?"
+
+msgid "Recognize and copy"
+msgstr "인식 후 복사"

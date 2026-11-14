@@ -2546,3 +2546,6 @@ msgstr "返回選取範圍"
 
 msgid "Discard the current annotations?"
 msgstr "捨棄目前的註記？"
+
+msgid "Recognize and copy"
+msgstr "辨識並複製"

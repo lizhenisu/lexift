@@ -2546,3 +2546,6 @@ msgstr "選択範囲に戻る"
 
 msgid "Discard the current annotations?"
 msgstr "現在の注釈を破棄しますか？"
+
+msgid "Recognize and copy"
+msgstr "認識してコピー"

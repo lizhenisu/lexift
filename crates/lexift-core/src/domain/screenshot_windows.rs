@@ -190,6 +190,15 @@ pub fn clip_pixels(
 }
 
 pub fn compose(frames: &[CapturedRegion], mask: &[Rect]) -> Result<CapturedRegion> {
+    compose_cancellable(frames, mask, &Default::default())
+}
+
+/// Compose only confirmed pixels, polling cancellation at row boundaries.
+pub fn compose_cancellable(
+    frames: &[CapturedRegion],
+    mask: &[Rect],
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<CapturedRegion> {
     let bounds = mask
         .iter()
         .copied()
@@ -220,6 +229,9 @@ pub fn compose(frames: &[CapturedRegion], mask: &[Rect]) -> Result<CapturedRegio
         }
         for part in mask.iter().filter_map(|&r| intersection(r, frame.bounds)) {
             for y in part.top..part.bottom {
+                if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+                    return Err(Error::new("Screenshot cancelled"));
+                }
                 let src = ((y - frame.bounds.top) as usize * fw
                     + (part.left - frame.bounds.left) as usize)
                     * 4;

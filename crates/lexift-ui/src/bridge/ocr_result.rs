@@ -12,6 +12,7 @@ struct ResultView {
     copy: CopyResultText,
     request: u64,
     busy: bool,
+    owner: Option<(u64, u64)>,
 }
 impl Drop for ResultView {
     fn drop(&mut self) {
@@ -47,12 +48,30 @@ pub(crate) fn exclusion() -> Option<lexift_core::ports::magnifier::WindowToken> 
 }
 
 pub(super) fn close() {
-    VIEW.with(|v| {
-        v.borrow_mut().take();
-    });
+    let old = VIEW.with(|v| v.borrow_mut().take());
+    retire(old);
     super::schedule_idle_memory_trim();
 }
 
+fn retire(old: Option<ResultView>) {
+    let owner = old.as_ref().and_then(|v| v.owner);
+    drop(old);
+    if let Some(owner) = owner {
+        crate::annotation::screenshot::close_mask_recognition(owner);
+    }
+}
+
+pub(crate) fn sync_mask_owner() {
+    let stale = VIEW.with(|v| {
+        v.borrow()
+            .as_ref()
+            .and_then(|v| v.owner)
+            .is_some_and(|owner| !crate::annotation::screenshot::masked_recognition_current(owner))
+    });
+    if stale {
+        close();
+    }
+}
 fn selected_text(text: &str, anchor: i32, cursor: i32) -> Option<&str> {
     let start = usize::try_from(anchor.min(cursor)).ok()?;
     let end = usize::try_from(anchor.max(cursor)).ok()?;
@@ -102,11 +121,25 @@ fn copy_text(identity: &Arc<AtomicBool>, range: Option<(i32, i32)>) {
 }
 
 pub(super) fn show(text: lexift_core::domain::ocr::ResultText, copy: CopyResultText) {
+    show_owned(text, copy, None);
+}
+pub(super) fn show_owned(
+    text: lexift_core::domain::ocr::ResultText,
+    copy: CopyResultText,
+    owner: Option<(u64, u64)>,
+) {
+    let unavailable = || {
+        if let Some(owner) = owner {
+            crate::annotation::screenshot::close_mask_recognition(owner);
+        }
+    };
     let Some((_, lifecycle)) = SERVICES.with(|s| s.borrow().clone()) else {
+        unavailable();
         return;
     };
     let Ok(window) = crate::screen_interaction::create(&lifecycle, crate::OcrResultWindow::new)
     else {
+        unavailable();
         return;
     };
     crate::theme::apply(&window);
@@ -125,15 +158,17 @@ pub(super) fn show(text: lexift_core::domain::ocr::ResultText, copy: CopyResultT
     window.on_copy_all(move || copy_text(&identity, None));
     let area =
         (lifecycle.toolbar_cursor_position)().and_then(|point| (lifecycle.popup_work_area)(point));
-    VIEW.with(|v| {
-        *v.borrow_mut() = Some(ResultView {
+    let old = VIEW.with(|v| {
+        v.borrow_mut().replace(ResultView {
             window,
             cancel: cancel.clone(),
             copy,
             request: 0,
             busy: false,
+            owner,
         })
     });
+    retire(old);
     super::cancel_idle_memory_trim();
     prepare(cancel, area, 0);
 }

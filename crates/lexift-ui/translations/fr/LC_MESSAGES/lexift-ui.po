@@ -2546,3 +2546,6 @@ msgstr "Retour à la sélection"
 
 msgid "Discard the current annotations?"
 msgstr "Ignorer les annotations actuelles ?"
+
+msgid "Recognize and copy"
+msgstr "Reconnaître et copier"

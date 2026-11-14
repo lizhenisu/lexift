@@ -105,6 +105,8 @@ pub struct ScreenshotState {
     pub last_region: Option<LastRegion>,
     pub reuse_sequence: u64,
     pub error: Option<String>,
+    pub masked_ocr_from: Option<ScreenshotPhase>,
+    pub masked_ocr_view: bool,
     pub ocr_result: Option<OcrOutcome>,
     pub ocr_output: super::ocr::Output,
     pub element_sequence: u64,
@@ -284,6 +286,15 @@ pub enum ScreenshotEvent {
         session: u64,
         bounds: Rect,
     },
+    RecognizeMask {
+        session: u64,
+        version: u64,
+        output: super::ocr::Output,
+    },
+    CloseMaskRecognition {
+        session: u64,
+        operation: u64,
+    },
     RecognitionText {
         session: u64,
         operation: u64,
@@ -391,11 +402,14 @@ pub enum ScreenshotCommand {
         session: u64,
     },
     PresentRecognition(super::ocr::ResultText),
+    PresentMaskedRecognition(u64, u64, super::ocr::ResultText),
     Recognize {
         output: super::ocr::Output,
         session: u64,
         operation: u64,
         bounds: Rect,
+        mask: Option<std::sync::Arc<Vec<Rect>>>,
+        raw: bool,
         strategy: super::ocr::OcrRecognitionStrategy,
     },
     CopyColor {
@@ -456,6 +470,8 @@ fn start_capture(
     s.recording = None;
     s.frame_version = 0;
     s.mode_version = 0;
+    s.masked_ocr_from = None;
+    s.masked_ocr_view = false;
     s.masked_edit = None;
     s.frozen_layers = None;
     s.session = s
@@ -916,6 +932,56 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 bounds: s.reusable_region(),
             })
         }
+        ScreenshotEvent::RecognizeMask {
+            session,
+            version,
+            output,
+        } if session == s.session
+            && version == s.mode_version
+            && s.color_pending.is_none()
+            && (s.can_switch_mode()
+                || s.phase == ScreenshotPhase::Editing
+                    && s.masked_edit.as_ref().is_some_and(|edit| !edit.preparing)) =>
+        {
+            let mask = match &s.masked_edit {
+                Some(edit) => Some(edit.mask.clone()),
+                None => s.confirmed_mask(),
+            };
+            let Some(mask) = mask else { return vec![] };
+            let Some(bounds) = super::screenshot_polygon::bounds(&mask) else {
+                return vec![];
+            };
+            s.masked_ocr_from = Some(s.phase);
+            s.masked_ocr_view = false;
+            s.phase = ScreenshotPhase::Recognizing;
+            s.operation = s
+                .operation
+                .checked_add(1)
+                .expect("screenshot operation exhausted");
+            s.ocr_result = None;
+            s.error = None;
+            s.ocr_output = output;
+            command(ScreenshotCommand::Recognize {
+                output,
+                session,
+                operation: s.operation,
+                bounds,
+                mask: Some(mask),
+                raw: s.windows.is_some(),
+                strategy: super::ocr::copy_strategy(&state.settings),
+            })
+        }
+        ScreenshotEvent::CloseMaskRecognition { session, operation }
+            if s.session == session
+                && s.operation == operation
+                && s.phase == ScreenshotPhase::Recognizing =>
+        {
+            if let Some(phase) = s.masked_ocr_from.take() {
+                s.phase = phase;
+                s.masked_ocr_view = false;
+            }
+            vec![]
+        }
         event @ (ScreenshotEvent::Recognize { session, bounds }
         | ScreenshotEvent::ViewRecognition { session, bounds })
             if s.session == session && s.editable() && s.bounds == Some(bounds) =>
@@ -940,6 +1006,8 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 session,
                 operation: s.operation,
                 bounds,
+                mask: None,
+                raw: false,
                 strategy,
             })
         }
@@ -952,6 +1020,15 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             && s.phase == ScreenshotPhase::Recognizing
             && s.ocr_output == super::ocr::Output::View =>
         {
+            if s.masked_ocr_from.is_some() {
+                if s.masked_ocr_view {
+                    return vec![];
+                }
+                s.masked_ocr_view = true;
+                return command(ScreenshotCommand::PresentMaskedRecognition(
+                    session, operation, text,
+                ));
+            }
             s.phase = ScreenshotPhase::Idle;
             vec![
                 AppCommand::Screenshot(ScreenshotCommand::Restore { session }),
@@ -966,7 +1043,14 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             && s.operation == operation
             && s.phase == ScreenshotPhase::Recognizing =>
         {
+            if s.masked_ocr_view {
+                return vec![];
+            }
             s.ocr_result = Some(outcome);
+            if let Some(phase) = s.masked_ocr_from.take() {
+                s.phase = phase;
+                return vec![];
+            }
             if s.ocr_output == super::ocr::Output::View {
                 s.phase = ScreenshotPhase::Editing;
                 return vec![];
@@ -1230,6 +1314,14 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             }
         }
         ScreenshotEvent::Cancelled { session }
+            if s.session == session && s.masked_ocr_from.is_some() =>
+        {
+            if !s.masked_ocr_view {
+                s.phase = s.masked_ocr_from.take().unwrap();
+            }
+            vec![]
+        }
+        ScreenshotEvent::Cancelled { session }
             if s.session == session && s.multi.as_ref().is_some_and(|batch| batch.running) =>
         {
             command(ScreenshotCommand::StopRegions(
@@ -1256,6 +1348,8 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.shortcut_pending = None;
             s.multi = None;
             s.masked_edit = None;
+            s.masked_ocr_from = None;
+            s.masked_ocr_view = false;
             s.windows = None;
             s.polygon = None;
             s.freehand = false;
@@ -1284,6 +1378,91 @@ mod tests {
         },
     };
     use std::sync::Arc;
+    #[test]
+    fn masked_recognition_restores_selection_and_rejects_late_results() {
+        let mut state = begin();
+        state.screenshot.phase = ScreenshotPhase::Selecting;
+        state.screenshot.combine = Some(Default::default());
+        state.screenshot.combine.as_mut().unwrap().mask = Arc::new(vec![bounds()]);
+        let start = AppEvent::Screenshot(ScreenshotEvent::RecognizeMask {
+            session: 1,
+            version: 0,
+            output: super::super::ocr::Output::View,
+        });
+        assert!(matches!(
+            state.reduce(start).as_slice(),
+            [AppCommand::Screenshot(ScreenshotCommand::Recognize {
+                mask: Some(_),
+                raw: false,
+                ..
+            })]
+        ));
+        let operation = state.screenshot.operation;
+        let text = || {
+            AppEvent::Screenshot(ScreenshotEvent::RecognitionText {
+                session: 1,
+                operation,
+                text: super::super::ocr::ResultText("fixture".into()),
+            })
+        };
+        assert!(matches!(
+            state.reduce(text()).as_slice(),
+            [AppCommand::Screenshot(
+                ScreenshotCommand::PresentMaskedRecognition(..)
+            )]
+        ));
+        assert!(state.reduce(text()).is_empty());
+        state.reduce(AppEvent::Screenshot(
+            ScreenshotEvent::CloseMaskRecognition {
+                session: 1,
+                operation,
+            },
+        ));
+        assert_eq!(state.screenshot.phase, ScreenshotPhase::Selecting);
+        assert!(state.screenshot.confirmed_mask().is_some());
+        assert!(state.reduce(text()).is_empty());
+    }
+
+    #[test]
+    fn masked_copy_returns_to_editing_after_failure_or_cancel() {
+        use super::super::ocr::Output;
+        let mut state = begin();
+        state.screenshot.phase = ScreenshotPhase::Editing;
+        state.screenshot.masked_edit = Some(MaskedEdit {
+            bounds: bounds(),
+            mask: Arc::new(vec![bounds()]),
+            request: 9,
+            preparing: false,
+        });
+        for outcome in [
+            Some(OcrOutcome::Copied),
+            Some(OcrOutcome::RecognitionFailed),
+            None,
+        ] {
+            state.reduce(AppEvent::Screenshot(ScreenshotEvent::RecognizeMask {
+                session: 1,
+                version: 0,
+                output: Output::Copy,
+            }));
+            assert_eq!(state.screenshot.phase, ScreenshotPhase::Recognizing);
+            let operation = state.screenshot.operation;
+            state.reduce(AppEvent::Screenshot(match outcome {
+                Some(outcome) => ScreenshotEvent::Recognized {
+                    session: 1,
+                    operation,
+                    outcome,
+                },
+                None => ScreenshotEvent::CloseMaskRecognition {
+                    session: 1,
+                    operation,
+                },
+            }));
+            assert_eq!(state.screenshot.phase, ScreenshotPhase::Editing);
+            assert_eq!(state.screenshot.masked_edit.as_ref().unwrap().request, 9);
+            assert!(state.screenshot.last_region.is_none());
+        }
+    }
+
     #[test]
     fn masked_editor_roundtrip_preserves_shape_and_r_and_rejects_old_preparation() {
         let mut state = begin();

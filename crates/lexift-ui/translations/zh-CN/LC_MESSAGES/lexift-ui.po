@@ -2546,3 +2546,6 @@ msgstr "返回选区"
 
 msgid "Discard the current annotations?"
 msgstr "放弃当前标注？"
+
+msgid "Recognize and copy"
+msgstr "识别并复制"
