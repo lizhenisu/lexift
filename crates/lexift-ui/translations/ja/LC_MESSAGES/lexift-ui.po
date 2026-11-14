@@ -2513,3 +2513,15 @@ msgstr "輪郭内に画面のピクセルがありません"
 
 msgid "Polygon selection is too large"
 msgstr "選択範囲が大きすぎます"
+
+msgid "Combine screenshot regions"
+msgstr "選択範囲の加減"
+
+msgid "Add selection"
+msgstr "追加"
+
+msgid "Subtract selection"
+msgstr "除外"
+
+msgid "Selection is too complex"
+msgstr "選択範囲が複雑すぎます"

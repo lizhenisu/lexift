@@ -744,7 +744,9 @@ pub(crate) fn successful_output(state: &AppState, event: &AppEvent) -> Option<Ou
             Ok(SaveOutcome::Saved),
         )) if state.screenshot.session == *session
             && state.screenshot.operation == *operation
-            && (state.screenshot.windows.is_some() || state.screenshot.polygon.is_some())
+            && (state.screenshot.windows.is_some()
+                || state.screenshot.polygon.is_some()
+                || state.screenshot.combine.is_some())
             && state.screenshot.phase == ScreenshotPhase::Output =>
         {
             Some(OutputKey::Screenshot {

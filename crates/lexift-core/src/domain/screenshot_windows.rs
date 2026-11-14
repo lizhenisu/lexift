@@ -12,7 +12,7 @@ pub struct Layer {
     pub selectable: bool,
 }
 
-fn intersection(a: Rect, b: Rect) -> Option<Rect> {
+pub(super) fn intersection(a: Rect, b: Rect) -> Option<Rect> {
     let r = Rect {
         left: a.left.max(b.left),
         top: a.top.max(b.top),
@@ -22,7 +22,7 @@ fn intersection(a: Rect, b: Rect) -> Option<Rect> {
     (r.left < r.right && r.top < r.bottom).then_some(r)
 }
 
-fn subtract(a: Rect, b: Rect, out: &mut Vec<Rect>) {
+pub(super) fn subtract(a: Rect, b: Rect, out: &mut Vec<Rect>) {
     let Some(i) = intersection(a, b) else {
         out.push(a);
         return;

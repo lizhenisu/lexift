@@ -2513,3 +2513,15 @@ msgstr "Le polygone ne contient aucun pixel d’écran"
 
 msgid "Polygon selection is too large"
 msgstr "La sélection est trop grande"
+
+msgid "Combine screenshot regions"
+msgstr "Combiner les zones"
+
+msgid "Add selection"
+msgstr "Ajouter"
+
+msgid "Subtract selection"
+msgstr "Soustraire"
+
+msgid "Selection is too complex"
+msgstr "Sélection trop complexe"

@@ -398,3 +398,48 @@ fn multi_region_history_records_only_published_regions_and_preserves_reuse() {
     );
     assert_eq!(state.screenshot.last_region, Some(last));
 }
+
+#[test]
+fn combined_mask_save_failure_and_stale_success_preserve_history_and_reuse() {
+    use crate::domain::{screenshot::LastRegion, screenshot_combine::Edit};
+    let mut state = AppState::default();
+    state.screenshot.session = 1;
+    state.screenshot.phase = ScreenshotPhase::Selecting;
+    state.screenshot.layout = vec![bounds()];
+    let last = LastRegion {
+        bounds: bounds(),
+        layout: vec![bounds()],
+    };
+    state.screenshot.last_region = Some(last.clone());
+    state.screenshot.combine = Some(Default::default());
+    let run = |s: &mut AppState, e| s.reduce(AppEvent::Screenshot(e));
+    run(
+        &mut state,
+        ScreenshotEvent::CombineEdit(1, Edit::Apply(bounds())),
+    );
+    let save = ScreenshotEvent::SaveMaskedPng(1, None, String::new());
+    assert_eq!(run(&mut state, save.clone()).len(), 1);
+    assert!(run(&mut state, save.clone()).is_empty());
+    run(
+        &mut state,
+        ScreenshotEvent::MaskedPngSaved(1, 1, Err(crate::Error::new("write failure"))),
+    );
+    assert!(state.screenshot.combine.as_ref().unwrap().can_undo());
+    assert_eq!(run(&mut state, save).len(), 1);
+    let key = OutputKey::Screenshot {
+        session: 1,
+        operation: 2,
+    };
+    let ticket = prepared(&mut state, key);
+    run(
+        &mut state,
+        ScreenshotEvent::MaskedPngSaved(1, 1, Ok(SaveOutcome::Saved)),
+    );
+    assert!(state.image_history.cache.entry(ticket.origin).is_none());
+    run(
+        &mut state,
+        ScreenshotEvent::MaskedPngSaved(1, 2, Ok(SaveOutcome::Saved)),
+    );
+    assert!(state.image_history.cache.entry(ticket.origin).is_some());
+    assert_eq!(state.screenshot.last_region, Some(last));
+}

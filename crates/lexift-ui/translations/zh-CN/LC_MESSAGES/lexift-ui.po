@@ -2513,3 +2513,15 @@ msgstr "轮廓内没有屏幕像素"
 
 msgid "Polygon selection is too large"
 msgstr "选区超过像素上限"
+
+msgid "Combine screenshot regions"
+msgstr "选区加减"
+
+msgid "Add selection"
+msgstr "加选"
+
+msgid "Subtract selection"
+msgstr "减选"
+
+msgid "Selection is too complex"
+msgstr "选区过于复杂"

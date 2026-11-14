@@ -2513,3 +2513,15 @@ msgstr "윤곽선 안에 화면 픽셀이 없습니다"
 
 msgid "Polygon selection is too large"
 msgstr "선택 영역이 너무 큽니다"
+
+msgid "Combine screenshot regions"
+msgstr "캡처 영역 결합"
+
+msgid "Add selection"
+msgstr "추가"
+
+msgid "Subtract selection"
+msgstr "빼기"
+
+msgid "Selection is too complex"
+msgstr "선택 영역이 너무 복잡합니다"
