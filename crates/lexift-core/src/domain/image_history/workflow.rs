@@ -560,7 +560,7 @@ pub(crate) fn after(
     }
     for command in commands {
         match command {
-            AppCommand::Screenshot(ScreenshotCommand::SaveWindows {
+            AppCommand::Screenshot(ScreenshotCommand::SaveMaskedPng {
                 session, operation, ..
             }) => {
                 h.start(
@@ -738,13 +738,13 @@ pub(crate) fn after(
 
 pub(crate) fn successful_output(state: &AppState, event: &AppEvent) -> Option<OutputKey> {
     match event {
-        AppEvent::Screenshot(ScreenshotEvent::WindowsSaved(
+        AppEvent::Screenshot(ScreenshotEvent::MaskedPngSaved(
             session,
             operation,
             Ok(SaveOutcome::Saved),
         )) if state.screenshot.session == *session
             && state.screenshot.operation == *operation
-            && state.screenshot.windows.is_some()
+            && (state.screenshot.windows.is_some() || state.screenshot.polygon.is_some())
             && state.screenshot.phase == ScreenshotPhase::Output =>
         {
             Some(OutputKey::Screenshot {

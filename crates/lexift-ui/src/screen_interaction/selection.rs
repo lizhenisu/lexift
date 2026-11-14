@@ -112,6 +112,8 @@ struct Registry {
     phase: HostPhase,
     windows: Vec<Host<OcrSelectionWindow>>,
     gesture: RegionSelection,
+    polygon: Option<lexift_core::domain::screenshot_polygon::Polygon>,
+    polygon_pointer: Option<Point>,
     window_selection: Option<lexift_core::domain::screenshot_windows::Selection>,
     window_busy: bool,
     multi: Option<lexift_core::domain::screenshot_multi::Batch>,
@@ -161,6 +163,8 @@ pub(crate) fn init(
             phase: HostPhase::Idle,
             windows: vec![],
             gesture: RegionSelection::default(),
+            polygon: None,
+            polygon_pointer: None,
             window_selection: None,
             window_busy: false,
             multi: None,
@@ -474,6 +478,7 @@ pub(crate) fn show_with_origin(
         if let Some(r) = slot.borrow_mut().as_mut() {
             r.multi = None;
             r.window_selection = None;
+            r.polygon = None;
         }
     });
     show_prepared(generation, frames, origin, None);
@@ -511,7 +516,7 @@ fn show_prepared(
             let r = slot.as_mut()?;
             r.generation = generation;
             r.candidates = candidates;
-            if r.multi.is_some() || r.window_selection.is_some() {
+            if r.multi.is_some() || r.window_selection.is_some() || r.polygon.is_some() {
                 return None;
             }
             r.reusable = reusable;
@@ -547,18 +552,27 @@ fn show_prepared(
             let window = crate::screen_interaction::create(&r.lifecycle, OcrSelectionWindow::new)
                 .map_err(|_| ())?;
             window.set_screenshot_mode(r.screenshot);
-            window.set_multi_mode(r.multi.is_some() || r.window_selection.is_some());
+            window.set_multi_mode(
+                r.multi.is_some() || r.window_selection.is_some() || r.polygon.is_some(),
+            );
             window.set_window_mode(r.window_selection.is_some());
+            window.set_polygon_mode(r.polygon.is_some());
             window.set_multi_controls(r.multi_screen == Some(frame.bounds));
             let multi_weak = window.as_weak();
+            let polygon_mode = r.polygon.is_some();
+            let multi_repeat = Rc::new(Cell::new(false));
+            let button_repeat = multi_repeat.clone();
             window.on_multi_action(move |action| {
+                if polygon_mode && button_repeat.get() && action == 1 {
+                    return;
+                }
                 let Some(window) = multi_weak.upgrade() else {
                     return;
                 };
                 let owner = STATE.with(|slot| {
                     let slot = slot.borrow();
                     let r = slot.as_ref().filter(|r| r.generation == generation)?;
-                    if r.multi.is_none() && r.window_selection.is_none() {
+                    if r.multi.is_none() && r.window_selection.is_none() && r.polygon.is_none() {
                         return None;
                     }
                     Some((r.lifecycle.annotation_window_token)(window.window()))
@@ -577,7 +591,8 @@ fn show_prepared(
             window.window().on_winit_window_event(move |_, event| {
                 match event {
                     winit::event::WindowEvent::KeyboardInput { event, .. } => {
-                        native_repeat.set(event.repeat)
+                        native_repeat.set(event.repeat);
+                        multi_repeat.set(event.repeat);
                     }
                     winit::event::WindowEvent::ModifiersChanged(m) => {
                         modified.set(!m.state().is_empty())
@@ -1710,23 +1725,123 @@ pub(crate) fn sync_multi(state: &lexift_core::domain::screenshot::ScreenshotStat
         {
             return;
         }
+        let polygon_changed = r.polygon != state.polygon;
+        let busy = state.phase == lexift_core::domain::screenshot::ScreenshotPhase::Output;
+        let repaint = state.polygon.is_none()
+            || polygon_changed
+            || r.window_busy != busy
+            || r.multi_error != state.error;
         r.multi = state.multi.clone();
         r.window_selection = state.windows.clone();
+        r.polygon = state.polygon.clone();
+        if r.polygon.is_none() {
+            r.polygon_pointer = None;
+        }
         r.window_busy = state.phase == lexift_core::domain::screenshot::ScreenshotPhase::Output;
         r.multi_error = state.error.clone();
-        if r.multi.is_none() && r.window_selection.is_none() {
+        if r.multi.is_none() && r.window_selection.is_none() && r.polygon.is_none() {
             r.multi_drag = None;
             r.multi_button = false;
         }
-        if r.generation == state.session {
+        if r.generation == state.session && repaint {
             paint_multi(r);
         }
     });
 }
 
+fn paint_polygon_lines(
+    r: &Registry,
+    polygon: &lexift_core::domain::screenshot_polygon::Polygon,
+    vertices_changed: bool,
+) {
+    use std::fmt::Write;
+    for host in &r.windows {
+        let scale = host.window.window().scale_factor();
+        let local = |p: Point| {
+            (
+                (p.x - host.bounds.left) as f32 / scale,
+                (p.y - host.bounds.top) as f32 / scale,
+            )
+        };
+        let mut path = String::from("M0 0");
+        for (i, &p) in polygon.points.iter().enumerate() {
+            let (x, y) = local(p);
+            let _ = write!(path, "{}{x} {y}", if i == 0 { "M" } else { "L" });
+        }
+        if polygon.mask.is_some() {
+            path.push('Z');
+        } else if !polygon.points.is_empty()
+            && let Some(p) = r.polygon_pointer
+        {
+            let (x, y) = local(p);
+            let _ = write!(path, "L{x} {y}");
+        }
+        host.window.set_polygon_path(path.into());
+        if vertices_changed {
+            host.window
+                .set_polygon_vertices(slint::ModelRc::new(slint::VecModel::from(
+                    polygon
+                        .points
+                        .iter()
+                        .map(|&p| {
+                            let (x, y) = local(p);
+                            crate::PolygonVertex { x, y }
+                        })
+                        .collect::<Vec<_>>(),
+                )));
+        }
+    }
+}
+
+fn paint_polygon(
+    r: &Registry,
+    polygon: &lexift_core::domain::screenshot_polygon::Polygon,
+    error: Option<&str>,
+) {
+    use std::fmt::Write;
+    paint_polygon_lines(r, polygon, true);
+    for host in &r.windows {
+        let scale = host.window.window().scale_factor();
+        let mut fill = String::from("M0 0");
+        if let Some(mask) = &polygon.mask {
+            for b in mask.iter().filter(|b| {
+                b.left < host.bounds.right
+                    && b.right > host.bounds.left
+                    && b.top < host.bounds.bottom
+                    && b.bottom > host.bounds.top
+            }) {
+                let x = (b.left - host.bounds.left) as f32 / scale;
+                let y = (b.top - host.bounds.top) as f32 / scale;
+                let right = (b.right - host.bounds.left) as f32 / scale;
+                let bottom = (b.bottom - host.bounds.top) as f32 / scale;
+                let _ = write!(fill, "M{x} {y}H{right}V{bottom}H{x}Z");
+            }
+        }
+        host.window.set_polygon_fill(fill.into());
+        host.window.set_polygon_closed(polygon.mask.is_some());
+        host.window.set_multi_can_save(
+            !r.window_busy && (polygon.mask.is_some() || polygon.points.len() >= 3),
+        );
+        host.window
+            .set_multi_can_delete(!r.window_busy && !polygon.points.is_empty());
+        let size = polygon
+            .mask
+            .as_ref()
+            .and_then(|m| lexift_core::domain::screenshot_polygon::bounds(m))
+            .map(|b| format!("{} × {} px", b.right - b.left, b.bottom - b.top))
+            .unwrap_or_default();
+        host.window
+            .set_multi_feedback(error.map_or(size, crate::i18n::tr).into());
+    }
+}
+
 fn paint_multi(r: &Registry) {
     let error = r.multi_error.as_deref();
     use lexift_core::domain::screenshot_multi::Status;
+    if let Some(polygon) = &r.polygon {
+        paint_polygon(r, polygon, error);
+        return;
+    }
     if let Some(selection) = &r.window_selection {
         for host in &r.windows {
             let window = &host.window;
@@ -1842,6 +1957,35 @@ fn multi_action(
     owner: Option<lexift_core::ports::magnifier::WindowToken>,
 ) {
     use lexift_core::domain::screenshot::ScreenshotEvent;
+    use lexift_core::domain::screenshot_polygon::Edit;
+    let polygon = STATE.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .filter(|r| r.generation == generation)
+            .and_then(|r| {
+                r.polygon
+                    .as_ref()
+                    .map(|p| (p.mask.is_some(), r.window_busy))
+            })
+    });
+    if let Some((closed, busy)) = polygon {
+        if !busy {
+            let event = match action {
+                0 => ScreenshotEvent::PolygonEdit(generation, Edit::Back),
+                1 if !closed => ScreenshotEvent::PolygonEdit(generation, Edit::Close),
+                1 => {
+                    ScreenshotEvent::SaveMaskedPng(generation, owner, crate::i18n::tr("Save image"))
+                }
+                2 => {
+                    emit(SelectionEvent::Cancelled);
+                    return;
+                }
+                _ => return,
+            };
+            emit(SelectionEvent::Windows(event));
+        }
+        return;
+    }
     let windows = STATE.with(|slot| {
         slot.borrow()
             .as_ref()
@@ -1850,7 +1994,7 @@ fn multi_action(
     });
     if let Some(busy) = windows {
         match action {
-            1 if !busy => emit(SelectionEvent::Windows(ScreenshotEvent::SaveWindows(
+            1 if !busy => emit(SelectionEvent::Windows(ScreenshotEvent::SaveMaskedPng(
                 generation,
                 owner,
                 crate::i18n::tr("Save image").to_string(),
@@ -1890,13 +2034,14 @@ fn multi_pointer(generation: u64, screen: Rect, event: PopupPointerInput) -> boo
     let mut action = None;
     let mut button = None;
     let mut window_point = None;
+    let mut polygon_edit = None;
     let handled = STATE.with(|slot| {
         let mut slot = slot.borrow_mut();
         let Some(r) = slot.as_mut().filter(|r| r.generation == generation) else {
             return false;
         };
         let batch = r.multi.as_ref();
-        if batch.is_none() && r.window_selection.is_none() {
+        if batch.is_none() && r.window_selection.is_none() && r.polygon.is_none() {
             return false;
         }
         let Some(host) = r.windows.iter().find(|h| h.bounds == screen) else {
@@ -1925,6 +2070,35 @@ fn multi_pointer(generation: u64, screen: Rect, event: PopupPointerInput) -> boo
                     }
                 };
                 button = Some((host.window.as_weak(), event));
+            }
+            PopupPointerInput::Moved { x, y }
+                if r.polygon.as_ref().is_some_and(|p| p.mask.is_none()) =>
+            {
+                r.polygon_pointer = Some(Point {
+                    x: screen.left + x.round() as i32,
+                    y: screen.top + y.round() as i32,
+                });
+                paint_polygon_lines(r, r.polygon.as_ref().unwrap(), false);
+            }
+            PopupPointerInput::LeftReleased { x, y }
+                if r.polygon.as_ref().is_some_and(|p| p.mask.is_none()) && !r.window_busy =>
+            {
+                use lexift_core::domain::screenshot_polygon::Edit;
+                let p = Point {
+                    x: screen.left + x.round() as i32,
+                    y: screen.top + y.round() as i32,
+                };
+                let polygon = r.polygon.as_ref().unwrap();
+                let near_start = polygon.points.len() >= 3
+                    && polygon.points.first().is_some_and(|start| {
+                        (start.x.abs_diff(p.x) as f32).hypot(start.y.abs_diff(p.y) as f32)
+                            <= 8.0 * scale
+                    });
+                polygon_edit = Some(if near_start {
+                    Edit::Close
+                } else {
+                    Edit::Add(p)
+                });
             }
             PopupPointerInput::LeftReleased { x, y }
                 if r.window_selection.is_some() && !r.window_busy =>
@@ -2002,6 +2176,11 @@ fn multi_pointer(generation: u64, screen: Rect, event: PopupPointerInput) -> boo
         && let Some(window) = window.upgrade()
     {
         window.window().dispatch_event(event);
+    }
+    if let Some(edit) = polygon_edit {
+        emit(SelectionEvent::Windows(
+            lexift_core::domain::screenshot::ScreenshotEvent::PolygonEdit(generation, edit),
+        ));
     }
     if let Some(point) = window_point {
         emit(SelectionEvent::Windows(

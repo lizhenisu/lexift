@@ -2483,3 +2483,33 @@ msgstr "Salva PNG"
 
 msgid "Selected windows"
 msgstr "Finestre selezionate"
+
+msgid "Polygon screenshot"
+msgstr "Cattura poligonale"
+
+msgid "Continue editing polygon"
+msgstr "Continua a modificare"
+
+msgid "Remove last vertex"
+msgstr "Rimuovi ultimo punto"
+
+msgid "Close polygon"
+msgstr "Chiudi poligono"
+
+msgid "Polygon edges overlap"
+msgstr "I lati si sovrappongono"
+
+msgid "Polygon edges intersect"
+msgstr "I lati si intersecano"
+
+msgid "Invalid polygon vertex"
+msgstr "Vertice ripetuto o limite raggiunto"
+
+msgid "Polygon selection is too complex"
+msgstr "Il poligono è troppo complesso"
+
+msgid "Polygon contains no screen pixels"
+msgstr "Il poligono non contiene pixel dello schermo"
+
+msgid "Polygon selection is too large"
+msgstr "La selezione è troppo grande"

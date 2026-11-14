@@ -2483,3 +2483,33 @@ msgstr "Save PNG"
 
 msgid "Selected windows"
 msgstr "Selected windows"
+
+msgid "Polygon screenshot"
+msgstr "Polygon screenshot"
+
+msgid "Continue editing polygon"
+msgstr "Continue editing polygon"
+
+msgid "Remove last vertex"
+msgstr "Remove last vertex"
+
+msgid "Close polygon"
+msgstr "Close polygon"
+
+msgid "Polygon edges overlap"
+msgstr "Polygon edges overlap"
+
+msgid "Polygon edges intersect"
+msgstr "Polygon edges intersect"
+
+msgid "Invalid polygon vertex"
+msgstr "Invalid polygon vertex"
+
+msgid "Polygon selection is too complex"
+msgstr "Polygon selection is too complex"
+
+msgid "Polygon contains no screen pixels"
+msgstr "Polygon contains no screen pixels"
+
+msgid "Polygon selection is too large"
+msgstr "Polygon selection is too large"

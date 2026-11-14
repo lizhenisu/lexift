@@ -113,8 +113,8 @@ fn choose(sequence: u64, index: Option<i32>) {
             crate::bridge::screenshot_presets::open(None);
             return;
         }
-        if kind == 0 && matches!(index, Some(5 | 6)) {
-            super::screenshot::request_multi(index == Some(6));
+        if kind == 0 && matches!(index, Some(5..=7)) {
+            super::screenshot::request_multi(index.unwrap_or_default());
             return;
         }
         if kind == RECOGNITION_MENU {
@@ -383,6 +383,7 @@ fn menu_kind(kind: u8) {
             "Screenshot presets",
             "Multi-region screenshot",
             "Multi-window screenshot",
+            "Polygon screenshot",
         ]
     };
     w.set_options(slint::ModelRc::new(slint::VecModel::from(

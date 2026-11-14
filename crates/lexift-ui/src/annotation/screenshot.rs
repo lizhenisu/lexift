@@ -66,7 +66,7 @@ pub(crate) fn active() -> bool {
         s.state.active() || s.recovery.is_some()
     })
 }
-pub(crate) fn request_multi(windows: bool) {
+pub(crate) fn request_multi(mode: i32) {
     let trigger = REGISTRY.with(|slot| {
         let slot = slot.borrow();
         let r = slot.as_ref()?;
@@ -80,10 +80,10 @@ pub(crate) fn request_multi(windows: bool) {
         })
     });
     if let Some(trigger) = trigger {
-        emit(if windows {
-            ScreenshotEvent::WindowsRequested(trigger)
-        } else {
-            ScreenshotEvent::MultiRequested(trigger)
+        emit(match mode {
+            7 => ScreenshotEvent::PolygonRequested(trigger),
+            6 => ScreenshotEvent::WindowsRequested(trigger),
+            _ => ScreenshotEvent::MultiRequested(trigger),
         });
     }
 }

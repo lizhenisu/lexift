@@ -67,6 +67,7 @@ pub struct ScreenshotState {
     pub quick_directory_pending: bool,
     pub refresh: Option<refresh::State>,
     pub shortcut_sequence: u64,
+    pub polygon: Option<super::screenshot_polygon::Polygon>,
     pub windows: Option<super::screenshot_windows::Selection>,
     pub multi: Option<super::screenshot_multi::Batch>,
     pub preset_region: Option<LastRegion>,
@@ -102,7 +103,8 @@ impl ScreenshotState {
     /// Physical layout equality ignores enumeration order and logical DPI.
     pub fn reusable_region(&self) -> Option<Rect> {
         let last = self.last_region.as_ref()?;
-        if self.windows.is_some()
+        if self.polygon.is_some()
+            || self.windows.is_some()
             || self.multi.is_some()
             || self.phase != ScreenshotPhase::Selecting
             || self.layout.is_empty()
@@ -132,10 +134,12 @@ pub enum ScreenshotEvent {
     ShortcutRequested(ShortcutTrigger),
     MultiRequested(ShortcutTrigger),
     WindowsRequested(ShortcutTrigger),
+    PolygonRequested(ShortcutTrigger),
+    PolygonEdit(u64, super::screenshot_polygon::Edit),
     WindowLayers(u64, Vec<super::screenshot_windows::Layer>),
     ToggleWindow(u64, Point),
-    SaveWindows(u64, Option<crate::ports::magnifier::WindowToken>, String),
-    WindowsSaved(u64, u64, Result<SaveOutcome>),
+    SaveMaskedPng(u64, Option<crate::ports::magnifier::WindowToken>, String),
+    MaskedPngSaved(u64, u64, Result<SaveOutcome>),
     Multi(u64, super::screenshot_multi::Action),
     PresetRequested {
         id: u64,
@@ -228,7 +232,7 @@ pub enum ScreenshotEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotCommand {
-    SaveWindows {
+    SaveMaskedPng {
         session: u64,
         operation: u64,
         mask: Vec<Rect>,
@@ -331,6 +335,7 @@ fn start_capture(
     s.origin = origin;
     s.multi = None;
     s.windows = None;
+    s.polygon = None;
     s.preset_region = None;
     s.refresh = None;
     s.recording = None;
@@ -382,36 +387,50 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             }
             vec![]
         }
-        ScreenshotEvent::SaveWindows(session, owner, title)
+        ScreenshotEvent::PolygonEdit(session, edit)
             if s.session == session && s.phase == ScreenshotPhase::Selecting =>
         {
-            let Some(selection) = s
-                .windows
+            if let Some(polygon) = s.polygon.as_mut() {
+                s.error = polygon
+                    .edit(edit, &s.layout)
+                    .err()
+                    .map(|error| error.to_string());
+            }
+            vec![]
+        }
+        ScreenshotEvent::SaveMaskedPng(session, owner, title)
+            if s.session == session && s.phase == ScreenshotPhase::Selecting =>
+        {
+            let Some(mask) = s
+                .polygon
                 .as_ref()
-                .filter(|selection| !selection.mask.is_empty())
+                .and_then(|p| p.mask.as_deref())
+                .or_else(|| s.windows.as_ref().map(|s| &s.mask))
+                .filter(|mask| !mask.is_empty())
             else {
                 return vec![];
             };
             s.operation += 1;
             s.error = None;
             s.phase = ScreenshotPhase::Output;
-            command(ScreenshotCommand::SaveWindows {
+            command(ScreenshotCommand::SaveMaskedPng {
                 session,
                 operation: s.operation,
-                mask: selection.mask.clone(),
+                mask: mask.clone(),
                 owner,
                 title,
             })
         }
-        ScreenshotEvent::WindowsSaved(session, operation, result)
+        ScreenshotEvent::MaskedPngSaved(session, operation, result)
             if s.session == session
                 && s.operation == operation
-                && s.windows.is_some()
+                && (s.windows.is_some() || s.polygon.is_some())
                 && s.phase == ScreenshotPhase::Output =>
         {
             match result {
                 Ok(SaveOutcome::Saved) => {
                     s.windows = None;
+                    s.polygon = None;
                     s.phase = ScreenshotPhase::Idle;
                     command(ScreenshotCommand::Restore { session })
                 }
@@ -472,6 +491,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         event @ (ScreenshotEvent::ShortcutRequested(trigger)
         | ScreenshotEvent::MultiRequested(trigger)
         | ScreenshotEvent::WindowsRequested(trigger)
+        | ScreenshotEvent::PolygonRequested(trigger)
         | ScreenshotEvent::PresetRequested { trigger, .. })
             if delay_allowed
                 && state.editor_ocr.request.is_none()
@@ -480,6 +500,8 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                     .values()
                     .any(|p| p.recognition.is_some() || p.interaction.pending.is_some()) =>
         {
+            s.polygon =
+                matches!(event, ScreenshotEvent::PolygonRequested(_)).then(Default::default);
             s.windows =
                 matches!(event, ScreenshotEvent::WindowsRequested(_)).then(Default::default);
             s.multi = matches!(event, ScreenshotEvent::MultiRequested(_)).then(Default::default);
@@ -514,6 +536,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.shortcut_pending = None;
             s.multi = None;
             s.windows = None;
+            s.polygon = None;
             vec![]
         }
         ScreenshotEvent::ShortcutFrozen {
@@ -528,10 +551,12 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             let preset = s.preset_region.take();
             let multi = s.multi.take();
             let windows = s.windows.take();
+            let polygon = s.polygon.take();
             let commands = start_capture(state, request, origin);
             state.screenshot.preset_region = preset;
             state.screenshot.multi = multi;
             state.screenshot.windows = windows;
+            state.screenshot.polygon = polygon;
             commands
         }
 
@@ -539,6 +564,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.shortcut_pending = None;
             s.multi = None;
             s.windows = None;
+            s.polygon = None;
             vec![]
         }
 
@@ -555,6 +581,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.origin = CaptureOrigin::Toolbar;
             s.multi = None;
             s.windows = None;
+            s.polygon = None;
             s.phase = ScreenshotPhase::CountingDown;
             s.reuse_sequence = 0;
             s.element_sequence = 0;
@@ -755,6 +782,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 }
                 Err(error) => {
                     s.windows = None;
+                    s.polygon = None;
                     s.phase = ScreenshotPhase::Idle;
                     s.error = Some(error.to_string());
                     command(ScreenshotCommand::Restore { session })
@@ -763,6 +791,8 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         }
         ScreenshotEvent::Selected { session, bounds }
             if s.multi.is_none()
+                && s.polygon.is_none()
+                && s.windows.is_none()
                 && s.session == session
                 && s.long.is_none()
                 && matches!(
@@ -920,6 +950,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.shortcut_pending = None;
             s.multi = None;
             s.windows = None;
+            s.polygon = None;
             s.refresh = None;
             s.phase = ScreenshotPhase::Idle;
             s.element_pending = None;

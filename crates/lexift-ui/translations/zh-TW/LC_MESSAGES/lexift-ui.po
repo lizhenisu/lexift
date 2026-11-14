@@ -2483,3 +2483,33 @@ msgstr "儲存 PNG"
 
 msgid "Selected windows"
 msgstr "已選視窗"
+
+msgid "Polygon screenshot"
+msgstr "多邊形截圖"
+
+msgid "Continue editing polygon"
+msgstr "繼續調整"
+
+msgid "Remove last vertex"
+msgstr "移除最後一點"
+
+msgid "Close polygon"
+msgstr "閉合輪廓"
+
+msgid "Polygon edges overlap"
+msgstr "輪廓邊不能重疊"
+
+msgid "Polygon edges intersect"
+msgstr "輪廓邊不能相交"
+
+msgid "Invalid polygon vertex"
+msgstr "頂點重複或已達頂點上限"
+
+msgid "Polygon selection is too complex"
+msgstr "輪廓過於複雜"
+
+msgid "Polygon contains no screen pixels"
+msgstr "輪廓內沒有螢幕像素"
+
+msgid "Polygon selection is too large"
+msgstr "選區超過像素上限"

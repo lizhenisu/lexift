@@ -752,7 +752,7 @@ impl ScreenshotRuntime {
     }
     pub fn execute(self: &Arc<Self>, controller: &Arc<AppController>, command: ScreenshotCommand) {
         match command {
-            ScreenshotCommand::SaveWindows {
+            ScreenshotCommand::SaveMaskedPng {
                 session,
                 operation,
                 mask,
@@ -795,7 +795,7 @@ impl ScreenshotRuntime {
                         }
                         Ok(result)
                     })();
-                    controller.dispatch(AppEvent::Screenshot(ScreenshotEvent::WindowsSaved(session, operation, result)));
+                    controller.dispatch(AppEvent::Screenshot(ScreenshotEvent::MaskedPngSaved(session, operation, result)));
                 });
             }
             ScreenshotCommand::SaveRegions {

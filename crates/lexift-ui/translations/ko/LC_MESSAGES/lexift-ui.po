@@ -2483,3 +2483,33 @@ msgstr "PNG 저장"
 
 msgid "Selected windows"
 msgstr "선택한 창"
+
+msgid "Polygon screenshot"
+msgstr "다각형 스크린샷"
+
+msgid "Continue editing polygon"
+msgstr "계속 편집"
+
+msgid "Remove last vertex"
+msgstr "마지막 꼭짓점 제거"
+
+msgid "Close polygon"
+msgstr "윤곽 닫기"
+
+msgid "Polygon edges overlap"
+msgstr "윤곽선의 변이 겹칩니다"
+
+msgid "Polygon edges intersect"
+msgstr "윤곽선의 변이 교차합니다"
+
+msgid "Invalid polygon vertex"
+msgstr "꼭짓점이 중복되었거나 한도에 도달했습니다"
+
+msgid "Polygon selection is too complex"
+msgstr "윤곽선이 너무 복잡합니다"
+
+msgid "Polygon contains no screen pixels"
+msgstr "윤곽선 안에 화면 픽셀이 없습니다"
+
+msgid "Polygon selection is too large"
+msgstr "선택 영역이 너무 큽니다"

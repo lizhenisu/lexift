@@ -271,7 +271,7 @@ mod tests {
         assert_eq!(
             run(
                 &mut state,
-                ScreenshotEvent::SaveWindows(1, None, String::new())
+                ScreenshotEvent::SaveMaskedPng(1, None, String::new())
             )
             .len(),
             1
@@ -279,13 +279,13 @@ mod tests {
         assert!(
             run(
                 &mut state,
-                ScreenshotEvent::SaveWindows(1, None, String::new())
+                ScreenshotEvent::SaveMaskedPng(1, None, String::new())
             )
             .is_empty()
         );
         run(
             &mut state,
-            ScreenshotEvent::WindowsSaved(1, 1, Ok(SaveOutcome::Cancelled)),
+            ScreenshotEvent::MaskedPngSaved(1, 1, Ok(SaveOutcome::Cancelled)),
         );
         assert_eq!(
             state.screenshot.windows.as_ref().unwrap().mask,
@@ -293,16 +293,16 @@ mod tests {
         );
         run(
             &mut state,
-            ScreenshotEvent::SaveWindows(1, None, String::new()),
+            ScreenshotEvent::SaveMaskedPng(1, None, String::new()),
         );
         run(
             &mut state,
-            ScreenshotEvent::WindowsSaved(1, 1, Ok(SaveOutcome::Saved)),
+            ScreenshotEvent::MaskedPngSaved(1, 1, Ok(SaveOutcome::Saved)),
         );
         assert_eq!(state.screenshot.phase, ScreenshotPhase::Output);
         run(
             &mut state,
-            ScreenshotEvent::WindowsSaved(1, 2, Ok(SaveOutcome::Saved)),
+            ScreenshotEvent::MaskedPngSaved(1, 2, Ok(SaveOutcome::Saved)),
         );
         assert_eq!(state.screenshot.phase, ScreenshotPhase::Idle);
         assert_eq!(state.screenshot.last_region, last);

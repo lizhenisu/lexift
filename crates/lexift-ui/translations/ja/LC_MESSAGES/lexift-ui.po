@@ -2483,3 +2483,33 @@ msgstr "PNG で保存"
 
 msgid "Selected windows"
 msgstr "選択したウィンドウ"
+
+msgid "Polygon screenshot"
+msgstr "多角形スクリーンショット"
+
+msgid "Continue editing polygon"
+msgstr "編集を続ける"
+
+msgid "Remove last vertex"
+msgstr "最後の頂点を削除"
+
+msgid "Close polygon"
+msgstr "輪郭を閉じる"
+
+msgid "Polygon edges overlap"
+msgstr "輪郭の辺が重なっています"
+
+msgid "Polygon edges intersect"
+msgstr "輪郭の辺が交差しています"
+
+msgid "Invalid polygon vertex"
+msgstr "頂点が重複しているか上限に達しました"
+
+msgid "Polygon selection is too complex"
+msgstr "輪郭が複雑すぎます"
+
+msgid "Polygon contains no screen pixels"
+msgstr "輪郭内に画面のピクセルがありません"
+
+msgid "Polygon selection is too large"
+msgstr "選択範囲が大きすぎます"
