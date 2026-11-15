@@ -817,6 +817,19 @@ pub(crate) fn successful_output(state: &AppState, event: &AppEvent) -> Option<Ou
                 operation: *operation,
             })
         }
+        AppEvent::Screenshot(ScreenshotEvent::ImageCopied {
+            session, operation, ..
+        }) if state.screenshot.session == *session
+            && state.screenshot.operation == *operation
+            && state.screenshot.phase == ScreenshotPhase::Output
+            && state.screenshot.output_kind
+                == Some(crate::domain::screenshot::ScreenshotOutput::Copy) =>
+        {
+            Some(OutputKey::Screenshot {
+                session: *session,
+                operation: *operation,
+            })
+        }
         AppEvent::Screenshot(ScreenshotEvent::Completed {
             session,
             operation,

@@ -258,7 +258,7 @@ mod tests {
         std::thread::spawn(|| {
             let _a = Apartment::new().unwrap();
             let request = ImageSaveRequest {
-                image: CapturedRegion {
+                image: Arc::new(CapturedRegion {
                     bounds: Rect {
                         left: 0,
                         top: 0,
@@ -266,7 +266,7 @@ mod tests {
                         bottom: 1,
                     },
                     pixels: vec![0, 0, 0, 0, 64, 32, 16, 128],
-                },
+                }),
                 owner: None,
                 default_name: String::new(),
                 title: String::new(),

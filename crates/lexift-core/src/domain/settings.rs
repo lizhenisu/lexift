@@ -24,6 +24,7 @@ pub enum SettingsField {
     RecordingPauseHotkey,
     RecordingFinishHotkey,
     QuickSaveDirectory,
+    ScreenshotAutoSave,
     ScreenshotPresets,
     OcrLanguage,
     OcrKoreanAuto,
@@ -85,6 +86,10 @@ pub enum SettingsChange {
         session: u64,
         operation: u64,
     },
+    ScreenshotAutoSave {
+        enabled: Option<bool>,
+        directory: Option<String>,
+    },
     OcrLanguage(Option<String>),
     OcrKoreanAuto(bool),
     Provider(ProviderConfig),
@@ -128,6 +133,7 @@ impl SettingsChange {
             Self::RecordingFinishHotkey(_) => SettingsField::RecordingFinishHotkey,
             Self::ScreenshotPresets { .. } => SettingsField::ScreenshotPresets,
             Self::QuickSaveDirectory { .. } => SettingsField::QuickSaveDirectory,
+            Self::ScreenshotAutoSave { .. } => SettingsField::ScreenshotAutoSave,
             Self::OcrLanguage(_) => SettingsField::OcrLanguage,
             Self::OcrKoreanAuto(_) => SettingsField::OcrKoreanAuto,
             Self::Provider(_) => SettingsField::Provider,
@@ -274,6 +280,14 @@ impl SettingsChange {
             Self::QuickSaveDirectory {
                 directory: value, ..
             } => settings.quick_save_directory = Some(value.clone()),
+            Self::ScreenshotAutoSave { enabled, directory } => {
+                if let Some(enabled) = enabled {
+                    settings.screenshot_auto_save = *enabled;
+                }
+                if let Some(path) = directory {
+                    settings.quick_save_directory = Some(path.clone());
+                }
+            }
             Self::OcrLanguage(value) => settings.ocr_language = value.clone(),
             Self::OcrKoreanAuto(value) => settings.ocr_korean_auto = *value,
             Self::Provider(value) => settings.provider = *value,
@@ -344,6 +358,12 @@ impl SettingsChange {
             Self::RecordingPauseHotkey(value) => settings.recording_pause_hotkey == *value,
             Self::RecordingFinishHotkey(value) => settings.recording_finish_hotkey == *value,
             Self::ScreenshotPresets { .. } => false,
+            Self::ScreenshotAutoSave { enabled, directory } => {
+                enabled.is_none_or(|value| settings.screenshot_auto_save == value)
+                    && directory
+                        .as_ref()
+                        .is_none_or(|path| settings.quick_save_directory.as_ref() == Some(path))
+            }
             Self::QuickSaveDirectory {
                 directory: value, ..
             } => settings.quick_save_directory.as_ref() == Some(value),
@@ -390,6 +410,7 @@ pub struct Settings {
     pub recording_finish_hotkey: HotkeyConfig,
     pub screenshot_presets: Vec<super::screenshot_presets::Preset>,
     pub quick_save_directory: Option<String>,
+    pub screenshot_auto_save: bool,
     pub ocr_language: Option<String>,
     pub ocr_enabled: bool,
     pub ocr_korean_auto: bool,
@@ -418,6 +439,7 @@ impl Default for Settings {
             recording_finish_hotkey: super::recording_hotkeys::default_finish(),
             screenshot_presets: vec![],
             quick_save_directory: None,
+            screenshot_auto_save: false,
             ocr_language: Some("auto".into()),
             ocr_enabled: true,
             ocr_korean_auto: false,

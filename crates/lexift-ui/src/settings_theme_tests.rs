@@ -169,7 +169,9 @@ fn settings_interaction_colors_follow_theme_across_pages_and_overlays() {
                 "modal scrim",
             );
             w.set_translation_settings_open(false);
-            for category in [0, 2, 5] {
+            w.set_screenshot_auto_save(true);
+            w.set_quick_save_directory("D:/Lexift/自动保存".into());
+            for category in [0, 2, 3, 5] {
                 w.set_active_category(category);
                 render(&adapter, &format!("{prefix}-page-{category}"));
             }

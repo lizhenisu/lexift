@@ -85,6 +85,8 @@ pub struct ScreenshotState {
     pub masked_edit: Option<MaskedEdit>,
     pub frozen_layers: Option<std::sync::Arc<Vec<super::screenshot_windows::Layer>>>,
     pub quick_directory_pending: bool,
+    pub save_directory_picker: Option<u64>,
+    pub output_kind: Option<ScreenshotOutput>,
     pub refresh: Option<refresh::State>,
     pub shortcut_sequence: u64,
     pub combine: Option<super::screenshot_combine::Selection>,
@@ -198,6 +200,16 @@ pub enum MaskTarget {
         owner: Option<crate::ports::magnifier::WindowToken>,
         title: String,
     },
+}
+
+/// Pixel ownership crosses the completion boundary without exposing pixels in diagnostics.
+#[derive(Clone, PartialEq, Eq)]
+pub struct CopiedImage(pub std::sync::Arc<crate::ports::screen_capture::CapturedRegion>);
+
+impl std::fmt::Debug for CopiedImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("CopiedImage").field(&self.0.bounds).finish()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -336,6 +348,23 @@ pub enum ScreenshotEvent {
         kind: ScreenshotOutput,
         request: ExportRequest,
     },
+    SaveDirectoryRequested {
+        owner: Option<crate::ports::magnifier::WindowToken>,
+        request: u64,
+        enable: bool,
+    },
+    SaveDirectoryClosed(u64),
+    SaveDirectorySelected {
+        request: u64,
+        enable: bool,
+        directory: Result<Option<String>>,
+    },
+    ImageCopied {
+        session: u64,
+        operation: u64,
+        name: String,
+        image: CopiedImage,
+    },
     Completed {
         session: u64,
         operation: u64,
@@ -351,6 +380,18 @@ pub enum ScreenshotEvent {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenshotCommand {
+    PickSaveDirectory {
+        owner: Option<crate::ports::magnifier::WindowToken>,
+        request: u64,
+        enable: bool,
+    },
+    AutoSave {
+        session: u64,
+        operation: u64,
+        name: String,
+        directory: String,
+        image: CopiedImage,
+    },
     PrepareMaskEditor {
         session: u64,
         mode: SelectionMode,
@@ -499,6 +540,85 @@ fn start_capture(
 }
 pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCommand> {
     let command = |command| vec![AppCommand::Screenshot(command)];
+    let event = match event {
+        ScreenshotEvent::SaveDirectoryRequested {
+            owner,
+            request,
+            enable,
+        } if state.screenshot.save_directory_picker.is_none() && !state.settings_saving => {
+            state.screenshot.save_directory_picker = Some(request);
+            return command(ScreenshotCommand::PickSaveDirectory {
+                owner,
+                request,
+                enable,
+            });
+        }
+        ScreenshotEvent::SaveDirectoryClosed(request) => {
+            if state.screenshot.save_directory_picker == Some(request) {
+                state.screenshot.save_directory_picker = None;
+            }
+            return vec![];
+        }
+        ScreenshotEvent::SaveDirectorySelected {
+            request,
+            enable,
+            directory,
+        } if state.screenshot.save_directory_picker == Some(request) => {
+            state.screenshot.save_directory_picker = None;
+            return match directory {
+                Ok(Some(directory)) => state.request_settings_change(
+                    super::settings::SettingsChange::ScreenshotAutoSave {
+                        enabled: enable.then_some(true),
+                        directory: Some(directory),
+                    },
+                ),
+                Ok(None) => vec![],
+                Err(_) => vec![AppCommand::ShowSettingsFeedback {
+                    feedback: super::settings::SettingsFeedback::SettingsSaveFailed(
+                        super::settings::SettingsField::ScreenshotAutoSave,
+                    ),
+                }],
+            };
+        }
+        ScreenshotEvent::ImageCopied {
+            session,
+            operation,
+            name,
+            image,
+        } if state.screenshot.session == session
+            && state.screenshot.operation == operation
+            && state.screenshot.phase == ScreenshotPhase::Output
+            && state.screenshot.output_kind == Some(ScreenshotOutput::Copy) =>
+        {
+            let directory = state.settings.quick_save_directory.clone().filter(|_| {
+                state.settings.screenshot_auto_save
+                    && state.screenshot.masked_edit.is_none()
+                    && state.screenshot.selection_mode() == SelectionMode::Rectangle
+            });
+            let mut commands = reduce(
+                state,
+                ScreenshotEvent::Completed {
+                    session,
+                    operation,
+                    result: Ok(SaveOutcome::Saved),
+                },
+            );
+            if let Some(directory) = directory {
+                commands.insert(
+                    0,
+                    AppCommand::Screenshot(ScreenshotCommand::AutoSave {
+                        session,
+                        operation,
+                        name,
+                        directory,
+                        image,
+                    }),
+                );
+            }
+            return commands;
+        }
+        event => event,
+    };
     let delay_allowed = delay_available(state);
     let s = &mut state.screenshot;
     let event = match event {
@@ -1263,6 +1383,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
         {
             s.operation = operation;
             s.phase = ScreenshotPhase::Output;
+            s.output_kind = Some(kind);
             s.color_pending = None;
             s.color_result = None;
             s.error = None;
@@ -1281,6 +1402,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             && s.operation == operation
             && s.phase == ScreenshotPhase::Output =>
         {
+            s.output_kind = None;
             match result {
                 Ok(SaveOutcome::Saved) => {
                     if let Some(bounds) = s.bounds.filter(|_| {
@@ -1989,6 +2111,99 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn screenshot_auto_save_uses_the_accepted_copy_only_once() {
+        for (enabled, masked, expected) in [
+            (true, false, true),
+            (false, false, false),
+            (true, true, false),
+        ] {
+            let mut state = AppState::new(Settings {
+                screenshot_auto_save: enabled,
+                quick_save_directory: Some("D:/screenshots".into()),
+                ..Settings::default()
+            });
+            let b = bounds();
+            state.screenshot.session = 1;
+            state.screenshot.operation = 2;
+            state.screenshot.phase = ScreenshotPhase::Output;
+            state.screenshot.output_kind = Some(ScreenshotOutput::Copy);
+            state.screenshot.bounds = Some(b);
+            state.screenshot.layout = vec![b];
+            if masked {
+                state.screenshot.masked_edit = Some(MaskedEdit {
+                    mask: Arc::new(vec![b]),
+                    bounds: b,
+                    request: 1,
+                    preparing: false,
+                });
+                state.screenshot.combine = Some(Default::default());
+            }
+            let pixels = Arc::new(crate::ports::screen_capture::CapturedRegion {
+                bounds: b,
+                pixels: vec![0, 0, 0, 255],
+            });
+            let copied = AppEvent::Screenshot(ScreenshotEvent::ImageCopied {
+                session: 1,
+                operation: 2,
+                name: "Lexift.png".into(),
+                image: CopiedImage(pixels.clone()),
+            });
+            let commands = state.reduce(copied.clone());
+            let job = commands.iter().find_map(|command| match command {
+                AppCommand::Screenshot(ScreenshotCommand::AutoSave {
+                    directory, image, ..
+                }) => {
+                    assert_eq!(directory, "D:/screenshots");
+                    assert!(Arc::ptr_eq(&image.0, &pixels));
+                    Some(())
+                }
+                _ => None,
+            });
+            assert_eq!(job.is_some(), expected);
+            assert_eq!(state.screenshot.phase, ScreenshotPhase::Idle);
+            assert_eq!(state.screenshot.last_region.is_some(), !masked);
+            assert!(state.reduce(copied).is_empty());
+        }
+    }
+
+    #[test]
+    fn save_directory_picker_cancels_and_commits_the_first_enable_atomically() {
+        let mut state = AppState::default();
+        let request = |request| {
+            AppEvent::Screenshot(ScreenshotEvent::SaveDirectoryRequested {
+                owner: None,
+                request,
+                enable: true,
+            })
+        };
+        let chosen = |request| {
+            AppEvent::Screenshot(ScreenshotEvent::SaveDirectorySelected {
+                request,
+                enable: true,
+                directory: Ok(Some("D:/screenshots".into())),
+            })
+        };
+        assert!(!state.reduce(request(1)).is_empty());
+        assert!(state.reduce(request(2)).is_empty());
+        assert!(
+            state
+                .reduce(AppEvent::Screenshot(ScreenshotEvent::SaveDirectoryClosed(
+                    1
+                )))
+                .is_empty()
+        );
+        assert!(state.reduce(chosen(1)).is_empty());
+        assert!(!state.reduce(request(2)).is_empty());
+        let commands = state.reduce(chosen(2));
+        assert!(
+            matches!(&commands[..], [AppCommand::PersistSettings { settings, .. }]
+            if settings.screenshot_auto_save && settings.quick_save_directory.as_deref() == Some("D:/screenshots"))
+        );
+        assert!(!state.settings.screenshot_auto_save);
+        assert!(state.settings.quick_save_directory.is_none());
+    }
+
     #[test]
     fn quick_directory_selection_is_session_owned_and_does_not_complete_an_output() {
         let mut state = AppState::default();

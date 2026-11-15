@@ -2549,3 +2549,15 @@ msgstr "捨棄目前的註記？"
 
 msgid "Recognize and copy"
 msgstr "辨識並複製"
+
+msgid "Automatically save copied screenshots as PNG"
+msgstr "複製螢幕擷取後自動儲存 PNG"
+
+msgid "Image copied, but automatic saving failed"
+msgstr "圖片已複製，自動儲存失敗"
+
+msgid "Screenshot settings saved"
+msgstr "螢幕擷取設定已儲存"
+
+msgid "Could not save screenshot settings"
+msgstr "無法儲存螢幕擷取設定"

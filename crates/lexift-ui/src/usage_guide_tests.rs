@@ -248,6 +248,23 @@ fn screenshot_settings_render_all_locales_themes_and_dpis() {
                     });
                     w.window().set_size(slint::LogicalSize::new(width, 640.));
                     w.show().unwrap();
+                    w.set_active_category(3);
+                    w.set_screenshot_auto_save(true);
+                    w.set_quick_save_directory(
+                        "D:/Lexift/自动保存/Long Screenshot Directory".into(),
+                    );
+                    let image = w.window().take_snapshot().unwrap();
+                    assert!(image.width() > 0 && image.height() > 0);
+                    if let Ok(dir) = std::env::var("LEXIFT_GUIDE_RENDER") {
+                        crate::i18n::write_test_bitmap(
+                            &dir,
+                            &format!("auto-save-{}-{dark}-{scale}-{width}", language.code()),
+                            image.width(),
+                            image.height(),
+                            image.as_slice().iter().map(|p| [p.r, p.g, p.b, p.a]),
+                        );
+                    }
+                    w.set_active_category(2);
                     for bottom in [false, true] {
                         if bottom {
                             w.window().dispatch_event(WindowEvent::PointerScrolled {

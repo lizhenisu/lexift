@@ -221,6 +221,7 @@ pub(super) fn ensure_settings_window(
 }
 
 pub(super) fn schedule_settings_window_destruction(settings: &SettingsWindow) {
+    close_save_directory_picker(settings);
     let token = settings.get_llm_page_token();
     let generation = APP_WINDOW_REGISTRY.with(|registry| {
         let mut registry = registry.borrow_mut();
@@ -272,6 +273,34 @@ pub(super) fn current_history_settings(weak: &slint::Weak<SettingsWindow>) -> bo
     })
 }
 
+fn close_save_directory_picker(settings: &SettingsWindow) {
+    let request = settings.get_screenshot_save_picker_request();
+    if request == 0 {
+        return;
+    }
+    settings.set_screenshot_save_picker_request(0);
+    let handler = APP_WINDOW_REGISTRY.with(|r| r.borrow().as_ref()?.handler.clone());
+    if let Some(handler) = handler {
+        handler(AppEvent::Screenshot(
+            lexift_core::domain::screenshot::ScreenshotEvent::SaveDirectoryClosed(request as u64),
+        ));
+    }
+}
+
+fn request_save_directory(settings: &SettingsWindow, handler: &dyn Fn(AppEvent), enable: bool) {
+    static REQUESTS: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(1);
+    let request = REQUESTS.fetch_add(1, Ordering::Relaxed);
+    settings.set_screenshot_save_picker_request(request);
+    let owner = crate::annotation::window_token(settings.window());
+    handler(AppEvent::Screenshot(
+        lexift_core::domain::screenshot::ScreenshotEvent::SaveDirectoryRequested {
+            owner,
+            request: request as u64,
+            enable,
+        },
+    ));
+}
+
 pub(super) fn wire_settings_callbacks(
     settings: &SettingsWindow,
     handler: Rc<dyn Fn(AppEvent)>,
@@ -304,6 +333,34 @@ pub(super) fn wire_settings_callbacks(
         HotkeyConfig::from_key_event(&text, control, alt, shift, meta)
             .map(|config| config.to_string().into())
             .unwrap_or_default()
+    });
+    let weak = settings.as_weak();
+    let settings_handler = Rc::clone(&handler);
+    settings.on_screenshot_auto_save_changed(move |enabled| {
+        if let Some(settings) = weak.upgrade() {
+            if settings.get_screenshot_save_busy() {
+                return;
+            }
+            if enabled && settings.get_quick_save_directory().is_empty() {
+                request_save_directory(&settings, settings_handler.as_ref(), true);
+            } else {
+                settings_handler(AppEvent::SettingsChangeRequested {
+                    change: SettingsChange::ScreenshotAutoSave {
+                        enabled: Some(enabled),
+                        directory: None,
+                    },
+                });
+            }
+        }
+    });
+    let weak = settings.as_weak();
+    let settings_handler = Rc::clone(&handler);
+    settings.on_quick_save_directory_requested(move || {
+        if let Some(settings) = weak.upgrade()
+            && !settings.get_screenshot_save_busy()
+        {
+            request_save_directory(&settings, settings_handler.as_ref(), false);
+        }
     });
     let settings_handler = Rc::clone(&handler);
     settings.on_hotkey_change_requested(move |hotkey| {
@@ -683,6 +740,12 @@ pub(super) fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static
         SettingsFeedback::SettingsSaveFailed(SettingsField::OcrLanguage) => {
             ("Recognition language wasn't saved", true)
         }
+        SettingsFeedback::SettingsSaved(
+            SettingsField::QuickSaveDirectory | SettingsField::ScreenshotAutoSave,
+        ) => ("Screenshot settings saved", false),
+        SettingsFeedback::SettingsSaveFailed(
+            SettingsField::QuickSaveDirectory | SettingsField::ScreenshotAutoSave,
+        ) => ("Could not save screenshot settings", true),
         SettingsFeedback::SettingsSaved(SettingsField::Theme) => ("Theme saved", false),
         SettingsFeedback::SettingsSaveFailed(SettingsField::Theme) => {
             ("Could not save theme", true)
@@ -693,7 +756,6 @@ pub(super) fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static
         SettingsFeedback::SettingsSaved(
             SettingsField::RecordingPauseHotkey
             | SettingsField::ScreenshotPresets
-            | SettingsField::QuickSaveDirectory
             | SettingsField::RecordingFinishHotkey
             | SettingsField::OcrHotkey
             | SettingsField::Hotkey
@@ -725,7 +787,6 @@ pub(super) fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static
         SettingsFeedback::SettingsSaveFailed(
             SettingsField::RecordingPauseHotkey
             | SettingsField::ScreenshotPresets
-            | SettingsField::QuickSaveDirectory
             | SettingsField::RecordingFinishHotkey
             | SettingsField::OcrHotkey
             | SettingsField::Hotkey
@@ -830,6 +891,16 @@ impl UiHandle {
         let credential_generation = Arc::clone(&self.credential_generation);
         let toast_records = Arc::clone(&self.toast_records);
         let _ = slint::invoke_from_event_loop(move || {
+            let settings = APP_WINDOW_REGISTRY.with(|r| {
+                r.borrow()
+                    .as_ref()?
+                    .settings
+                    .as_ref()
+                    .map(ComponentHandle::clone_strong)
+            });
+            if let Some(settings) = settings {
+                close_save_directory_picker(&settings);
+            }
             APP_WINDOW_REGISTRY.with(|registry| {
                 let mut registry = registry.borrow_mut();
                 if let Some(registry) = registry.as_mut()

@@ -32,6 +32,15 @@ pub(crate) fn apply_settings(settings: &SettingsWindow, state: &UiState) {
     }
     settings.set_history_error(state.history_error.clone().into());
     settings.set_history_enabled(state.history_enabled);
+    settings.set_screenshot_auto_save(state.screenshot_auto_save);
+    settings.set_quick_save_directory(
+        state
+            .quick_save_directory
+            .as_deref()
+            .unwrap_or_default()
+            .into(),
+    );
+    settings.set_screenshot_save_busy(state.screenshot_save_busy);
     settings.set_history_limit(state.history_limit);
     if settings.get_selection_toolbar() != state.selection_toolbar {
         settings.set_selection_toolbar(state.selection_toolbar);

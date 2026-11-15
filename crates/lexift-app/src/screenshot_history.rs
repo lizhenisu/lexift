@@ -358,7 +358,7 @@ impl ScreenshotRuntime {
                             }
                             Action::Save => this.save.save_image(
                                 ImageSaveRequest {
-                                    image: (*asset.output).clone(),
+                                    image: asset.output.clone(),
                                     owner,
                                     default_name: "Lexift.png".into(),
                                     title,

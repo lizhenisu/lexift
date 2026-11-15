@@ -2549,3 +2549,15 @@ msgstr "放弃当前标注？"
 
 msgid "Recognize and copy"
 msgstr "识别并复制"
+
+msgid "Automatically save copied screenshots as PNG"
+msgstr "复制截图后自动保存 PNG"
+
+msgid "Image copied, but automatic saving failed"
+msgstr "图片已复制，自动保存失败"
+
+msgid "Screenshot settings saved"
+msgstr "截图设置已保存"
+
+msgid "Could not save screenshot settings"
+msgstr "无法保存截图设置"

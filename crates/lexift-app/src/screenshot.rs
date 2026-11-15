@@ -22,6 +22,8 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
+#[path = "screenshot_auto_save.rs"]
+mod auto_save;
 #[path = "screenshot_history.rs"]
 mod history;
 #[path = "image_import.rs"]
@@ -69,6 +71,7 @@ pub(crate) struct ScreenshotRuntime {
     recording: Mutex<recording::Runtime>,
     imports: Mutex<BTreeMap<u64, import::Job>>,
     recognition: Mutex<Option<MultiSaveJob>>,
+    auto_save: Mutex<auto_save::Queue>,
     multi_save: Mutex<Option<MultiSaveJob>>,
     delay: Mutex<Option<(u64, tokio::task::JoinHandle<()>)>>,
     refresh: Mutex<Option<refresh::Job>>,
@@ -167,6 +170,7 @@ impl ScreenshotRuntime {
             recording: Default::default(),
             imports: Default::default(),
             recognition: Default::default(),
+            auto_save: Default::default(),
             multi_save: Default::default(),
             delay: Default::default(),
             refresh: Default::default(),
@@ -336,6 +340,7 @@ impl ScreenshotRuntime {
                 task.abort();
             }
         }
+        auto_save::sync(self, state, quitting);
         refresh::sync(self, state, quitting);
         recording::sync(self, quitting);
         long::sync(self, state, quitting);
@@ -830,7 +835,7 @@ impl ScreenshotRuntime {
             PinOutput::Copy => self.write_image(image, cancel).map(|_| SaveOutcome::Saved),
             PinOutput::Save => self.save.save_image(
                 ImageSaveRequest {
-                    image: image.clone(),
+                    image: Arc::new(image.clone()),
                     owner,
                     default_name: "Lexift.png".into(),
                     title,
@@ -867,6 +872,32 @@ impl ScreenshotRuntime {
     }
     pub fn execute(self: &Arc<Self>, controller: &Arc<AppController>, command: ScreenshotCommand) {
         match command {
+            ScreenshotCommand::PickSaveDirectory {
+                owner,
+                request,
+                enable,
+            } => {
+                auto_save::choose_directory(self, controller, owner, request, enable);
+            }
+            ScreenshotCommand::AutoSave {
+                session,
+                operation,
+                name,
+                directory,
+                image,
+            } => {
+                auto_save::enqueue(
+                    self,
+                    controller,
+                    auto_save::Job {
+                        session,
+                        operation,
+                        name,
+                        directory,
+                        image,
+                    },
+                );
+            }
             ScreenshotCommand::PrepareMaskEditor {
                 session,
                 mode,
@@ -988,7 +1019,7 @@ impl ScreenshotRuntime {
                                 let mut options = crate::annotation_export::save_options(&controller);
                                 options.formats.retain(|format| *format == options.default_format);
                                 this.save.save_image(ImageSaveRequest {
-                                    image: (*image).clone(), owner, default_name: source.snapshot.name.clone(), title, options,
+                                    image: image.clone(), owner, default_name: source.snapshot.name.clone(), title, options,
                                 }, cancelled)?
                             }
                         };
@@ -1065,7 +1096,7 @@ impl ScreenshotRuntime {
                                     this.save
                                         .quick_save_png(
                                             ImageSaveRequest {
-                                                image: (*image).clone(),
+                                                image: image.clone(),
                                                 owner,
                                                 default_name: format!("{stem}-{number}.png"),
                                                 title: title.clone(),
@@ -1538,6 +1569,7 @@ impl ScreenshotRuntime {
                 let spawned = std::thread::Builder::new()
                     .name("screenshot-output".into())
                     .spawn(move || {
+                        let mut copied = None;
                         let result = this
                             .output_image(&request, frames.clone(), &cancelled)
                             .and_then(|image| {
@@ -1548,11 +1580,12 @@ impl ScreenshotRuntime {
                                 let outcome = match kind {
                                     ScreenshotOutput::Copy => {
                                         this.write_image(&image, &cancelled)?;
+                                        copied = Some(image.clone());
                                         Ok(SaveOutcome::Saved)
                                     }
                                     ScreenshotOutput::Save => this.save.save_image(
                                         ImageSaveRequest {
-                                            image: (*image).clone(),
+                                            image: image.clone(),
                                             owner: request.snapshot.owner,
                                             default_name: request.snapshot.name.clone(),
                                             title: request.snapshot.title.clone(),
@@ -1579,7 +1612,7 @@ impl ScreenshotRuntime {
                                         };
                                         this.save.quick_save_png(
                                             ImageSaveRequest {
-                                                image: (*image).clone(),
+                                                image: image.clone(),
                                                 owner: request.snapshot.owner,
                                                 default_name: request.snapshot.name.clone(),
                                                 title: request.snapshot.title.clone(),
@@ -1635,7 +1668,14 @@ impl ScreenshotRuntime {
                                 }
                                 outcome
                             });
-                        if kind != ScreenshotOutput::Pin || result.is_err() {
+                        if let Some(image) = copied {
+                            worker_controller.dispatch(AppEvent::Screenshot(ScreenshotEvent::ImageCopied {
+                                session,
+                                operation,
+                                name: request.snapshot.name.clone(),
+                                image: lexift_core::domain::screenshot::CopiedImage(image),
+                            }));
+                        } else if kind != ScreenshotOutput::Pin || result.is_err() {
                             worker_controller.dispatch(AppEvent::Screenshot(
                                 ScreenshotEvent::Completed {
                                     session,
@@ -2578,7 +2618,7 @@ mod tests {
                     request.owner,
                     Some(lexift_core::ports::magnifier::WindowToken(42))
                 );
-                self.0.lock().unwrap().push(request.image.pixels);
+                self.0.lock().unwrap().push(request.image.pixels.clone());
                 Ok(SaveOutcome::Cancelled)
             }
         }

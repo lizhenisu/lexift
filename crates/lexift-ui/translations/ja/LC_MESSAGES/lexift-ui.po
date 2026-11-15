@@ -2549,3 +2549,15 @@ msgstr "現在の注釈を破棄しますか？"
 
 msgid "Recognize and copy"
 msgstr "認識してコピー"
+
+msgid "Automatically save copied screenshots as PNG"
+msgstr "コピーしたスクリーンショットを PNG で自動保存"
+
+msgid "Image copied, but automatic saving failed"
+msgstr "画像はコピーされましたが、自動保存に失敗しました"
+
+msgid "Screenshot settings saved"
+msgstr "スクリーンショットの設定を保存しました"
+
+msgid "Could not save screenshot settings"
+msgstr "スクリーンショットの設定を保存できませんでした"

@@ -569,6 +569,12 @@ export component SettingsWindow inherits Window {
     in-out property <bool> launch-at-login: false;
     in property <bool> history-supported: true;
     in property <string> history-error;
+    in property <bool> screenshot-auto-save;
+    in property <string> quick-save-directory;
+    in property <bool> screenshot-save-busy;
+    in-out property <int> screenshot-save-picker-request;
+    callback screenshot-auto-save-changed(bool);
+    callback quick-save-directory-requested();
     in-out property <bool> history-enabled: false;
     in-out property <int> history-limit: 50;
     callback history-enabled-changed(bool);
@@ -874,6 +880,7 @@ export component SettingsWindow inherits Window {
         else if index == 1 { nav-1.focus-item(); }
         else if index == 2 { nav-2.focus-item(); }
         else if index == 3 { nav-3.focus-item(); }
+        else if index == 4 { nav-5.focus-item(); }
         else { nav-4.focus-item(); }
     }
     public function settings-keyboard-input() { SettingsInteraction.keyboard-mode = true; }
@@ -901,7 +908,7 @@ export component SettingsWindow inherits Window {
         SettingsInteraction.invalidate();
         root.active-category = category;
         root.about-link-failed = false;
-        root.focus-navigation(category == 0 ? 0 : category == 2 ? 1 : category == 1 ? 2 : category == 5 ? 3 : 4);
+        root.focus-navigation(category == 0 ? 0 : category == 2 ? 1 : category == 1 ? 2 : category == 5 ? 3 : category == 3 ? 4 : 5);
     }
 
     root-content := SettingsFocusScope {
@@ -951,13 +958,21 @@ export component SettingsWindow inherits Window {
             activated => { root.select-category(5); }
             move-focus(delta) => { root.focus-navigation(3 + delta); }
         }
-        nav-4 := SettingsNavItem {
+        nav-5 := SettingsNavItem {
             x: root.expanded-navigation ? Spacing.medium : Spacing.small;
             y: Spacing.large + 64px + 4 * (Metrics.settings-nav-item-height + Spacing.small);
             width: parent.width - 2 * self.x;
+            label: @tr("Screenshot settings"); icon-kind: 4; selected: root.active-category == 3; expanded: root.expanded-navigation;
+            activated => { root.select-category(3); }
+            move-focus(delta) => { root.focus-navigation(4 + delta); }
+        }
+        nav-4 := SettingsNavItem {
+            x: root.expanded-navigation ? Spacing.medium : Spacing.small;
+            y: Spacing.large + 64px + 5 * (Metrics.settings-nav-item-height + Spacing.small);
+            width: parent.width - 2 * self.x;
             label: @tr("About"); icon-kind: 6; selected: root.active-category == 6; expanded: root.expanded-navigation;
             activated => { root.select-category(6); }
-            move-focus(delta) => { root.focus-navigation(4 + delta); }
+            move-focus(delta) => { root.focus-navigation(5 + delta); }
         }
         Rectangle { x: parent.width - 1px; width: 1px; height: parent.height; background: Colors.outline; }
     }
@@ -971,7 +986,7 @@ export component SettingsWindow inherits Window {
         Text {
             x: Metrics.settings-page-padding; y: (parent.height - 32px) / 2; height: 32px;
             text: root.active-category == 0 ? @tr("General") : root.active-category == 2 ? @tr("Hotkeys")
-                : root.active-category == 5 ? @tr("Service providers") : root.active-category == 6 ? @tr("About") : @tr("Translation settings");
+                : root.active-category == 3 ? @tr("Screenshot settings") : root.active-category == 5 ? @tr("Service providers") : root.active-category == 6 ? @tr("About") : @tr("Translation settings");
             color: Colors.foreground; font-size: 24px; font-weight: 700; vertical-alignment: center;
         }
         Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: Colors.outline; }
@@ -982,6 +997,40 @@ export component SettingsWindow inherits Window {
         x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - self.y;
         version: root.about-version; link-failed: root.about-link-failed;
         open-link(index) => { root.about-link-requested(index); }
+    }
+
+    ScrollView {
+        visible: root.active-category == 3;
+        x: 0px; y: Metrics.settings-header-height; width: main-pane.width; height: main-pane.height - self.y;
+        content-width: self.visible-width;
+        content-height: max(self.visible-height, screenshot-saving-card.y + screenshot-saving-card.height + Metrics.settings-page-padding);
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+        screenshot-saving-card := SettingsCard {
+            x: Metrics.settings-page-padding; y: Metrics.settings-page-padding;
+            width: parent.width - 2 * self.x;
+            title: @tr("Screenshot settings");
+            VerticalLayout {
+                spacing: Spacing.small;
+                SettingsToggleRow {
+                    label: @tr("Automatically save copied screenshots as PNG");
+                    checked: root.screenshot-auto-save; enabled: !root.screenshot-save-busy;
+                    toggled(value) => { root.screenshot-auto-save-changed(value); }
+                }
+                Text {
+                    text: root.quick-save-directory;
+                    visible: root.quick-save-directory != "";
+                    wrap: word-wrap; color: Colors.foreground;
+                    accessible-label: root.quick-save-directory;
+                }
+                HorizontalLayout {
+                    SettingsButton {
+                        label: @tr("Change quick save directory"); enabled: !root.screenshot-save-busy;
+                        clicked => { root.quick-save-directory-requested(); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+            }
+        }
     }
 
     general-scroll := ScrollView {

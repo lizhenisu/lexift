@@ -2549,3 +2549,15 @@ msgstr "현재 주석을 버리시겠습니까?"
 
 msgid "Recognize and copy"
 msgstr "인식 후 복사"
+
+msgid "Automatically save copied screenshots as PNG"
+msgstr "복사한 스크린샷을 PNG로 자동 저장"
+
+msgid "Image copied, but automatic saving failed"
+msgstr "이미지를 복사했지만 자동 저장에 실패했습니다"
+
+msgid "Screenshot settings saved"
+msgstr "스크린샷 설정을 저장했습니다"
+
+msgid "Could not save screenshot settings"
+msgstr "스크린샷 설정을 저장하지 못했습니다"

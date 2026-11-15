@@ -466,7 +466,7 @@ mod tests {
     use lexift_core::{domain::geometry::Rect, ports::screen_capture::CapturedRegion};
     fn request() -> ImageSaveRequest {
         ImageSaveRequest {
-            image: CapturedRegion {
+            image: Arc::new(CapturedRegion {
                 bounds: Rect {
                     left: -2,
                     top: -1,
@@ -474,7 +474,7 @@ mod tests {
                     bottom: 0,
                 },
                 pixels: vec![200, 10, 20, 255, 10, 200, 20, 255],
-            },
+            }),
             owner: None,
             default_name: "test.png".into(),
             title: String::new(),
@@ -553,14 +553,14 @@ mod tests {
         std::thread::spawn(|| {
             let _apartment = Apartment::new().unwrap();
             let mut request = request();
-            request.image.bounds = lexift_core::domain::geometry::Rect {
+            Arc::make_mut(&mut request.image).bounds = lexift_core::domain::geometry::Rect {
                 left: -20,
                 top: -10,
                 right: 76,
                 bottom: 54,
             };
             let colours = [[0, 0, 0, 0], [64, 32, 16, 128], [200, 100, 20, 255]];
-            request.image.pixels = (0..64)
+            Arc::make_mut(&mut request.image).pixels = (0..64)
                 .flat_map(|_| (0..96).flat_map(|x| colours[x / 32]))
                 .collect();
             let bytes = encode_image(&request, ImageFormat::Jpeg).unwrap();

@@ -133,7 +133,7 @@ impl ExportRuntime {
         }
         self.save.save_image(
             ImageSaveRequest {
-                image,
+                image: image.into(),
                 owner: snapshot.owner,
                 default_name: snapshot.name.clone(),
                 title: snapshot.title.clone(),

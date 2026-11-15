@@ -929,6 +929,16 @@ impl UiHandle {
         let _ = slint::invoke_from_event_loop(move || ocr_result::show(text, copy));
     }
 
+    pub fn show_auto_save_failure(&self, point: lexift_core::domain::geometry::Point) {
+        let _ = slint::invoke_from_event_loop(move || {
+            image_history::show_passive_feedback(
+                point,
+                "Image copied, but automatic saving failed",
+                true,
+            )
+        });
+    }
+
     pub fn quit(&self) {
         let credential_generation = Arc::clone(&self.credential_generation);
         let toast_records = Arc::clone(&self.toast_records);

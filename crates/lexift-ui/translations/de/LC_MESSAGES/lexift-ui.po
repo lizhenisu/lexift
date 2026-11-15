@@ -2549,3 +2549,15 @@ msgstr "Aktuelle Anmerkungen verwerfen?"
 
 msgid "Recognize and copy"
 msgstr "Erkennen und kopieren"
+
+msgid "Automatically save copied screenshots as PNG"
+msgstr "Kopierte Screenshots automatisch als PNG speichern"
+
+msgid "Image copied, but automatic saving failed"
+msgstr "Bild kopiert, aber automatisches Speichern fehlgeschlagen"
+
+msgid "Screenshot settings saved"
+msgstr "Screenshot-Einstellungen gespeichert"
+
+msgid "Could not save screenshot settings"
+msgstr "Screenshot-Einstellungen konnten nicht gespeichert werden"

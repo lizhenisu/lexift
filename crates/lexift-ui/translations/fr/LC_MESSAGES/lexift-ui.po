@@ -2549,3 +2549,15 @@ msgstr "Ignorer les annotations actuelles ?"
 
 msgid "Recognize and copy"
 msgstr "Reconnaître et copier"
+
+msgid "Automatically save copied screenshots as PNG"
+msgstr "Enregistrer automatiquement les captures copiées en PNG"
+
+msgid "Image copied, but automatic saving failed"
+msgstr "Image copiée, mais échec de l’enregistrement automatique"
+
+msgid "Screenshot settings saved"
+msgstr "Paramètres de capture enregistrés"
+
+msgid "Could not save screenshot settings"
+msgstr "Impossible d’enregistrer les paramètres de capture"

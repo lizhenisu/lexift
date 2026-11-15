@@ -2549,3 +2549,15 @@ msgstr "Scartare le annotazioni correnti?"
 
 msgid "Recognize and copy"
 msgstr "Riconosci e copia"
+
+msgid "Automatically save copied screenshots as PNG"
+msgstr "Salva automaticamente le catture copiate come PNG"
+
+msgid "Image copied, but automatic saving failed"
+msgstr "Immagine copiata, ma il salvataggio automatico non è riuscito"
+
+msgid "Screenshot settings saved"
+msgstr "Impostazioni di cattura salvate"
+
+msgid "Could not save screenshot settings"
+msgstr "Impossibile salvare le impostazioni di cattura"

@@ -744,7 +744,12 @@ impl AppState {
             } => {
                 self.settings = settings;
                 self.desired_settings.screenshot_presets = self.settings.screenshot_presets.clone();
-                if matches!(change, SettingsChange::QuickSaveDirectory { .. }) {
+                if matches!(
+                    change,
+                    SettingsChange::QuickSaveDirectory { .. }
+                        | SettingsChange::ScreenshotAutoSave { .. }
+                ) {
+                    self.desired_settings.screenshot_auto_save = self.settings.screenshot_auto_save;
                     self.desired_settings.quick_save_directory =
                         self.settings.quick_save_directory.clone();
                 }
@@ -1066,6 +1071,7 @@ impl AppState {
                 commands
             }
             AppEvent::ExitRequested => {
+                self.screenshot.save_directory_picker = None;
                 self.closed_pin = None;
                 self.pin_restore = None;
                 self.pin_restore_notice = None;
@@ -1095,7 +1101,7 @@ impl AppState {
         }
     }
 
-    fn request_settings_change(&mut self, change: SettingsChange) -> Vec<AppCommand> {
+    pub(crate) fn request_settings_change(&mut self, change: SettingsChange) -> Vec<AppCommand> {
         if let SettingsChange::Ollama(config) = &change
             && let Err(error) = config.validate()
         {
@@ -1130,7 +1136,9 @@ impl AppState {
         }
         if !matches!(
             change,
-            SettingsChange::QuickSaveDirectory { .. } | SettingsChange::ScreenshotPresets { .. }
+            SettingsChange::QuickSaveDirectory { .. }
+                | SettingsChange::ScreenshotPresets { .. }
+                | SettingsChange::ScreenshotAutoSave { .. }
         ) {
             change.apply_to(&mut self.desired_settings);
         }
@@ -1297,6 +1305,7 @@ impl AppState {
             | SettingsField::RecordingFinishHotkey
             | SettingsField::ScreenshotPresets
             | SettingsField::QuickSaveDirectory
+            | SettingsField::ScreenshotAutoSave
             | SettingsField::ScreenshotHotkey
             | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
@@ -1325,6 +1334,7 @@ impl AppState {
             | SettingsField::RecordingFinishHotkey
             | SettingsField::ScreenshotPresets
             | SettingsField::QuickSaveDirectory
+            | SettingsField::ScreenshotAutoSave
             | SettingsField::ScreenshotHotkey
             | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
@@ -1398,6 +1408,9 @@ impl AppState {
             }
             SettingsField::ScreenshotPresets => {
                 self.desired_settings.screenshot_presets = self.settings.screenshot_presets.clone();
+            }
+            SettingsField::ScreenshotAutoSave => {
+                self.desired_settings.screenshot_auto_save = self.settings.screenshot_auto_save;
             }
             SettingsField::QuickSaveDirectory => {
                 self.desired_settings.quick_save_directory =

@@ -1216,7 +1216,7 @@ mod tests {
         ] {
             settings.window().dispatch_event(event);
         }
-        for text in [Key::DownArrow, Key::Return] {
+        for text in [Key::DownArrow, Key::DownArrow, Key::Return] {
             settings
                 .window()
                 .dispatch_event(WindowEvent::KeyPressed { text: text.into() });

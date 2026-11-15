@@ -357,3 +357,9 @@ pub(crate) fn emit_pin(event: lexift_core::domain::pinned_image::Event) {
         handler(lexift_core::AppEvent::PinnedImage(event));
     }
 }
+
+pub(crate) fn window_token(
+    window: &slint::Window,
+) -> Option<lexift_core::ports::magnifier::WindowToken> {
+    REGISTRY.with(|r| (r.borrow().as_ref()?.lifecycle.annotation_window_token)(window))
+}

@@ -46,7 +46,7 @@ impl ImageSaveOptions {
 
 pub struct ImageSaveRequest {
     /// Tight, premultiplied RGBA in physical desktop coordinates.
-    pub image: CapturedRegion,
+    pub image: Arc<CapturedRegion>,
     pub owner: Option<WindowToken>,
     pub default_name: String,
     pub title: String,
@@ -145,7 +145,7 @@ mod tests {
     #[test]
     fn image_validation_rejects_truncated_and_overflowing_images() {
         let mut request = ImageSaveRequest {
-            image: CapturedRegion {
+            image: Arc::new(CapturedRegion {
                 bounds: Rect {
                     left: -2,
                     top: -1,
@@ -153,7 +153,7 @@ mod tests {
                     bottom: 0,
                 },
                 pixels: vec![255; 8],
-            },
+            }),
             owner: None,
             default_name: String::new(),
             title: String::new(),
@@ -166,10 +166,10 @@ mod tests {
         request.options.formats.push(ImageFormat::Png);
         assert!(request.validate().is_err());
         request.options = ImageSaveOptions::png_and_jpeg(String::new());
-        request.image.pixels.pop();
+        Arc::make_mut(&mut request.image).pixels.pop();
         assert!(request.validate().is_err());
-        request.image.bounds.left = i32::MIN;
-        request.image.bounds.right = i32::MAX;
+        Arc::make_mut(&mut request.image).bounds.left = i32::MIN;
+        Arc::make_mut(&mut request.image).bounds.right = i32::MAX;
         assert!(request.validate().is_err());
     }
 }

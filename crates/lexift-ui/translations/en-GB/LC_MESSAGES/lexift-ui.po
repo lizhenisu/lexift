@@ -2549,3 +2549,15 @@ msgstr "Discard the current annotations?"
 
 msgid "Recognize and copy"
 msgstr "Recognise and copy"
+
+msgid "Automatically save copied screenshots as PNG"
+msgstr "Automatically save copied screenshots as PNG"
+
+msgid "Image copied, but automatic saving failed"
+msgstr "Image copied, but automatic saving failed"
+
+msgid "Screenshot settings saved"
+msgstr "Screenshot settings saved"
+
+msgid "Could not save screenshot settings"
+msgstr "Could not save screenshot settings"

@@ -245,6 +245,7 @@ pub(crate) trait ViewPort: Send + Sync {
         secret: CredentialSecret,
     );
     fn show_settings_feedback(&self, feedback: SettingsFeedback);
+    fn show_auto_save_failure(&self, _point: lexift_core::domain::geometry::Point) {}
     fn quit(&self);
 }
 
@@ -512,6 +513,10 @@ impl ViewPort for lexift_ui::UiHandle {
 
     fn show_settings_feedback(&self, feedback: SettingsFeedback) {
         self.show_settings_feedback(feedback);
+    }
+
+    fn show_auto_save_failure(&self, point: lexift_core::domain::geometry::Point) {
+        self.show_auto_save_failure(point);
     }
 
     fn quit(&self) {
