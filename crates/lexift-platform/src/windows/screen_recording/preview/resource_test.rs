@@ -328,7 +328,7 @@ fn native_trim_playback_gate() {
         },
         file,
         Range::time(frames - 1, fps),
-        Some((range, fps)),
+        (Some((range, fps)), None),
         Arc::new(move |id, n| {
             let _ = tx.send((id, n));
         }),
@@ -402,6 +402,54 @@ fn native_trim_playback_gate() {
         }
     };
     wait(1, false);
+    if std::env::var_os("LEXIFT_FRAME_CROP").is_some() {
+        id.request += 1;
+        worker
+            .control(Command {
+                identity: id,
+                action: Action::SetFrameCrop(Some(
+                    lexift_core::domain::recording_trim::FrameCrop {
+                        left: 20,
+                        top: 16,
+                        right: 100,
+                        bottom: 80,
+                    },
+                )),
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            unsafe {
+                let mut msg = MSG::default();
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    DispatchMessageW(&msg);
+                }
+            }
+            match rx.recv_timeout(Duration::from_millis(10)) {
+                Ok((request, Notice::FrameCropPresented(true))) if request == id => break,
+                Ok((_, Notice::Failed(error))) => panic!("{error}"),
+                _ => assert!(Instant::now() < deadline, "crop was not presented"),
+            }
+        }
+        let retire = std::thread::spawn(move || drop(worker));
+        while !retire.is_finished() {
+            unsafe {
+                let mut msg = MSG::default();
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    DispatchMessageW(&msg);
+                }
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        retire.join().unwrap();
+        assert!(!path.exists());
+        super::super::super::recording_gate::resources::assert_retired();
+        unsafe {
+            DestroyWindow(parent).unwrap();
+            CoUninitialize();
+        }
+        return;
+    }
     id.request = 2;
     worker
         .control(Command {

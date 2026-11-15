@@ -1,5 +1,5 @@
 //! Playback belongs to a sealed recording, with its own command generation.
-use super::recording_trim::Range;
+use super::recording_trim::{FrameCrop, Range};
 use super::{
     geometry::Rect,
     screen_recording::{Artifact, Identity as RecordingIdentity},
@@ -44,6 +44,10 @@ pub enum Input {
     BeginTrim,
     SetRange { range: Range, end_handle: bool },
     ResetRange,
+    BeginFrameCrop,
+    CancelFrameCrop,
+    SetFrameCrop(Option<FrameCrop>),
+    CropGuide(FrameCrop),
     CancelSeek,
     Seek(Duration),
     Mute,
@@ -61,6 +65,7 @@ pub enum Notice {
         has_audio: bool,
     },
     Visible,
+    FrameCropPresented(bool),
     Paused,
     Ended,
     Failed(String),
@@ -74,6 +79,7 @@ pub enum Action {
         range: Range,
         fps: u32,
         version: u64,
+        crop: Option<FrameCrop>,
     },
     Play,
     Pause,
@@ -84,6 +90,8 @@ pub enum Action {
         version: u64,
         position: Duration,
     },
+    SetFrameCrop(Option<FrameCrop>),
+    CropGuide(Option<FrameCrop>),
     Mute(bool),
     Close,
     Handoff,
@@ -106,6 +114,11 @@ pub struct State {
     pub frames: u64,
     pub fps: u32,
     pub range_version: u64,
+    pub source_size: (u32, u32),
+    pub frame_crop: Option<FrameCrop>,
+    pub frame_crop_pending: Option<CropChange>,
+    pub frame_crop_editing: bool,
+    pub frame_crop_error: bool,
     pub position: Duration,
     pub duration: Duration,
     pub has_audio: bool,
@@ -118,6 +131,13 @@ pub struct State {
     intent: Option<Intent>,
     cleanup_failed: bool,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CropChange {
+    Begin,
+    Cancel,
+    Apply(Option<FrameCrop>),
+}
+
 impl State {
     pub fn new(id: RecordingIdentity, artifact: Artifact) -> Self {
         Self {
@@ -133,6 +153,11 @@ impl State {
             frames: 0,
             fps: 30,
             range_version: 0,
+            source_size: (0, 0),
+            frame_crop: None,
+            frame_crop_pending: None,
+            frame_crop_editing: false,
+            frame_crop_error: false,
             position: Duration::ZERO,
             duration: Duration::ZERO,
             has_audio: false,
@@ -181,12 +206,48 @@ impl State {
         if input == Input::Save && !self.visible && self.phase != Phase::Failed {
             return None;
         }
+        if self.frame_crop_pending.is_some() {
+            return None;
+        }
         match input {
+            Input::BeginFrameCrop
+                if !self.frame_crop_editing
+                    && self.visible
+                    && matches!(self.phase, Phase::Paused | Phase::Playing | Phase::Ended) =>
+            {
+                self.phase = Phase::Paused;
+                self.frame_crop_error = false;
+                self.frame_crop_pending = Some(CropChange::Begin);
+                self.next(Action::SetFrameCrop(None))
+            }
+            Input::CancelFrameCrop if self.frame_crop_editing => {
+                self.frame_crop_pending = Some(CropChange::Cancel);
+                self.next(Action::SetFrameCrop(self.frame_crop))
+            }
+            Input::CropGuide(crop)
+                if self.frame_crop_editing
+                    && crop.right <= self.source_size.0
+                    && crop.bottom <= self.source_size.1 =>
+            {
+                Some(self.command(Action::CropGuide(Some(crop))))
+            }
+            Input::SetFrameCrop(crop)
+                if self.frame_crop_editing
+                    && crop.is_none_or(|c| c.valid(self.source_size.0, self.source_size.1)) =>
+            {
+                self.frame_crop_error = false;
+                self.frame_crop_pending = Some(CropChange::Apply(crop));
+                self.next(Action::SetFrameCrop(crop))
+            }
+            _ if self.frame_crop_editing && !matches!(input, Input::Close | Input::Failed(_)) => {
+                None
+            }
             Input::Target(target) if self.phase == Phase::Preparing => self.next(Action::Open {
                 target,
                 range: self.range,
                 fps: self.fps,
                 version: self.range_version,
+                crop: self.frame_crop,
             }),
             Input::PlayPause
                 if self.intent.is_none() && matches!(self.phase, Phase::Paused | Phase::Ended) =>
@@ -338,6 +399,8 @@ impl State {
                 Some(self.command(Action::PrepareView))
             }
             Input::Failed(error) => {
+                self.frame_crop_pending = None;
+                self.frame_crop_editing = false;
                 self.error = Some(error);
                 self.phase = Phase::Failed;
                 self.intent = None;
@@ -351,6 +414,25 @@ impl State {
             return None;
         }
         match notice {
+            Notice::FrameCropPresented(success) => {
+                if let Some(change) = self.frame_crop_pending.take() {
+                    self.frame_crop_error = !success;
+                    if success {
+                        match change {
+                            CropChange::Begin => self.frame_crop_editing = true,
+                            CropChange::Cancel => self.frame_crop_editing = false,
+                            CropChange::Apply(crop) => {
+                                self.frame_crop_editing = false;
+                                if crop != self.frame_crop {
+                                    self.frame_crop = crop;
+                                    self.range_version += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                None
+            }
             Notice::Visible
                 if !self.visible
                     && matches!(
@@ -417,6 +499,8 @@ impl State {
                 None
             }
             Notice::Failed(error) if self.phase != Phase::Retiring => {
+                self.frame_crop_pending = None;
+                self.frame_crop_editing = false;
                 self.error = Some(error);
                 self.intent = None;
                 if !self.visible {
@@ -465,6 +549,61 @@ mod tests {
             Artifact(4),
         )
     }
+    #[test]
+    fn frame_crop_only_commits_after_current_presentation_and_keeps_time_range() {
+        let mut s = state();
+        s.source_size = (320, 240);
+        s.visible = true;
+        s.phase = Phase::Paused;
+        s.range = Range {
+            start: 10,
+            end: 300,
+        };
+        s.position = Range::time(30, 60);
+        let position = s.position;
+        let before = s.identity;
+        let begin = s.input(before, Input::BeginFrameCrop).unwrap();
+        assert_eq!(begin.action, Action::SetFrameCrop(None));
+        assert!(s.notice(before, Notice::FrameCropPresented(true)).is_none());
+        assert!(!s.frame_crop_editing);
+        assert!(s.input(begin.identity, Input::Close).is_none());
+        s.notice(begin.identity, Notice::FrameCropPresented(true));
+        assert!(s.frame_crop_editing);
+        assert!(s.input(s.identity, Input::Save).is_none());
+        let crop = FrameCrop {
+            left: 20,
+            top: 16,
+            right: 200,
+            bottom: 180,
+        };
+        let rejected = FrameCrop { left: 21, ..crop };
+        assert!(
+            s.input(s.identity, Input::SetFrameCrop(Some(rejected)))
+                .is_none()
+        );
+        let apply = s
+            .input(s.identity, Input::SetFrameCrop(Some(crop)))
+            .unwrap();
+        s.notice(apply.identity, Notice::FrameCropPresented(false));
+        assert!(s.frame_crop_editing && s.frame_crop_error);
+        assert!(s.frame_crop.is_none());
+        let apply = s
+            .input(s.identity, Input::SetFrameCrop(Some(crop)))
+            .unwrap();
+        s.notice(apply.identity, Notice::FrameCropPresented(true));
+        assert!(!s.frame_crop_editing);
+        assert_eq!(s.frame_crop, Some(crop));
+        assert_eq!(s.range_version, 1);
+        assert_eq!(
+            s.range,
+            Range {
+                start: 10,
+                end: 300
+            }
+        );
+        assert_eq!(s.position, position);
+    }
+
     #[test]
     fn trimming_uses_exclusive_frame_bounds_and_rejects_old_results() {
         let mut s = state();

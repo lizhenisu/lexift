@@ -35,10 +35,23 @@ pub(super) fn export(
     source: &Path,
     output: &Path,
     info: &ArtifactInfo,
-    range: Range,
+    selection: impl Into<lexift_core::domain::recording_trim::Selection>,
     cancel: &AtomicBool,
     progress: impl Fn(ExportStage, u64, u64),
 ) -> Result<()> {
+    use lexift_core::domain::recording_trim::FrameCrop;
+    let selection = selection.into();
+    let range = selection.range;
+    if selection
+        .crop
+        .is_some_and(|crop| !crop.valid(info.width, info.height))
+    {
+        return Err(Error::new("Invalid recording frame crop"));
+    }
+    let crop = selection
+        .crop
+        .unwrap_or(FrameCrop::full(info.width, info.height));
+    let (out_width, out_height) = crop.size();
     if !range.valid(info.frames) {
         return Err(Error::new("Invalid recording trim range"));
     }
@@ -105,14 +118,14 @@ pub(super) fn export(
             .SetCurrentPosition(&GUID::zeroed(), &position)
             .map_err(err)?;
         let encoder =
-            Encoder::new_av(output, info.width, info.height, has_audio, info.video).map_err(err)?;
+            Encoder::new_av(output, out_width, out_height, has_audio, info.video).map_err(err)?;
         let clock = Clock::new(fps, Duration::ZERO)
             .ok_or_else(|| Error::new("Invalid recording frame rate"))?;
         let mut pixels = Vec::new();
         pixels
-            .try_reserve_exact(bytes)
+            .try_reserve_exact(out_width as usize * out_height as usize * 3 / 2)
             .map_err(|_| Error::new("Recording export buffer unavailable"))?;
-        pixels.resize(bytes, 0u8);
+        pixels.resize(out_width as usize * out_height as usize * 3 / 2, 0u8);
         let (mut coded_width, mut coded_height) = (info.width as usize, info.height as usize);
         let mut decoded = Vec::new();
         let start_sample = ((u128::from(range.start) * 48000) / u128::from(fps)) as u64;
@@ -250,14 +263,16 @@ pub(super) fn export(
                     std::ptr::copy_nonoverlapping(data, decoded.as_mut_ptr(), coded_bytes);
                     buffer.Unlock().map_err(err)?;
                 }
-                let w = info.width as usize;
-                let h = info.height as usize;
+                let w = out_width as usize;
+                let h = out_height as usize;
+                let left = crop.left as usize;
+                let top = crop.top as usize;
                 for row in 0..h {
-                    pixels[row * w..(row + 1) * w]
-                        .copy_from_slice(&decoded[row * coded_width..row * coded_width + w]);
+                    let at = (row + top) * coded_width + left;
+                    pixels[row * w..(row + 1) * w].copy_from_slice(&decoded[at..at + w]);
                 }
                 for row in 0..h / 2 {
-                    let at = coded_width * coded_height + row * coded_width;
+                    let at = coded_width * coded_height + (row + top / 2) * coded_width + left;
                     pixels[w * h + row * w..w * h + (row + 1) * w]
                         .copy_from_slice(&decoded[at..at + w]);
                 }
@@ -408,7 +423,16 @@ mod tests {
         };
         let started = Instant::now();
         let cancel = AtomicBool::new(false);
-        let outcome = export(&source, &output, &info, range, &cancel, |_, _, _| {});
+        let crop = std::env::var_os("LEXIFT_FRAME_CROP").map(|_| {
+            lexift_core::domain::recording_trim::FrameCrop {
+                left: 20,
+                top: 16,
+                right: 100,
+                bottom: 80,
+            }
+        });
+        let selection = lexift_core::domain::recording_trim::Selection { range, crop };
+        let outcome = export(&source, &output, &info, selection, &cancel, |_, _, _| {});
         if std::env::var_os("LEXIFT_TRIM_EXPECT_ERROR").is_some() {
             assert!(outcome.is_err());
             if output.exists() {

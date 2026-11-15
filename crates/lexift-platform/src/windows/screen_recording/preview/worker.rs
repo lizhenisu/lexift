@@ -69,7 +69,10 @@ impl Worker {
         target: Target,
         file: Arc<super::super::FileArtifact>,
         last_frame: Duration,
-        initial_range: Option<(Range, u32)>,
+        initial: (
+            Option<(Range, u32)>,
+            Option<lexift_core::domain::recording_trim::FrameCrop>,
+        ),
         listener: PreviewListener,
     ) -> Result<Self> {
         let shared = Arc::new(Shared {
@@ -83,7 +86,7 @@ impl Worker {
             .insert(target.window, Arc::downgrade(&shared));
         let thread = thread::Builder::new()
             .name("lexift-recording-preview".into())
-            .spawn(move || run(id, target, file, last_frame, initial_range, listener, s))
+            .spawn(move || run(id, target, file, last_frame, initial, listener, s))
             .map_err(|_| {
                 unregister(target.window, &shared);
                 Error::new("Recording preview unavailable")
@@ -114,6 +117,10 @@ impl Worker {
             if matches!(command.action, Action::Seek(_)) {
                 p.commands.retain(|c| !matches!(c.action, Action::Seek(_)));
             }
+            if matches!(command.action, Action::CropGuide(_)) {
+                p.commands
+                    .retain(|c| !matches!(c.action, Action::CropGuide(_)));
+            }
             if p.commands.len() >= 16 {
                 return Err(Error::new("Recording preview is busy"));
             }
@@ -137,7 +144,10 @@ fn run(
     target: Target,
     file: Arc<super::super::FileArtifact>,
     last_frame: Duration,
-    initial_range: Option<(Range, u32)>,
+    initial: (
+        Option<(Range, u32)>,
+        Option<lexift_core::domain::recording_trim::FrameCrop>,
+    ),
     listener: PreviewListener,
     shared: Arc<Shared>,
 ) {
@@ -167,10 +177,13 @@ fn run(
         let mut surface = Surface::new(target)?;
         let mut engine = Engine::open(&file.path)?;
         #[cfg(test)]
-        if std::env::var_os("LEXIFT_TRIM_PREVIEW_PROBE").is_some() {
+        if std::env::var_os("LEXIFT_TRIM_PREVIEW_PROBE").is_some()
+            || std::env::var_os("LEXIFT_FRAME_CROP").is_some()
+        {
             surface.test_probe = Some((500, 66));
         }
-        let mut range = initial_range;
+        let mut range = initial.0;
+        engine.crop = initial.1;
         let mut initial_seek = range.is_some_and(|(r, _)| r.start > 0);
         let mut ending = false;
         let mut presented_pts: Option<f64> = None;
@@ -266,6 +279,36 @@ fn run(
                             seek_steps = 0;
                             waiting = true;
                             deadline = Instant::now() + Duration::from_secs(5);
+                        }
+                        Action::CropGuide(crop) => {
+                            surface.crop_guide = crop;
+                            dirty = true;
+                        }
+                        Action::SetFrameCrop(crop) => {
+                            engine.media.Pause()?;
+                            let guide = surface.crop_guide.take();
+                            let previous = engine.crop;
+                            engine.crop = crop;
+                            let success = engine
+                                .accept_frame()
+                                .and_then(|_| surface.present(&engine))
+                                .and_then(|_| surface.flush())
+                                .is_ok();
+                            if !success {
+                                surface.crop_guide = guide;
+                                engine.crop = previous;
+                                engine.accept_frame()?;
+                                surface.present(&engine)?;
+                            }
+                            #[cfg(test)]
+                            if success
+                                && std::env::var_os("LEXIFT_FRAME_CROP").is_some()
+                                && let Some(pixel) = surface.test_pixel
+                            {
+                                eprintln!("CROP_PRESENT swap_chain_bgra={pixel:?}");
+                                assert!(pixel[0] > 180 && pixel[1] < 60 && pixel[2] < 60);
+                            }
+                            listener(id, Notice::FrameCropPresented(success));
                         }
                         Action::Mute(muted) => engine.media.SetMuted(muted)?,
                         _ => {}

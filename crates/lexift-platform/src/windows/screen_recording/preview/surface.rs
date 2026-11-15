@@ -8,6 +8,7 @@ use windows::{
             Dwm::DwmFlush,
             Dxgi::{Common::*, *},
         },
+        UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture},
         UI::WindowsAndMessaging::*,
     },
     core::*,
@@ -21,6 +22,8 @@ pub(super) struct Surface {
     swap: Option<IDXGISwapChain1>,
     size: (u32, u32),
     blitter: Option<super::blit::Blitter>,
+    source_size: (u32, u32),
+    pub crop_guide: Option<lexift_core::domain::recording_trim::FrameCrop>,
     #[cfg(test)]
     pub test_probe: Option<(u32, u32)>,
     #[cfg(test)]
@@ -37,6 +40,24 @@ unsafe extern "system" fn procedure(window: HWND, message: u32, w: WPARAM, l: LP
                 LRESULT(0)
             }
             WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+            WM_LBUTTONDOWN | WM_LBUTTONUP | WM_MOUSEMOVE => {
+                use windows::Win32::Graphics::Gdi::MapWindowPoints;
+                if message == WM_LBUTTONDOWN {
+                    SetCapture(window);
+                } else if message == WM_LBUTTONUP {
+                    let _ = ReleaseCapture();
+                }
+                if let Ok(parent) = GetParent(window) {
+                    let mut at = POINT {
+                        x: l.0 as i16 as i32,
+                        y: (l.0 >> 16) as i16 as i32,
+                    };
+                    MapWindowPoints(Some(window), Some(parent), std::slice::from_mut(&mut at));
+                    let xy = u32::from(at.x as u16) | (u32::from(at.y as u16) << 16);
+                    let _ = PostMessageW(Some(parent), message, w, LPARAM(xy as isize));
+                }
+                LRESULT(0)
+            }
             _ => DefWindowProcW(window, message, w, l),
         }
     }
@@ -90,6 +111,8 @@ impl Surface {
                 restore_clip,
                 swap: None,
                 blitter: None,
+                source_size: (0, 0),
+                crop_guide: None,
                 #[cfg(test)]
                 test_probe: None,
                 #[cfg(test)]
@@ -168,13 +191,16 @@ impl Surface {
             let rh = (vh as f64 * scale).round() as i32;
             let x = (w as i32 - rw) / 2;
             let y = (h as i32 - rh) / 2;
-            if self.blitter.is_none() {
+            if self.blitter.is_none() || self.source_size != engine.size {
                 self.blitter = Some(super::blit::Blitter::new(engine)?);
+                self.source_size = engine.size;
             }
-            self.blitter
-                .as_ref()
-                .unwrap()
-                .draw(engine, &texture, x, y, rw, rh)?;
+            self.blitter.as_ref().unwrap().draw(
+                engine,
+                &texture,
+                (x, y, rw, rh),
+                self.crop_guide,
+            )?;
             #[cfg(test)]
             if let Some(point) = self.test_probe {
                 self.test_pixel = Some(engine.read_pixels_from(&texture, &[point])?[0]);

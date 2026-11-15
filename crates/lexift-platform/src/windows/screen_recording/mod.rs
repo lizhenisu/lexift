@@ -1106,6 +1106,7 @@ fn service(receiver: Receiver<Message>, sender: SyncSender<Message>, shared: Arc
                         range,
                         fps,
                         version: _,
+                        crop,
                     } = command.action
                     {
                         j.preview.take();
@@ -1117,7 +1118,7 @@ fn service(receiver: Receiver<Message>, sender: SyncSender<Message>, shared: Arc
                                 j.frames.saturating_sub(1) as f64
                                     / f64::from(j.request.video.frame_rate.get()),
                             ),
-                            Some((range, fps)),
+                            (Some((range, fps)), crop),
                             listener.clone(),
                         )
                         .map(|w| j.preview = Some(w))

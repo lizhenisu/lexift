@@ -2561,3 +2561,15 @@ msgstr "Screenshot-Einstellungen gespeichert"
 
 msgid "Could not save screenshot settings"
 msgstr "Screenshot-Einstellungen konnten nicht gespeichert werden"
+
+msgid "Crop video frame"
+msgstr "Videobild zuschneiden"
+
+msgid "Restore full frame"
+msgstr "Vollbildausschnitt wiederherstellen"
+
+msgid "Minimum crop size"
+msgstr "Mindestausschnitt"
+
+msgid "Could not apply video crop"
+msgstr "Videobildausschnitt konnte nicht angewendet werden"

@@ -37,6 +37,7 @@ pub(super) struct Engine {
     pub _context: ID3D11DeviceContext,
     pub texture: Option<ID3D11Texture2D>,
     pub size: (u32, u32),
+    pub crop: Option<lexift_core::domain::recording_trim::FrameCrop>,
     events: Receiver<(u32, usize, u32)>,
     _manager: IMFDXGIDeviceManager,
     _startup: super::super::encoder::Media,
@@ -95,6 +96,7 @@ impl Engine {
                 _context: context,
                 texture: None,
                 size: (0, 0),
+                crop: None,
                 events,
                 _manager: manager,
                 _startup: startup,
@@ -176,12 +178,19 @@ impl Engine {
     }
     pub fn accept_frame(&mut self) -> Result<()> {
         unsafe {
-            if self.texture.is_none() {
-                let (mut w, mut h) = (0, 0);
-                self.media.GetNativeVideoSize(Some(&mut w), Some(&mut h))?;
+            let (mut w, mut h) = (0, 0);
+            self.media.GetNativeVideoSize(Some(&mut w), Some(&mut h))?;
+            let (width, height) = self.crop.map_or((w, h), |crop| crop.size());
+            let source = self.crop.map(|crop| MFVideoNormalizedRect {
+                left: crop.left as f32 / w as f32,
+                top: crop.top as f32 / h as f32,
+                right: crop.right as f32 / w as f32,
+                bottom: crop.bottom as f32 / h as f32,
+            });
+            if self.size != (width, height) || self.texture.is_none() {
                 let desc = D3D11_TEXTURE2D_DESC {
-                    Width: w,
-                    Height: h,
+                    Width: width,
+                    Height: height,
                     MipLevels: 1,
                     ArraySize: 1,
                     Format: DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -195,12 +204,12 @@ impl Engine {
                 };
                 self.device
                     .CreateTexture2D(&desc, None, Some(&mut self.texture))?;
-                self.size = (w, h);
+                self.size = (width, height);
             }
             let texture = self.texture.as_ref().unwrap();
             self.media.TransferVideoFrame(
                 texture,
-                None,
+                source.as_ref().map(|source| source as *const _),
                 &RECT {
                     left: 0,
                     top: 0,

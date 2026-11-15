@@ -2561,3 +2561,15 @@ msgstr "Screenshot settings saved"
 
 msgid "Could not save screenshot settings"
 msgstr "Could not save screenshot settings"
+
+msgid "Crop video frame"
+msgstr "Crop video frame"
+
+msgid "Restore full frame"
+msgstr "Restore full frame"
+
+msgid "Minimum crop size"
+msgstr "Minimum crop size"
+
+msgid "Could not apply video crop"
+msgstr "Could not apply video crop"

@@ -2561,3 +2561,15 @@ msgstr "스크린샷 설정을 저장했습니다"
 
 msgid "Could not save screenshot settings"
 msgstr "스크린샷 설정을 저장하지 못했습니다"
+
+msgid "Crop video frame"
+msgstr "동영상 화면 자르기"
+
+msgid "Restore full frame"
+msgstr "전체 화면 범위 복원"
+
+msgid "Minimum crop size"
+msgstr "최소 자르기 크기"
+
+msgid "Could not apply video crop"
+msgstr "동영상 자르기를 적용하지 못했습니다"

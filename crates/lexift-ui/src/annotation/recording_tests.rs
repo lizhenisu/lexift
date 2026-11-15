@@ -263,9 +263,12 @@ fn recording_preview_renders_all_languages_themes_sizes_and_dpis() {
                 for (width, height) in [(640., 360.), (960., 760.)] {
                     let (width, height) = ((width * dpi) as u32, (height * dpi) as u32);
                     adapter.set_size(slint::PhysicalSize::new(width, height));
-                    for phase in 0..5 {
-                        w.set_busy(phase >= 3);
-                        w.set_exporting(phase >= 3);
+                    for phase in 0..6 {
+                        w.set_busy(matches!(phase, 3 | 4));
+                        w.set_exporting(matches!(phase, 3 | 4));
+                        w.set_crop_editing(phase == 5);
+                        w.set_crop_valid(true);
+                        w.set_crop_label("1280 × 720 px".into());
                         w.set_export_label(
                             format!(
                                 "{} 50%",

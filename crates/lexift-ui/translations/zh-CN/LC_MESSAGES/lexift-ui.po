@@ -2561,3 +2561,15 @@ msgstr "截图设置已保存"
 
 msgid "Could not save screenshot settings"
 msgstr "无法保存截图设置"
+
+msgid "Crop video frame"
+msgstr "裁剪画面"
+
+msgid "Restore full frame"
+msgstr "恢复完整画面"
+
+msgid "Minimum crop size"
+msgstr "最小裁剪尺寸"
+
+msgid "Could not apply video crop"
+msgstr "无法应用视频画面裁剪"

@@ -1,5 +1,56 @@
 //! Integer video-frame boundaries shared by preview and exact export.
 use std::time::Duration;
+/// A half-open rectangle in original video pixels, aligned to NV12 chroma cells.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameCrop {
+    pub left: u32,
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+}
+
+impl FrameCrop {
+    pub fn full(width: u32, height: u32) -> Self {
+        Self {
+            left: 0,
+            top: 0,
+            right: width,
+            bottom: height,
+        }
+    }
+
+    pub fn size(self) -> (u32, u32) {
+        (
+            self.right.saturating_sub(self.left),
+            self.bottom.saturating_sub(self.top),
+        )
+    }
+
+    pub fn valid(self, width: u32, height: u32) -> bool {
+        let (w, h) = self.size();
+        self.right <= width
+            && self.bottom <= height
+            && w >= 16
+            && h >= 16
+            && [self.left, self.top, self.right, self.bottom]
+                .into_iter()
+                .all(|edge| edge % 2 == 0)
+    }
+}
+
+/// The spatial and temporal boundaries frozen for one export.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Selection {
+    pub range: Range,
+    pub crop: Option<FrameCrop>,
+}
+
+impl From<Range> for Selection {
+    fn from(range: Range) -> Self {
+        Self { range, crop: None }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Range {
     pub start: u64,

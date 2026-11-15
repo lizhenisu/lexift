@@ -55,16 +55,23 @@ pub(super) fn export(
     output: &Path,
     info: &super::ArtifactInfo,
     plan: &Plan,
+    crop: Option<lexift_core::domain::recording_trim::FrameCrop>,
     cancel: &AtomicBool,
     progress: impl Fn(Phase, u64, u64),
 ) -> Result<()> {
     cancelled(cancel)?;
+    use lexift_core::domain::recording_trim::FrameCrop;
+    if crop.is_some_and(|crop| !crop.valid(info.width, info.height)) {
+        return Err(Error::new("Invalid GIF frame crop"));
+    }
+    let crop = crop.unwrap_or(FrameCrop::full(info.width, info.height));
+    let (width, height) = crop.size();
     if Plan::new(
         plan.range,
         info.frames,
         info.video.frame_rate.get(),
-        info.width,
-        info.height,
+        width,
+        height,
     )
     .as_ref()
         != Ok(plan)
@@ -76,9 +83,16 @@ pub(super) fn export(
     let _media = Media::new().map_err(err)?;
     let started = Instant::now();
     let rgba = plan.width as usize * plan.height as usize * 4;
+    let (crop_width, crop_height) = crop.size();
+    let cropped_rgba = crop_width as usize * crop_height as usize * 4;
     let sheet_upper = 96 * 96 * 4 * plan.palette_frames().len();
-    let controlled_upper =
-        16 * 1024 * 1024 + rgba * 2 + sheet_upper * 2 + 96 * 96 * 4 + rgba / 2 + 262144 + 16384;
+    let controlled_upper = 16 * 1024 * 1024
+        + rgba * 3
+        + cropped_rgba * 2
+        + sheet_upper * 2
+        + 96 * 96 * 4
+        + 262144
+        + 16384;
     if controlled_upper > 64 * 1024 * 1024 {
         return Err(Error::new("GIF pixel buffer budget exceeded"));
     }
@@ -99,14 +113,19 @@ pub(super) fn export(
         let representatives = plan.palette_frames();
         let mut sheet = buffer(96 * 96 * 4 * representatives.len())?;
         report(Phase::Analyzing, 0, representatives.len() as u64 + 1);
-        let analysis_sample =
-            reader::visit(source, info, plan, &representatives, cancel, |i, pixels| {
+        let analysis_sample = reader::visit(
+            source,
+            info,
+            (plan, crop),
+            &representatives,
+            cancel,
+            |i, pixels| {
                 let bitmap = factory
                     .CreateBitmapFromMemory(
-                        plan.width,
-                        plan.height,
+                        crop_width,
+                        crop_height,
                         &GUID_WICPixelFormat32bppBGRA,
-                        plan.width * 4,
+                        crop_width * 4,
                         pixels,
                     )
                     .map_err(err)?;
@@ -135,7 +154,8 @@ pub(super) fn export(
                     representatives.len() as u64 + 1,
                 );
                 Ok(())
-            })?;
+            },
+        )?;
         let sample = factory
             .CreateBitmapFromMemory(
                 96,
@@ -217,62 +237,93 @@ pub(super) fn export(
             .SetMetadataByName(w!("/appext/Data"), &repeat)
             .map_err(err)?;
         let mut indexed = buffer((plan.width * plan.height) as usize)?;
+        let mut scaled = buffer(rgba)?;
         let indices: Vec<_> = (0..plan.frames).collect();
         report(Phase::Encoding, 0, plan.frames);
         let encoding_started = Instant::now();
-        let encoding_sample = reader::visit(source, info, plan, &indices, cancel, |i, pixels| {
-            for y in 0..plan.height as usize {
-                cancelled(cancel)?;
-                let width = plan.width as usize;
-                mapping.row(
-                    &pixels[y * width * 4..(y + 1) * width * 4],
-                    y,
-                    &mut indexed[y * width..(y + 1) * width],
-                )?;
-            }
-            let (mut frame, mut options) = (None, None);
-            encoder
-                .CreateNewFrame(&mut frame, &mut options)
-                .map_err(err)?;
-            let frame = frame.ok_or_else(|| Error::new("GIF encoder did not create a frame"))?;
-            frame.Initialize(options.as_ref()).map_err(err)?;
-            frame.SetSize(plan.width, plan.height).map_err(err)?;
-            let mut format = GUID_WICPixelFormat8bppIndexed;
-            frame.SetPixelFormat(&mut format).map_err(err)?;
-            if format != GUID_WICPixelFormat8bppIndexed {
-                return Err(Error::new("GIF encoder rejected indexed pixels"));
-            }
-            frame
-                .SetPalette(&palette)
-                .map_err(|e| Error::new(format!("GIF frame palette: {e}")))?;
-            let metadata = frame.GetMetadataQueryWriter().map_err(err)?;
-            metadata
-                .SetMetadataByName(
-                    w!("/grctlext/Delay"),
-                    &PROPVARIANT::from(plan.delay_cs(i as u64).unwrap()),
-                )
-                .map_err(err)?;
-            metadata
-                .SetMetadataByName(w!("/grctlext/Disposal"), &PROPVARIANT::from(1u8))
-                .map_err(err)?;
-            metadata
-                .SetMetadataByName(w!("/grctlext/TransparencyFlag"), &PROPVARIANT::from(false))
-                .map_err(err)?;
-            #[cfg(test)]
-            if fault.mode.as_deref() == Some("write") && i > 0 {
-                fault.armed.store(true, Ordering::Release);
-            }
-            frame
-                .WritePixels(plan.height, plan.width, &indexed)
-                .map_err(|e| Error::new(format!("GIF indexed frame write: {e}")))?;
-            frame.Commit().map_err(err)?;
-            report(Phase::Encoding, i as u64 + 1, plan.frames);
-            Ok(())
-        })?;
+        let encoding_sample =
+            reader::visit(source, info, (plan, crop), &indices, cancel, |i, pixels| {
+                let bitmap = factory
+                    .CreateBitmapFromMemory(
+                        crop_width,
+                        crop_height,
+                        &GUID_WICPixelFormat32bppBGRA,
+                        crop_width * 4,
+                        pixels,
+                    )
+                    .map_err(err)?;
+                let scaler = factory.CreateBitmapScaler().map_err(err)?;
+                scaler
+                    .Initialize(
+                        &bitmap,
+                        plan.width,
+                        plan.height,
+                        WICBitmapInterpolationModeFant,
+                    )
+                    .map_err(err)?;
+                scaler
+                    .CopyPixels(std::ptr::null(), plan.width * 4, &mut scaled)
+                    .map_err(err)?;
+                for y in 0..plan.height as usize {
+                    cancelled(cancel)?;
+                    let width = plan.width as usize;
+                    mapping.row(
+                        &scaled[y * width * 4..(y + 1) * width * 4],
+                        y,
+                        &mut indexed[y * width..(y + 1) * width],
+                    )?;
+                }
+                let (mut frame, mut options) = (None, None);
+                encoder
+                    .CreateNewFrame(&mut frame, &mut options)
+                    .map_err(err)?;
+                let frame =
+                    frame.ok_or_else(|| Error::new("GIF encoder did not create a frame"))?;
+                frame.Initialize(options.as_ref()).map_err(err)?;
+                frame.SetSize(plan.width, plan.height).map_err(err)?;
+                let mut format = GUID_WICPixelFormat8bppIndexed;
+                frame.SetPixelFormat(&mut format).map_err(err)?;
+                if format != GUID_WICPixelFormat8bppIndexed {
+                    return Err(Error::new("GIF encoder rejected indexed pixels"));
+                }
+                frame
+                    .SetPalette(&palette)
+                    .map_err(|e| Error::new(format!("GIF frame palette: {e}")))?;
+                let metadata = frame.GetMetadataQueryWriter().map_err(err)?;
+                metadata
+                    .SetMetadataByName(
+                        w!("/grctlext/Delay"),
+                        &PROPVARIANT::from(plan.delay_cs(i as u64).unwrap()),
+                    )
+                    .map_err(err)?;
+                metadata
+                    .SetMetadataByName(w!("/grctlext/Disposal"), &PROPVARIANT::from(1u8))
+                    .map_err(err)?;
+                metadata
+                    .SetMetadataByName(w!("/grctlext/TransparencyFlag"), &PROPVARIANT::from(false))
+                    .map_err(err)?;
+                #[cfg(test)]
+                if fault.mode.as_deref() == Some("write") && i > 0 {
+                    fault.armed.store(true, Ordering::Release);
+                }
+                frame
+                    .WritePixels(plan.height, plan.width, &indexed)
+                    .map_err(|e| Error::new(format!("GIF indexed frame write: {e}")))?;
+                frame.Commit().map_err(err)?;
+                report(Phase::Encoding, i as u64 + 1, plan.frames);
+                Ok(())
+            })?;
         cancelled(cancel)?;
         let encoding_ms = encoding_started.elapsed().as_secs_f64() * 1000.;
-        let measured_pixels =
-            measured_pixels.max(encoding_sample + rgba + 2 * indexed.capacity() + 262144 + 16384);
+        let measured_pixels = measured_pixels.max(
+            encoding_sample
+                + rgba
+                + scaled.capacity()
+                + cropped_rgba
+                + indexed.capacity()
+                + 262144
+                + 16384,
+        );
         report(Phase::Finalizing, plan.frames, plan.frames);
         cancelled(cancel)?;
         #[cfg(test)]
@@ -363,6 +414,15 @@ mod tests {
             duration: Default::default(),
             interrupted: None,
         };
+        let crop = std::env::var_os("LEXIFT_FRAME_CROP").map(|_| {
+            lexift_core::domain::recording_trim::FrameCrop {
+                left: 20,
+                top: 16,
+                right: 100,
+                bottom: 80,
+            }
+        });
+        let (width, height) = crop.map_or((info.width, info.height), |crop| crop.size());
         let plan = Plan::new(
             Range {
                 start: value("LEXIFT_GIF_START"),
@@ -370,8 +430,8 @@ mod tests {
             },
             info.frames,
             fps,
-            info.width,
-            info.height,
+            width,
+            height,
         )
         .unwrap();
         let outcome = export(
@@ -379,6 +439,7 @@ mod tests {
             Path::new(&std::env::var_os("LEXIFT_GIF_OUTPUT").unwrap()),
             &info,
             &plan,
+            crop,
             &AtomicBool::new(false),
             |stage, n, total| eprintln!("GIF_GATE {stage:?} {n}/{total}"),
         );
@@ -427,6 +488,7 @@ mod tests {
                 &path,
                 &info,
                 &plan,
+                None,
                 &cancel,
                 |phase, done, total| {
                     let selected = match round % 5 {

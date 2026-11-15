@@ -1,7 +1,10 @@
 //! Slint preview ownership and view-only native-surface placement.
 use super::*;
 use crate::{LongCaptureConfirmation, RecordingPreview};
-use lexift_core::domain::recording_preview as p;
+use lexift_core::domain::{recording_preview as p, recording_trim::FrameCrop};
+use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
+#[path = "recording_frame_crop.rs"]
+mod frame_crop;
 #[derive(Default)]
 struct Views {
     window: window::Slot<RecordingPreview>,
@@ -9,6 +12,7 @@ struct Views {
     session: u64,
     operation: u64,
     last_bounds: Option<(p::Target, f32)>,
+    crop: Option<frame_crop::Draft>,
     last_status: Option<(p::Phase, Phase, bool)>,
 }
 thread_local! {static VIEWS:RefCell<Views>=RefCell::new(Views::default());}
@@ -56,6 +60,7 @@ pub(super) fn clear() {
         v.confirmation.clear();
         v.window.clear();
         v.last_bounds = None;
+        v.crop = None;
         v.last_status = None;
     });
 }
@@ -169,6 +174,14 @@ fn open(id: p::Identity) {
             })
         });
         let work = v.window.input();
+        w.on_crop_pointer(move |kind, x, y| {
+            work.post(move || {
+                if VIEWS.with(|v| v.borrow().window.revision() == revision) {
+                    frame_crop::pointer(kind, x, y);
+                }
+            });
+        });
+        let work = v.window.input();
         w.on_surface_changed(move || work.post(update_surface));
         let weak = w.as_weak();
         let begin = l.begin_window_drag;
@@ -199,6 +212,19 @@ fn open(id: p::Identity) {
         w.window().on_close_requested(move || {
             work.post(|| act(5, 0.));
             slint::CloseRequestResponse::KeepWindowShown
+        });
+        let work = v.window.input();
+        w.window().on_winit_window_event(move |_, event| {
+            if matches!(event, winit::event::WindowEvent::Focused(false)) {
+                work.post(move || {
+                    if VIEWS.with(|v| v.borrow().window.revision() == revision)
+                        && state().is_some_and(|s| s.frame_crop_editing)
+                    {
+                        input(p::Input::CancelFrameCrop);
+                    }
+                });
+            }
+            EventResult::Propagate
         });
         let work = v.window.input();
         (l.configure_window_paint_repair)(w.window(), Rc::new(move || work.post(update_surface)));
@@ -389,6 +415,10 @@ fn act(action: i32, value: f32) {
         }
         return;
     }
+    if action >= 13 {
+        frame_crop::action(action);
+        return;
+    }
     tracing::debug!(action, target = value, "Recording preview user input");
     let event = match action {
         0 => p::Input::PlayPause,
@@ -424,6 +454,7 @@ fn act(action: i32, value: f32) {
 }
 pub(super) fn sync(s: &lexift_core::domain::screenshot::recording::Session) {
     let Some(p) = &s.preview else { return };
+    frame_crop::sync(p);
     if p.phase == p::Phase::Failed && !p.confirming_discard() {
         VIEWS.with(|v| v.borrow_mut().confirmation.clear());
     }
@@ -463,7 +494,8 @@ pub(super) fn sync(s: &lexift_core::domain::screenshot::recording::Session) {
         w.set_export_label(export_label(s));
         w.set_busy(
             s.lifecycle.phase == Phase::Saving
-                || matches!(p.phase, p::Phase::Preparing | p::Phase::Retiring),
+                || matches!(p.phase, p::Phase::Preparing | p::Phase::Retiring)
+                || p.frame_crop_pending.is_some(),
         );
         w.set_error(
             p.error
@@ -485,8 +517,8 @@ pub(super) fn sync(s: &lexift_core::domain::screenshot::recording::Session) {
             w.set_metadata(
                 format!(
                     "{} × {} px · {}fps",
-                    a.width,
-                    a.height,
+                    p.frame_crop.map_or(a.width, |crop| crop.size().0),
+                    p.frame_crop.map_or(a.height, |crop| crop.size().1),
                     a.video.frame_rate.get()
                 )
                 .into(),

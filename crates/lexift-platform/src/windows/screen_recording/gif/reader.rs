@@ -1,15 +1,17 @@
 //! Source-frame selection after keyframe pre-roll; no audio or native FPS conversion.
 use super::*;
+use lexift_core::domain::recording_trim::FrameCrop;
 use windows::Win32::Media::MediaFoundation::*;
 
 pub(super) fn visit(
     path: &Path,
     info: &super::super::ArtifactInfo,
-    plan: &Plan,
+    selection: (&Plan, FrameCrop),
     indices: &[u64],
     cancel: &AtomicBool,
     mut consume: impl FnMut(usize, &[u8]) -> Result<()>,
 ) -> Result<usize> {
+    let (plan, crop) = selection;
     cancelled(cancel)?;
     let mut sample_peak = 0;
     unsafe {
@@ -29,8 +31,8 @@ pub(super) fn visit(
         reader.SetStreamSelection(stream, true).map_err(err)?;
         let media = super::super::encoder::video_type(
             &MFVideoFormat_RGB32,
-            plan.width,
-            plan.height,
+            info.width,
+            info.height,
             info.video,
         )
         .map_err(err)?;
@@ -45,10 +47,10 @@ pub(super) fn visit(
         let actual = reader.GetCurrentMediaType(stream).map_err(err)?;
         let size = actual.GetUINT64(&MF_MT_FRAME_SIZE).map_err(err)?;
         let (width, height) = ((size >> 32) as usize, size as u32 as usize);
-        if width < plan.width as usize
-            || height < plan.height as usize
-            || width - plan.width as usize >= 32
-            || height - plan.height as usize >= 32
+        if width < info.width as usize
+            || height < info.height as usize
+            || width - info.width as usize >= 32
+            || height - info.height as usize >= 32
         {
             return Err(Error::new("GIF decoder rejected output geometry"));
         }
@@ -63,7 +65,8 @@ pub(super) fn visit(
         if pitch < width * 4 {
             return Err(Error::new("Invalid GIF decoder stride"));
         }
-        let mut pixels = buffer(plan.width as usize * plan.height as usize * 4)?;
+        let (crop_width, crop_height) = crop.size();
+        let mut pixels = buffer(crop_width as usize * crop_height as usize * 4)?;
         let start = Range::ticks(plan.range.start, plan.source_fps)
             .ok_or_else(|| Error::new("GIF timestamp overflow"))?;
         reader
@@ -108,13 +111,7 @@ pub(super) fn visit(
                     }
                     sample_peak = sample_peak.max(bytes as usize);
                     let input = std::slice::from_raw_parts(data, bytes as usize);
-                    let copied = copy_rows(
-                        input,
-                        (width, height),
-                        stride,
-                        (plan.width as usize, plan.height as usize),
-                        &mut pixels,
-                    );
+                    let copied = copy_rows(input, (width, height), stride, crop, &mut pixels);
                     let unlocked = buffer.Unlock().map_err(err);
                     copied?;
                     unlocked?;
@@ -136,15 +133,17 @@ fn copy_rows(
     input: &[u8],
     coded: (usize, usize),
     stride: i32,
-    visible: (usize, usize),
+    crop: FrameCrop,
     output: &mut [u8],
 ) -> Result<()> {
     let pitch = stride.unsigned_abs() as usize;
     let size = pitch
         .checked_mul(coded.1)
         .ok_or_else(|| Error::new("Invalid GIF stride"))?;
-    if visible.0 > coded.0
-        || visible.1 > coded.1
+    let (width, height) = crop.size();
+    let visible = (width as usize, height as usize);
+    if crop.right as usize > coded.0
+        || crop.bottom as usize > coded.1
         || pitch < coded.0 * 4
         || size > input.len()
         || output.len() != visible.0 * visible.1 * 4
@@ -153,9 +152,10 @@ fn copy_rows(
     }
     let bytes = visible.0 * 4;
     for y in 0..visible.1 {
-        let row = if stride < 0 { coded.1 - 1 - y } else { y };
-        output[y * bytes..(y + 1) * bytes]
-            .copy_from_slice(&input[row * pitch..row * pitch + bytes]);
+        let y_in = y + crop.top as usize;
+        let row = if stride < 0 { coded.1 - 1 - y_in } else { y_in };
+        let start = row * pitch + crop.left as usize * 4;
+        output[y * bytes..(y + 1) * bytes].copy_from_slice(&input[start..start + bytes]);
     }
     for p in output.as_chunks_mut::<4>().0 {
         p[3] = 255;
@@ -165,6 +165,7 @@ fn copy_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lexift_core::domain::recording_trim::FrameCrop;
     #[test]
     fn positive_negative_stride_padding_and_bounds_preserve_orientation() {
         let top = [1, 2, 3, 0, 4, 5, 6, 0, 99, 99, 99, 0];
@@ -172,14 +173,14 @@ mod tests {
         let (mut a, mut b) = ([0; 16], [0; 16]);
         let positive = [top, bottom].concat();
         let negative = [bottom, top].concat();
-        copy_rows(&positive, (3, 2), 12, (2, 2), &mut a).unwrap();
-        copy_rows(&negative, (3, 2), -12, (2, 2), &mut b).unwrap();
+        copy_rows(&positive, (3, 2), 12, FrameCrop::full(2, 2), &mut a).unwrap();
+        copy_rows(&negative, (3, 2), -12, FrameCrop::full(2, 2), &mut b).unwrap();
         assert_eq!(a, b);
         assert_eq!(
             a,
             [1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255]
         );
-        assert!(copy_rows(&positive[..20], (3, 2), 12, (2, 2), &mut a).is_err());
-        assert!(copy_rows(&positive, (3, 2), 8, (2, 2), &mut a).is_err());
+        assert!(copy_rows(&positive[..20], (3, 2), 12, FrameCrop::full(2, 2), &mut a).is_err());
+        assert!(copy_rows(&positive, (3, 2), 8, FrameCrop::full(2, 2), &mut a).is_err());
     }
 }

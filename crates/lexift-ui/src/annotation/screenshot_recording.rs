@@ -826,6 +826,7 @@ fn save_request() {
             ),
             range: None,
             range_version: 0,
+            frame_crop: None,
             identity: state.lifecycle.identity,
             artifact,
             owner,

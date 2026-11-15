@@ -257,6 +257,7 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
                 let mut p = preview::State::new(recording.lifecycle.identity, artifact);
                 if let Some(info) = &recording.artifact {
                     p.configure(info.frames, info.video.frame_rate.get());
+                    p.source_size = (info.width, info.height);
                 }
                 let command = p.command(preview::Action::PrepareView);
                 recording.preview = Some(p);
@@ -479,19 +480,23 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
             use crate::domain::recording_gif::{Format, Plan, Rejection};
             request.formats = vec![Format::Mp4, Format::Gif];
             request.default_format = Format::Mp4;
+            request.frame_crop = recording.preview.as_ref().and_then(|p| p.frame_crop);
             request.gif_plan =
                 recording
                     .artifact
                     .as_ref()
                     .map_or(Err(Rejection::InvalidSource), |info| {
+                        let (width, height) = request
+                            .frame_crop
+                            .map_or((info.width, info.height), |crop| crop.size());
                         Plan::new(
                             request
                                 .range
                                 .unwrap_or(crate::domain::recording_trim::Range::full(info.frames)),
                             info.frames,
                             info.video.frame_rate.get(),
-                            info.width,
-                            info.height,
+                            width,
+                            height,
                         )
                     });
             recording.export_progress = None;
@@ -965,6 +970,7 @@ mod tests {
                 gif_unavailable_message: String::new(),
                 range: None,
                 range_version: 0,
+                frame_crop: None,
                 identity: id(&s),
                 artifact: lifecycle::Artifact(9),
                 owner: None,

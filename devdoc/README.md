@@ -41,6 +41,7 @@
 - [录屏预览同步与资源收尾专项](releases/recording-preview-validation.md)
 - [PixPin 长截图链路与交互研究](planning/pixpin-long-screenshot-research.md)
 - [PixPin 长图结果编辑器研究](planning/pixpin-image-editor-research.md)
+- [PixPin 功能入口对照与 Lexift 实施顺序](planning/pixpin-feature-entry-roadmap.md)
 - [阶段实施计划与阶段验收记录](planning/implementation-plan.md)：M2／M3／M4 的阶段背景，不能单独作为当前功能清单。
 
 ## 功能
@@ -147,7 +148,7 @@
 - [发布检查清单](releases/release-checklist.md)
 - [Release 测量](releases/release-performance.md)
 - [v0.1.0 候选验收记录](releases/release-validation-v0.1.0.md)
-- 发布说明：[v0.1.0](releases/notes/release-notes-v0.1.0.md)、[rc.14](releases/notes/release-notes-v0.0.1-rc.14.md)、[rc.13](releases/notes/release-notes-v0.0.1-rc.13.md)、[rc.12](releases/notes/release-notes-v0.0.1-rc.12.md)、[rc.11](releases/notes/release-notes-v0.0.1-rc.11.md)、[rc.10](releases/notes/release-notes-v0.0.1-rc.10.md)、[rc.9](releases/notes/release-notes-v0.0.1-rc.9.md)、[rc.8](releases/notes/release-notes-v0.0.1-rc.8.md)、[rc.7](releases/notes/release-notes-v0.0.1-rc.7.md)、[rc.6](releases/notes/release-notes-v0.0.1-rc.6.md)、[rc.5](releases/notes/release-notes-v0.0.1-rc.5.md)、[rc.4](releases/notes/release-notes-v0.0.1-rc.4.md)、[rc.3](releases/notes/release-notes-v0.0.1-rc.3.md)、[rc.2](releases/notes/release-notes-v0.0.1-rc.2.md)、[rc.1](releases/notes/release-notes-v0.0.1-rc.1.md)。
+- 发布说明：[v0.1.0](releases/notes/release-notes-v0.1.0.md)、[rc.15](releases/notes/release-notes-v0.0.1-rc.15.md)、[rc.14](releases/notes/release-notes-v0.0.1-rc.14.md)、[rc.13](releases/notes/release-notes-v0.0.1-rc.13.md)、[rc.12](releases/notes/release-notes-v0.0.1-rc.12.md)、[rc.11](releases/notes/release-notes-v0.0.1-rc.11.md)、[rc.10](releases/notes/release-notes-v0.0.1-rc.10.md)、[rc.9](releases/notes/release-notes-v0.0.1-rc.9.md)、[rc.8](releases/notes/release-notes-v0.0.1-rc.8.md)、[rc.7](releases/notes/release-notes-v0.0.1-rc.7.md)、[rc.6](releases/notes/release-notes-v0.0.1-rc.6.md)、[rc.5](releases/notes/release-notes-v0.0.1-rc.5.md)、[rc.4](releases/notes/release-notes-v0.0.1-rc.4.md)、[rc.3](releases/notes/release-notes-v0.0.1-rc.3.md)、[rc.2](releases/notes/release-notes-v0.0.1-rc.2.md)、[rc.1](releases/notes/release-notes-v0.0.1-rc.1.md)。
 
 ## 维护约定
 
@@ -181,6 +182,7 @@
 - [大图编辑性能验证](releases/large-image-performance.md)
 
 - [录屏首尾裁剪验证](releases/recording-trim.md)
+- [录屏画面裁剪验证](releases/recording-frame-crop.md)
 - [录屏 GIF 导出验证](releases/recording-gif-export.md)
 - [录屏全局快捷键](features/recording-hotkeys.md)
 - [录屏快捷键验证](releases/recording-hotkeys.md)

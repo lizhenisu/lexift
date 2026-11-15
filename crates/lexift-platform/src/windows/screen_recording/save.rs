@@ -76,6 +76,10 @@ pub fn save(
     let gif_plan = request.gif_plan.clone();
     let identity = request.identity;
     let range_version = request.range_version;
+    let crop = request.frame_crop;
+    if crop.is_some_and(|crop| !crop.valid(info.width, info.height)) {
+        return Err(Error::new("Invalid recording frame crop"));
+    }
     let selected = host::choose(request, &cancel)?;
     if let Some(Selection {
         path,
@@ -89,6 +93,7 @@ pub fn save(
             &temp.0,
             info,
             &plan,
+            crop,
             &cancel,
             |phase, completed, total| {
                 let stage = match phase {
@@ -119,7 +124,10 @@ pub fn save(
         return publish(&temp.0, path, &cancel);
     }
     match selected.map(|s| s.path) {
-        Some(path) if range == lexift_core::domain::recording_trim::Range::full(info.frames) => {
+        Some(path)
+            if crop.is_none()
+                && range == lexift_core::domain::recording_trim::Range::full(info.frames) =>
+        {
             publish(source, &path, &cancel)
         }
         Some(path) => {
@@ -133,7 +141,14 @@ pub fn save(
                     total,
                 })
             };
-            match super::trim::export(source, &file.path, info, range, &cancel, progress) {
+            match super::trim::export(
+                source,
+                &file.path,
+                info,
+                lexift_core::domain::recording_trim::Selection { range, crop },
+                &cancel,
+                progress,
+            ) {
                 Ok(()) if !cancel.load(Ordering::Acquire) => {
                     listener(super::Notice::ExportProgress {
                         identity,

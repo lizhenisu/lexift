@@ -2561,3 +2561,15 @@ msgstr "スクリーンショットの設定を保存しました"
 
 msgid "Could not save screenshot settings"
 msgstr "スクリーンショットの設定を保存できませんでした"
+
+msgid "Crop video frame"
+msgstr "動画の画面を切り抜く"
+
+msgid "Restore full frame"
+msgstr "画面全体に戻す"
+
+msgid "Minimum crop size"
+msgstr "最小切り抜きサイズ"
+
+msgid "Could not apply video crop"
+msgstr "動画の切り抜きを適用できませんでした"

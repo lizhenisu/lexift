@@ -129,6 +129,7 @@ pub struct SaveRequest {
     pub gif_unavailable_message: String,
     pub range: Option<crate::domain::recording_trim::Range>,
     pub range_version: u64,
+    pub frame_crop: Option<crate::domain::recording_trim::FrameCrop>,
     pub identity: Identity,
     pub artifact: Artifact,
     pub owner: Option<WindowToken>,

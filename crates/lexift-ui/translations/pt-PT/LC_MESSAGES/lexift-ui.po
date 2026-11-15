@@ -2561,3 +2561,15 @@ msgstr "Definições de captura guardadas"
 
 msgid "Could not save screenshot settings"
 msgstr "Não foi possível guardar as definições de captura"
+
+msgid "Crop video frame"
+msgstr "Recortar fotograma"
+
+msgid "Restore full frame"
+msgstr "Restaurar o enquadramento completo"
+
+msgid "Minimum crop size"
+msgstr "Tamanho mínimo do recorte"
+
+msgid "Could not apply video crop"
+msgstr "Não foi possível aplicar o recorte do vídeo"

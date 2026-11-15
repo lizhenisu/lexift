@@ -2561,3 +2561,15 @@ msgstr "Impostazioni di cattura salvate"
 
 msgid "Could not save screenshot settings"
 msgstr "Impossibile salvare le impostazioni di cattura"
+
+msgid "Crop video frame"
+msgstr "Ritaglia fotogramma"
+
+msgid "Restore full frame"
+msgstr "Ripristina inquadratura completa"
+
+msgid "Minimum crop size"
+msgstr "Dimensione minima del ritaglio"
+
+msgid "Could not apply video crop"
+msgstr "Impossibile applicare il ritaglio del video"
