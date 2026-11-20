@@ -180,6 +180,7 @@
 
 - [大图编辑性能与资源管理](features/large-image-performance.md)
 - [大图编辑性能验证](releases/large-image-performance.md)
+- [Slint 1.19 升级验证](releases/slint-1-19.md)
 
 - [录屏首尾裁剪验证](releases/recording-trim.md)
 - [录屏画面裁剪验证](releases/recording-frame-crop.md)

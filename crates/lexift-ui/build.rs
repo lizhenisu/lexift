@@ -92,6 +92,8 @@ fn main() {
     )
     .unwrap();
     let config = slint_build::CompilerConfiguration::new()
+        // Preserve established layout/state semantics during the runtime upgrade.
+        .with_edition((1, 18))
         .with_bundled_translations("translations")
         .with_default_translation_context(slint_build::DefaultTranslationContext::None);
     slint_build::compile_with_config("ui/main.slint", config).expect("failed to compile Slint UI");

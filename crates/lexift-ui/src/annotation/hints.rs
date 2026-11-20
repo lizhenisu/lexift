@@ -391,6 +391,7 @@ mod tests {
     };
     use std::cell::Cell;
     slint::slint! {
+        #[edition = "1.19"]
         import {ToolButton} from "ui/annotation.slint";
         export {AnnotationHints} from "ui/annotation-hint.slint";
         export component ButtonProbe inherits Window {

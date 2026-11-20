@@ -109,6 +109,7 @@ mod tests {
     };
     use std::{cell::RefCell, rc::Rc};
     slint::slint! {
+        #[edition = "1.19"]
         export component NumericProbe inherits Window {
             out property <string> formatted: 1.5;
             public function parse(text: string) -> float { return text.to-float(); }

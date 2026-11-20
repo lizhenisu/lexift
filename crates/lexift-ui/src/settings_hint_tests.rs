@@ -8,6 +8,7 @@ use slint::{
 };
 use std::{cell::RefCell, rc::Rc};
 slint::slint! {
+        #[edition = "1.19"]
     import {SettingsHints, SettingsHintOverlay, SettingsHelpIcon} from "ui/settings-hint.slint";
     export component HintProbe inherits Window {
         out property <length> hint-x: overlay.x;

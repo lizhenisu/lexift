@@ -154,6 +154,8 @@ version = "0.0.1-rc.14"
 
 定位：**Slint 表现层**。
 
+当前 UI 编译器、运行时与 Winit 后端统一使用 Slint 1.19.0，语言 edition 在 `build.rs` 显式选择 1.18，以保留既有布局和状态语义。升级验证见[Slint 1.19](../releases/slint-1-19.md)。
+
 职责：
 
 - `.slint` 界面和组件。

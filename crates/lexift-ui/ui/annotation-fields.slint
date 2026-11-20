@@ -177,6 +177,7 @@ export component FontPicker inherits Rectangle {
 export component CheckBox inherits Rectangle {
     in property <string> text;
     in-out property <bool> checked;
+    callback toggled();
     out property <length> content-width: 26px + label.preferred-width;
     height: 24px;
     Rectangle { x: 0px; y: 3px; width: 18px; height: 18px; border-radius: 4px;
@@ -187,7 +188,7 @@ export component CheckBox inherits Rectangle {
             fill: transparent; stroke: Colors.on-primary; stroke-width: 1.5px; }
     }
     label := Text { x: 26px; height: parent.height; text: root.text; font-size: 13px; color: Colors.foreground; vertical-alignment: center; }
-    TouchArea { clicked => { root.checked = !root.checked; } }
+    TouchArea { clicked => { root.checked = !root.checked; root.toggled(); } }
 }
 
 export component Slider inherits Rectangle {

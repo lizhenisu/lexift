@@ -119,24 +119,25 @@ fn settings_interaction_colors_follow_theme_across_pages_and_overlays() {
             });
             let pixels = render(&adapter, &format!("{prefix}-translation"));
             pixel(&pixels, scale, 22.0, 232.0, selected, "selected navigation");
-            // Empty padding in the real selector avoids text and logo pixels.
+            // Sample the selector padding, outside the SVG logo and text.
+            // SVG rasterization can change across Slint versions.
             w.window().dispatch_event(WindowEvent::PointerMoved {
-                position: slint::LogicalPosition::new(549.0, 308.0),
+                position: slint::LogicalPosition::new(540.0, 318.0),
             });
             let pixels = render(&adapter, &format!("{prefix}-hover"));
-            pixel(&pixels, scale, 549.0, 308.0, hover, "selector hover");
+            pixel(&pixels, scale, 540.0, 318.0, hover, "selector hover");
             w.window().dispatch_event(WindowEvent::PointerPressed {
-                position: slint::LogicalPosition::new(549.0, 308.0),
+                position: slint::LogicalPosition::new(540.0, 318.0),
                 button: PointerEventButton::Left,
             });
             let pixels = render(&adapter, &format!("{prefix}-pressed"));
-            pixel(&pixels, scale, 549.0, 308.0, pressed, "selector pressed");
+            pixel(&pixels, scale, 540.0, 318.0, pressed, "selector pressed");
             w.window().dispatch_event(WindowEvent::PointerReleased {
-                position: slint::LogicalPosition::new(549.0, 308.0),
+                position: slint::LogicalPosition::new(540.0, 318.0),
                 button: PointerEventButton::Left,
             });
             let pixels = render(&adapter, &format!("{prefix}-picker"));
-            pixel(&pixels, scale, 549.0, 308.0, selected, "expanded selector");
+            pixel(&pixels, scale, 540.0, 318.0, selected, "expanded selector");
             pixel(&pixels, scale, 462.0, 449.0, selected, "selected model row");
             w.set_translation_selector_open(false);
             w.set_settings_menu_open(true);

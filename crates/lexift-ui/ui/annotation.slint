@@ -382,17 +382,17 @@ export component AnnotationPanel inherits Window {
                 clicked => { root.values.shape = 1; } }
             if root.tool < 2: CheckBox {
                   width:self.content-width;
-                text: @tr("Fill"); checked <=> root.values.fill;
+                text: @tr("Fill"); checked: root.values.fill; toggled => { root.values.fill = self.checked; }
             }
             if root.tool == 2: CheckBox {
                   width:self.content-width;
-                text: @tr("Outline"); checked <=> root.values.erase;
+                text: @tr("Outline"); checked: root.values.erase; toggled => { root.values.erase = self.checked; }
             }
             if root.tool < 2 || root.tool == 3: ComboBox { field: 2; lines: true; active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); }
                   width: 105px; height: 30px;
                 language-revision: root.language-revision;
                 model: ["────", "— —", "····", "— ·", "— · ·"];
-                current-index <=> root.values.style;
+                current-index: root.values.style; changed current-index => { root.values.style = self.current-index; }
             }
             if root.tool == 4: ToolButton { kind: 18; selected: root.values.shape == 0; clicked => {root.values.shape = 0;} }
             if root.tool == 4: ToolButton { kind: 0; selected: root.values.shape == 1; clicked => {root.values.shape = 1;} }
@@ -440,19 +440,19 @@ export component AnnotationPanel inherits Window {
                 active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); }
                 language-revision: root.language-revision;
                 model: [@tr("Solid"), @tr("Dashed"), @tr("Dotted"), @tr("Dash dot"), @tr("Dash dot dot")];
-                current-index <=> root.values.style;
+                current-index: root.values.style; changed current-index => { root.values.style = self.current-index; }
             }
             NumericButton { tool:root.tool; height:38px; field:-9; value:root.values.size; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
             if root.tool == 6: CheckBox {   width:self.content-width;
-                text: @tr("Fill"); checked <=> root.values.fill; }
+                text: @tr("Fill"); checked: root.values.fill; toggled => { root.values.fill = self.checked; } }
             if root.tool != 7: CheckBox {   width:self.content-width;
-                text: @tr("Arrowhead"); checked <=> root.values.head; }
+                text: @tr("Arrowhead"); checked: root.values.head; toggled => { root.values.head = self.checked; } }
             if root.tool != 7: ComboBox {
                   width: 108px; height: 30px; field: 19;
                 enabled: root.values.head;
                 active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); }
                 language-revision: root.language-revision; model: root.endpoint-options;
-                current-index <=> root.values.line-start;
+                current-index: root.values.line-start; changed current-index => { root.values.line-start = self.current-index; }
             }
             if root.tool != 7: ComboBox {
 
@@ -460,24 +460,24 @@ export component AnnotationPanel inherits Window {
                 enabled: root.values.head;
                 active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); }
                 language-revision: root.language-revision; model: root.endpoint-options;
-                current-index <=> root.values.line-end;
+                current-index: root.values.line-end; changed current-index => { root.values.line-end = self.current-index; }
             }
             if root.tool == 7: ComboBox {
                   width: 108px; height: 30px; field: 21;
                 connectors: true;
                 active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); }
                 language-revision: root.language-revision; model: root.connector-options;
-                current-index <=> root.values.connector-style;
+                current-index: root.values.connector-style; changed current-index => { root.values.connector-style = self.current-index; }
             }
             if root.tool == 7: NumericButton { tool:root.tool;   field:-103; value:root.values.zoom; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
             if root.tool == 7: CheckBox {   width: self.content-width;
-                text: @tr("Include annotations"); checked <=> root.values.include-annotations; }
+                text: @tr("Include annotations"); checked: root.values.include-annotations; toggled => { root.values.include-annotations = self.checked; } }
             if root.tool == 7: CheckBox {
                  width:self.content-width;
-                text: @tr("Anti-aliasing"); checked <=> root.values.antialias; }
+                text: @tr("Anti-aliasing"); checked: root.values.antialias; toggled => { root.values.antialias = self.checked; } }
             if root.tool == 7: CheckBox {
                  width:self.content-width;
-                text: @tr("Shadow"); checked <=> root.values.shadow; }
+                text: @tr("Shadow"); checked: root.values.shadow; toggled => { root.values.shadow = self.checked; } }
             for ink[i] in root.palette: Rectangle {
 
 
@@ -523,12 +523,12 @@ export component AnnotationPanel inherits Window {
             FontPicker { status: root.font-status; retry-requested => { root.font-retry-requested(); } width:210px; height: 30px; active-field: root.active-choice;
                 menu-requested(request) => { root.choice-requested(request); }
                 language-revision: root.language-revision; fonts: root.font-families;
-                font-index <=> root.values.font; }
+                font-index: root.values.font; changed font-index => { root.values.font = self.font-index; } }
             NumericButton { tool:root.tool; height:38px; field:-102; value:root.values.text-size; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
             AnnotationPalette {
 
 
-                selected <=> root.values.color-index; palette: root.palette; custom-active: root.active-choice == -2;
+                selected: root.values.color-index; changed selected => { root.values.color-index = self.selected; } palette: root.palette; custom-active: root.active-choice == -2;
                 custom-requested(x,y,w,h) => { root.choice-requested({field: -2, options: [], selected: 0, lines: false, connectors: false,
                     x: x, y: y, width: w, height: h}); }
             }
@@ -545,16 +545,16 @@ export component AnnotationPanel inherits Window {
                 active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); }
                 language-revision: root.language-revision;
                 model: [@tr("Tile"), @tr("Bottom right"), @tr("Bottom left"), @tr("Top right"), @tr("Top left"), @tr("Top center"), @tr("Bottom center"), @tr("Center")];
-                current-index <=> root.values.mode; }
+                current-index: root.values.mode; changed current-index => { root.values.mode = self.current-index; } }
             NumericButton { tool:root.tool;   field:-101; value:root.values.strength; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
             NumericButton { tool:root.tool; height:38px; field:-102; value:root.values.text-size; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
             FontPicker { status: root.font-status; retry-requested => { root.font-retry-requested(); } width: 130px; height: 30px;
                 active-field: root.active-choice; menu-requested(request) => { root.choice-requested(request); }
-                language-revision: root.language-revision; fonts: root.font-families; font-index <=> root.values.font; }
+                language-revision: root.language-revision; fonts: root.font-families; font-index: root.values.font; changed font-index => { root.values.font = self.font-index; } }
             AnnotationPalette {
 
 
-                selected <=> root.values.color-index; palette: root.palette; custom-active: root.active-choice == -2;
+                selected: root.values.color-index; changed selected => { root.values.color-index = self.selected; } palette: root.palette; custom-active: root.active-choice == -2;
                 custom-requested(x,y,w,h) => { root.choice-requested({field: -2, options: [], selected: 0, lines: false, connectors: false,
                     x: x, y: y, width: w, height: h}); }
             }
@@ -573,10 +573,10 @@ export component AnnotationPanel inherits Window {
                 input-editing(active) => { root.report-parameter-input(active, self.absolute-position.x / 1px, self.absolute-position.y / 1px, (self.width - 28px) / 1px, self.height / 1px); }
                 input-confirmed => { root.confirm-parameter-input(); }
                 input-finished => { root.finish-parameter-input(); }
- width:78px;height:30px;minimum:1;maximum:2147483646;value <=> root.values.start; }
-            ComboBox { width:106px;height:30px;field:16;active-field:root.active-choice;model:["1,2,3","I,II,III","a,b,c","A,B,C","一,二,三"];current-index <=> root.values.format;menu-requested(q)=>{root.choice-requested(q);} }
+ width:78px;height:30px;minimum:1;maximum:2147483646;value: root.values.start; changed value => { root.values.start = self.value; } }
+            ComboBox { width:106px;height:30px;field:16;active-field:root.active-choice;model:["1,2,3","I,II,III","a,b,c","A,B,C","一,二,三"];current-index: root.values.format; changed current-index => { root.values.format = self.current-index; }menu-requested(q)=>{root.choice-requested(q);} }
             NumericButton { tool:root.tool; height:38px; field:-102; value:root.values.text-size; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
-            AnnotationPalette { selected <=> root.values.color-index; custom-active:root.active-choice == -2;
+            AnnotationPalette { selected: root.values.color-index; changed selected => { root.values.color-index = self.selected; } custom-active:root.active-choice == -2;
                 custom-requested(x,y,w,h)=>{root.choice-requested({field:-2,options:[],selected:0,lines:false,connectors:false,x:x,y:y,width:w,height:h});} }
             Rectangle { width:30px;height:30px;border-radius:5px;background:expand.has-hover ? Colors.icon-button-hover : transparent;
                 Image { x:6px;y:6px;width:18px;height:18px;source:root.values.sequence-expanded ? @image-url("icons/chevron-left.svg") : @image-url("icons/chevron-right.svg");colorize:Colors.foreground; }
@@ -585,18 +585,18 @@ export component AnnotationPanel inherits Window {
                 AnnotationHintTarget { width:parent.width; height:parent.height; text:@tr("More actions"); hovered:expand.has-hover; pressed:expand.pressed; }
             }
             if root.values.sequence-expanded: CustomColorButton { width:38px;height:38px;active:root.active-choice == -8;clicked=>{root.choice-requested({field:-8,options:[],selected:0,lines:false,connectors:false,x:self.absolute-position.x/1px,y:self.absolute-position.y/1px,width:38,height:38});} }
-            if root.values.sequence-expanded: FontPicker { status: root.font-status; retry-requested => { root.font-retry-requested(); } width:180px;height:38px;active-field:root.active-choice;fonts:root.font-families;font-index <=> root.values.font;menu-requested(q)=>{root.choice-requested(q);} }
+            if root.values.sequence-expanded: FontPicker { status: root.font-status; retry-requested => { root.font-retry-requested(); } width:180px;height:38px;active-field:root.active-choice;fonts:root.font-families;font-index: root.values.font; changed font-index => { root.values.font = self.font-index; }menu-requested(q)=>{root.choice-requested(q);} }
             if root.values.sequence-expanded: ToolButton { kind:8;text-style:2;selected:root.values.text-outline;clicked=>{root.text-style-requested({field:-3,options:[],selected:0,lines:false,connectors:false,x:self.absolute-position.x/1px,y:self.absolute-position.y/1px,width:38,height:38}); } }
-            if root.values.sequence-expanded: CheckBox { width:self.content-width;text:@tr("Guide");checked <=> root.values.sequence-guide; }
+            if root.values.sequence-expanded: CheckBox { width:self.content-width;text:@tr("Guide");checked: root.values.sequence-guide; toggled => { root.values.sequence-guide = self.checked; } }
             if root.values.sequence-expanded: NumericButton { tool:root.tool; height:38px; field:-108; value:root.values.sequence-ratio; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
-            if root.values.sequence-expanded: ComboBox { width:106px;height:38px;field:20;active-field:root.active-choice;model:root.endpoint-options;current-index <=> root.values.line-end;menu-requested(q)=>{root.choice-requested(q);} }
+            if root.values.sequence-expanded: ComboBox { width:106px;height:38px;field:20;active-field:root.active-choice;model:root.endpoint-options;current-index: root.values.line-end; changed current-index => { root.values.line-end = self.current-index; }menu-requested(q)=>{root.choice-requested(q);} }
 }
         numeric-mosaic := FlexboxLayout { flex-wrap:root.numeric-measuring ? no-wrap : wrap; visible: !root.menu && (root.tool == 12 || (root.tool == 11 && root.mosaic-available));
             x:12px;y:10px;width:parent.width - 24px;height:self.preferred-height;spacing:8px;cross-axis-alignment:center;
             ToolButton { mosaic-style:1;selected:root.values.shape == 0;clicked=>{root.values.shape=0;} }
             ToolButton { mosaic-style:2;selected:root.values.shape == 1;clicked=>{root.values.shape=1;} }
             NumericButton { tool:root.tool;field:-9;value:root.values.size;enabled:root.values.shape == 1;active-field:root.active-choice;requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
-            ComboBox { width:110px;height:30px;field:18;active-field:root.active-choice;model:root.tool == 12 ? [@tr("Glass tiles"),@tr("Frosted grain")] : [@tr("Mosaic"),@tr("Blur")];current-index <=> root.values.mode;menu-requested(q)=>{root.choice-requested(q);} }
+            ComboBox { width:110px;height:30px;field:18;active-field:root.active-choice;model:root.tool == 12 ? [@tr("Glass tiles"),@tr("Frosted grain")] : [@tr("Mosaic"),@tr("Blur")];current-index: root.values.mode; changed current-index => { root.values.mode = self.current-index; }menu-requested(q)=>{root.choice-requested(q);} }
             NumericButton { tool:root.tool;field:-101;value:root.values.strength;active-field:root.active-choice;requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
             if root.tool == 12: NumericButton { tool:root.tool; field:-109; value:root.values.zoom; active-field:root.active-choice; requested(q)=>{root.choice-requested(q);} scrolled(f,d)=>{root.numeric-scrolled(f,d);} }
         }
