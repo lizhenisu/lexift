@@ -2573,3 +2573,9 @@ msgstr "Tamaño mínimo de recorte"
 
 msgid "Could not apply video crop"
 msgstr "No se pudo aplicar el recorte del vídeo"
+
+msgid "Playback speed"
+msgstr "Velocidad de reproducción"
+
+msgid "Could not change playback speed"
+msgstr "No se pudo cambiar la velocidad de reproducción"

@@ -38,16 +38,63 @@ impl FrameCrop {
     }
 }
 
+/// Supported playback and export speeds, expressed as exact ratios.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Speed {
+    #[default]
+    Normal,
+    OneAndHalf,
+    Double,
+}
+
+impl Speed {
+    pub const fn ratio(self) -> (u128, u128) {
+        match self {
+            Self::Normal => (1, 1),
+            Self::OneAndHalf => (3, 2),
+            Self::Double => (2, 1),
+        }
+    }
+
+    pub fn multiplier(self) -> f64 {
+        let (num, den) = self.ratio();
+        num as f64 / den as f64
+    }
+
+    pub fn output_frames(self, source_frames: u64) -> u64 {
+        let (num, den) = self.ratio();
+        (u128::from(source_frames) * den).div_ceil(num) as u64
+    }
+
+    pub fn source_frame(self, range: Range, index: u64) -> Option<u64> {
+        let count = self.output_frames(range.len());
+        if index >= count {
+            return None;
+        }
+        let (num, den) = self.ratio();
+        Some(if count > 1 && index + 1 == count {
+            range.end - 1
+        } else {
+            range.start + (u128::from(index) * num / den) as u64
+        })
+    }
+}
+
 /// The spatial and temporal boundaries frozen for one export.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Selection {
     pub range: Range,
     pub crop: Option<FrameCrop>,
+    pub speed: Speed,
 }
 
 impl From<Range> for Selection {
     fn from(range: Range) -> Self {
-        Self { range, crop: None }
+        Self {
+            range,
+            crop: None,
+            speed: Speed::Normal,
+        }
     }
 }
 
@@ -90,6 +137,29 @@ impl Range {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn speed_selects_monotonic_source_frames_and_retains_short_ranges() {
+        for speed in [Speed::Normal, Speed::OneAndHalf, Speed::Double] {
+            for len in 1..=180 {
+                let range = Range {
+                    start: 37,
+                    end: 37 + len,
+                };
+                let count = speed.output_frames(len);
+                let frames: Vec<_> = (0..count)
+                    .map(|i| speed.source_frame(range, i).unwrap())
+                    .collect();
+                assert_eq!(frames[0], range.start);
+                assert_eq!(speed.source_frame(range, count), None);
+                assert!(frames.windows(2).all(|pair| pair[0] < pair[1]));
+                if count > 1 {
+                    assert_eq!(frames[count as usize - 1], range.end - 1);
+                }
+            }
+        }
+        assert_eq!(Speed::Double.output_frames(u64::MAX), 1 << 63);
+    }
+
     #[test]
     fn exact_frame_ranges_exclude_end_and_keep_long_clock_precision() {
         for fps in [30, 60] {

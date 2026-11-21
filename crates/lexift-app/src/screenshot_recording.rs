@@ -468,6 +468,7 @@ mod trim_tests {
             artifact: life::Artifact(1),
             range: None,
             range_version: 0,
+            speed: Default::default(),
             frame_crop: None,
             owner: None,
             default_name: "owned".into(),

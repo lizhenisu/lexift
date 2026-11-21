@@ -2573,3 +2573,9 @@ msgstr "최소 자르기 크기"
 
 msgid "Could not apply video crop"
 msgstr "동영상 자르기를 적용하지 못했습니다"
+
+msgid "Playback speed"
+msgstr "재생 속도"
+
+msgid "Could not change playback speed"
+msgstr "재생 속도를 변경할 수 없습니다"

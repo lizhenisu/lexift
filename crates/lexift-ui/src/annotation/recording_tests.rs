@@ -245,6 +245,29 @@ fn recording_preview_renders_all_languages_themes_sizes_and_dpis() {
     slint::platform::set_platform(Box::new(Backend(windows.clone()))).unwrap();
     let w = crate::RecordingPreview::new().unwrap();
     let adapter = windows.borrow().last().unwrap().clone();
+    use slint::platform::PointerEventButton;
+    let picked = Rc::new(std::cell::Cell::new(None));
+    w.on_action({
+        let picked = picked.clone();
+        move |action, value| {
+            if action == 17 {
+                picked.set(Some(value as i32));
+            }
+        }
+    });
+    let click = |x, y| {
+        let position = slint::LogicalPosition::new(x, y);
+        w.window()
+            .dispatch_event(WindowEvent::PointerMoved { position });
+        w.window().dispatch_event(WindowEvent::PointerPressed {
+            position,
+            button: PointerEventButton::Left,
+        });
+        w.window().dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
+    };
     w.set_time_label("00:12 / 10:00".into());
     w.set_metadata("1920 × 1080 px · 60fps".into());
     w.set_progress(420.);
@@ -252,6 +275,28 @@ fn recording_preview_renders_all_languages_themes_sizes_and_dpis() {
     w.set_start_frame(170.);
     w.set_end_frame(31000.);
     w.set_range_label("00:02.833–08:36.666 (08:33.833)".into());
+    crate::i18n::select(lexift_core::domain::ui_language::UiLanguage::SimplifiedChinese);
+    adapter.set_size(slint::PhysicalSize::new(960, 760));
+    w.set_ready(true);
+    w.set_has_audio(true);
+    w.set_speed_enabled(true);
+    click(270., 712.);
+    let mut menu_pixels = vec![slint::Rgb8Pixel::default(); 960 * 760];
+    adapter.request_redraw();
+    adapter.draw_if_needed(|renderer| {
+        renderer.render(&mut menu_pixels, 960);
+    });
+    if let Ok(directory) = std::env::var("LEXIFT_PREVIEW_RENDER_DIR") {
+        crate::i18n::write_test_bitmap(
+            &directory,
+            "preview-speed-menu",
+            960,
+            760,
+            menu_pixels.iter().map(|p| [p.r, p.g, p.b, 255]),
+        );
+    }
+    click(372., 663.);
+    assert_eq!(picked.get(), Some(1));
     for language in lexift_core::domain::ui_language::UiLanguage::ALL {
         crate::i18n::select(language);
         for dark in [false, true] {
@@ -282,6 +327,8 @@ fn recording_preview_renders_all_languages_themes_sizes_and_dpis() {
                         );
                         w.set_ready(phase != 2);
                         w.set_playing(phase == 1);
+                        w.set_speed_index(phase % 3);
+                        w.set_speed_enabled(matches!(phase, 0 | 1));
                         w.set_has_audio(phase != 0);
                         w.set_error(if phase == 2 {
                             crate::i18n::tr("Recording preview unavailable").into()

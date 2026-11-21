@@ -1,7 +1,10 @@
 //! Slint preview ownership and view-only native-surface placement.
 use super::*;
 use crate::{LongCaptureConfirmation, RecordingPreview};
-use lexift_core::domain::{recording_preview as p, recording_trim::FrameCrop};
+use lexift_core::domain::{
+    recording_preview as p,
+    recording_trim::{FrameCrop, Speed},
+};
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 #[path = "recording_frame_crop.rs"]
 mod frame_crop;
@@ -415,7 +418,7 @@ fn act(action: i32, value: f32) {
         }
         return;
     }
-    if action >= 13 {
+    if (13..=16).contains(&action) {
         frame_crop::action(action);
         return;
     }
@@ -448,6 +451,14 @@ fn act(action: i32, value: f32) {
             }
         }
         11 => p::Input::ResetRange,
+        17 => {
+            let Some(speed) = [Speed::Normal, Speed::OneAndHalf, Speed::Double].get(value as usize)
+            else {
+                return;
+            };
+            p::Input::SetSpeed(*speed)
+        }
+
         _ => return,
     };
     input(event);
@@ -469,6 +480,17 @@ pub(super) fn sync(s: &lexift_core::domain::screenshot::recording::Session) {
         w.set_has_audio(p.has_audio);
         w.set_duration_seconds(p.duration.as_secs_f32());
         w.set_muted(p.muted);
+        w.set_speed_index(match p.speed {
+            Speed::Normal => 0,
+            Speed::OneAndHalf => 1,
+            Speed::Double => 2,
+        });
+        w.set_speed_enabled(p.can_set_speed());
+        w.set_speed_error(if p.speed_error {
+            crate::i18n::tr("Could not change playback speed").into()
+        } else {
+            "".into()
+        });
         w.set_frames(p.frames as f32);
         w.set_start_frame(p.range.start as f32);
         w.set_end_frame(p.range.end as f32);
@@ -482,20 +504,23 @@ pub(super) fn sync(s: &lexift_core::domain::screenshot::recording::Session) {
                 d.subsec_millis()
             )
         };
-        w.set_range_label(
-            format!(
-                "{}–{} ({})",
-                format_trim(p.range.start),
-                format_trim(p.range.end),
-                format_trim(p.range.len())
-            )
-            .into(),
+        let range = format!(
+            "{}–{}",
+            format_trim(p.range.start),
+            format_trim(p.range.end)
         );
+        let output = format_trim(p.speed.output_frames(p.range.len()));
+        w.set_range_label(if p.speed == Speed::Normal {
+            format!("{range} ({output})").into()
+        } else {
+            format!("{range} → {output}").into()
+        });
         w.set_export_label(export_label(s));
         w.set_busy(
             s.lifecycle.phase == Phase::Saving
                 || matches!(p.phase, p::Phase::Preparing | p::Phase::Retiring)
-                || p.frame_crop_pending.is_some(),
+                || p.frame_crop_pending.is_some()
+                || p.speed_pending.is_some(),
         );
         w.set_error(
             p.error

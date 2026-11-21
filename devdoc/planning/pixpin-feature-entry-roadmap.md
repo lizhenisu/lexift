@@ -24,7 +24,7 @@
 | 窗口贴图 | 截图副工具条或 Alt+W；持续跟随来源窗口的局部画面，最小化时暂停，可冻结为普通贴图。[窗口贴图](https://pixpin.cn/docs/pin/window) | Windows 已接入截图编辑「更多 → 窗口贴图」，支持单张实时窗口贴图、源最小化恢复与冻结为普通贴图。双屏正式验收见[接入记录](../releases/window-pin.md)。 |
 | 多种贴图内容 | 官方列出图片、文字、颜色、文件、GIF 和 LaTeX 等类型；文件贴图有独立入口。[认识 PixPin](https://pixpin.cn/docs/getting-started/about-pixpin) · [文件贴图](https://pixpin.cn/docs/pin/file) | 已有 PNG／JPEG 打开及剪贴板图片贴图；其他类型按独立场景选择。 |
 | OCR 结果 | 截图或贴图可从识别入口进入结果窗口，支持查看和选择复制。[文字识别](https://pixpin.cn/docs/recognition/text-recognition) · [快速上手](https://pixpin.cn/docs/getting-started/quick-start) | 已有截图／贴图识别复制及独立 OCR 翻译；可在识别复制之外补结果查看与局部复制。 |
-| 录屏及录后处理 | 框选后从工具条或 G 启动；录制控制条及成品预览分工。手册列出首尾裁剪、画面裁剪、变速、音量及 MP4／GIF／WebP。[屏幕录制](https://pixpin.cn/docs/screenshot/screen-recording) | 已有音频、倒计时、30／60fps、快捷键、预览、首尾精确裁剪和 MP4／GIF；画面裁剪、变速、WebP 可单列。 |
+| 录屏及录后处理 | 框选后从工具条或 G 启动；录制控制条及成品预览分工。手册列出首尾裁剪、画面裁剪、变速、音量及 MP4／GIF／WebP。[屏幕录制](https://pixpin.cn/docs/screenshot/screen-recording) | 已有音频、倒计时、30／60fps、快捷键、预览、首尾与画面裁剪、1×／1.5×／2× 变速和 MP4／GIF。 |
 
 ## 已核实的内部实现
 

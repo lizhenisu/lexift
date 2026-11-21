@@ -2573,3 +2573,9 @@ msgstr "最小切り抜きサイズ"
 
 msgid "Could not apply video crop"
 msgstr "動画の切り抜きを適用できませんでした"
+
+msgid "Playback speed"
+msgstr "再生速度"
+
+msgid "Could not change playback speed"
+msgstr "再生速度を変更できませんでした"

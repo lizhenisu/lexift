@@ -77,6 +77,7 @@ pub fn save(
     let identity = request.identity;
     let range_version = request.range_version;
     let crop = request.frame_crop;
+    let speed = request.speed;
     if crop.is_some_and(|crop| !crop.valid(info.width, info.height)) {
         return Err(Error::new("Invalid recording frame crop"));
     }
@@ -125,7 +126,8 @@ pub fn save(
     }
     match selected.map(|s| s.path) {
         Some(path)
-            if crop.is_none()
+            if speed == Default::default()
+                && crop.is_none()
                 && range == lexift_core::domain::recording_trim::Range::full(info.frames) =>
         {
             publish(source, &path, &cancel)
@@ -145,7 +147,7 @@ pub fn save(
                 source,
                 &file.path,
                 info,
-                lexift_core::domain::recording_trim::Selection { range, crop },
+                lexift_core::domain::recording_trim::Selection { range, crop, speed },
                 &cancel,
                 progress,
             ) {
@@ -154,8 +156,8 @@ pub fn save(
                         identity,
                         range_version,
                         stage: super::ExportStage::Publishing,
-                        completed: range.len(),
-                        total: range.len(),
+                        completed: speed.output_frames(range.len()),
+                        total: speed.output_frames(range.len()),
                     });
                     publish(&file.path, &path, &cancel)
                 }

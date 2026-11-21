@@ -18,6 +18,9 @@ export component SettingsButton inherits Rectangle {
     in property <bool> enabled: true;
     in property <length> available-width: self.preferred-button-width;
     private property <length> preferred-button-width: max(root.compact ? 72px : 104px, button-label.preferred-width + 2 * Spacing.medium + (root.icon.width > 0 ? 24px : 0px));
+    in property <string> accessibility-label: root.label;
+    out property <bool> hovered: button-touch.has-hover;
+    out property <bool> pressed: button-touch.pressed;
     callback clicked();
     public function focus-button() { keyboard.focus-target(); }
 
@@ -28,7 +31,7 @@ export component SettingsButton inherits Rectangle {
     border-color: keyboard.focus-visible ? Colors.primary : root.destructive ? Colors.error : root.primary ? transparent : Colors.outline;
     background: root.quiet ? (root.enabled && (button-touch.has-hover || button-touch.pressed) ? Colors.error-container : transparent) : !root.enabled ? Colors.background : root.destructive && (button-touch.pressed || button-touch.has-hover) ? Colors.error-container : root.primary ? (button-touch.pressed ? SettingsColors.primary-pressed : button-touch.has-hover ? SettingsColors.primary-hover : Colors.primary) : button-touch.pressed ? SettingsColors.pressed : button-touch.has-hover ? SettingsColors.hover : Colors.surface;
     opacity: root.quiet && !root.enabled ? Metrics.disabled-opacity : 1;
-    accessible-role: button; accessible-label: root.label; accessible-enabled: root.enabled;
+    accessible-role: button; accessible-label: root.accessibility-label; accessible-enabled: root.enabled;
 
     if root.icon.width > 0: Image { x: 12px; y: (parent.height - 16px) / 2; width: 16px; height: 16px; source: root.icon; colorize: !root.enabled ? Colors.secondary-foreground : button-touch.has-hover ? Colors.error : Colors.secondary-foreground; }
     button-label := Text {

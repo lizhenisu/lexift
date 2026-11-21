@@ -1107,6 +1107,8 @@ fn service(receiver: Receiver<Message>, sender: SyncSender<Message>, shared: Arc
                         fps,
                         version: _,
                         crop,
+                        speed,
+                        muted,
                     } = command.action
                     {
                         j.preview.take();
@@ -1118,7 +1120,7 @@ fn service(receiver: Receiver<Message>, sender: SyncSender<Message>, shared: Arc
                                 j.frames.saturating_sub(1) as f64
                                     / f64::from(j.request.video.frame_rate.get()),
                             ),
-                            (Some((range, fps)), crop),
+                            (Some((range, fps)), crop, speed, muted),
                             listener.clone(),
                         )
                         .map(|w| j.preview = Some(w))
@@ -1262,5 +1264,15 @@ fn service(receiver: Receiver<Message>, sender: SyncSender<Message>, shared: Arc
     let callback = shared.shutdown_callback.lock().unwrap().take();
     if let Some(callback) = callback {
         callback();
+    }
+}
+
+#[cfg(test)]
+fn fixture_speed() -> lexift_core::domain::recording_trim::Speed {
+    use lexift_core::domain::recording_trim::Speed;
+    match std::env::var("LEXIFT_RECORDING_TEST_SPEED").as_deref() {
+        Ok("1.5") => Speed::OneAndHalf,
+        Ok("2") => Speed::Double,
+        _ => Speed::Normal,
     }
 }

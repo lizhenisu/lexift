@@ -1,4 +1,6 @@
 //! Exact, bounded transcoding of a sealed recording. All COM stays on this MTA.
+mod tempo;
+
 use super::{
     encoder::{Encoder, Media},
     err,
@@ -42,6 +44,7 @@ pub(super) fn export(
     use lexift_core::domain::recording_trim::FrameCrop;
     let selection = selection.into();
     let range = selection.range;
+    let output_frames = selection.speed.output_frames(range.len());
     if selection
         .crop
         .is_some_and(|crop| !crop.valid(info.width, info.height))
@@ -130,13 +133,44 @@ pub(super) fn export(
         let mut decoded = Vec::new();
         let start_sample = ((u128::from(range.start) * 48000) / u128::from(fps)) as u64;
         let audio_length = ((u128::from(range.len()) * 48000) / u128::from(fps)) as u64;
+        let mut audio_consumed = 0u64;
         let mut audio_written = 0u64;
+        let video_samples = ((u128::from(output_frames) * 48000) / u128::from(fps)) as u64;
+        let (num, den) = selection.speed.ratio();
+        let tempo_samples =
+            ((u128::from(audio_length) * den).div_ceil(num) as u64).min(video_samples);
+        let mut tempo =
+            (selection.speed != Default::default()).then(|| tempo::Tempo::new(selection.speed));
+        let mut tempo_block = [[0.; 2]; tempo::BLOCK];
+        let mut emit_audio =
+            |block: &[[f32; 2]], finishing: bool, written: &mut u64| -> Result<()> {
+                if let Some(tempo) = &mut tempo {
+                    tempo.push(block);
+                    loop {
+                        cancelled(cancel)?;
+                        let count = tempo.next(tempo_samples, finishing, &mut tempo_block);
+                        if count == 0 {
+                            break;
+                        }
+                        encoder
+                            .write_audio(&tempo_block[..count], *written)
+                            .map_err(err)?;
+                        *written += count as u64;
+                    }
+                } else if !block.is_empty() {
+                    cancelled(cancel)?;
+                    encoder.write_audio(block, *written).map_err(err)?;
+                    *written += block.len() as u64;
+                }
+                Ok(())
+            };
         let mut video_written = 0u64;
+        let mut source_index = range.start;
         let mut video_done = false;
         let mut audio_done = !has_audio;
         let mut notify = Instant::now();
         let zeros = vec![[0f32; 2]; 480];
-        progress(ExportStage::Transcoding, 0, range.len());
+        progress(ExportStage::Transcoding, 0, output_frames);
         let (mut video_time, mut audio_time) = (i64::MIN, i64::MIN);
         while !video_done || !audio_done {
             cancelled(cancel)?;
@@ -225,10 +259,14 @@ pub(super) fn export(
                     video_done = true;
                     continue;
                 }
-                if index != range.start + video_written {
+                if index != source_index {
                     return Err(Error::new(
                         "Recording export has a missing or duplicate video frame",
                     ));
+                }
+                source_index += 1;
+                if selection.speed.source_frame(range, video_written) != Some(index) {
+                    continue;
                 }
                 let coded_bytes = coded_width
                     .checked_mul(coded_height)
@@ -285,11 +323,11 @@ pub(super) fn export(
                     .map_err(|e| Error::new(format!("Encode selected frame: {e}")))?;
                 encode_time += encode_started.elapsed();
                 video_written += 1;
-                if video_written == range.len() {
+                if video_written == output_frames {
                     video_done = true;
                 }
                 if notify.elapsed() >= Duration::from_millis(100) {
-                    progress(ExportStage::Transcoding, video_written, range.len());
+                    progress(ExportStage::Transcoding, video_written, output_frames);
                     notify = Instant::now();
                 }
             } else if kind == MFMediaType_Audio && !audio_done {
@@ -307,7 +345,7 @@ pub(super) fn export(
                 let count = values.len() / 8;
                 let first =
                     ((i128::from(timestamp) * 48000 + 5_000_000) / 10_000_000).max(0) as u64;
-                let from = first.max(start_sample + audio_written);
+                let from = first.max(start_sample + audio_consumed);
                 let end = (first + count as u64).min(start_sample + audio_length);
                 let mut pcm = Vec::new();
                 if pcm.try_reserve_exact(count).is_err() {
@@ -326,41 +364,41 @@ pub(super) fn export(
                 }
                 buffer.Unlock().map_err(err)?;
                 if end > from {
-                    let gap = from.saturating_sub(start_sample + audio_written);
+                    let gap = from.saturating_sub(start_sample + audio_consumed);
                     if gap > 4800 {
                         return Err(Error::new("Recording export audio discontinuity"));
                     }
-                    while audio_written < from - start_sample {
-                        cancelled(cancel)?;
-                        let n = ((from - start_sample - audio_written) as usize).min(zeros.len());
-                        encoder
-                            .write_audio(&zeros[..n], audio_written)
-                            .map_err(err)?;
-                        audio_written += n as u64;
+                    while audio_consumed < from - start_sample {
+                        let n = ((from - start_sample - audio_consumed) as usize).min(zeros.len());
+                        emit_audio(&zeros[..n], false, &mut audio_written)?;
+                        audio_consumed += n as u64;
                     }
-                    for block in pcm.chunks(24000) {
-                        cancelled(cancel)?;
-                        encoder.write_audio(block, audio_written).map_err(err)?;
-                        audio_written += block.len() as u64;
-                    }
+                    emit_audio(&pcm, false, &mut audio_written)?;
+                    audio_consumed += pcm.len() as u64;
                 }
-                if audio_written >= audio_length || first >= start_sample + audio_length {
+                if audio_consumed >= audio_length || first >= start_sample + audio_length {
                     audio_done = true;
                 }
             }
         }
-        if video_written != range.len() {
+        if video_written != output_frames {
             return Err(Error::new(
                 "Recording export ended before the last selected frame",
             ));
         }
         if has_audio {
-            if audio_length.saturating_sub(audio_written) > 4800 {
+            if audio_length.saturating_sub(audio_consumed) > 4800 {
                 return Err(Error::new("Recording export audio ended early"));
             }
-            while audio_written < audio_length {
+            while audio_consumed < audio_length {
+                let n = ((audio_length - audio_consumed) as usize).min(zeros.len());
+                emit_audio(&zeros[..n], false, &mut audio_written)?;
+                audio_consumed += n as u64;
+            }
+            emit_audio(&[], true, &mut audio_written)?;
+            while audio_written < video_samples {
                 cancelled(cancel)?;
-                let n = ((audio_length - audio_written) as usize).min(zeros.len());
+                let n = ((video_samples - audio_written) as usize).min(zeros.len());
                 encoder
                     .write_audio(&zeros[..n], audio_written)
                     .map_err(err)?;
@@ -368,7 +406,7 @@ pub(super) fn export(
             }
         }
         cancelled(cancel)?;
-        progress(ExportStage::Finalizing, range.len(), range.len());
+        progress(ExportStage::Finalizing, output_frames, output_frames);
         cancelled(cancel)?;
         let finalize_started = Instant::now();
         encoder
@@ -431,7 +469,11 @@ mod tests {
                 bottom: 80,
             }
         });
-        let selection = lexift_core::domain::recording_trim::Selection { range, crop };
+        let selection = lexift_core::domain::recording_trim::Selection {
+            range,
+            crop,
+            speed: super::super::fixture_speed(),
+        };
         let outcome = export(&source, &output, &info, selection, &cancel, |_, _, _| {});
         if std::env::var_os("LEXIFT_TRIM_EXPECT_ERROR").is_some() {
             assert!(outcome.is_err());

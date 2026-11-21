@@ -328,7 +328,7 @@ fn native_trim_playback_gate() {
         },
         file,
         Range::time(frames - 1, fps),
-        (Some((range, fps)), None),
+        (Some((range, fps)), None, Default::default(), false),
         Arc::new(move |id, n| {
             let _ = tx.send((id, n));
         }),
@@ -336,11 +336,19 @@ fn native_trim_playback_gate() {
     .unwrap();
     let audio_probe = std::env::var_os("LEXIFT_TRIM_AUDIO_PROBE")
         .map(|_| super::audio_test::Probe::new().unwrap());
+    let speed_report = std::env::var_os("LEXIFT_PREVIEW_SPEED_WAVE");
+    let speed_samples = std::cell::RefCell::new(Vec::new());
     let transitions = std::cell::RefCell::new(Vec::<(usize, bool, f64)>::new());
     let active = std::cell::Cell::new([false, false]);
     let collect = || {
         if let Some(probe) = &audio_probe {
             while let Some(packet) = probe.read().unwrap() {
+                if speed_report.is_some() {
+                    let mut wave = speed_samples.borrow_mut();
+                    for frame in &packet.frames {
+                        wave.extend(frame.iter().flat_map(|sample| sample.to_le_bytes()));
+                    }
+                }
                 for (index, block) in packet.frames.chunks(48).enumerate() {
                     let mut was = active.get();
                     for ch in 0..2 {
@@ -466,51 +474,87 @@ fn native_trim_playback_gate() {
     assert!(
         matches!(first,Notice::Frame{position,..} if (position.as_secs_f64()-range.start as f64/fps as f64).abs()<0.5/fps as f64)
     );
-    id.request = 3;
-    worker
-        .control(Command {
-            identity: id,
-            action: Action::Play,
-        })
-        .unwrap();
-    wait(3, true);
-    drain();
-    id.request = 4;
-    worker
-        .control(Command {
-            identity: id,
-            action: Action::Seek(Range::time(range.start, fps)),
-        })
-        .unwrap();
-    wait(4, false);
-    id.request = 5;
-    worker
-        .control(Command {
-            identity: id,
-            action: Action::Play,
-        })
-        .unwrap();
-    wait(5, true);
-    drain();
-    if replay {
-        for round in 0..20 {
-            id.request += 1;
-            worker
-                .control(Command {
-                    identity: id,
-                    action: Action::Seek(Duration::ZERO),
-                })
-                .unwrap();
-            wait(id.request, false);
-            id.request += 1;
-            worker
-                .control(Command {
-                    identity: id,
-                    action: Action::Play,
-                })
-                .unwrap();
-            wait(id.request, true);
-            eprintln!("FULL_REPLAY round={round} passed");
+    if let Some(path) = &speed_report {
+        id.request += 1;
+        let speed = super::super::fixture_speed();
+        worker
+            .control(Command {
+                identity: id,
+                action: Action::SetSpeed(speed),
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let (reply, notice) = rx.recv_timeout(Duration::from_millis(250)).unwrap();
+            if reply == id && notice == Notice::SpeedConfigured(true) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "speed not confirmed: {notice:?}");
+        }
+        id.request += 1;
+        let started = Instant::now();
+        worker
+            .control(Command {
+                identity: id,
+                action: Action::Play,
+            })
+            .unwrap();
+        wait(id.request, true);
+        let elapsed = started.elapsed().as_secs_f64();
+        let expected = range.len() as f64 / f64::from(fps) / speed.multiplier();
+        eprintln!(
+            "SPEED_PLAYBACK rate={:?} elapsed_s={elapsed:.3} expected_s={expected:.3}",
+            speed
+        );
+        drain();
+        std::fs::write(path, &*speed_samples.borrow()).unwrap();
+    } else {
+        id.request = 3;
+        worker
+            .control(Command {
+                identity: id,
+                action: Action::Play,
+            })
+            .unwrap();
+        wait(3, true);
+        drain();
+        id.request = 4;
+        worker
+            .control(Command {
+                identity: id,
+                action: Action::Seek(Range::time(range.start, fps)),
+            })
+            .unwrap();
+        wait(4, false);
+        id.request = 5;
+        worker
+            .control(Command {
+                identity: id,
+                action: Action::Play,
+            })
+            .unwrap();
+        wait(5, true);
+        drain();
+        if replay {
+            for round in 0..20 {
+                id.request += 1;
+                worker
+                    .control(Command {
+                        identity: id,
+                        action: Action::Seek(Duration::ZERO),
+                    })
+                    .unwrap();
+                wait(id.request, false);
+                id.request += 1;
+                worker
+                    .control(Command {
+                        identity: id,
+                        action: Action::Play,
+                    })
+                    .unwrap();
+                wait(id.request, true);
+                eprintln!("FULL_REPLAY round={round} passed");
+            }
         }
     }
     drop(audio_probe);
@@ -530,7 +574,9 @@ fn native_trim_playback_gate() {
         std::thread::sleep(Duration::from_millis(2));
     }
     retire.join().unwrap();
-    if let Some(path) = std::env::var_os("LEXIFT_TRIM_AUDIO_PROBE") {
+    if speed_report.is_none()
+        && let Some(path) = std::env::var_os("LEXIFT_TRIM_AUDIO_PROBE")
+    {
         let rows = transitions.borrow();
         std::fs::write(path, serde_json::to_vec_pretty(&*rows).unwrap()).unwrap();
         let on: Vec<_> = rows

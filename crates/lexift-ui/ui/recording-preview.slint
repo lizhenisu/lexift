@@ -6,6 +6,7 @@ import { SettingsFocusScope, SettingsInteraction } from "settings-interaction.sl
 import { CaptureButton } from "long-capture.slint";
 import { Slider } from "annotation-fields.slint";
 
+import { AnnotationHintTarget } from "annotation-hint.slint";
 import { RecordingTrim } from "recording-trim.slint";
 export component RecordingPreview inherits Window {
  title:@tr("Recording preview");no-frame:true;background:Colors.surface;
@@ -14,6 +15,16 @@ export component RecordingPreview inherits Window {
  in property <string> error;in property <string> metadata;in property <string> time-label;
  private property <bool> compact-controls:root.width < 800px;
  in property <float> start-frame;in property <float> end-frame;in property <float> frames;in property <string> range-label;in property <string> export-label;in property <bool> exporting;
+ in property <int> speed-index;
+ in property <bool> speed-enabled;
+ in property <string> speed-error;
+ private property <image> empty-icon;
+ private property <bool> speed-menu-open;
+ private property <int> speed-menu-choice;
+ changed speed-enabled => { if !root.speed-enabled { root.speed-menu-open = false; } }
+ function dismiss-speed-menu() { root.speed-menu-open = false; speed-button.focus-button(); }
+ function choose-speed(index: int) { root.dismiss-speed-menu(); root.action(17,index); }
+ private property <[string]> speed-labels: ["1×", "1.5×", "2×"];
  in property <float> progress;in property <float> duration-seconds;
  out property <float> video-x:12;out property <float> video-y:44;
  out property <float> video-width:(root.width - 24px)/1px;out property <float> video-height:max(1,(root.height - (root.compact-controls ? 240px : 192px))/1px);
@@ -69,13 +80,49 @@ export component RecordingPreview inherits Window {
    SettingsButton {compact:true;icon:root.playing ? @image-url("assets/icons/capture-pause.svg") : @image-url("assets/icons/capture-play.svg");label:root.playing ? @tr("Pause") : @tr("Play");enabled:root.ready && !root.busy;clicked=>{root.action(0,0);}}
    SettingsButton {compact:true;icon:@image-url("assets/icons/recording-audio.svg");label:root.muted ? @tr("Unmute") : @tr("Mute");enabled:root.has-audio && root.ready && !root.busy;clicked=>{root.action(1,0);}}
    CaptureButton {icon:@image-url("assets/icons/crop.svg");label:@tr("Crop video frame");enabled:root.ready && !root.busy;clicked=>{root.action(13,0);}}
-   VerticalLayout {horizontal-stretch:1;spacing:1px;Text {text:root.time-label;color:Colors.foreground;font-size:13px;}Text {text:root.exporting ? root.export-label : root.range-label + " · " + root.metadata;color:Colors.secondary-foreground;font-size:11px;overflow:elide;min-width:0px;}}
+   speed-button := SettingsButton {
+    compact:true; icon:@image-url("assets/icons/recording-speed.svg");
+    label:root.speed-labels[root.speed-index];
+    enabled:root.speed-enabled && !root.busy;
+    accessibility-label:@tr("Playback speed") + " " + root.speed-labels[root.speed-index];
+    clicked=>{root.speed-menu-open = true; root.speed-menu-choice = root.speed-index; speed-menu-keys.focus();}
+    AnnotationHintTarget {width:parent.width;height:parent.height;text:@tr("Playback speed");hovered:speed-button.hovered;pressed:speed-button.pressed;}
+   }
+   VerticalLayout {horizontal-stretch:1;spacing:1px;Text {text:root.time-label;color:Colors.foreground;font-size:13px;}Text {text:root.exporting ? root.export-label : root.speed-error != "" ? root.speed-error : root.range-label + " · " + root.metadata;color:Colors.secondary-foreground;font-size:11px;overflow:elide;min-width:0px;}}
    if !root.compact-controls: SettingsButton {compact:true;label:root.exporting ? @tr("Cancel") : @tr("Save video");enabled:root.exporting || !root.busy;primary:true;clicked=>{root.action(root.exporting ? 12 : 4,0);}}
    if !root.compact-controls: SettingsButton {compact:true;label:@tr("Close");enabled:root.exporting || !root.busy;clicked=>{root.action(5,0);}}
   }
   if root.compact-controls: HorizontalLayout {y:120px;height:40px;spacing:8px;Rectangle {horizontal-stretch:1;}
    SettingsButton {compact:true;label:root.exporting ? @tr("Cancel") : @tr("Save video");enabled:root.exporting || !root.busy;primary:true;clicked=>{root.action(root.exporting ? 12 : 4,0);}}
    SettingsButton {compact:true;label:@tr("Close");enabled:root.exporting || !root.busy;clicked=>{root.action(5,0);}}
+  }
+ }
+ // The native video child covers the video rectangle. Keep the menu in the
+ // Slint control area above the speed button and intercept outside clicks there.
+ speed-menu-keys := FocusScope {
+  visible:root.speed-menu-open;width:root.width;height:root.height;
+  key-pressed(event) => {
+   if event.text == Key.Escape || event.text == Key.Tab { root.dismiss-speed-menu(); return accept; }
+   if event.text == Key.LeftArrow { root.speed-menu-choice = max(0,root.speed-menu-choice - 1); return accept; }
+   if event.text == Key.RightArrow { root.speed-menu-choice = min(2,root.speed-menu-choice + 1); return accept; }
+   if event.text == Key.Return || event.text == Key.Space { root.choose-speed(root.speed-menu-choice); return accept; }
+   return reject;
+  }
+  TouchArea { clicked=>{root.dismiss-speed-menu();} }
+  Rectangle {
+   x:clamp(speed-button.absolute-position.x,0px,root.width - self.width);
+   y:speed-button.absolute-position.y - self.height - 4px;
+   width:268px;height:44px;
+   background:Colors.surface;border-color:Colors.outline;border-width:1px;border-radius:6px;
+   TouchArea {}
+   HorizontalLayout {padding:4px;spacing:4px;
+    for rate[index] in root.speed-labels: SettingsButton {
+     compact:true;label:rate;primary:index == root.speed-menu-choice;
+     icon:index == root.speed-index ? @image-url("assets/icons/check.svg") : root.empty-icon;
+     accessible-checkable:true;accessible-checked:index == root.speed-index;
+     clicked=>{root.choose-speed(index);}
+    }
+   }
   }
  }
  ResizeEdges {resize-requested(edge)=>{root.resize-requested(edge);}}

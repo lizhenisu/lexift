@@ -2573,3 +2573,9 @@ msgstr "Dimensione minima del ritaglio"
 
 msgid "Could not apply video crop"
 msgstr "Impossibile applicare il ritaglio del video"
+
+msgid "Playback speed"
+msgstr "Velocità di riproduzione"
+
+msgid "Could not change playback speed"
+msgstr "Impossibile modificare la velocità di riproduzione"

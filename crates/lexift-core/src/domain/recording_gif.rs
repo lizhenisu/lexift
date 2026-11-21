@@ -1,5 +1,5 @@
 //! Fixed sharing policy and an absolute, centisecond GIF timeline.
-use super::recording_trim::Range;
+use super::recording_trim::{Range, Speed};
 pub mod palette;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,6 +33,7 @@ pub struct Plan {
     pub height: u32,
     pub frames: u64,
     total_cs: u64,
+    pub speed: Speed,
 }
 impl Plan {
     pub fn new(
@@ -42,10 +43,24 @@ impl Plan {
         width: u32,
         height: u32,
     ) -> Result<Self, Rejection> {
+        Self::with_speed(range, frames, fps, width, height, Speed::Normal)
+    }
+
+    pub fn with_speed(
+        range: Range,
+        frames: u64,
+        fps: u32,
+        width: u32,
+        height: u32,
+        speed: Speed,
+    ) -> Result<Self, Rejection> {
         if !range.valid(frames) || !matches!(fps, 30 | 60) || width == 0 || height == 0 {
             return Err(Rejection::InvalidSource);
         }
-        if range.len() > u64::from(fps) * 60 {
+        let (num, den) = speed.ratio();
+        let ticks = u128::from(range.len()) * den;
+        let units_per_second = u128::from(fps) * num;
+        if ticks > units_per_second * 60 {
             return Err(Rejection::TooLong);
         }
         let longest = u64::from(width.max(height));
@@ -61,8 +76,9 @@ impl Plan {
             source_fps: fps,
             width: dimension(width),
             height: dimension(height),
-            frames: (range.len() * 15).div_ceil(u64::from(fps)),
-            total_cs: ((range.len() * 100 + u64::from(fps) / 2) / u64::from(fps)).max(2),
+            frames: (ticks * 15).div_ceil(units_per_second) as u64,
+            total_cs: ((ticks * 100 + units_per_second / 2) / units_per_second).max(2) as u64,
+            speed,
         })
     }
     pub fn source_frame(&self, index: u64) -> Option<u64> {
@@ -70,7 +86,9 @@ impl Plan {
             if self.frames > 1 && index + 1 == self.frames {
                 self.range.end - 1
             } else {
-                self.range.start + index * u64::from(self.source_fps) / 15
+                let (num, den) = self.speed.ratio();
+                self.range.start
+                    + (u128::from(index) * u128::from(self.source_fps) * num / (15 * den)) as u64
             }
         })
     }
@@ -102,6 +120,29 @@ impl Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn speed_applies_to_gif_limits_delays_and_source_identity() {
+        for fps in [30, 60] {
+            for speed in [Speed::Normal, Speed::OneAndHalf, Speed::Double] {
+                let (num, den) = speed.ratio();
+                let exact = (u128::from(fps) * 60 * num / den) as u64;
+                let plan = |n| Plan::with_speed(Range::full(n), n, fps, 1920, 1080, speed);
+                assert_eq!(plan(exact + 1), Err(Rejection::TooLong));
+                let p = plan(exact).unwrap();
+                assert_eq!(p.frames, 900);
+                assert_eq!(p.source_frame(0), Some(0));
+                assert_eq!(p.source_frame(899), Some(exact - 1));
+                assert_eq!(
+                    (0..900)
+                        .map(|i| u64::from(p.delay_cs(i).unwrap()))
+                        .sum::<u64>(),
+                    6000
+                );
+                assert_eq!(plan(1).unwrap().source_frame(0), Some(0));
+            }
+        }
+    }
+
     #[test]
     fn every_short_tail_keeps_absolute_duration_and_frame_bounds() {
         for fps in [30, 60] {

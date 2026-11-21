@@ -136,6 +136,18 @@ impl Engine {
         }
         Ok(())
     }
+    pub fn set_speed(&self, speed: lexift_core::domain::recording_trim::Speed) -> Result<()> {
+        let rate = speed.multiplier();
+        unsafe {
+            self.media.SetDefaultPlaybackRate(rate)?;
+            self.media.SetPlaybackRate(rate)?;
+            if self.media.GetPlaybackRate() != rate {
+                return Err(Error::from_hresult(E_FAIL));
+            }
+        }
+        Ok(())
+    }
+
     pub fn seek(&mut self, position: f64) -> Result<()> {
         self.check_events()?;
         self.seeked = false;

@@ -1,5 +1,5 @@
 //! Playback belongs to a sealed recording, with its own command generation.
-use super::recording_trim::{FrameCrop, Range};
+use super::recording_trim::{FrameCrop, Range, Speed};
 use super::{
     geometry::Rect,
     screen_recording::{Artifact, Identity as RecordingIdentity},
@@ -51,6 +51,7 @@ pub enum Input {
     CancelSeek,
     Seek(Duration),
     Mute,
+    SetSpeed(Speed),
     Save,
     Close,
     Retry,
@@ -66,6 +67,7 @@ pub enum Notice {
     },
     Visible,
     FrameCropPresented(bool),
+    SpeedConfigured(bool),
     Paused,
     Ended,
     Failed(String),
@@ -80,6 +82,8 @@ pub enum Action {
         fps: u32,
         version: u64,
         crop: Option<FrameCrop>,
+        speed: Speed,
+        muted: bool,
     },
     Play,
     Pause,
@@ -93,6 +97,7 @@ pub enum Action {
     SetFrameCrop(Option<FrameCrop>),
     CropGuide(Option<FrameCrop>),
     Mute(bool),
+    SetSpeed(Speed),
     Close,
     Handoff,
     Install,
@@ -123,6 +128,9 @@ pub struct State {
     pub duration: Duration,
     pub has_audio: bool,
     pub muted: bool,
+    pub speed: Speed,
+    pub speed_pending: Option<Speed>,
+    pub speed_error: bool,
     pub error: Option<String>,
     pub presented: bool,
     pub visible: bool,
@@ -162,6 +170,9 @@ impl State {
             duration: Duration::ZERO,
             has_audio: false,
             muted: false,
+            speed: Speed::Normal,
+            speed_pending: None,
+            speed_error: false,
             error: None,
             presented: false,
             visible: false,
@@ -171,6 +182,15 @@ impl State {
             cleanup_failed: false,
         }
     }
+    pub fn can_set_speed(&self) -> bool {
+        self.visible
+            && self.intent.is_none()
+            && self.speed_pending.is_none()
+            && !self.frame_crop_editing
+            && self.frame_crop_pending.is_none()
+            && matches!(self.phase, Phase::Paused | Phase::Playing | Phase::Ended)
+    }
+
     pub fn configure(&mut self, frames: u64, fps: u32) {
         self.frames = frames;
         self.fps = fps;
@@ -206,10 +226,20 @@ impl State {
         if input == Input::Save && !self.visible && self.phase != Phase::Failed {
             return None;
         }
-        if self.frame_crop_pending.is_some() {
+        if self.frame_crop_pending.is_some()
+            || self.speed_pending.is_some() && !matches!(input, Input::Failed(_))
+        {
             return None;
         }
         match input {
+            Input::SetSpeed(speed) if self.can_set_speed() && self.speed != speed => {
+                if self.phase != Phase::Ended {
+                    self.phase = Phase::Paused;
+                }
+                self.speed_pending = Some(speed);
+                self.speed_error = false;
+                self.next(Action::SetSpeed(speed))
+            }
             Input::BeginFrameCrop
                 if !self.frame_crop_editing
                     && self.visible
@@ -248,6 +278,8 @@ impl State {
                 fps: self.fps,
                 version: self.range_version,
                 crop: self.frame_crop,
+                speed: self.speed,
+                muted: self.muted,
             }),
             Input::PlayPause
                 if self.intent.is_none() && matches!(self.phase, Phase::Paused | Phase::Ended) =>
@@ -395,10 +427,11 @@ impl State {
                 self.intent = None;
                 self.resume = false;
                 self.presented = false;
-                self.muted = false;
+                self.speed_error = false;
                 Some(self.command(Action::PrepareView))
             }
             Input::Failed(error) => {
+                self.speed_pending = None;
                 self.frame_crop_pending = None;
                 self.frame_crop_editing = false;
                 self.error = Some(error);
@@ -414,6 +447,16 @@ impl State {
             return None;
         }
         match notice {
+            Notice::SpeedConfigured(success) => {
+                if let Some(speed) = self.speed_pending.take() {
+                    self.speed_error = !success;
+                    if success {
+                        self.speed = speed;
+                        self.range_version += 1;
+                    }
+                }
+                None
+            }
             Notice::FrameCropPresented(success) => {
                 if let Some(change) = self.frame_crop_pending.take() {
                     self.frame_crop_error = !success;
@@ -499,6 +542,7 @@ impl State {
                 None
             }
             Notice::Failed(error) if self.phase != Phase::Retiring => {
+                self.speed_pending = None;
                 self.frame_crop_pending = None;
                 self.frame_crop_editing = false;
                 self.error = Some(error);
@@ -549,6 +593,38 @@ mod tests {
             Artifact(4),
         )
     }
+    #[test]
+    fn speed_waits_for_the_owned_confirmation_and_preserves_edit_state() {
+        let mut s = state();
+        s.visible = true;
+        s.phase = Phase::Playing;
+        s.configure(120, 30);
+        s.range = Range { start: 8, end: 80 };
+        s.position = Range::time(24, 30);
+        s.muted = true;
+
+        let old = s.identity;
+        let change = s.input(old, Input::SetSpeed(Speed::Double)).unwrap();
+        assert_eq!(s.phase, Phase::Paused);
+        assert_eq!(s.speed, Speed::Normal);
+        assert!(s.input(change.identity, Input::Save).is_none());
+        s.notice(old, Notice::SpeedConfigured(true));
+        assert_eq!(s.speed, Speed::Normal);
+        s.notice(change.identity, Notice::SpeedConfigured(false));
+        assert!(s.speed_error);
+        let retry = s
+            .input(s.identity, Input::SetSpeed(Speed::OneAndHalf))
+            .unwrap();
+        s.notice(retry.identity, Notice::SpeedConfigured(true));
+        assert_eq!(s.speed, Speed::OneAndHalf);
+        assert!(!s.speed_error);
+        assert_eq!(s.range_version, 1);
+        assert_eq!(s.range, Range { start: 8, end: 80 });
+        assert_eq!(s.position, Range::time(24, 30));
+        assert!(s.muted);
+        assert!(s.input(s.identity, Input::SetSpeed(s.speed)).is_none());
+    }
+
     #[test]
     fn frame_crop_only_commits_after_current_presentation_and_keeps_time_range() {
         let mut s = state();

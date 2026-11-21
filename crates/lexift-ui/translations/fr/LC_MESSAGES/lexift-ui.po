@@ -2573,3 +2573,9 @@ msgstr "Taille minimale du cadre"
 
 msgid "Could not apply video crop"
 msgstr "Impossible d’appliquer le recadrage de la vidéo"
+
+msgid "Playback speed"
+msgstr "Vitesse de lecture"
+
+msgid "Could not change playback speed"
+msgstr "Impossible de modifier la vitesse de lecture"

@@ -66,12 +66,13 @@ pub(super) fn export(
     }
     let crop = crop.unwrap_or(FrameCrop::full(info.width, info.height));
     let (width, height) = crop.size();
-    if Plan::new(
+    if Plan::with_speed(
         plan.range,
         info.frames,
         info.video.frame_rate.get(),
         width,
         height,
+        plan.speed,
     )
     .as_ref()
         != Ok(plan)
@@ -423,7 +424,7 @@ mod tests {
             }
         });
         let (width, height) = crop.map_or((info.width, info.height), |crop| crop.size());
-        let plan = Plan::new(
+        let plan = Plan::with_speed(
             Range {
                 start: value("LEXIFT_GIF_START"),
                 end: value("LEXIFT_GIF_END"),
@@ -432,6 +433,7 @@ mod tests {
             fps,
             width,
             height,
+            super::super::fixture_speed(),
         )
         .unwrap();
         let outcome = export(

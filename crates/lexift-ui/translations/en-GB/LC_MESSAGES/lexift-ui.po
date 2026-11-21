@@ -2573,3 +2573,9 @@ msgstr "Minimum crop size"
 
 msgid "Could not apply video crop"
 msgstr "Could not apply video crop"
+
+msgid "Playback speed"
+msgstr "Playback speed"
+
+msgid "Could not change playback speed"
+msgstr "Could not change playback speed"

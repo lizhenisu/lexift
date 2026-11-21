@@ -72,6 +72,8 @@ impl Worker {
         initial: (
             Option<(Range, u32)>,
             Option<lexift_core::domain::recording_trim::FrameCrop>,
+            lexift_core::domain::recording_trim::Speed,
+            bool,
         ),
         listener: PreviewListener,
     ) -> Result<Self> {
@@ -147,6 +149,8 @@ fn run(
     initial: (
         Option<(Range, u32)>,
         Option<lexift_core::domain::recording_trim::FrameCrop>,
+        lexift_core::domain::recording_trim::Speed,
+        bool,
     ),
     listener: PreviewListener,
     shared: Arc<Shared>,
@@ -184,6 +188,10 @@ fn run(
         }
         let mut range = initial.0;
         engine.crop = initial.1;
+        let mut speed = initial.2;
+        let mut initial_speed = true;
+        unsafe { engine.media.SetMuted(initial.3)? };
+
         let mut initial_seek = range.is_some_and(|(r, _)| r.start > 0);
         let mut ending = false;
         let mut presented_pts: Option<f64> = None;
@@ -228,6 +236,7 @@ fn run(
                                         Range::time(r.end, fps).as_secs_f64(),
                                     )?;
                             }
+                            engine.set_speed(speed)?;
                             engine.media.Play()?;
                         }
                         Action::Pause => {
@@ -310,6 +319,21 @@ fn run(
                             }
                             listener(id, Notice::FrameCropPresented(success));
                         }
+                        Action::SetSpeed(requested) => {
+                            engine.media.Pause()?;
+                            let success = match engine.set_speed(requested) {
+                                Ok(()) => {
+                                    speed = requested;
+                                    true
+                                }
+                                Err(error) => {
+                                    tracing::debug!(%error, ?requested, "Recording preview speed rejected");
+                                    engine.set_speed(speed)?;
+                                    false
+                                }
+                            };
+                            listener(id, Notice::SpeedConfigured(success));
+                        }
                         Action::Mute(muted) => engine.media.SetMuted(muted)?,
                         _ => {}
                     }
@@ -364,6 +388,10 @@ fn run(
                     unsafe { engine.media.GetCurrentTime() },
                     unsafe { engine.media.IsEnded().as_bool() }
                 );
+            }
+            if initial_speed && decoded_frame.is_some() {
+                engine.set_speed(speed)?;
+                initial_speed = false;
             }
             if initial_seek && decoded_frame.is_some() {
                 let (r, fps) = range.unwrap();

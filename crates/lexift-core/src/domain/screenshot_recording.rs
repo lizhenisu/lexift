@@ -454,13 +454,14 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
             if request.identity == recording.lifecycle.identity
                 && recording.lifecycle.phase == lifecycle::Phase::PendingSave
                 && recording.preview.as_ref().is_none_or(|p| {
-                    matches!(
-                        p.phase,
-                        preview::Phase::Paused
-                            | preview::Phase::Ended
-                            | preview::Phase::Failed
-                            | preview::Phase::Preparing
-                    )
+                    p.speed_pending.is_none()
+                        && matches!(
+                            p.phase,
+                            preview::Phase::Paused
+                                | preview::Phase::Ended
+                                | preview::Phase::Failed
+                                | preview::Phase::Preparing
+                        )
                 })
                 && recording.lifecycle.artifact == Some(request.artifact) =>
         {
@@ -481,6 +482,10 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
             request.formats = vec![Format::Mp4, Format::Gif];
             request.default_format = Format::Mp4;
             request.frame_crop = recording.preview.as_ref().and_then(|p| p.frame_crop);
+            request.speed = recording
+                .preview
+                .as_ref()
+                .map_or_else(Default::default, |p| p.speed);
             request.gif_plan =
                 recording
                     .artifact
@@ -489,7 +494,7 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
                         let (width, height) = request
                             .frame_crop
                             .map_or((info.width, info.height), |crop| crop.size());
-                        Plan::new(
+                        Plan::with_speed(
                             request
                                 .range
                                 .unwrap_or(crate::domain::recording_trim::Range::full(info.frames)),
@@ -497,6 +502,7 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
                             info.video.frame_rate.get(),
                             width,
                             height,
+                            request.speed,
                         )
                     });
             recording.export_progress = None;
@@ -970,6 +976,7 @@ mod tests {
                 gif_unavailable_message: String::new(),
                 range: None,
                 range_version: 0,
+                speed: Default::default(),
                 frame_crop: None,
                 identity: id(&s),
                 artifact: lifecycle::Artifact(9),
