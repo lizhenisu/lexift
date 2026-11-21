@@ -555,6 +555,7 @@ pub(crate) struct AppController {
     pub(crate) ui: Arc<dyn ViewPort>,
     pub(crate) ocr: Option<Arc<crate::ocr::OcrRuntime>>,
     selection_capture_in_flight: AtomicBool,
+    exiting: AtomicBool,
     #[cfg(not(feature = "m1-demo"))]
     selection_toolbar_enabled: AtomicBool,
     state_changed: Arc<Notify>,
@@ -602,6 +603,7 @@ impl AppController {
             speech: None,
             ui,
             selection_capture_in_flight: AtomicBool::new(false),
+            exiting: AtomicBool::new(false),
             #[cfg(not(feature = "m1-demo"))]
             selection_toolbar_enabled: AtomicBool::new(selection_toolbar_enabled),
             state_changed: Arc::new(Notify::new()),
@@ -744,6 +746,12 @@ impl AppController {
                 .state
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if self.exiting.load(Ordering::Relaxed) {
+                return;
+            }
+            if quitting {
+                self.exiting.store(true, Ordering::Relaxed);
+            }
             let commands = state.reduce(event);
             if !progress_event {
                 tracing::debug!(
@@ -816,8 +824,12 @@ impl AppController {
     }
 
     pub(crate) fn translate_hotkey_handler(self: &Arc<Self>) -> HotkeyHandler {
-        let controller = Arc::clone(self);
-        Arc::new(move || controller.dispatch(AppEvent::SelectionTranslationRequested))
+        let controller = Arc::downgrade(self);
+        Arc::new(move || {
+            if let Some(controller) = controller.upgrade() {
+                controller.dispatch(AppEvent::SelectionTranslationRequested);
+            }
+        })
     }
 
     pub(crate) fn tray_handler(self: &Arc<Self>) -> TrayHandler {
@@ -1990,6 +2002,7 @@ mod tests {
         credential_draft_cleared: AtomicBool,
         presented_secret: Mutex<Option<(CredentialAccessPurpose, u64, String)>>,
         settings_feedback: Mutex<Vec<SettingsFeedback>>,
+        quit_calls: AtomicUsize,
     }
 
     impl ViewPort for RecordingView {
@@ -2057,10 +2070,40 @@ mod tests {
             self.settings_feedback.lock().unwrap().push(feedback);
         }
 
-        fn quit(&self) {}
+        fn quit(&self) {
+            self.quit_calls.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     struct ReorderingTranslator;
+
+    #[test]
+    fn repeated_exit_and_late_events_do_not_restart_shutdown() {
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        let view = Arc::new(RecordingView::default());
+        let controller = Arc::new(AppController::new(
+            runtime.handle().clone(),
+            Arc::new(Mutex::new(AppState::default())),
+            None,
+            None,
+            Arc::new(ReorderingTranslator),
+            Arc::new(RecordingSettingsStore::default()),
+            view.clone(),
+        ));
+        let retained_hotkey = controller.translate_hotkey_handler();
+        controller.dispatch(AppEvent::ExitRequested);
+        controller.dispatch(AppEvent::ExitRequested);
+        controller.dispatch(AppEvent::Started);
+        runtime.block_on(async {
+            tokio::task::yield_now().await;
+        });
+        assert_eq!(view.states.lock().unwrap().len(), 1);
+        assert_eq!(view.quit_calls.load(Ordering::Relaxed), 1);
+        let owner = Arc::downgrade(&controller);
+        drop(controller);
+        assert!(owner.upgrade().is_none());
+        retained_hotkey();
+    }
 
     #[derive(Default)]
     struct RecordingSettingsStore {

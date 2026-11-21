@@ -154,7 +154,12 @@ impl TrayListener {
             );
         }
         if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+            let joined = thread.join().is_ok();
+            tracing::debug!(
+                joined,
+                thread_id = self.thread_id,
+                "Windows tray listener retired"
+            );
         }
     }
 }

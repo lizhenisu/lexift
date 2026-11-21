@@ -421,6 +421,12 @@ impl Ui {
     }
 
     pub fn run(&self, show_main_window: bool) -> Result<(), slint::PlatformError> {
+        let result = self.run_event_loop(show_main_window);
+        Self::shutdown();
+        result
+    }
+
+    fn run_event_loop(&self, show_main_window: bool) -> Result<(), slint::PlatformError> {
         if show_main_window {
             cancel_idle_memory_trim();
             APP_WINDOW_REGISTRY.with(|registry| {
@@ -437,8 +443,17 @@ impl Ui {
                 Ok::<(), slint::PlatformError>(())
             })?;
         }
-        slint::run_event_loop_until_quit()?;
+        slint::run_event_loop_until_quit()
+    }
+
+    fn shutdown() {
+        // Release bridges on the owning thread before native thread-local teardown.
+        // Their callbacks can hold the last references to worker-backed adapters.
         crate::tray_menu::shutdown();
+        screenshot_presets::shutdown();
+        ocr_result::shutdown();
+        pin_manager::shutdown();
+        text_pin::shutdown();
         crate::annotation::shutdown();
         crate::pinned_screenshot::shutdown();
         crate::ocr::shutdown();
@@ -482,7 +497,8 @@ impl Ui {
                 }
             }
         });
-        Ok(())
+        cancel_idle_memory_trim();
+        IDLE_TRIM_CALLBACK.with(|callback| callback.set(None));
     }
 }
 

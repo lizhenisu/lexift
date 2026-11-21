@@ -19,3 +19,5 @@
 - 应用退出码单列。最终 Release 在普通图片和文字贴图并存时，从托盘退出记录了 `Lexift stopped`，进程返回 `0xC0000409`。从未打开管理窗、打开后关闭管理窗、保留管理窗三组均复现相同退出码，原因尚未归因。见 `native-exit-*/exit.json`。管理窗口的主动关闭和截图前退役已独立验证。
 - 最终 Release SHA256 为 `60748e26329a445a6f53e3d1cf2b9a42ddd668a2a62d7cdf1ef7cad823f7f6a9`，结果见 `native-release-verified/result.json`。
 - 脚本、合成夹具、原始日志、布局截图及构建哈希保存在忽略的 `target/pin-manager/`。
+
+退出异常的后续归因、修复及双屏复测见[贴图退出稳定性验证](pin-exit-stability.md)。

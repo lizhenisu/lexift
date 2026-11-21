@@ -83,6 +83,11 @@ fn emit(event: Event) {
 pub(super) fn active() -> bool {
     REGISTRY.with(|r| r.borrow().as_ref().is_some_and(|r| r.view.is_some()))
 }
+pub(super) fn shutdown() {
+    if let Some(mut retired) = REGISTRY.with(|r| r.borrow_mut().take()) {
+        drop(retired.view.take());
+    }
+}
 pub(super) fn apply_theme() {
     REGISTRY.with(|r| {
         if let Some(v) = r.borrow().as_ref().and_then(|r| r.view.as_ref()) {

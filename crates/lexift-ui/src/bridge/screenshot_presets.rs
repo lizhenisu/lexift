@@ -70,6 +70,13 @@ pub(crate) fn close() {
     schedule_idle_memory_trim();
 }
 
+pub(super) fn shutdown() {
+    let retired = REGISTRY.with(|r| r.borrow_mut().take());
+    if let Some(panel) = retired.as_ref().and_then(|r| r.panel.as_ref()) {
+        let _ = panel.window.hide();
+    }
+}
+
 pub(crate) fn exclusion() -> Option<lexift_core::ports::magnifier::WindowToken> {
     REGISTRY.with(|r| {
         let r = r.borrow();

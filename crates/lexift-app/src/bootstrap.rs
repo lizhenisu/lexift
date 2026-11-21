@@ -610,12 +610,14 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let result = ui.run(!tray_registered).map_err(Into::into);
+    tracing::debug!("UI event loop and window registries retired");
 
     lexift_platform::stop_selection_monitor();
 
     drop(controller);
     drop(ui);
     drop(services);
+    tracing::debug!("App services retired");
     lifecycle::on_exit();
     #[cfg(all(test, debug_assertions, target_os = "windows"))]
     if let Some(result) = native_pin_result {

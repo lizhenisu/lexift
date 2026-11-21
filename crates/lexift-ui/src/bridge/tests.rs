@@ -655,3 +655,41 @@ fn final_ui_shutdown_releases_services_retained_by_closed_registries() {
         "services must retire before process TLS teardown"
     );
 }
+#[test]
+fn failed_event_loop_releases_adapter_callbacks_before_thread_teardown() {
+    use super::{AppState, PassiveWindowPreparation, Ui, WindowLifecycleCallbacks};
+    use slint::platform::{Platform, WindowAdapter};
+    use std::rc::Rc;
+
+    struct NoEventLoop;
+    impl Platform for NoEventLoop {
+        fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+            Err(slint::PlatformError::NoEventLoopProvider)
+        }
+    }
+    slint::platform::set_platform(Box::new(NoEventLoop)).unwrap();
+    let adapter = Rc::new(());
+    let observer = Rc::downgrade(&adapter);
+    let callbacks = WindowLifecycleCallbacks::new(
+        |_, _| false,
+        |_| false,
+        |_| false,
+        |_, _, _| false,
+        |_, _| false,
+        |_, _| false,
+        || false,
+    )
+    .with_tray_menu_cancelled(move || {
+        let _ = &adapter;
+    });
+    let ui = Ui::new(
+        &AppState::default(),
+        |_| PassiveWindowPreparation::Failed,
+        callbacks,
+    )
+    .unwrap();
+    assert!(observer.upgrade().is_some());
+    assert!(ui.run(false).is_err());
+    assert!(observer.upgrade().is_none());
+    Ui::shutdown();
+}

@@ -102,6 +102,12 @@ pub(super) fn close_all() {
     drop(old);
 }
 
+pub(super) fn shutdown() {
+    HANDLER.with(|h| h.borrow_mut().take());
+    close_all();
+    SERVICES.with(|s| s.borrow_mut().take());
+}
+
 fn services() -> Option<(Preparation, WindowLifecycleCallbacks)> {
     SERVICES.with(|s| s.borrow().clone())
 }

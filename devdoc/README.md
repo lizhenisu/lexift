@@ -59,7 +59,7 @@
 - [共用屏幕交互宿主](features/screen-interaction.md)
 - [独立截图快捷键](features/screenshot-hotkey.md) · [专项验证](releases/screenshot-hotkey.md)
 - [截图模式与临时贴图](features/screenshot-mode.md) · [刷新底图验证](releases/screenshot-refresh.md)
-- [贴图交互、透明度与统一显隐](features/pin-interaction.md) · [贴图管理验证](releases/pin-manager.md) · [文字贴图验证](releases/text-pin.md)
+- [贴图交互、透明度与统一显隐](features/pin-interaction.md) · [贴图管理验证](releases/pin-manager.md) · [文字贴图验证](releases/text-pin.md) · [贴图退出稳定性](releases/pin-exit-stability.md)
 - [截图／长图图片历史](features/image-history.md)
 - [图片历史验证](releases/screenshot-image-history.md)
 - [标注撤销与重做](annotation/annotation-history.md)

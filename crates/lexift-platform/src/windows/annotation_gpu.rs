@@ -240,7 +240,8 @@ impl Drop for WindowsAnnotationRenderPort {
         }
         wake.notify_one();
         if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+            let joined = thread.join().is_ok();
+            tracing::debug!(joined, "Annotation render worker retired");
         }
     }
 }

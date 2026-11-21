@@ -53,6 +53,12 @@ pub(super) fn close() {
     super::schedule_idle_memory_trim();
 }
 
+pub(super) fn shutdown() {
+    let view = VIEW.with(|v| v.borrow_mut().take());
+    retire(view);
+    SERVICES.with(|s| s.borrow_mut().take());
+}
+
 fn retire(old: Option<ResultView>) {
     let owner = old.as_ref().and_then(|v| v.owner);
     drop(old);
