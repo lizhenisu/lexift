@@ -2621,3 +2621,6 @@ msgstr "새 텍스트를 추가하려면 기존 텍스트 창을 닫으세요. �
 
 msgid "Could not open the text pin."
 msgstr "고정된 텍스트를 열 수 없습니다."
+
+msgid "Speed applies to preview and export."
+msgstr "속도 설정은 미리보기와 내보내기에 적용됩니다."

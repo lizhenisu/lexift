@@ -2621,3 +2621,6 @@ msgstr "Close a text pin before adding another. The limit is 20."
 
 msgid "Could not open the text pin."
 msgstr "Could not open the text pin."
+
+msgid "Speed applies to preview and export."
+msgstr "Speed applies to preview and export."

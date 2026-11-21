@@ -246,84 +246,112 @@ fn recording_preview_renders_all_languages_themes_sizes_and_dpis() {
     let w = crate::RecordingPreview::new().unwrap();
     let adapter = windows.borrow().last().unwrap().clone();
     use slint::platform::PointerEventButton;
-    let picked = Rc::new(std::cell::Cell::new(None));
+    let actions = Rc::new(RefCell::new(Vec::new()));
     w.on_action({
-        let picked = picked.clone();
-        move |action, value| {
-            if matches!(action, 17 | 18) {
-                picked.set(Some((action, value as i32)));
-            }
-        }
+        let actions = actions.clone();
+        move |action, value| actions.borrow_mut().push((action, value))
     });
-    let click = |x, y| {
+    let pointer = |x, y, pressed| {
         let position = slint::LogicalPosition::new(x, y);
+        let button = PointerEventButton::Left;
         w.window()
             .dispatch_event(WindowEvent::PointerMoved { position });
-        w.window().dispatch_event(WindowEvent::PointerPressed {
-            position,
-            button: PointerEventButton::Left,
+        w.window().dispatch_event(if pressed {
+            WindowEvent::PointerPressed { position, button }
+        } else {
+            WindowEvent::PointerReleased { position, button }
         });
-        w.window().dispatch_event(WindowEvent::PointerReleased {
-            position,
-            button: PointerEventButton::Left,
+    };
+    let click = |x, y| {
+        pointer(x, y, true);
+        pointer(x, y, false);
+    };
+    let key = |key: slint::platform::Key| {
+        w.window()
+            .dispatch_event(WindowEvent::KeyPressed { text: key.into() });
+        w.window()
+            .dispatch_event(WindowEvent::KeyReleased { text: key.into() });
+    };
+    let snapshot = |name: &str| {
+        let size = w.window().size();
+        let (width, height) = (size.width, size.height);
+        let mut pixels = vec![slint::Rgb8Pixel::default(); (width * height) as usize];
+        adapter.request_redraw();
+        adapter.draw_if_needed(|renderer| {
+            renderer.render(&mut pixels, width as usize);
         });
+        if let Ok(directory) = std::env::var("LEXIFT_PREVIEW_RENDER_DIR") {
+            crate::i18n::write_test_bitmap(
+                &directory,
+                name,
+                width,
+                height,
+                pixels.iter().map(|p| [p.r, p.g, p.b, 255]),
+            );
+        }
     };
     w.set_time_label("00:12 / 10:00".into());
     w.set_metadata("1920 × 1080 px · 60fps".into());
-    w.set_progress(420.);
+    w.set_progress(500.);
     w.set_frames(36000.);
-    w.set_start_frame(170.);
-    w.set_end_frame(31000.);
-    w.set_range_label("00:02.833–08:36.666 (08:33.833)".into());
+    w.set_frame_rate(60.);
+    w.set_duration_seconds(600.);
+    w.set_start_frame(18000.);
+    w.set_end_frame(18001.);
+    w.set_range_label("05:00.000–05:00.016 (00:00.016)".into());
     crate::i18n::select(lexift_core::domain::ui_language::UiLanguage::SimplifiedChinese);
-    adapter.set_size(slint::PhysicalSize::new(960, 760));
+    adapter.set_size(slint::PhysicalSize::new(640, 360));
     w.set_ready(true);
     w.set_has_audio(true);
     w.set_speed_enabled(true);
-    click(270., 712.);
-    let mut menu_pixels = vec![slint::Rgb8Pixel::default(); 960 * 760];
-    adapter.request_redraw();
-    adapter.draw_if_needed(|renderer| {
-        renderer.render(&mut menu_pixels, 960);
-    });
-    if let Ok(directory) = std::env::var("LEXIFT_PREVIEW_RENDER_DIR") {
-        crate::i18n::write_test_bitmap(
-            &directory,
-            "preview-speed-menu",
-            960,
-            760,
-            menu_pixels.iter().map(|p| [p.r, p.g, p.b, 255]),
-        );
-    }
-    click(372., 663.);
-    assert_eq!(picked.get(), Some((17, 1)));
-    click(342., 712.);
-    assert_eq!(picked.get(), Some((17, 1)));
     w.set_export_audio_enabled(true);
-    click(342., 712.);
-    adapter.request_redraw();
-    adapter.draw_if_needed(|renderer| {
-        renderer.render(&mut menu_pixels, 960);
-    });
-    if let Ok(directory) = std::env::var("LEXIFT_PREVIEW_RENDER_DIR") {
-        crate::i18n::write_test_bitmap(
-            &directory,
-            "preview-export-audio",
-            960,
-            760,
-            menu_pixels.iter().map(|p| [p.r, p.g, p.b, 255]),
-        );
-    }
-    for text in [
-        slint::platform::Key::RightArrow,
-        slint::platform::Key::Return,
-    ] {
-        w.window()
-            .dispatch_event(WindowEvent::KeyPressed { text: text.into() });
-        w.window()
-            .dispatch_event(WindowEvent::KeyReleased { text: text.into() });
-    }
-    assert_eq!(picked.get(), Some((18, 1)));
+    snapshot("preview-compact");
+    let last_actions = || std::mem::take(&mut *actions.borrow_mut());
+    click(292., 262.);
+    assert_eq!(last_actions(), [(8, 0.), (9, 18000.)]);
+    click(312., 262.);
+    assert_eq!(last_actions(), [(8, 0.), (10, 18001.)]);
+    click(302., 288.);
+    assert_eq!(last_actions(), [(2, 0.), (3, 500.)]);
+    pointer(292., 262., true);
+    key(slint::platform::Key::Escape);
+    pointer(282., 262., false);
+    assert_eq!(last_actions(), [(8, 0.), (7, 0.)]);
+    key(slint::platform::Key::LeftArrow);
+    assert_eq!(last_actions(), [(8, 0.), (9, 17999.)]);
+
+    let closed_height = w.get_video_height();
+    click(460., 326.);
+    snapshot("preview-speed-menu");
+    assert!(w.get_video_height() < closed_height);
+    key(slint::platform::Key::RightArrow);
+    key(slint::platform::Key::Return);
+    assert_eq!(last_actions(), [(17, 1.)]);
+    assert_eq!(w.get_video_height(), closed_height);
+    click(514., 326.);
+    snapshot("preview-export-audio");
+    key(slint::platform::Key::Escape);
+    assert!(last_actions().is_empty());
+    assert_eq!(w.get_video_height(), closed_height);
+    key(slint::platform::Key::Return);
+    assert!(w.get_video_height() < closed_height);
+    key(slint::platform::Key::RightArrow);
+    key(slint::platform::Key::Return);
+    assert_eq!(last_actions(), [(18, 1.)]);
+    w.invoke_open_options(false);
+    click(100., 80.);
+    assert!(
+        last_actions().is_empty(),
+        "dismissal must not click through"
+    );
+    assert_eq!(w.get_video_height(), closed_height);
+    w.set_busy(true);
+    click(302., 288.);
+    assert!(last_actions().is_empty());
+    w.set_busy(false);
+    w.set_start_frame(170.);
+    w.set_end_frame(31000.);
+    w.set_range_label("00:02.833–08:36.666 (08:33.833)".into());
     for language in lexift_core::domain::ui_language::UiLanguage::ALL {
         crate::i18n::select(language);
         for dark in [false, true] {
@@ -335,7 +363,8 @@ fn recording_preview_renders_all_languages_themes_sizes_and_dpis() {
                 for (width, height) in [(640., 360.), (960., 760.)] {
                     let (width, height) = ((width * dpi) as u32, (height * dpi) as u32);
                     adapter.set_size(slint::PhysicalSize::new(width, height));
-                    for phase in 0..6 {
+                    for phase in 0..8 {
+                        w.invoke_cancel_view_input();
                         w.set_busy(matches!(phase, 3 | 4));
                         w.set_exporting(matches!(phase, 3 | 4));
                         w.set_crop_editing(phase == 5);
@@ -355,15 +384,19 @@ fn recording_preview_renders_all_languages_themes_sizes_and_dpis() {
                         w.set_ready(phase != 2);
                         w.set_playing(phase == 1);
                         w.set_speed_index(phase % 3);
-                        w.set_speed_enabled(matches!(phase, 0 | 1));
+                        w.set_speed_enabled(matches!(phase, 0 | 1 | 6));
                         w.set_has_audio(phase != 0);
-                        w.set_export_audio_enabled(phase == 1);
+                        w.set_export_audio_enabled(matches!(phase, 1 | 7));
                         w.set_export_audio_index(phase % 3);
                         w.set_error(if phase == 2 {
                             crate::i18n::tr("Recording preview unavailable").into()
                         } else {
                             "".into()
                         });
+                        if matches!(phase, 6 | 7) {
+                            w.invoke_open_options(phase == 7);
+                        }
+                        assert!(w.get_video_height() >= 80.);
                         let mut pixels =
                             vec![slint::Rgb8Pixel::default(); (width * height) as usize];
                         adapter.request_redraw();

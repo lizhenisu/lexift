@@ -1,44 +1,245 @@
 import { Colors } from "design/colors.slint";
 import { SettingsFocusScope, SettingsInteraction } from "settings-interaction.slint";
 import { AnnotationHintTarget } from "annotation-hint.slint";
-component RangeHandle inherits Rectangle {
- in property <float> frame;
- in property <float> total;
- in property <float> minimum;
- in property <float> maximum;
- in property <bool> enabled;
- in property <string> label;
- in property <length> track-width;
- callback begin();callback commit(float);callback cancel();
- private property <float> draft;
- private property <float> origin;
- private property <bool> dragging;
- out property <float> current:root.dragging ? root.draft : root.frame;
- width:16px;height:28px;border-radius:3px;
- background:area.pressed ? Colors.primary : area.has-hover || focus.focus-visible ? Colors.primary-container : Colors.surface;
- border-width:2px;border-color:Colors.primary;
- Rectangle {x:6px;y:7px;width:2px;height:14px;background:Colors.primary;}
- focus:=SettingsFocusScope {width:parent.width;height:parent.height;enabled:root.enabled;accessible-role:slider;accessible-label:root.label;
-  key-pressed(event)=>{if event.text==Key.LeftArrow || event.text==Key.RightArrow {root.begin();root.commit(clamp(root.frame+(event.text==Key.LeftArrow ? -1 : 1),root.minimum,root.maximum));return accept;}if event.text==Key.Escape && root.dragging {root.dragging=false;root.cancel();return accept;}return reject;}
- }
- area:=TouchArea {enabled:root.enabled;mouse-cursor:ew-resize;
-  pointer-event(event)=>{
-   if event.kind==PointerEventKind.down && event.button==PointerEventButton.left {SettingsInteraction.pointer-input();focus.focus-target();root.origin=(self.mouse-x + root.x)/1px;root.draft=root.frame;root.dragging=true;root.begin();}
-   if event.kind==PointerEventKind.cancel && root.dragging {root.dragging=false;root.cancel();}
-   if event.kind==PointerEventKind.up && root.dragging {root.dragging=false;root.commit(root.draft);}
-  }
-  moved=>{if self.pressed && root.dragging {root.draft=clamp(round(root.frame+((self.mouse-x + root.x)/1px - root.origin)*root.total/max(1,root.track-width/1px)),root.minimum,root.maximum);}}
- }
- AnnotationHintTarget {width:parent.width;height:parent.height;text:root.label;hovered:area.has-hover;pressed:area.pressed;}
+
+component TrimHandle inherits Rectangle {
+    in property <float> frame;
+    in property <float> total;
+    in property <float> minimum;
+    in property <float> maximum;
+    in property <bool> end;
+    in property <bool> enabled;
+    in property <string> label;
+    in property <length> track-width;
+    callback begin();
+    callback commit(float);
+    callback cancel();
+    private property <float> draft;
+    private property <length> origin;
+    private property <bool> dragging;
+    out property <float> current: root.dragging ? root.draft : root.frame;
+
+    public function cancel-drag() -> bool {
+        if !root.dragging { return false; }
+        root.dragging = false;
+        root.cancel();
+        return true;
+    }
+
+    width: 20px;
+    height: 24px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: focus.focus-visible ? Colors.foreground : Colors.primary;
+    background: root.dragging || area.has-hover ? Colors.primary : Colors.primary-container;
+
+    Rectangle {
+        x: root.end ? 6px : 12px;
+        y: 6px;
+        width: 2px;
+        height: 12px;
+        border-radius: 1px;
+        background: root.dragging || area.has-hover ? Colors.on-primary : Colors.primary;
+    }
+
+    focus := SettingsFocusScope {
+        enabled: root.enabled;
+        accessible-role: slider;
+        accessible-label: root.label;
+        key-pressed(event) => {
+            if event.text == Key.LeftArrow || event.text == Key.RightArrow {
+                let next = clamp(root.frame + (event.text == Key.LeftArrow ? -1 : 1), root.minimum, root.maximum);
+                if next != root.frame {
+                    root.begin();
+                    root.commit(next);
+                }
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    area := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: ew-resize;
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                SettingsInteraction.pointer-input();
+                focus.focus-target();
+                root.origin = self.mouse-x + root.x;
+                root.draft = root.frame;
+                root.dragging = true;
+                root.begin();
+            } else if event.kind == PointerEventKind.cancel {
+                root.cancel-drag();
+            } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left && root.dragging {
+                let value = root.dragged-frame(self.mouse-x + root.x);
+                root.dragging = false;
+                root.commit(value);
+            }
+        }
+        moved => {
+            if self.pressed && root.dragging {
+                root.draft = root.dragged-frame(self.mouse-x + root.x);
+            }
+        }
+    }
+    function dragged-frame(position: length) -> float {
+        return clamp(round(root.frame + (position - root.origin) / max(1px, root.track-width) * root.total), root.minimum, root.maximum);
+    }
+    AnnotationHintTarget { width: parent.width; height: parent.height; text: root.label; hovered: area.has-hover; pressed: area.pressed; }
 }
+
 export component RecordingTrim inherits Rectangle {
- in property <float> start-frame;in property <float> end-frame;in property <float> frames;
- in property <bool> enabled;
- callback begin();callback commit(bool,float);callback cancel();
- height:28px;
- Rectangle {x:8px;y:8px;width:parent.width - 16px;height:12px;border-radius:3px;background:Colors.outline;
-  Rectangle {x:parent.width*start.current/max(1,root.frames);width:parent.width*(end.current - start.current)/max(1,root.frames);height:parent.height;background:Colors.primary-container;}
- }
- start:=RangeHandle {x:(parent.width - 16px)*self.current/max(1,root.frames) - 8px;frame:root.start-frame;total:root.frames;minimum:0;maximum:root.end-frame - 1;track-width:parent.width - 16px;enabled:root.enabled;label:@tr("Trim start");begin=>{root.begin();}commit(value)=>{root.commit(false,value);}cancel=>{root.cancel();}}
- end:=RangeHandle {x:(parent.width - 16px)*self.current/max(1,root.frames) + 8px;frame:root.end-frame;total:root.frames;minimum:root.start-frame+1;maximum:root.frames;track-width:parent.width - 16px;enabled:root.enabled;label:@tr("Trim end");begin=>{root.begin();}commit(value)=>{root.commit(true,value);}cancel=>{root.cancel();}}
+    in property <float> start-frame;
+    in property <float> end-frame;
+    in property <float> frames;
+    in property <float> frame-rate;
+    in property <float> duration-seconds;
+    in property <float> progress;
+    in property <bool> enabled;
+    callback trim-begin();
+    callback trim-commit(bool, float);
+    callback seek-begin();
+    callback seek-commit(float);
+    callback cancel();
+    private property <bool> seeking;
+    private property <float> seek-draft;
+    private property <length> inset: 20px;
+    private property <length> span: max(1px, root.width - 2 * root.inset);
+    // The axis describes video frames, while the seek bridge still takes thousandths of media duration.
+    private property <float> video-duration: root.frames / max(1, root.frame-rate);
+    private property <float> media-duration: root.duration-seconds > 0 ? root.duration-seconds : root.video-duration;
+    private property <float> play-fraction: root.seeking ? root.seek-draft : clamp(root.progress / 1000 * root.media-duration / max(0.001, root.video-duration), 0, 1);
+    private property <length> head-x: root.inset + root.span * root.play-fraction;
+
+    height: 46px;
+
+    public function cancel-gesture() -> bool {
+        if root.seeking {
+            root.seeking = false;
+            root.cancel();
+            return true;
+        }
+        if start.cancel-drag() { return true; }
+        return end.cancel-drag();
+    }
+
+    changed enabled => { if !root.enabled { root.cancel-gesture(); } }
+
+    function position-fraction(x: length) -> float {
+        let fraction = clamp((x - root.inset) / root.span, 0, 1);
+        return clamp(fraction, root.start-frame / max(1, root.frames), max(root.start-frame, root.end-frame - 1) / max(1, root.frames));
+    }
+
+    function commit-seek(fraction: float) {
+        root.seek-commit(clamp(fraction * root.video-duration / max(0.001, root.media-duration) * 1000, 0, 1000));
+    }
+
+    Rectangle {
+        x: root.inset;
+        y: 10px;
+        width: root.span;
+        height: 24px;
+        border-radius: 4px;
+        background: Colors.image-workspace;
+        border-width: 1px;
+        border-color: Colors.outline;
+
+        Rectangle {
+            x: parent.width * start.current / max(1, root.frames);
+            width: parent.width * (end.current - start.current) / max(1, root.frames);
+            height: parent.height;
+            background: Colors.primary-container;
+            border-width: 1px;
+            border-color: Colors.primary;
+        }
+        for tick in 9: Rectangle {
+            x: parent.width * (tick + 1) / 10;
+            y: 18px;
+            width: 1px;
+            height: 5px;
+            background: Colors.secondary-foreground;
+            opacity: 0.55;
+        }
+    }
+
+    Rectangle { x: root.head-x - 1px; y: 9px; width: 2px; height: 30px; background: Colors.primary; }
+    Rectangle {
+        x: root.head-x - 5px;
+        y: 36px;
+        width: 10px;
+        height: 8px;
+        border-radius: 2px;
+        background: Colors.primary;
+        border-width: seek-focus.focus-visible ? 1px : 0px;
+        border-color: Colors.foreground;
+    }
+
+    seek-focus := SettingsFocusScope {
+        enabled: root.enabled;
+        accessible-role: slider;
+        accessible-label: @tr("Playback position");
+        key-pressed(event) => {
+            if event.text == Key.LeftArrow || event.text == Key.RightArrow {
+                let x = root.head-x + root.span * (event.text == Key.LeftArrow ? -1 : 1) / max(0.001, root.video-duration);
+                root.seek-begin();
+                root.commit-seek(root.position-fraction(x));
+                return accept;
+            }
+            return reject;
+        }
+    }
+    TouchArea {
+        enabled: root.enabled;
+        y: 24px;
+        height: 22px;
+        mouse-cursor: pointer;
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                SettingsInteraction.pointer-input();
+                seek-focus.focus-target();
+                root.seek-draft = root.position-fraction(self.mouse-x);
+                root.seeking = true;
+                root.seek-begin();
+            } else if event.kind == PointerEventKind.cancel && root.seeking {
+                root.cancel-gesture();
+            } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left && root.seeking {
+                root.seeking = false;
+                root.commit-seek(root.position-fraction(self.mouse-x));
+            }
+        }
+        moved => { if root.seeking && self.pressed { root.seek-draft = root.position-fraction(self.mouse-x); } }
+    }
+
+    // The trim handles extend outward from their exact boundaries.
+    start := TrimHandle {
+        x: root.inset + root.span * self.current / max(1, root.frames) - self.width;
+        y: 0px;
+        frame: root.start-frame;
+        total: root.frames;
+        minimum: 0;
+        maximum: max(0, root.end-frame - 1);
+        track-width: root.span;
+        enabled: root.enabled;
+        label: @tr("Trim start");
+        begin => { root.trim-begin(); }
+        commit(value) => { root.trim-commit(false, value); }
+        cancel => { root.cancel(); }
+    }
+    end := TrimHandle {
+        x: root.inset + root.span * self.current / max(1, root.frames);
+        y: 0px;
+        frame: root.end-frame;
+        total: root.frames;
+        minimum: min(root.frames, root.start-frame + 1);
+        maximum: root.frames;
+        track-width: root.span;
+        end: true;
+        enabled: root.enabled;
+        label: @tr("Trim end");
+        begin => { root.trim-begin(); }
+        commit(value) => { root.trim-commit(true, value); }
+        cancel => { root.cancel(); }
+    }
 }

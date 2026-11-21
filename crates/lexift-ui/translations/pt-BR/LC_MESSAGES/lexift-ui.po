@@ -2621,3 +2621,6 @@ msgstr "Feche uma janela de texto antes de adicionar outra. O limite é 20."
 
 msgid "Could not open the text pin."
 msgstr "Não foi possível abrir a janela de texto."
+
+msgid "Speed applies to preview and export."
+msgstr "A velocidade se aplica à prévia e à exportação."

@@ -1,172 +1,452 @@
 import { Colors } from "design/colors.slint";
 import { Metrics } from "design/metrics.slint";
+import { Spacing } from "design/spacing.slint";
+import { Typography } from "design/typography.slint";
 import { ResizeEdges } from "design/resize-edges.slint";
 import { SettingsButton } from "settings-controls.slint";
 import { SettingsFocusScope, SettingsInteraction } from "settings-interaction.slint";
-import { CaptureButton } from "long-capture.slint";
-import { Slider } from "annotation-fields.slint";
-
 import { AnnotationHintTarget } from "annotation-hint.slint";
 import { RecordingTrim } from "recording-trim.slint";
+
+component PreviewControl inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <string> hint: root.label;
+    in property <bool> enabled: true;
+    in property <bool> selected;
+    callback activated();
+
+    width: root.label == "" ? 40px : 48px + caption.preferred-width;
+    height: 40px;
+    border-radius: 8px;
+    border-width: keyboard.focus-visible || root.selected ? 1px : 0px;
+    border-color: keyboard.focus-visible ? Colors.primary : Colors.outline;
+    background: root.enabled && area.pressed ? Colors.icon-button-pressed
+        : root.enabled && area.has-hover ? Colors.icon-button-hover
+        : root.selected ? Colors.primary-container : transparent;
+    opacity: root.enabled ? 1 : Metrics.disabled-opacity;
+    accessible-role: button;
+    accessible-label: root.hint;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.activated(); } }
+    public function focus-button() { keyboard.focus-target(); }
+
+    Image {
+        x: root.label == "" ? (parent.width - self.width) / 2 : 12px;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        source: root.icon;
+        colorize: root.selected ? Colors.primary : Colors.foreground;
+    }
+    caption := Text {
+        x: 36px;
+        width: parent.width - self.x - 8px;
+        height: parent.height;
+        text: root.label;
+        font-size: Typography.menu-size;
+        color: Colors.foreground;
+        vertical-alignment: center;
+    }
+    keyboard := SettingsFocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " { root.activated(); return accept; }
+            return reject;
+        }
+    }
+    area := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { SettingsInteraction.pointer-input(); keyboard.focus-target(); root.activated(); }
+    }
+    AnnotationHintTarget { width: parent.width; height: parent.height; text: root.hint; hovered: area.has-hover; pressed: area.pressed; }
+}
+
 export component RecordingPreview inherits Window {
- title:@tr("Recording preview");no-frame:true;background:Colors.surface;
- preferred-width:960px;preferred-height:760px;min-width:640px;min-height:360px;
- in property <bool> ready;in property <bool> playing;in property <bool> has-audio;in property <bool> muted;in property <bool> busy;
- in property <string> error;in property <string> metadata;in property <string> time-label;
- private property <bool> compact-controls:root.width < 800px;
- in property <float> start-frame;in property <float> end-frame;in property <float> frames;in property <string> range-label;in property <string> export-label;in property <bool> exporting;
- in property <int> speed-index;
- in property <bool> speed-enabled;
- in property <string> speed-error;
- private property <image> empty-icon;
- in property <int> export-audio-index;
- in property <bool> export-audio-enabled;
- in property <string> export-audio-error;
- private property <bool> options-open;
- private property <bool> audio-options;
- private property <int> option-choice;
- private property <[string]> speed-labels: ["1×", "1.5×", "2×"];
- private property <[string]> audio-labels: [@tr("Original sound"), @tr("50% volume"), @tr("Remove audio track")];
- changed speed-enabled => { if !root.speed-enabled && !root.audio-options { root.options-open = false; } }
- changed export-audio-enabled => { if !root.export-audio-enabled && root.audio-options { root.options-open = false; } }
- function open-options(audio: bool) {
-  root.audio-options = audio;
-  root.option-choice = audio ? root.export-audio-index : root.speed-index;
-  root.options-open = true;
-  option-keys.focus();
- }
- function dismiss-options() {
-  root.options-open = false;
-  if root.audio-options { audio-button.focus-button(); }
-  else { speed-button.focus-button(); }
- }
- function choose-option(index: int) {
-  root.dismiss-options();
-  root.action(root.audio-options ? 18 : 17, index);
- }
- in property <float> progress;in property <float> duration-seconds;
- out property <float> video-x:12;out property <float> video-y:44;
- out property <float> video-width:(root.width - 24px)/1px;out property <float> video-height:max(1,(root.height - (root.compact-controls ? 240px : 192px))/1px);
- in property <bool> crop-editing;in property <bool> crop-valid;in property <string> crop-label;
- callback crop-pointer(int,float,float);
- callback action(int,float);callback move-requested();callback resize-requested(int);callback surface-changed();
- changed width=>{root.surface-changed();}changed height=>{root.surface-changed();}
- forward-focus:keys;
- keys:=FocusScope{width:root.width;height:root.height;key-pressed(event)=>{if event.text==Key.Escape{root.action(root.crop-editing ? 14 : 5,0);return accept;}return reject;}
- Rectangle {x:0px;y:0px;width:root.width;height:40px;background:Colors.surface;
-  Text {x:16px;width:parent.width - 72px;height:100%;text:@tr("Recording preview");font-size:14px;font-weight:600;color:Colors.foreground;vertical-alignment:center;}
-  TouchArea {x:0px;y:0px;width:parent.width - 52px;height:parent.height;pointer-event(event)=>{if event.button==PointerEventButton.left && event.kind==PointerEventKind.down{root.move-requested();}}}
-  CaptureButton {x:parent.width - 40px;y:4px;icon:@image-url("assets/icons/screenshot-close.svg");label:@tr("Close");clicked=>{root.action(5,0);}}
- }
- Rectangle {x:root.video-x*1px;y:root.video-y*1px;width:root.video-width*1px;height:root.video-height*1px;background:#000;
-  if !root.ready: Text {text:root.error!="" ? root.error : @tr("Preparing preview");x:24px;width:parent.width - 48px;height:parent.height - 64px;vertical-alignment:center;horizontal-alignment:center;wrap:word-wrap;color:#eee;}
-  if root.crop-editing && !root.busy: TouchArea {
-   pointer-event(event) => {
-    if event.kind == PointerEventKind.cancel { root.crop-pointer(3,0,0); }
-    if event.button == PointerEventButton.left && event.kind == PointerEventKind.down { keys.focus();root.crop-pointer(0,self.mouse-x/1px,self.mouse-y/1px); }
-    if event.button == PointerEventButton.left && event.kind == PointerEventKind.up { root.crop-pointer(2,self.mouse-x/1px,self.mouse-y/1px); }
-   }
-   moved => { if self.pressed { root.crop-pointer(1,self.mouse-x/1px,self.mouse-y/1px); } }
-  }
-  if root.error!="": SettingsButton {x:(parent.width - self.width)/2;y:parent.height/2 + 20px;compact:true;label:@tr("Retry");clicked=>{root.action(6,0);}}
- }
- if root.crop-editing: VerticalLayout {
-  x:16px;y:root.height - (root.compact-controls ? 188px : 140px);width:root.width - 32px;height:106px;spacing:8px;
-  Text {text:root.crop-label;color:Colors.foreground;wrap:word-wrap;}
-  HorizontalLayout {spacing:8px;
-   SettingsButton {compact:true;icon:@image-url("assets/icons/restore-range.svg");label:@tr("Restore full frame");enabled:!root.busy;clicked=>{root.action(15,0);}}
-   Rectangle {horizontal-stretch:1;}
-   SettingsButton {compact:true;label:@tr("Cancel");enabled:!root.busy;clicked=>{root.action(14,0);}}
-   SettingsButton {compact:true;label:@tr("Apply");primary:true;enabled:root.crop-valid && !root.busy;clicked=>{root.action(16,0);}}
-  }
- }
- timeline := Rectangle {visible:!root.crop-editing;x:16px;y:root.height - (root.compact-controls ? 188px : 140px);width:root.width - 32px;height:root.compact-controls ? 180px : 132px;
-  private property <bool> scrubbing;
-  private property <float> draft;
-  RecordingTrim {x:0px;y:0px;width:parent.width - 40px;start-frame:root.start-frame;end-frame:root.end-frame;frames:root.frames;enabled:root.ready && !root.busy;
-   begin=>{root.action(8,0);}commit(end,value)=>{root.action(end ? 10 : 9,value);}cancel=>{root.action(7,0);}}
-  CaptureButton {x:parent.width - 32px;y:0px;icon:@image-url("assets/icons/restore-range.svg");label:@tr("Restore full range");enabled:root.ready && !root.busy;clicked=>{root.action(11,0);}}
-  seek-keys := SettingsFocusScope {x:0px;y:32px;width:parent.width - 40px;height:28px;enabled:root.ready && !root.busy;accessible-role:slider;accessible-label:@tr("Playback position");
-   key-pressed(event)=>{if event.text==Key.LeftArrow || event.text==Key.RightArrow{root.action(2,0);root.action(3,clamp(root.progress + (event.text==Key.LeftArrow ? -1 : 1)*1000/max(1,root.duration-seconds),0,1000));return accept;}return reject;}
-  Slider {x:0px;y:0px;width:parent.width;height:28px;maximum:1000;enabled:root.ready && !root.busy;
-   value:timeline.scrubbing ? timeline.draft : root.progress;
-   changed value=>{if timeline.scrubbing{timeline.draft=self.value;}}
-   drag-cancelled=>{if timeline.scrubbing{timeline.scrubbing=false;root.action(7,0);}}
-   dragging(active)=>{if active{SettingsInteraction.pointer-input();seek-keys.focus-target();timeline.draft=root.progress;timeline.scrubbing=true;root.action(2,0);}else if timeline.scrubbing{root.action(3,timeline.draft);timeline.scrubbing=false;}}
-  }
-  }
-  HorizontalLayout {y:72px;height:40px;spacing:8px;
-   SettingsButton {compact:true;icon:root.playing ? @image-url("assets/icons/capture-pause.svg") : @image-url("assets/icons/capture-play.svg");label:root.playing ? @tr("Pause") : @tr("Play");enabled:root.ready && !root.busy;clicked=>{root.action(0,0);}}
-   SettingsButton {compact:true;icon:@image-url("assets/icons/recording-audio.svg");label:root.muted ? @tr("Unmute") : @tr("Mute");enabled:root.has-audio && root.ready && !root.busy;clicked=>{root.action(1,0);}}
-   CaptureButton {icon:@image-url("assets/icons/crop.svg");label:@tr("Crop video frame");enabled:root.ready && !root.busy;clicked=>{root.action(13,0);}}
-   speed-button := SettingsButton {
-    compact:true; icon:@image-url("assets/icons/recording-speed.svg");
-    label:root.speed-labels[root.speed-index];
-    enabled:root.speed-enabled && !root.busy;
-    accessibility-label:@tr("Playback speed") + " " + root.speed-labels[root.speed-index];
-    clicked=>{root.open-options(false);}
-    AnnotationHintTarget {width:parent.width;height:parent.height;text:@tr("Playback speed");hovered:speed-button.hovered;pressed:speed-button.pressed;}
-   }
-   audio-button := SettingsButton {
-    compact: true;
-    available-width: 40px;
-    icon: @image-url("assets/icons/recording-export-audio.svg");
-    label: "";
-    enabled: root.export-audio-enabled && !root.busy;
-    primary: root.has-audio && root.export-audio-index != 0;
-    accessibility-label: @tr("Export audio") + " · " + (root.has-audio ? root.audio-labels[root.export-audio-index] : @tr("No audio track"));
-    clicked => { root.open-options(true); }
-    AnnotationHintTarget {
-     width: parent.width; height: parent.height; text: audio-button.accessibility-label;
-     hovered: audio-button.hovered; pressed: audio-button.pressed;
+    title: @tr("Recording preview");
+    no-frame: true;
+    background: Colors.background;
+    preferred-width: 960px;
+    preferred-height: 760px;
+    min-width: 640px;
+    min-height: 360px;
+
+    in property <bool> ready;
+    in property <bool> playing;
+    in property <bool> has-audio;
+    in property <bool> muted;
+    in property <bool> busy;
+    in property <string> error;
+    in property <string> metadata;
+    in property <string> time-label;
+    in property <float> start-frame;
+    in property <float> end-frame;
+    in property <float> frames;
+    in property <float> frame-rate;
+    in property <float> progress;
+    in property <float> duration-seconds;
+    in property <string> range-label;
+    in property <string> export-label;
+    in property <bool> exporting;
+    in property <int> speed-index;
+    in property <bool> speed-enabled;
+    in property <string> speed-error;
+    in property <int> export-audio-index;
+    in property <bool> export-audio-enabled;
+    in property <string> export-audio-error;
+    in property <bool> crop-editing;
+    in property <bool> crop-valid;
+    in property <string> crop-label;
+
+    private property <bool> compact-controls: root.width < 880px;
+    private property <bool> options-open;
+    private property <bool> audio-options;
+    private property <int> option-choice;
+    private property <image> empty-icon;
+    private property <[string]> speed-labels: ["1×", "1.5×", "2×"];
+    private property <[string]> audio-labels: [@tr("Original sound"), @tr("50% volume"), @tr("Remove audio track")];
+    private property <string> speed-title: @tr("Playback speed") + " " + root.speed-labels[root.speed-index];
+    private property <string> audio-value: root.has-audio ? root.audio-labels[root.export-audio-index] : @tr("No audio track");
+    private property <string> status: root.exporting ? root.export-label : root.export-audio-error != "" ? root.export-audio-error : root.speed-error;
+    private property <length> options-height: root.options-open ? 72px : 0px;
+    private property <length> notice-height: root.status != "" || !root.ready ? 48px : 0px;
+    private property <length> editor-height: root.crop-editing ? 68px : 132px + root.options-height + root.notice-height;
+
+    out property <float> video-x: canvas.x / 1px;
+    out property <float> video-y: canvas.y / 1px;
+    out property <float> video-width: canvas.width / 1px;
+    out property <float> video-height: canvas.height / 1px;
+    callback crop-pointer(int, float, float);
+    callback action(int, float);
+    callback move-requested();
+    callback resize-requested(int);
+    callback surface-changed();
+
+    changed video-width => { root.surface-changed(); }
+    changed video-height => { root.surface-changed(); }
+    changed crop-editing => { if root.crop-editing { root.options-open = false; trim.cancel-gesture(); } }
+    changed busy => { if root.busy { root.options-open = false; } }
+    changed speed-enabled => { if !root.speed-enabled && !root.audio-options { root.options-open = false; } }
+    changed export-audio-enabled => { if !root.export-audio-enabled && root.audio-options { root.options-open = false; } }
+
+    public function cancel-view-input() {
+        root.options-open = false;
+        trim.cancel-gesture();
     }
-   }
-   VerticalLayout {horizontal-stretch:1;spacing:1px;Text {text:root.time-label;color:Colors.foreground;font-size:13px;}Text {text:root.exporting ? root.export-label : root.export-audio-error != "" ? root.export-audio-error : root.speed-error != "" ? root.speed-error : root.range-label + " · " + root.metadata;color:Colors.secondary-foreground;font-size:11px;overflow:elide;min-width:0px;}}
-   if !root.compact-controls: SettingsButton {compact:true;label:root.exporting ? @tr("Cancel") : @tr("Save video");enabled:root.exporting || !root.busy;primary:true;clicked=>{root.action(root.exporting ? 12 : 4,0);}}
-   if !root.compact-controls: SettingsButton {compact:true;label:@tr("Close");enabled:root.exporting || !root.busy;clicked=>{root.action(5,0);}}
-  }
-  if root.compact-controls: HorizontalLayout {y:120px;height:40px;spacing:8px;Rectangle {horizontal-stretch:1;}
-   SettingsButton {compact:true;label:root.exporting ? @tr("Cancel") : @tr("Save video");enabled:root.exporting || !root.busy;primary:true;clicked=>{root.action(root.exporting ? 12 : 4,0);}}
-   SettingsButton {compact:true;label:@tr("Close");enabled:root.exporting || !root.busy;clicked=>{root.action(5,0);}}
-  }
- }
- // The native video child covers the video rectangle. Keep both menus within
- // the Slint control area and share focus, backdrop and keyboard behavior.
- option-keys := FocusScope {
-  visible: root.options-open; width: root.width; height: root.height;
-  key-pressed(event) => {
-   if event.text == Key.Escape || event.text == Key.Tab { root.dismiss-options(); return accept; }
-   if event.text == Key.LeftArrow { root.option-choice = max(0,root.option-choice - 1); return accept; }
-   if event.text == Key.RightArrow { root.option-choice = min(2,root.option-choice + 1); return accept; }
-   if event.text == Key.Return || event.text == Key.Space { root.choose-option(root.option-choice); return accept; }
-   return reject;
-  }
-  TouchArea { clicked => { root.dismiss-options(); } }
-  Rectangle {
-   x: clamp(root.audio-options ? audio-button.absolute-position.x : speed-button.absolute-position.x, 8px, root.width - self.width - 8px);
-   y: speed-button.absolute-position.y - self.height - 4px;
-   width: root.audio-options ? min(560px, root.width - 16px) : 268px;
-   height: root.audio-options ? 66px : 44px;
-   background: Colors.surface; border-color: Colors.outline; border-width: 1px; border-radius: 6px;
-   TouchArea {}
-   HorizontalLayout {
-    y: 0px; height: 44px; padding: 4px; spacing: 4px;
-    for label[index] in root.audio-options ? root.audio-labels : root.speed-labels: SettingsButton {
-     compact: true; label: label; primary: index == root.option-choice;
-     icon: self.accessible-checked ? @image-url("assets/icons/check.svg") : root.empty-icon;
-     accessible-checkable: true;
-     accessible-checked: index == (root.audio-options ? root.export-audio-index : root.speed-index);
-     clicked => { root.choose-option(index); }
+
+    public function open-options(audio: bool) {
+        if root.busy || root.crop-editing || (audio ? !root.export-audio-enabled : !root.speed-enabled) { return; }
+        root.audio-options = audio;
+        root.option-choice = audio ? root.export-audio-index : root.speed-index;
+        root.options-open = true;
+        option-keys.focus-target();
     }
-   }
-   if root.audio-options: Text {
-    x: 8px; y: 44px; width: parent.width - 16px; height: parent.height - 44px;
-    text: @tr("Changing MP4 audio re-encodes the video.");
-    color: Colors.secondary-foreground; font-size: 11px; vertical-alignment: center;
-    overflow: elide;
-   }
-  }
- }
- ResizeEdges {resize-requested(edge)=>{root.resize-requested(edge);}}
- }
+    function dismiss-options() {
+        root.options-open = false;
+        if root.audio-options { audio-button.focus-button(); }
+        else { speed-button.focus-button(); }
+    }
+    function choose-option(index: int) {
+        root.dismiss-options();
+        root.action(root.audio-options ? 18 : 17, index);
+    }
+
+    forward-focus: keys;
+    keys := FocusScope {
+        width: root.width;
+        height: root.height;
+        capture-key-pressed(event) => {
+            if event.text != Key.Escape { return reject; }
+            if root.options-open { root.dismiss-options(); }
+            else if trim.cancel-gesture() { }
+            else { root.action(root.crop-editing ? 14 : 5, 0); }
+            return accept;
+        }
+
+        header := Rectangle {
+            y: 0px;
+            width: parent.width;
+            height: Metrics.auxiliary-header-height;
+            background: Colors.surface;
+            Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: Colors.outline; }
+            Text {
+                x: Spacing.medium;
+                width: parent.width / 2 - Spacing.medium;
+                height: parent.height;
+                text: @tr("Recording preview");
+                font-size: Typography.body-size;
+                font-weight: 700;
+                color: Colors.foreground;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Text {
+                x: parent.width / 2;
+                width: parent.width / 2 - 60px;
+                height: parent.height;
+                text: root.metadata;
+                color: Colors.secondary-foreground;
+                font-size: Typography.menu-size;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            TouchArea {
+                width: parent.width - 54px;
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.left { root.move-requested(); }
+                }
+            }
+            PreviewControl {
+                x: parent.width - self.width - Spacing.small;
+                y: (parent.height - self.height) / 2;
+                icon: @image-url("assets/icons/header-close.svg");
+                hint: @tr("Close");
+                enabled: root.exporting || !root.busy;
+                activated => { root.action(root.crop-editing ? 14 : 5, 0); }
+            }
+        }
+
+        canvas := Rectangle {
+            x: Spacing.medium;
+            y: header.height + Spacing.small;
+            width: parent.width - 2 * self.x;
+            height: max(1px, editor.y - self.y - Spacing.small);
+            background: black;
+            if root.crop-editing && !root.busy: TouchArea {
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.cancel { root.crop-pointer(3, 0, 0); }
+                    else if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                        keys.focus();
+                        root.crop-pointer(0, self.mouse-x / 1px, self.mouse-y / 1px);
+                    } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
+                        root.crop-pointer(2, self.mouse-x / 1px, self.mouse-y / 1px);
+                    }
+                }
+                moved => { if self.pressed { root.crop-pointer(1, self.mouse-x / 1px, self.mouse-y / 1px); } }
+            }
+        }
+
+        editor := Rectangle {
+            x: Spacing.medium;
+            y: parent.height - root.editor-height - Spacing.small;
+            width: parent.width - 2 * self.x;
+            height: root.editor-height;
+
+            timeline := Rectangle {
+                y: 0px;
+                visible: !root.crop-editing;
+                width: parent.width;
+                height: 80px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: Colors.outline;
+                background: Colors.surface;
+                Text {
+                    x: Spacing.medium;
+                    y: 4px;
+                    height: 24px;
+                    text: root.time-label;
+                    color: Colors.foreground;
+                    font-size: Typography.menu-size;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+                Text {
+                    x: parent.width / 3;
+                    y: 4px;
+                    width: parent.width - self.x - 56px;
+                    height: 24px;
+                    text: root.range-label;
+                    color: Colors.secondary-foreground;
+                    font-size: Typography.menu-size;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                trim := RecordingTrim {
+                    x: Spacing.medium;
+                    y: 30px;
+                    width: parent.width - 2 * Spacing.medium - 36px;
+                    start-frame: root.start-frame;
+                    end-frame: root.end-frame;
+                    frames: root.frames;
+                    frame-rate: root.frame-rate;
+                    duration-seconds: root.duration-seconds;
+                    progress: root.progress;
+                    enabled: root.ready && !root.busy && !root.crop-editing && !root.options-open;
+                    trim-begin => { root.action(8, 0); }
+                    trim-commit(last, frame) => { root.action(last ? 10 : 9, frame); }
+                    seek-begin => { root.action(2, 0); }
+                    seek-commit(position) => { root.action(3, position); }
+                    cancel => { root.action(7, 0); }
+                }
+                PreviewControl {
+                    x: parent.width - self.width - Spacing.small;
+                    y: 30px;
+                    icon: @image-url("assets/icons/restore-range.svg");
+                    hint: @tr("Restore full range");
+                    enabled: root.ready && !root.busy;
+                    activated => { root.action(11, 0); }
+                }
+            }
+
+            row := HorizontalLayout {
+                visible: !root.crop-editing;
+                y: timeline.height + Spacing.small;
+                height: 40px;
+                spacing: 4px;
+                PreviewControl {
+                    icon: root.playing ? @image-url("assets/icons/capture-pause.svg") : @image-url("assets/icons/capture-play.svg");
+                    label: root.compact-controls ? "" : self.hint;
+                    hint: root.playing ? @tr("Pause") : @tr("Play");
+                    enabled: root.ready && !root.busy;
+                    activated => { root.action(0, 0); }
+                }
+                PreviewControl {
+                    icon: @image-url("assets/icons/recording-audio.svg");
+                    label: root.compact-controls ? "" : self.hint;
+                    hint: root.muted ? @tr("Unmute") : @tr("Mute");
+                    selected: root.muted;
+                    enabled: root.has-audio && root.ready && !root.busy;
+                    activated => { root.action(1, 0); }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                PreviewControl {
+                    icon: @image-url("assets/icons/crop.svg");
+                    label: root.compact-controls ? "" : self.hint;
+                    hint: @tr("Crop video frame");
+                    enabled: root.ready && !root.busy;
+                    activated => { root.action(13, 0); }
+                }
+                speed-button := PreviewControl {
+                    icon: @image-url("assets/icons/recording-speed.svg");
+                    label: root.speed-labels[root.speed-index];
+                    hint: root.speed-title;
+                    selected: root.options-open && !root.audio-options;
+                    enabled: root.speed-enabled && !root.busy;
+                    activated => { root.open-options(false); }
+                }
+                audio-button := PreviewControl {
+                    icon: @image-url("assets/icons/recording-export-audio.svg");
+                    label: root.compact-controls ? "" : root.audio-value;
+                    hint: @tr("Export audio") + " · " + root.audio-value;
+                    selected: (root.options-open && root.audio-options) || (root.has-audio && root.export-audio-index != 0);
+                    enabled: root.export-audio-enabled && !root.busy;
+                    activated => { root.open-options(true); }
+                }
+                SettingsButton {
+                    compact: true;
+                    label: root.exporting ? @tr("Cancel") : @tr("Save video");
+                    enabled: root.exporting || !root.busy;
+                    primary: true;
+                    clicked => { root.action(root.exporting ? 12 : 4, 0); }
+                }
+            }
+
+            HorizontalLayout {
+                visible: root.crop-editing;
+                y: (parent.height - 44px) / 2;
+                height: 44px;
+                spacing: Spacing.small;
+                Text {
+                    text: root.crop-label;
+                    color: Colors.foreground;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                }
+                SettingsButton {
+                    compact: true;
+                    icon: @image-url("assets/icons/restore-range.svg");
+                    label: @tr("Restore full frame");
+                    enabled: !root.busy;
+                    clicked => { root.action(15, 0); }
+                }
+                SettingsButton { compact: true; label: @tr("Cancel"); enabled: !root.busy; clicked => { root.action(14, 0); } }
+                SettingsButton { compact: true; primary: true; label: @tr("Apply"); enabled: root.crop-valid && !root.busy; clicked => { root.action(16, 0); } }
+            }
+
+            HorizontalLayout {
+                visible: !root.crop-editing && root.notice-height > 0px;
+                y: parent.height - root.notice-height;
+                height: root.notice-height;
+                spacing: Spacing.small;
+                Text {
+                    text: root.error != "" ? root.error : !root.ready ? @tr("Preparing preview") : root.status;
+                    color: root.error != "" || (!root.exporting && root.ready) ? Colors.error : Colors.secondary-foreground;
+                    font-size: Typography.menu-size;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                if root.error != "": SettingsButton {
+                    compact: true;
+                    label: @tr("Retry");
+                    clicked => { root.action(6, 0); }
+                }
+            }
+        }
+
+        if root.options-open: TouchArea {
+            width: parent.width;
+            height: parent.height;
+            clicked => { root.dismiss-options(); }
+        }
+
+        drawer := Rectangle {
+            visible: root.options-open;
+            x: editor.x;
+            y: editor.y + row.y + row.height + 4px;
+            width: editor.width;
+            height: 68px;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Colors.outline;
+            background: Colors.surface;
+            TouchArea {}
+            option-keys := SettingsFocusScope {
+                enabled: root.options-open;
+                key-pressed(event) => {
+                    if event.text == Key.Tab || event.text == Key.Backtab { root.dismiss-options(); return accept; }
+                    if event.text == Key.LeftArrow || event.text == Key.UpArrow { root.option-choice = max(0, root.option-choice - 1); return accept; }
+                    if event.text == Key.RightArrow || event.text == Key.DownArrow { root.option-choice = min(2, root.option-choice + 1); return accept; }
+                    if event.text == Key.Return || event.text == " " { root.choose-option(root.option-choice); return accept; }
+                    return reject;
+                }
+            }
+            HorizontalLayout {
+                x: Spacing.small;
+                y: 4px;
+                width: parent.width - 2 * self.x;
+                height: 36px;
+                spacing: Spacing.small;
+                for label[index] in root.audio-options ? root.audio-labels : root.speed-labels: SettingsButton {
+                    compact: true;
+                    width: (drawer.width - 4 * Spacing.small) / 3;
+                    label: label;
+                    primary: index == root.option-choice && option-keys.focus-visible;
+                    icon: self.accessible-checked ? @image-url("assets/icons/check.svg") : root.empty-icon;
+                    accessible-checkable: true;
+                    accessible-checked: index == (root.audio-options ? root.export-audio-index : root.speed-index);
+                    accessible-action-default => { root.choose-option(index); }
+                    clicked => { root.choose-option(index); }
+                }
+            }
+            Text {
+                x: Spacing.medium;
+                y: 42px;
+                width: parent.width - 2 * self.x;
+                height: 24px;
+                text: root.audio-options ? @tr("Changing MP4 audio re-encodes the video.") : @tr("Speed applies to preview and export.");
+                font-size: Typography.menu-size;
+                color: Colors.secondary-foreground;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        ResizeEdges { resize-requested(edge) => { root.resize-requested(edge); } }
+    }
 }

@@ -2621,3 +2621,6 @@ msgstr "Chiudi una finestra di testo prima di aggiungerne un’altra. Il limite 
 
 msgid "Could not open the text pin."
 msgstr "Impossibile aprire la finestra di testo."
+
+msgid "Speed applies to preview and export."
+msgstr "La velocità si applica all’anteprima e all’esportazione."

@@ -220,10 +220,17 @@ fn open(id: p::Identity) {
         w.window().on_winit_window_event(move |_, event| {
             if matches!(event, winit::event::WindowEvent::Focused(false)) {
                 work.post(move || {
-                    if VIEWS.with(|v| v.borrow().window.revision() == revision)
-                        && state().is_some_and(|s| s.frame_crop_editing)
-                    {
-                        input(p::Input::CancelFrameCrop);
+                    let window = VIEWS.with(|v| {
+                        let v = v.borrow();
+                        (v.window.revision() == revision)
+                            .then(|| v.window.get().map(ComponentHandle::clone_strong))
+                            .flatten()
+                    });
+                    if let Some(window) = window {
+                        window.invoke_cancel_view_input();
+                        if state().is_some_and(|s| s.frame_crop_editing) {
+                            input(p::Input::CancelFrameCrop);
+                        }
                     }
                 });
             }
@@ -317,6 +324,9 @@ fn show(id: p::Identity) {
                     sync_native_geometry(w.window(), &geometry, width, height);
                     update_surface();
                     return;
+                }
+                if matches!(input, PopupPointerInput::LeftCancelled { .. }) {
+                    w.invoke_cancel_view_input();
                 }
                 crate::bridge::dispatch_pointer_input(w.window(), input);
             }
@@ -514,6 +524,7 @@ pub(super) fn sync(s: &lexift_core::domain::screenshot::recording::Session) {
             "".into()
         });
         w.set_frames(p.frames as f32);
+        w.set_frame_rate(p.fps as f32);
         w.set_start_frame(p.range.start as f32);
         w.set_end_frame(p.range.end as f32);
         w.set_exporting(s.lifecycle.phase == Phase::Saving);
@@ -560,7 +571,15 @@ pub(super) fn sync(s: &lexift_core::domain::screenshot::recording::Session) {
             });
         }
         let format = |d: Duration| format!("{:02}:{:02}", d.as_secs() / 60, d.as_secs() % 60);
-        w.set_time_label(format!("{} / {}", format(p.position), format(p.duration)).into());
+        let video_duration = lexift_core::domain::recording_trim::Range::time(p.frames, p.fps);
+        w.set_time_label(
+            format!(
+                "{} / {}",
+                format(p.position.min(video_duration)),
+                format(video_duration)
+            )
+            .into(),
+        );
         if let Some(a) = &s.artifact {
             w.set_metadata(
                 format!(

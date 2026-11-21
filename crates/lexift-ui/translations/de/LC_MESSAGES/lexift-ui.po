@@ -2621,3 +2621,6 @@ msgstr "Schließen Sie zuerst ein Textfenster. Es sind höchstens 20 möglich."
 
 msgid "Could not open the text pin."
 msgstr "Das Textfenster konnte nicht geöffnet werden."
+
+msgid "Speed applies to preview and export."
+msgstr "Das Tempo gilt für Vorschau und Export."

@@ -2621,3 +2621,6 @@ msgstr "Fermez une fenêtre de texte avant d’en ajouter une autre. La limite e
 
 msgid "Could not open the text pin."
 msgstr "Impossible d’ouvrir le texte épinglé."
+
+msgid "Speed applies to preview and export."
+msgstr "La vitesse s’applique à l’aperçu et à l’exportation."

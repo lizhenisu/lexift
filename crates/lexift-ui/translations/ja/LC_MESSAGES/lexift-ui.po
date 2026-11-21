@@ -2621,3 +2621,6 @@ msgstr "テキストを追加する前に、ピン留めを一つ閉じてくだ
 
 msgid "Could not open the text pin."
 msgstr "ピン留めしたテキストを開けませんでした。"
+
+msgid "Speed applies to preview and export."
+msgstr "速度の設定はプレビューと書き出しに適用されます。"

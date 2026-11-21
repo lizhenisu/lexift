@@ -2621,3 +2621,6 @@ msgstr "最多同時保留 20 張文字貼圖，請先關閉一張。"
 
 msgid "Could not open the text pin."
 msgstr "無法開啟文字貼圖。"
+
+msgid "Speed applies to preview and export."
+msgstr "倍速同時用於預覽和匯出。"
