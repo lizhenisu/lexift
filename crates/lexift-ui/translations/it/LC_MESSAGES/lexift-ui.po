@@ -2624,3 +2624,36 @@ msgstr "Impossibile aprire la finestra di testo."
 
 msgid "Speed applies to preview and export."
 msgstr "La velocità si applica all’anteprima e all’esportazione."
+
+msgid "Manage pins"
+msgstr "Gestisci elementi fissati"
+
+msgid "No active pins"
+msgstr "Nessun elemento fissato attivo"
+
+msgid "Show pin"
+msgstr "Mostra"
+
+msgid "Hide pin"
+msgstr "Nascondi"
+
+msgid "Locate"
+msgstr "Individua"
+
+msgid "Restore mouse input"
+msgstr "Ripristina il controllo del mouse"
+
+msgid "Close pin"
+msgstr "Chiudi elemento"
+
+msgid "Close this live window pin?"
+msgstr "Chiudere questa finestra fissata in diretta?"
+
+msgid "Pin visible"
+msgstr "Visibile"
+
+msgid "Pin hidden"
+msgstr "Nascosto"
+
+msgid "Source paused"
+msgstr "Sorgente in pausa"

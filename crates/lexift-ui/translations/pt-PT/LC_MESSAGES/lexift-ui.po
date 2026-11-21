@@ -2624,3 +2624,36 @@ msgstr "Não foi possível abrir a janela de texto."
 
 msgid "Speed applies to preview and export."
 msgstr "A velocidade aplica-se à pré-visualização e à exportação."
+
+msgid "Manage pins"
+msgstr "Gerir elementos fixados"
+
+msgid "No active pins"
+msgstr "Nenhum elemento fixado ativo"
+
+msgid "Show pin"
+msgstr "Mostrar"
+
+msgid "Hide pin"
+msgstr "Ocultar"
+
+msgid "Locate"
+msgstr "Localizar"
+
+msgid "Restore mouse input"
+msgstr "Restaurar o controlo do rato"
+
+msgid "Close pin"
+msgstr "Fechar elemento"
+
+msgid "Close this live window pin?"
+msgstr "Fechar esta janela fixada em direto?"
+
+msgid "Pin visible"
+msgstr "Visível"
+
+msgid "Pin hidden"
+msgstr "Oculto"
+
+msgid "Source paused"
+msgstr "Origem em pausa"

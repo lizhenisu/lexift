@@ -34,6 +34,7 @@ use crate::runtime::RuntimeManager;
 mod text_pin;
 
 pub(crate) trait ViewPort: Send + Sync {
+    fn pin_manager(&self, _command: lexift_core::domain::pinned_image::manager::Command) {}
     fn text_pin(&self, _command: lexift_core::domain::text_pin::Command, _text: Option<Arc<str>>) {}
     fn screen_recording(&self, _command: lexift_core::domain::screenshot::recording::Command) {}
     fn open_image_editor(
@@ -254,6 +255,9 @@ pub(crate) trait ViewPort: Send + Sync {
 }
 
 impl ViewPort for lexift_ui::UiHandle {
+    fn pin_manager(&self, command: lexift_core::domain::pinned_image::manager::Command) {
+        lexift_ui::UiHandle::pin_manager(self, command);
+    }
     fn text_pin(&self, command: lexift_core::domain::text_pin::Command, text: Option<Arc<str>>) {
         lexift_ui::UiHandle::text_pin(self, command, text);
     }
@@ -853,6 +857,7 @@ impl AppController {
                     runtime.execute_history(self, command);
                 }
             }
+            AppCommand::PinManager(command) => self.ui.pin_manager(command),
             AppCommand::TextPin(command) => self.execute_text_pin(command),
             AppCommand::PinnedImage(command) => {
                 if let Some(runtime) = &self.screenshot {
@@ -1844,6 +1849,7 @@ fn event_name(event: &AppEvent) -> &'static str {
         AppEvent::ClipboardHistory(_) => "clipboard_history",
         AppEvent::PinnedImage(_) => "pinned-image",
         AppEvent::TextPin(_) => "text-pin",
+        AppEvent::PinManager(_) => "pin-manager",
         AppEvent::Screenshot(_) => "screenshot",
         AppEvent::AnnotationExport(_) => "annotation_export",
         AppEvent::Ocr(_) => "ocr",

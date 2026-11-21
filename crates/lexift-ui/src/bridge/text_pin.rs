@@ -276,6 +276,36 @@ fn open(creation: Creation, text: Arc<str>) {
     prepare(creation, 0);
 }
 
+pub(crate) fn manager_idle(id: u64) -> bool {
+    VIEWS.with(|v| {
+        let v = v.borrow();
+        !v.frozen
+            && !v.suspended
+            && v.views
+                .get(&id)
+                .is_some_and(|p| p.ready && !p.gesturing.get())
+    })
+}
+
+pub(crate) fn manager_summary(id: u64) -> Option<slint::SharedString> {
+    Some(window(id)?.get_content())
+}
+
+pub(crate) fn manager_bounds(id: u64) -> Option<Rect> {
+    let w = window(id)?;
+    let p = w.window().position();
+    let size = w.window().size();
+    Some(Rect {
+        left: p.x,
+        top: p.y,
+        right: p.x.saturating_add(size.width as i32),
+        bottom: p.y.saturating_add(size.height as i32),
+    })
+}
+
+pub(crate) fn manager_close(id: u64) {
+    close_later(id);
+}
 fn close_later(id: u64) {
     slint::Timer::single_shot(Duration::ZERO, move || {
         if window(id).is_some() {

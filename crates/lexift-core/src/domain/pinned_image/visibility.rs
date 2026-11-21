@@ -36,6 +36,11 @@ pub enum Event {
         hidden: bool,
         anchor: Point,
     },
+    Target {
+        pin: super::manager::PinId,
+        hidden: bool,
+        anchor: Point,
+    },
     Applied {
         request: Request,
         result: Result<()>,
@@ -95,7 +100,7 @@ pub(crate) fn blocks_event(s: &AppState, e: &AppEvent) -> bool {
                 _
             ))
             | AppEvent::PinnedImage(
-                PinEvent::WindowVisibility(Event::Requested { .. })
+                PinEvent::WindowVisibility(Event::Requested { .. } | Event::Target { .. })
                     | PinEvent::EditRequested { .. }
                     | PinEvent::TransformRequested { .. }
                     | PinEvent::Requested { .. }
@@ -152,8 +157,12 @@ pub(crate) fn text_applied(s: &mut AppState, request: Request, success: bool) {
 }
 pub(super) fn reduce(s: &mut AppState, e: Event) -> Vec<AppCommand> {
     match e {
-        Event::Requested { hidden, anchor } => {
-            if !available(s, hidden) {
+        Event::Requested { hidden, anchor } | Event::Target { hidden, anchor, .. } => {
+            let target = match e {
+                Event::Target { pin, .. } => Some(pin),
+                _ => None,
+            };
+            if !available(s, hidden) || target.is_some_and(|id| id.hidden(s) != Some(!hidden)) {
                 return vec![];
             }
             s.pin_visibility.serial = s
@@ -165,14 +174,22 @@ pub(super) fn reduce(s: &mut AppState, e: Event) -> Vec<AppCommand> {
             let targets: BTreeSet<_> = s
                 .pinned_images
                 .iter()
-                .filter_map(|(&id, p)| (p.user_hidden != hidden).then_some(id))
+                .filter_map(|(&id, p)| {
+                    (p.user_hidden != hidden
+                        && target.is_none_or(|t| t == super::manager::PinId::Image(id)))
+                    .then_some(id)
+                })
                 .collect();
             s.pin_visibility.notice = None;
             let text_targets: BTreeSet<_> = s
                 .text_pins
                 .pins
                 .iter()
-                .filter_map(|(&id, pin)| (pin.hidden != hidden).then_some(id))
+                .filter_map(|(&id, pin)| {
+                    (pin.hidden != hidden
+                        && target.is_none_or(|t| t == super::manager::PinId::Text(id)))
+                    .then_some(id)
+                })
                 .collect();
             let commands = targets
                 .iter()

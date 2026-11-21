@@ -2624,3 +2624,36 @@ msgstr "고정된 텍스트를 열 수 없습니다."
 
 msgid "Speed applies to preview and export."
 msgstr "속도 설정은 미리보기와 내보내기에 적용됩니다."
+
+msgid "Manage pins"
+msgstr "고정 창 관리"
+
+msgid "No active pins"
+msgstr "활성 고정 창이 없습니다"
+
+msgid "Show pin"
+msgstr "표시"
+
+msgid "Hide pin"
+msgstr "숨기기"
+
+msgid "Locate"
+msgstr "위치 표시"
+
+msgid "Restore mouse input"
+msgstr "마우스 조작 복원"
+
+msgid "Close pin"
+msgstr "고정 창 닫기"
+
+msgid "Close this live window pin?"
+msgstr "이 실시간 고정 창을 닫을까요?"
+
+msgid "Pin visible"
+msgstr "표시됨"
+
+msgid "Pin hidden"
+msgstr "숨겨짐"
+
+msgid "Source paused"
+msgstr "원본 일시 중지"

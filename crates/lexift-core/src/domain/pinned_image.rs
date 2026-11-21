@@ -5,6 +5,7 @@ use crate::{AppCommand, AppState, Result};
 use std::collections::BTreeMap;
 pub mod interaction;
 pub mod live;
+pub mod manager;
 pub mod transform;
 pub mod visibility;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

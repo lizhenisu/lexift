@@ -963,6 +963,26 @@ pub(crate) fn closed_restore_available() -> bool {
 pub(crate) fn close_from_core(id: u64) {
     retire(id, false);
 }
+pub(crate) fn manager_idle(id: u64) -> bool {
+    STATE.with(|s| {
+        let s = s.borrow();
+        s.as_ref()
+            .filter(|r| !r.frozen)
+            .and_then(|r| r.windows.get(&id))
+            .is_some_and(|p| {
+                p.phase == Phase::Visible
+                    && !p.gesture.pressed.get()
+                    && !p.gesture.native_drag.get()
+            })
+    })
+}
+pub(crate) fn manager_image(id: u64) -> Option<Arc<CapturedRegion>> {
+    STATE.with(|s| {
+        let s = s.borrow();
+        let p = s.as_ref()?.windows.get(&id)?;
+        (p.phase == Phase::Visible).then(|| p.image.clone())
+    })
+}
 pub(crate) fn request_close(id: u64) {
     retire(id, true);
 }

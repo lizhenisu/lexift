@@ -14,6 +14,7 @@ pub enum AppCommand {
     ImageHistory(crate::domain::image_history::workflow::Command),
     PinnedImage(crate::domain::pinned_image::Command),
     TextPin(crate::domain::text_pin::Command),
+    PinManager(crate::domain::pinned_image::manager::Command),
     Screenshot(crate::domain::screenshot::ScreenshotCommand),
     AnnotationExport(crate::domain::annotation_export::ExportCommand),
     Ocr(crate::domain::ocr::OcrCommand),

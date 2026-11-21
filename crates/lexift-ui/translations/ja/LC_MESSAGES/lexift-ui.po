@@ -2624,3 +2624,36 @@ msgstr "ピン留めしたテキストを開けませんでした。"
 
 msgid "Speed applies to preview and export."
 msgstr "速度の設定はプレビューと書き出しに適用されます。"
+
+msgid "Manage pins"
+msgstr "ピン留めを管理"
+
+msgid "No active pins"
+msgstr "表示できるピン留めはありません"
+
+msgid "Show pin"
+msgstr "表示"
+
+msgid "Hide pin"
+msgstr "非表示"
+
+msgid "Locate"
+msgstr "場所を表示"
+
+msgid "Restore mouse input"
+msgstr "マウス操作を戻す"
+
+msgid "Close pin"
+msgstr "ピン留めを閉じる"
+
+msgid "Close this live window pin?"
+msgstr "このライブウィンドウのピン留めを閉じますか？"
+
+msgid "Pin visible"
+msgstr "表示中"
+
+msgid "Pin hidden"
+msgstr "非表示"
+
+msgid "Source paused"
+msgstr "ソースは一時停止中"

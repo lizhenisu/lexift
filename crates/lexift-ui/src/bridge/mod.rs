@@ -110,6 +110,7 @@ fn has_live_window_instances() -> bool {
         || crate::ocr::active()
         || ocr_result::active()
         || text_pin::active()
+        || pin_manager::active()
         || screenshot_presets::active()
         || crate::annotation::is_open()
         || crate::annotation::screenshot::active()
@@ -132,6 +133,7 @@ fn has_live_window_instances() -> bool {
 
 mod app_window;
 pub(crate) mod ocr_result;
+mod pin_manager;
 pub(crate) mod screenshot_presets;
 pub(crate) mod text_pin;
 pub use app_window::WindowRole;
@@ -227,6 +229,7 @@ impl Ui {
         );
         ocr_result::init(prepare_passive_window, window_lifecycle.clone());
         text_pin::init(prepare_passive_window, window_lifecycle.clone());
+        pin_manager::init(prepare_passive_window, window_lifecycle.clone());
         crate::pinned_screenshot::init(prepare_passive_window, window_lifecycle.clone());
         crate::tray_menu::init(prepare_passive_window, window_lifecycle.clone());
         image_history::init(prepare_passive_window, window_lifecycle.clone());
@@ -368,6 +371,7 @@ impl Ui {
         crate::tray_menu::set_handler(Rc::clone(&handler));
         screenshot_presets::set_handler(handler.clone());
         text_pin::set_handler(handler.clone());
+        pin_manager::set_handler(handler.clone());
         image_history::set_handler(Rc::clone(&handler));
         crate::ocr::set_handler(handler.clone());
         crate::annotation::set_handler(handler.clone());
@@ -589,6 +593,7 @@ impl UiHandle {
     ) {
         let _ = slint::invoke_from_event_loop(move || {
             image_history::close();
+            pin_manager::suspend();
             crate::annotation::screenshot::suspend(session);
             crate::annotation::screenshot::delay::begin(session, seconds, ready);
         });
@@ -630,6 +635,7 @@ impl UiHandle {
     ) {
         let _ = slint::invoke_from_event_loop(move || {
             image_history::close();
+            pin_manager::suspend();
             crate::annotation::screenshot::delay::finish(session);
             crate::annotation::screenshot::suspend(session);
             ready(crate::annotation::screenshot::suspended_pointer(session));
@@ -840,6 +846,10 @@ impl UiHandle {
         });
     }
 
+    pub fn pin_manager(&self, command: lexift_core::domain::pinned_image::manager::Command) {
+        let _ = slint::invoke_from_event_loop(move || pin_manager::execute(command));
+    }
+
     pub fn text_pin(
         &self,
         command: lexift_core::domain::text_pin::Command,
@@ -869,6 +879,7 @@ impl UiHandle {
             crate::pinned_screenshot::sync_outputs(&state.pinned_images);
             text_pin::sync(&state);
             crate::pinned_screenshot::visibility::sync(&state);
+            pin_manager::sync(&state, language_changed);
             let view_state = mapper::view_state(&state);
             let popup_states = mapper::popup_states(&state);
             if language_changed {
@@ -965,6 +976,7 @@ impl UiHandle {
             });
             screenshot_presets::close();
             ocr_result::close();
+            pin_manager::suspend();
             text_pin::close_all();
             let _ = slint::quit_event_loop();
         });
@@ -974,6 +986,7 @@ impl UiHandle {
 fn apply_window_themes() {
     ocr_result::apply_theme();
     text_pin::apply_theme();
+    pin_manager::apply_theme();
     screenshot_presets::apply_theme();
     APP_WINDOW_REGISTRY.with(|slot| {
         if let Some(r) = slot.borrow().as_ref() {

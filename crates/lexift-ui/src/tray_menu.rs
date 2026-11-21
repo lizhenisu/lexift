@@ -226,6 +226,7 @@ pub(crate) fn show(request: TrayMenuRequest) {
                     &crate::i18n::tr("Hide all pins"),
                     &crate::i18n::tr("Restore hidden pins"),
                     &crate::i18n::tr("Restore last closed pin"),
+                    &crate::i18n::tr("Manage pins"),
                     &crate::i18n::tr("Screenshot presets"),
                     &labels.quit,
                 ],
@@ -235,8 +236,9 @@ pub(crate) fn show(request: TrayMenuRequest) {
                 let index = match matches[0] {
                     5 => 11,
                     6..=9 => matches[0] - 1,
-                    10 => 10,
-                    11 => 9,
+                    10 => 12,
+                    11 => 10,
+                    12 => 9,
                     row => row,
                 };
                 if index == 10 {
@@ -426,6 +428,9 @@ fn action_for_index(index: i32, anchor: lexift_core::domain::geometry::Point) ->
         }),
         9 => AppEvent::ExitRequested,
         11 => AppEvent::TextPin(lexift_core::domain::text_pin::Event::Requested(anchor)),
+        12 => AppEvent::PinManager(lexift_core::domain::pinned_image::manager::Event::Open(
+            anchor,
+        )),
         _ => return None,
     })
 }

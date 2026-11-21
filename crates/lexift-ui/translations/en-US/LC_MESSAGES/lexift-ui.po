@@ -2624,3 +2624,36 @@ msgstr "Could not open the text pin."
 
 msgid "Speed applies to preview and export."
 msgstr "Speed applies to preview and export."
+
+msgid "Manage pins"
+msgstr "Manage pins"
+
+msgid "No active pins"
+msgstr "No active pins"
+
+msgid "Show pin"
+msgstr "Show pin"
+
+msgid "Hide pin"
+msgstr "Hide pin"
+
+msgid "Locate"
+msgstr "Locate"
+
+msgid "Restore mouse input"
+msgstr "Restore mouse input"
+
+msgid "Close pin"
+msgstr "Close pin"
+
+msgid "Close this live window pin?"
+msgstr "Close this live window pin?"
+
+msgid "Pin visible"
+msgstr "Pin visible"
+
+msgid "Pin hidden"
+msgstr "Pin hidden"
+
+msgid "Source paused"
+msgstr "Source paused"

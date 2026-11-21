@@ -1,0 +1,301 @@
+import { ScrollView } from "std-widgets.slint";
+import { Colors } from "design/colors.slint";
+import { Spacing } from "design/spacing.slint";
+import { Typography } from "design/typography.slint";
+import { Metrics } from "design/metrics.slint";
+import { WindowHeaderButton } from "design/window-header.slint";
+import { ResizeEdges } from "design/resize-edges.slint";
+import { SettingsButton } from "settings-controls.slint";
+import { SettingsInteraction } from "settings-interaction.slint";
+
+export struct PinManagerRow {
+    identity: string,
+    number: string,
+    kind: string,
+    summary: string,
+    status: string,
+    kind-index: int,
+    preview: image,
+    hidden: bool,
+}
+
+export component PinManagerWindow inherits Window {
+    title: @tr("Manage pins");
+    no-frame: true;
+    preferred-width: 640px;
+    preferred-height: 480px;
+    min-width: min(420px, root.limit-width);
+    min-height: min(300px, root.limit-height);
+    max-width: root.limit-width;
+    max-height: root.limit-height;
+    background: Colors.background;
+
+    in property <length> limit-width: 1920px;
+    in property <length> limit-height: 1080px;
+    in property <[PinManagerRow]> rows;
+    in property <int> selected: -1;
+    in property <bool> selected-hidden;
+    in property <bool> can-toggle;
+    in property <bool> can-locate;
+    in property <bool> show-recovery;
+    in property <bool> can-recover;
+    in property <bool> can-close;
+    in property <bool> confirming;
+    private property <bool> compact: root.width < 620px;
+    callback select(string);
+    callback navigate(int);
+    callback action(int);
+    callback close-manager();
+    callback move-requested();
+    callback resize-requested(int);
+
+    public function focus-list() { keys.focus(); }
+
+    function keep-selected-in-view() {
+        if root.selected < 0 { return; }
+        let top = Spacing.small + root.selected * (64px + Spacing.small);
+        if top + list.content-y < 0px { list.content-y = -top; }
+        if top + 64px + list.content-y > list.visible-height {
+            list.content-y = list.visible-height - top - 64px;
+        }
+    }
+    changed selected => { root.keep-selected-in-view(); }
+
+    forward-focus: keys;
+    keys := FocusScope {
+        capture-key-pressed(event) => {
+            if event.text == Key.Escape {
+                if root.confirming { root.action(4); } else { root.close-manager(); }
+                return accept;
+            }
+            if !root.confirming && (event.text == Key.DownArrow || event.text == Key.UpArrow) {
+                root.navigate(event.text == Key.DownArrow ? 1 : -1);
+                return accept;
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+            spacing: 0px;
+            Rectangle {
+                height: Metrics.auxiliary-header-height;
+                background: Colors.surface;
+                TouchArea {
+                    width: parent.width - 54px;
+                    mouse-cursor: move;
+                    pointer-event(event) => {
+                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.left { root.move-requested(); }
+                    }
+                }
+                Image {
+                    x: Spacing.medium;
+                    y: (parent.height - self.height) / 2;
+                    width: Metrics.auxiliary-header-icon;
+                    height: self.width;
+                    source: @image-url("assets/icons/header-pin.svg");
+                    colorize: Colors.primary;
+                }
+                Text {
+                    x: 44px;
+                    width: parent.width - 108px;
+                    height: parent.height;
+                    text: @tr("Manage pins");
+                    font-size: Typography.body-size;
+                    font-weight: 700;
+                    color: Colors.foreground;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                WindowHeaderButton {
+                    x: parent.width - self.width - Spacing.small;
+                    y: (parent.height - self.height) / 2;
+                    icon: @image-url("assets/icons/header-close.svg");
+                    label: @tr("Close");
+                    clicked => { root.close-manager(); }
+                }
+            }
+            Rectangle { height: 1px; background: Colors.outline; }
+            if root.rows.length == 0: Rectangle {
+                vertical-stretch: 1;
+                Text {
+                    text: @tr("No active pins");
+                    color: Colors.secondary-foreground;
+                    font-size: Typography.body-size;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+            list := ScrollView {
+                visible: root.rows.length > 0;
+                vertical-stretch: root.rows.length > 0 ? 1 : 0;
+                min-height: 0px;
+                max-height: root.rows.length > 0 ? 4096px : 0px;
+                content-width: self.visible-width;
+                content-height: max(self.visible-height, 2 * Spacing.small + root.rows.length * (64px + Spacing.small) - Spacing.small);
+                horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                for row[index] in root.rows: Rectangle {
+                    x: Spacing.medium;
+                    y: Spacing.small + index * (64px + Spacing.small);
+                    width: max(1px, list.visible-width - 2 * Spacing.medium);
+                    height: 64px;
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: root.selected == index ? Colors.primary : Colors.outline;
+                    background: root.selected == index ? Colors.primary-container : touch.has-hover ? Colors.menu-hover : Colors.surface;
+                    accessible-role: list-item;
+                    accessible-item-selected: root.selected == index;
+                    accessible-label: row.number + " · " + row.kind + " · " + row.status;
+                    accessible-action-default => { if !root.confirming { keys.focus(); root.select(row.identity); } }
+
+                    Rectangle {
+                        x: Spacing.small;
+                        y: Spacing.small;
+                        width: 58px;
+                        height: parent.height - 2 * Spacing.small;
+                        border-radius: 5px;
+                        background: Colors.image-workspace;
+                        clip: true;
+                        if row.preview.width > 0: Image {
+                            width: parent.width;
+                            height: parent.height;
+                            source: row.preview;
+                            image-fit: contain;
+                        }
+                        if row.preview.width == 0: Image {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: 22px;
+                            height: 22px;
+                            source: row.kind-index == 1 ? @image-url("assets/icons/header-pin.svg") : @image-url("assets/icons/pin-screenshot.svg");
+                            colorize: Colors.primary;
+                        }
+                    }
+                    Text {
+                        x: 78px;
+                        y: 10px;
+                        width: parent.width - self.x - Spacing.medium;
+                        height: 22px;
+                        text: row.number + " · " + row.kind;
+                        font-size: Typography.menu-size;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        color: Colors.foreground;
+                        overflow: elide;
+                    }
+                    Text {
+                        x: 78px;
+                        y: 33px;
+                        width: parent.width - self.x - Spacing.medium;
+                        height: 20px;
+                        text: row.summary == "" ? row.status : row.status + " · " + row.summary;
+                        font-size: Typography.menu-size;
+                        color: Colors.secondary-foreground;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    touch := TouchArea {
+                        enabled: !root.confirming;
+                        mouse-cursor: pointer;
+                        private property <string> down-identity;
+                        pointer-event(event) => { if event.kind == PointerEventKind.down { self.down-identity = row.identity; } }
+                        clicked => {
+                            if self.down-identity == row.identity { SettingsInteraction.pointer-input(); keys.focus(); root.select(row.identity); }
+                        }
+                    }
+                }
+            }
+            if root.rows.length > 0: Rectangle { height: 1px; background: Colors.outline; }
+            if root.rows.length > 0: Rectangle {
+                height: root.confirming || root.compact ? 100px : 60px;
+                background: Colors.surface;
+
+                first := HorizontalLayout {
+                    visible: !root.confirming;
+                    x: Spacing.medium;
+                    y: Spacing.small;
+                    width: root.compact ? parent.width - 2 * Spacing.medium : parent.width * 0.43 - Spacing.medium;
+                    height: 40px;
+                    spacing: Spacing.small;
+                    SettingsButton {
+                        compact: true;
+                        available-width: (first.width - Spacing.small) / 2;
+                        label: root.selected-hidden ? @tr("Show pin") : @tr("Hide pin");
+                        enabled: root.can-toggle;
+                        clicked => { root.action(0); }
+                    }
+                    SettingsButton {
+                        compact: true;
+                        available-width: (first.width - Spacing.small) / 2;
+                        label: @tr("Locate");
+                        enabled: root.can-locate;
+                        clicked => { root.action(1); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                second := HorizontalLayout {
+                    visible: !root.confirming;
+                    x: root.compact ? Spacing.medium : parent.width * 0.43;
+                    y: root.compact ? 52px : Spacing.small;
+                    width: parent.width - self.x - Spacing.medium;
+                    height: 40px;
+                    spacing: Spacing.small;
+                    alignment: end;
+                    if root.show-recovery: SettingsButton {
+                        compact: true;
+                        available-width: max(1px, second.width - 114px);
+                        label: @tr("Restore mouse input");
+                        enabled: root.can-recover;
+                        clicked => { root.action(2); }
+                    }
+                    SettingsButton {
+                        compact: true;
+                        destructive: true;
+                        available-width: 106px;
+                        label: @tr("Close pin");
+                        enabled: root.can-close;
+                        clicked => { root.action(3); }
+                    }
+                }
+                if root.confirming: VerticalLayout {
+                    padding: Spacing.small;
+                    padding-left: Spacing.medium;
+                    padding-right: Spacing.medium;
+                    spacing: Spacing.small;
+                    Text {
+                        text: @tr("Close this live window pin?");
+                        color: Colors.foreground;
+                        font-size: Typography.menu-size;
+                        wrap: word-wrap;
+                        vertical-alignment: center;
+                    }
+                    HorizontalLayout {
+                        height: 40px;
+                        alignment: end;
+                        spacing: Spacing.small;
+                        SettingsButton { compact: true; label: @tr("Cancel"); clicked => { root.action(4); } }
+                        SettingsButton {
+                            compact: true; destructive: true;
+                            label: @tr("Close pin"); enabled: root.can-close;
+                            clicked => { root.action(5); }
+                        }
+                    }
+                }
+            }
+        }
+        ResizeEdges { resize-requested(edge) => { root.resize-requested(edge); } }
+    }
+}
+
+export component PinLocateOutline inherits Window {
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-width: 3px;
+        border-color: Colors.primary;
+        border-radius: 5px;
+    }
+}

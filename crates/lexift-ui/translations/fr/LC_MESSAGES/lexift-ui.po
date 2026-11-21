@@ -2624,3 +2624,36 @@ msgstr "Impossible d’ouvrir le texte épinglé."
 
 msgid "Speed applies to preview and export."
 msgstr "La vitesse s’applique à l’aperçu et à l’exportation."
+
+msgid "Manage pins"
+msgstr "Gérer les éléments épinglés"
+
+msgid "No active pins"
+msgstr "Aucun élément épinglé actif"
+
+msgid "Show pin"
+msgstr "Afficher"
+
+msgid "Hide pin"
+msgstr "Masquer"
+
+msgid "Locate"
+msgstr "Localiser"
+
+msgid "Restore mouse input"
+msgstr "Rétablir la souris"
+
+msgid "Close pin"
+msgstr "Fermer l’élément"
+
+msgid "Close this live window pin?"
+msgstr "Fermer cette fenêtre épinglée en direct ?"
+
+msgid "Pin visible"
+msgstr "Visible"
+
+msgid "Pin hidden"
+msgstr "Masqué"
+
+msgid "Source paused"
+msgstr "Source en pause"

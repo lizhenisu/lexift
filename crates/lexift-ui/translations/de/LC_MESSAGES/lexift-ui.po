@@ -2624,3 +2624,36 @@ msgstr "Das Textfenster konnte nicht geöffnet werden."
 
 msgid "Speed applies to preview and export."
 msgstr "Das Tempo gilt für Vorschau und Export."
+
+msgid "Manage pins"
+msgstr "Anheftungen verwalten"
+
+msgid "No active pins"
+msgstr "Keine aktiven Anheftungen"
+
+msgid "Show pin"
+msgstr "Einblenden"
+
+msgid "Hide pin"
+msgstr "Ausblenden"
+
+msgid "Locate"
+msgstr "Markieren"
+
+msgid "Restore mouse input"
+msgstr "Mausbedienung wiederherstellen"
+
+msgid "Close pin"
+msgstr "Anheftung schließen"
+
+msgid "Close this live window pin?"
+msgstr "Diese Live-Anheftung schließen?"
+
+msgid "Pin visible"
+msgstr "Sichtbar"
+
+msgid "Pin hidden"
+msgstr "Ausgeblendet"
+
+msgid "Source paused"
+msgstr "Quelle pausiert"

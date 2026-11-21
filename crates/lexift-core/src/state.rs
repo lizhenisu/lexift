@@ -53,6 +53,7 @@ pub struct AppState {
     pub pin_restore: Option<(u64, u64)>,
     pub pin_restore_serial: u64,
     pub pin_restore_notice: Option<(crate::domain::geometry::Point, bool)>,
+    pub pin_manager: crate::domain::pinned_image::manager::State,
     pub text_pins: crate::domain::text_pin::State,
     pub pinned_images: crate::domain::pinned_image::States,
     pub pin_visibility: crate::domain::pinned_image::visibility::State,
@@ -111,6 +112,7 @@ impl AppState {
             pin_restore: None,
             pin_restore_serial: 0,
             pin_restore_notice: None,
+            pin_manager: Default::default(),
             text_pins: Default::default(),
             pinned_images: Default::default(),
             pin_visibility: Default::default(),
@@ -162,11 +164,22 @@ impl AppState {
     pub fn reduce(&mut self, event: AppEvent) -> Vec<AppCommand> {
         let success = crate::domain::image_history::workflow::successful_output(self, &event);
         let quitting = matches!(event, AppEvent::ExitRequested);
+        let pin_counts = (self.pinned_images.len(), self.text_pins.pins.len());
+        let opening_pin_manager = matches!(
+            event,
+            AppEvent::PinManager(crate::domain::pinned_image::manager::Event::Open(_))
+        );
         let saved = event.clone();
         let mut commands = self.reduce_inner(event);
         commands.extend(crate::domain::image_import::after(self, &saved));
         crate::domain::editor_ocr::after(self, &saved);
         crate::domain::image_history::workflow::after(self, quitting, &commands, success);
+        let pins_changed = pin_counts != (self.pinned_images.len(), self.text_pins.pins.len());
+        commands.extend(crate::domain::pinned_image::manager::after(
+            self,
+            quitting,
+            pins_changed || (opening_pin_manager && self.pin_manager.window.is_some()),
+        ));
         commands
     }
 
@@ -229,6 +242,9 @@ impl AppState {
             AppEvent::ImageImport(event) => crate::domain::image_import::reduce(self, event),
             AppEvent::ImageHistory(event) => {
                 crate::domain::image_history::workflow::reduce(self, event)
+            }
+            AppEvent::PinManager(event) => {
+                crate::domain::pinned_image::manager::reduce(self, event)
             }
             AppEvent::TextPin(event) => crate::domain::text_pin::reduce(self, event),
             AppEvent::PinnedImage(event) => crate::domain::pinned_image::reduce(self, event),

@@ -2624,3 +2624,36 @@ msgstr "無法開啟文字貼圖。"
 
 msgid "Speed applies to preview and export."
 msgstr "倍速同時用於預覽和匯出。"
+
+msgid "Manage pins"
+msgstr "管理貼圖"
+
+msgid "No active pins"
+msgstr "目前沒有貼圖"
+
+msgid "Show pin"
+msgstr "顯示貼圖"
+
+msgid "Hide pin"
+msgstr "隱藏貼圖"
+
+msgid "Locate"
+msgstr "定位"
+
+msgid "Restore mouse input"
+msgstr "恢復滑鼠操作"
+
+msgid "Close pin"
+msgstr "關閉貼圖"
+
+msgid "Close this live window pin?"
+msgstr "關閉這張即時視窗貼圖？"
+
+msgid "Pin visible"
+msgstr "已顯示"
+
+msgid "Pin hidden"
+msgstr "已隱藏"
+
+msgid "Source paused"
+msgstr "來源已暫停"
