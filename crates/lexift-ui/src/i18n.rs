@@ -1603,6 +1603,90 @@ mod tests {
         assert_eq!(reopened.get_active_category(), 0);
     }
     #[test]
+    fn text_pin_layout_and_keyboard_actions() {
+        use slint::platform::{Key, PointerEventButton, WindowEvent};
+
+        let last = Rc::new(RefCell::new(None));
+        slint::platform::set_platform(Box::new(TestPlatform(last.clone()))).unwrap();
+        let pin = crate::TextPinWindow::new().unwrap();
+        let adapter = last.borrow().as_ref().unwrap().clone();
+        adapter.set_size(slint::PhysicalSize::new(420, 280));
+        let body = format!(
+            "  中英文摘录 😀\r\n\n{}\n\n{}",
+            "https://example.com/".to_owned() + &"abc".repeat(80),
+            "Review the caption against the source.\n".repeat(10)
+        );
+        pin.set_content(body.as_str().into());
+
+        let selection = Rc::new(Cell::new(None));
+        let capture = selection.clone();
+        pin.on_copy_text(move |a, b| capture.set(Some((a, b))));
+        let copies = Rc::new(Cell::new(0));
+        let capture = copies.clone();
+        pin.on_copy_all(move || capture.set(capture.get() + 1));
+        let close = Rc::new(Cell::new(0));
+        let capture = close.clone();
+        pin.on_close_pin(move || capture.set(capture.get() + 1));
+
+        let w = pin.window();
+        let position = slint::LogicalPosition::new(82., 80.);
+        w.dispatch_event(WindowEvent::PointerPressed {
+            position,
+            button: PointerEventButton::Left,
+        });
+        w.dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
+        let press = |text: slint::SharedString| w.dispatch_event(WindowEvent::KeyPressed { text });
+        let release =
+            |text: slint::SharedString| w.dispatch_event(WindowEvent::KeyReleased { text });
+        press(Key::Control.into());
+        press("a".into());
+        release("a".into());
+        press("c".into());
+        release("c".into());
+        release(Key::Control.into());
+        assert_eq!(
+            selection
+                .get()
+                .and_then(|range| lexift_core::domain::text_pin::selection(&body, Some(range))),
+            Some(body.as_str())
+        );
+        pin.invoke_open_menu(395., 265.);
+        press(Key::Return.into());
+        release(Key::Return.into());
+        assert_eq!(copies.get(), 1);
+        pin.invoke_open_menu(395., 265.);
+        press(Key::Escape.into());
+        release(Key::Escape.into());
+        assert_eq!(close.get(), 0);
+        press(Key::Escape.into());
+        release(Key::Escape.into());
+        assert_eq!(close.get(), 1);
+
+        for language in UiLanguage::ALL {
+            select(language);
+            assert!(lookup(language.code(), "Pin text from clipboard").is_some());
+            for scale in [1., 1.25] {
+                w.dispatch_event(WindowEvent::ScaleFactorChanged {
+                    scale_factor: scale,
+                });
+                for theme in [0, 1] {
+                    pin.global::<crate::Colors>().set_preference(theme);
+                    pin.invoke_open_menu(999., 999.);
+                    snapshot(
+                        &adapter,
+                        &format!("text-pin-{}-{scale}-{theme}", language.code()),
+                        (276. * scale) as u32,
+                        (220. * scale) as u32,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn history_visual_feedback_keeps_pending_actions_isolated() {
         use slint::platform::{PointerEventButton, WindowEvent};
         let last = Rc::new(RefCell::new(None));

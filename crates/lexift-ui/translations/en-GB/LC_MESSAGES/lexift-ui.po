@@ -2600,3 +2600,24 @@ msgstr "Could not change export audio"
 
 msgid "Changing MP4 audio re-encodes the video."
 msgstr "Changing MP4 audio re-encodes the video."
+
+msgid "Pin text from clipboard"
+msgstr "Pin text from clipboard"
+
+msgid "Pinned text"
+msgstr "Pinned text"
+
+msgid "The clipboard has no text to pin."
+msgstr "The clipboard has no text to pin."
+
+msgid "Text pins are limited to 64 KiB."
+msgstr "Text pins are limited to 64 KiB."
+
+msgid "Could not read clipboard text."
+msgstr "Could not read clipboard text."
+
+msgid "Close a text pin before adding another. The limit is 20."
+msgstr "Close a text pin before adding another. The limit is 20."
+
+msgid "Could not open the text pin."
+msgstr "Could not open the text pin."

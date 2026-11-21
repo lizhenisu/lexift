@@ -19,23 +19,24 @@ pub(crate) fn available(hidden: bool) -> bool {
     VIEW.with(|v| v.borrow().available[usize::from(hidden)]) && runtime_idle()
 }
 pub(super) fn runtime_idle() -> bool {
-    STATE.with(|s| {
-        s.borrow().as_ref().is_some_and(|r| {
-            !r.frozen
-                && r.windows.values().all(|p| {
-                    p.phase == Phase::Visible
-                        && !p.gesture.native_drag.get()
-                        && !p.gesture.pressed.get()
-                        && p.window.get().is_some_and(|w| {
-                            !w.get_editing()
-                                && !w.get_output_busy()
-                                && !w.get_recognizing()
-                                && !w.get_cropping()
-                                && !w.get_policy_busy()
-                        })
-                })
+    crate::bridge::text_pin::idle()
+        && STATE.with(|s| {
+            s.borrow().as_ref().is_some_and(|r| {
+                !r.frozen
+                    && r.windows.values().all(|p| {
+                        p.phase == Phase::Visible
+                            && !p.gesture.native_drag.get()
+                            && !p.gesture.pressed.get()
+                            && p.window.get().is_some_and(|w| {
+                                !w.get_editing()
+                                    && !w.get_output_busy()
+                                    && !w.get_recognizing()
+                                    && !w.get_cropping()
+                                    && !w.get_policy_busy()
+                            })
+                    })
+            })
         })
-    })
 }
 pub(super) fn operable(id: u64) -> bool {
     STATE.with(|s| {

@@ -2600,3 +2600,24 @@ msgstr "Impossibile modificare l’audio esportato"
 
 msgid "Changing MP4 audio re-encodes the video."
 msgstr "Modificare l’audio MP4 ricodifica il video."
+
+msgid "Pin text from clipboard"
+msgstr "Fissa testo dagli appunti"
+
+msgid "Pinned text"
+msgstr "Testo fissato"
+
+msgid "The clipboard has no text to pin."
+msgstr "Negli appunti non c’è testo da fissare."
+
+msgid "Text pins are limited to 64 KiB."
+msgstr "Il testo fissato non può superare 64 KiB."
+
+msgid "Could not read clipboard text."
+msgstr "Impossibile leggere il testo negli appunti."
+
+msgid "Close a text pin before adding another. The limit is 20."
+msgstr "Chiudi una finestra di testo prima di aggiungerne un’altra. Il limite è 20."
+
+msgid "Could not open the text pin."
+msgstr "Impossibile aprire la finestra di testo."

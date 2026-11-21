@@ -2600,3 +2600,24 @@ msgstr "Ausgabeton konnte nicht geändert werden"
 
 msgid "Changing MP4 audio re-encodes the video."
 msgstr "Beim Ändern des MP4-Tons wird das Video neu kodiert."
+
+msgid "Pin text from clipboard"
+msgstr "Text aus der Zwischenablage anheften"
+
+msgid "Pinned text"
+msgstr "Angehefteter Text"
+
+msgid "The clipboard has no text to pin."
+msgstr "Die Zwischenablage enthält keinen Text zum Anheften."
+
+msgid "Text pins are limited to 64 KiB."
+msgstr "Angehefteter Text ist auf 64 KiB begrenzt."
+
+msgid "Could not read clipboard text."
+msgstr "Der Text in der Zwischenablage konnte nicht gelesen werden."
+
+msgid "Close a text pin before adding another. The limit is 20."
+msgstr "Schließen Sie zuerst ein Textfenster. Es sind höchstens 20 möglich."
+
+msgid "Could not open the text pin."
+msgstr "Das Textfenster konnte nicht geöffnet werden."

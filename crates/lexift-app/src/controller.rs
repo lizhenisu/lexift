@@ -30,7 +30,11 @@ use tokio::{runtime::Handle, sync::Notify};
 
 use crate::runtime::RuntimeManager;
 
+#[path = "controller_text_pin.rs"]
+mod text_pin;
+
 pub(crate) trait ViewPort: Send + Sync {
+    fn text_pin(&self, _command: lexift_core::domain::text_pin::Command, _text: Option<Arc<str>>) {}
     fn screen_recording(&self, _command: lexift_core::domain::screenshot::recording::Command) {}
     fn open_image_editor(
         &self,
@@ -250,6 +254,9 @@ pub(crate) trait ViewPort: Send + Sync {
 }
 
 impl ViewPort for lexift_ui::UiHandle {
+    fn text_pin(&self, command: lexift_core::domain::text_pin::Command, text: Option<Arc<str>>) {
+        lexift_ui::UiHandle::text_pin(self, command, text);
+    }
     fn freeze_screenshot_shortcut(
         &self,
         id: u64,
@@ -539,6 +546,7 @@ pub(crate) struct AppController {
     credential_store: Option<Arc<dyn CredentialStore>>,
     credential_reference: Option<Arc<RwLock<Option<String>>>>,
     clipboard: Option<Arc<dyn ClipboardPort>>,
+    text_pins: text_pin::Resources,
     speech: Option<Arc<dyn SpeechPort>>,
     pub(crate) ui: Arc<dyn ViewPort>,
     pub(crate) ocr: Option<Arc<crate::ocr::OcrRuntime>>,
@@ -586,6 +594,7 @@ impl AppController {
             credential_store: None,
             credential_reference: None,
             clipboard: None,
+            text_pins: Default::default(),
             speech: None,
             ui,
             selection_capture_in_flight: AtomicBool::new(false),
@@ -844,6 +853,7 @@ impl AppController {
                     runtime.execute_history(self, command);
                 }
             }
+            AppCommand::TextPin(command) => self.execute_text_pin(command),
             AppCommand::PinnedImage(command) => {
                 if let Some(runtime) = &self.screenshot {
                     runtime.execute_pin(self, command);
@@ -1051,6 +1061,7 @@ impl AppController {
             }
             AppCommand::ClearCredentialDraft => self.ui.clear_credential_draft(),
             AppCommand::Exit => {
+                self.text_pins.clear();
                 if let Some(ocr) = &self.ocr {
                     ocr.shutdown();
                 }
@@ -1832,6 +1843,7 @@ fn event_name(event: &AppEvent) -> &'static str {
         AppEvent::ImageHistory(_) => "image-history",
         AppEvent::ClipboardHistory(_) => "clipboard_history",
         AppEvent::PinnedImage(_) => "pinned-image",
+        AppEvent::TextPin(_) => "text-pin",
         AppEvent::Screenshot(_) => "screenshot",
         AppEvent::AnnotationExport(_) => "annotation_export",
         AppEvent::Ocr(_) => "ocr",
@@ -1957,9 +1969,12 @@ mod tests {
 
     use super::*;
 
+    type TextPinViewCommand = (lexift_core::domain::text_pin::Command, Option<Arc<str>>);
+
     #[derive(Default)]
     struct RecordingView {
         states: Mutex<Vec<AppState>>,
+        text_pin_commands: Mutex<Vec<TextPinViewCommand>>,
         popup_shown: AtomicBool,
         main_window_shown: AtomicBool,
         popup_context: Mutex<Option<(Option<Point>, Option<Rect>)>>,
@@ -1972,6 +1987,14 @@ mod tests {
     }
 
     impl ViewPort for RecordingView {
+        fn text_pin(
+            &self,
+            command: lexift_core::domain::text_pin::Command,
+            text: Option<Arc<str>>,
+        ) {
+            self.text_pin_commands.lock().unwrap().push((command, text));
+        }
+
         fn update(&self, state: AppState) {
             self.states
                 .lock()
@@ -2173,6 +2196,98 @@ mod tests {
             *self.text.lock().unwrap() = Some(text.into());
             Ok(())
         }
+    }
+
+    #[test]
+    fn text_pin_reads_once_and_copies_only_through_the_sensitive_port() {
+        use lexift_core::domain::text_pin::{Command, Event};
+
+        #[derive(Default)]
+        struct Clipboard {
+            writes: Mutex<Vec<String>>,
+            reads: AtomicUsize,
+            fail: AtomicBool,
+        }
+        const BODY: &str = "  字😀\r\nnotes\n ";
+        impl ClipboardPort for Clipboard {
+            fn read_text(&self) -> lexift_core::Result<Option<String>> {
+                self.reads.fetch_add(1, Ordering::SeqCst);
+                Ok(Some(BODY.into()))
+            }
+            fn write_text(&self, _: &str) -> lexift_core::Result<()> {
+                panic!("plaintext copy would enter clipboard history")
+            }
+            fn write_sensitive_text(&self, text: &str) -> lexift_core::Result<()> {
+                if self.fail.load(Ordering::SeqCst) {
+                    return Err(lexift_core::Error::new("clipboard busy"));
+                }
+                self.writes.lock().unwrap().push(text.into());
+                Ok(())
+            }
+        }
+
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        let state = Arc::new(Mutex::new(AppState::default()));
+        let view = Arc::new(RecordingView::default());
+        let clipboard = Arc::new(Clipboard::default());
+        let mut controller = AppController::new(
+            runtime.handle().clone(),
+            state.clone(),
+            None,
+            None,
+            Arc::new(ReorderingTranslator),
+            Arc::new(RecordingSettingsStore::default()),
+            view.clone(),
+        );
+        controller.clipboard = Some(clipboard.clone());
+        let controller = Arc::new(controller);
+        let dispatch = |event| controller.dispatch(AppEvent::TextPin(event));
+        let wait = |condition: &dyn Fn() -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while !condition() {
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(1));
+            }
+        };
+        dispatch(Event::Requested(Point::default()));
+        wait(&|| !view.text_pin_commands.lock().unwrap().is_empty());
+        let id = {
+            let commands = view.text_pin_commands.lock().unwrap();
+            let [(Command::Present(creation), Some(text))] = commands.as_slice() else {
+                panic!("expected prepared clipboard snapshot");
+            };
+            assert_eq!(text.as_ref(), BODY);
+            creation.id
+        };
+        assert!(clipboard.writes.lock().unwrap().is_empty());
+        dispatch(Event::Presented { id, success: true });
+        clipboard.fail.store(true, Ordering::SeqCst);
+        dispatch(Event::Copy {
+            id,
+            selection: Some((9, 2)),
+        });
+        wait(&|| view.text_pin_commands.lock().unwrap().len() == 2);
+        assert!(clipboard.writes.lock().unwrap().is_empty());
+        clipboard.fail.store(false, Ordering::SeqCst);
+        dispatch(Event::Copy {
+            id,
+            selection: Some((9, 2)),
+        });
+        wait(&|| state.lock().unwrap().text_pins.pins[&id].copy.is_none());
+        dispatch(Event::Copy {
+            id,
+            selection: None,
+        });
+        wait(&|| state.lock().unwrap().text_pins.pins[&id].copy.is_none());
+        assert_eq!(*clipboard.writes.lock().unwrap(), ["字😀", BODY]);
+        assert_eq!(clipboard.reads.load(Ordering::SeqCst), 1);
+        dispatch(Event::Closed(id));
+        dispatch(Event::Copy {
+            id,
+            selection: None,
+        });
+        assert!(state.lock().unwrap().text_pins.pins.is_empty());
+        assert_eq!(clipboard.writes.lock().unwrap().len(), 2);
     }
 
     struct CountingSelection {

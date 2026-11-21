@@ -2600,3 +2600,24 @@ msgstr "Não foi possível alterar o áudio exportado"
 
 msgid "Changing MP4 audio re-encodes the video."
 msgstr "Alterar o áudio do MP4 recodifica o vídeo."
+
+msgid "Pin text from clipboard"
+msgstr "Fixar texto da área de transferência"
+
+msgid "Pinned text"
+msgstr "Texto fixado"
+
+msgid "The clipboard has no text to pin."
+msgstr "Não há texto para fixar na área de transferência."
+
+msgid "Text pins are limited to 64 KiB."
+msgstr "O texto fixado está limitado a 64 KiB."
+
+msgid "Could not read clipboard text."
+msgstr "Não foi possível ler o texto da área de transferência."
+
+msgid "Close a text pin before adding another. The limit is 20."
+msgstr "Feche uma janela de texto antes de adicionar outra. O limite é de 20."
+
+msgid "Could not open the text pin."
+msgstr "Não foi possível abrir a janela de texto."

@@ -2600,3 +2600,24 @@ msgstr "書き出し音声を変更できませんでした"
 
 msgid "Changing MP4 audio re-encodes the video."
 msgstr "MP4 の音声を変更すると映像が再エンコードされます。"
+
+msgid "Pin text from clipboard"
+msgstr "クリップボードのテキストをピン留め"
+
+msgid "Pinned text"
+msgstr "ピン留めしたテキスト"
+
+msgid "The clipboard has no text to pin."
+msgstr "クリップボードにピン留めできるテキストがありません。"
+
+msgid "Text pins are limited to 64 KiB."
+msgstr "ピン留めできるテキストは最大 64 KiB です。"
+
+msgid "Could not read clipboard text."
+msgstr "クリップボードのテキストを読み取れませんでした。"
+
+msgid "Close a text pin before adding another. The limit is 20."
+msgstr "テキストを追加する前に、ピン留めを一つ閉じてください。上限は 20 件です。"
+
+msgid "Could not open the text pin."
+msgstr "ピン留めしたテキストを開けませんでした。"

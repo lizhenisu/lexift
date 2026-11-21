@@ -389,6 +389,7 @@ pub(crate) fn close_menus() {
     }
 }
 pub(crate) fn set_annotation_interaction(allowed: bool) {
+    crate::bridge::text_pin::set_interactive(allowed);
     let contexts = STATE.with(|s| {
         let mut s = s.borrow_mut();
         let Some(r) = s.as_mut() else { return vec![] };
@@ -868,9 +869,10 @@ fn show_feedback_details(
 /// The frozen screenshot already contains existing pins. Hide their live windows
 /// during editing so only the snapshot receives gestures; restore without activation.
 pub(crate) fn capture_visibility(visible: bool) -> bool {
-    visibility::capture_visibility(visible)
+    visibility::capture_visibility(visible) & crate::bridge::text_pin::capture_visibility(visible)
 }
 pub(crate) fn set_frozen(frozen: bool) {
+    crate::bridge::text_pin::set_frozen(frozen);
     visibility::frozen(frozen);
 }
 #[cfg(test)]
@@ -885,24 +887,25 @@ pub(crate) fn diagnostic_visible_count() -> usize {
     })
 }
 pub(crate) fn capture_idle() -> bool {
-    STATE.with(|s| {
-        s.borrow().as_ref().is_none_or(|r| {
-            r.windows.values().all(|p| {
-                let idle = !p.gesture.native_drag.get()
-                    && !p.gesture.pressed.get()
-                    && p.visibility_pending.is_none();
-                if !idle {
-                    tracing::debug!(
-                        native_drag = p.gesture.native_drag.get(),
-                        pressed = p.gesture.pressed.get(),
-                        visibility_pending = p.visibility_pending.is_some(),
-                        "Screenshot shortcut blocked by pin input"
-                    );
-                }
-                idle
+    crate::bridge::text_pin::idle()
+        && STATE.with(|s| {
+            s.borrow().as_ref().is_none_or(|r| {
+                r.windows.values().all(|p| {
+                    let idle = !p.gesture.native_drag.get()
+                        && !p.gesture.pressed.get()
+                        && p.visibility_pending.is_none();
+                    if !idle {
+                        tracing::debug!(
+                            native_drag = p.gesture.native_drag.get(),
+                            pressed = p.gesture.pressed.get(),
+                            visibility_pending = p.visibility_pending.is_some(),
+                            "Screenshot shortcut blocked by pin input"
+                        );
+                    }
+                    idle
+                })
             })
         })
-    })
 }
 pub(crate) fn active() -> bool {
     STATE.with(|s| s.borrow().as_ref().is_some_and(|s| !s.windows.is_empty()))

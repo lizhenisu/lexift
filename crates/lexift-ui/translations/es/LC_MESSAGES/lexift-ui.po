@@ -2600,3 +2600,24 @@ msgstr "No se pudo cambiar el audio de exportación"
 
 msgid "Changing MP4 audio re-encodes the video."
 msgstr "Cambiar el audio del MP4 vuelve a codificar el vídeo."
+
+msgid "Pin text from clipboard"
+msgstr "Fijar texto del portapapeles"
+
+msgid "Pinned text"
+msgstr "Texto fijado"
+
+msgid "The clipboard has no text to pin."
+msgstr "No hay texto que fijar en el portapapeles."
+
+msgid "Text pins are limited to 64 KiB."
+msgstr "El texto fijado no puede superar los 64 KiB."
+
+msgid "Could not read clipboard text."
+msgstr "No se pudo leer el texto del portapapeles."
+
+msgid "Close a text pin before adding another. The limit is 20."
+msgstr "Cierra una ventana de texto antes de añadir otra. El límite es 20."
+
+msgid "Could not open the text pin."
+msgstr "No se pudo abrir la ventana de texto."

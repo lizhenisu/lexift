@@ -2600,3 +2600,24 @@ msgstr "Impossible de modifier l’audio exporté"
 
 msgid "Changing MP4 audio re-encodes the video."
 msgstr "Modifier l’audio MP4 réencode la vidéo."
+
+msgid "Pin text from clipboard"
+msgstr "Épingler le texte du presse-papiers"
+
+msgid "Pinned text"
+msgstr "Texte épinglé"
+
+msgid "The clipboard has no text to pin."
+msgstr "Le presse-papiers ne contient aucun texte à épingler."
+
+msgid "Text pins are limited to 64 KiB."
+msgstr "Un texte épinglé ne peut pas dépasser 64 Kio."
+
+msgid "Could not read clipboard text."
+msgstr "Impossible de lire le texte du presse-papiers."
+
+msgid "Close a text pin before adding another. The limit is 20."
+msgstr "Fermez une fenêtre de texte avant d’en ajouter une autre. La limite est de 20."
+
+msgid "Could not open the text pin."
+msgstr "Impossible d’ouvrir le texte épinglé."

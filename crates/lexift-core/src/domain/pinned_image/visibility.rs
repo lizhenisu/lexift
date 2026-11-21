@@ -15,6 +15,7 @@ pub struct Batch {
     pub hidden: bool,
     pub anchor: Point,
     pub pending: BTreeSet<u64>,
+    pub pending_text: BTreeSet<u64>,
     pub failed: usize,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +45,7 @@ pub enum Event {
 /// Domain conflicts are checked again when a tray intent reaches Core.
 pub fn idle(s: &AppState) -> bool {
     s.pin_visibility.pending.is_none()
+        && s.text_pins.creation.is_none()
         && !s.screenshot.active()
         && s.image_import.request.is_none()
         && s.editor_ocr.request.is_none()
@@ -66,7 +68,9 @@ pub fn idle(s: &AppState) -> bool {
         })
 }
 pub fn available(s: &AppState, hidden: bool) -> bool {
-    idle(s) && s.pinned_images.values().any(|p| p.user_hidden != hidden)
+    idle(s)
+        && (s.pinned_images.values().any(|p| p.user_hidden != hidden)
+            || s.text_pins.pins.values().any(|p| p.hidden != hidden))
 }
 
 /// A visibility batch cannot race the start of another image operation.
@@ -105,7 +109,7 @@ fn settle(s: &mut AppState) {
     if s.pin_visibility
         .pending
         .as_ref()
-        .is_some_and(|b| b.pending.is_empty())
+        .is_some_and(|b| b.pending.is_empty() && b.pending_text.is_empty())
     {
         let b = s.pin_visibility.pending.take().unwrap();
         s.pin_visibility.notice = (b.failed > 0).then_some(Notice {
@@ -118,6 +122,31 @@ fn settle(s: &mut AppState) {
 pub(super) fn closed(s: &mut AppState, id: u64) {
     if let Some(b) = &mut s.pin_visibility.pending {
         b.pending.remove(&id);
+    }
+    settle(s);
+}
+pub(crate) fn text_closed(s: &mut AppState, id: u64) {
+    if let Some(batch) = &mut s.pin_visibility.pending {
+        batch.pending_text.remove(&id);
+    }
+    settle(s);
+}
+pub(crate) fn text_applied(s: &mut AppState, request: Request, success: bool) {
+    let Some(batch) = s.pin_visibility.pending.as_mut() else {
+        return;
+    };
+    if batch.id != request.batch
+        || batch.hidden != request.hidden
+        || !batch.pending_text.remove(&request.id)
+    {
+        return;
+    }
+    if let Some(pin) = s.text_pins.pins.get_mut(&request.id) {
+        if success {
+            pin.hidden = request.hidden;
+        } else {
+            batch.failed += 1;
+        }
     }
     settle(s);
 }
@@ -139,6 +168,12 @@ pub(super) fn reduce(s: &mut AppState, e: Event) -> Vec<AppCommand> {
                 .filter_map(|(&id, p)| (p.user_hidden != hidden).then_some(id))
                 .collect();
             s.pin_visibility.notice = None;
+            let text_targets: BTreeSet<_> = s
+                .text_pins
+                .pins
+                .iter()
+                .filter_map(|(&id, pin)| (pin.hidden != hidden).then_some(id))
+                .collect();
             let commands = targets
                 .iter()
                 .map(|&id| {
@@ -148,12 +183,20 @@ pub(super) fn reduce(s: &mut AppState, e: Event) -> Vec<AppCommand> {
                         hidden,
                     }))
                 })
+                .chain(text_targets.iter().map(|&id| {
+                    AppCommand::TextPin(crate::domain::text_pin::Command::Visibility(Request {
+                        batch,
+                        id,
+                        hidden,
+                    }))
+                }))
                 .collect();
             s.pin_visibility.pending = Some(Batch {
                 id: batch,
                 hidden,
                 anchor,
                 pending: targets,
+                pending_text: text_targets,
                 failed: 0,
             });
             commands

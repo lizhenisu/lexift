@@ -71,6 +71,7 @@ pub(crate) fn refresh_pin_recovery() {
             w.set_pin_hide_available(crate::pinned_screenshot::visibility::available(true));
             w.set_pin_restore_available(crate::pinned_screenshot::visibility::available(false));
             w.set_closed_restore_available(crate::pinned_screenshot::closed_restore_available());
+            w.set_text_pin_available(crate::bridge::text_pin::available());
         }
     });
 }
@@ -192,6 +193,7 @@ pub(crate) fn show(request: TrayMenuRequest) {
         window.set_pin_restore_available(crate::pinned_screenshot::visibility::available(false));
         window.set_closed_restore_available(crate::pinned_screenshot::closed_restore_available());
         window.set_import_available(crate::annotation::image_import::available());
+        window.set_text_pin_available(crate::bridge::text_pin::available());
         window.set_selected(if request.keyboard { 0 } else { -1 });
         let key = Opening {
             generation: r.generation,
@@ -202,21 +204,9 @@ pub(crate) fn show(request: TrayMenuRequest) {
                 finish_later(key, None, false, "screenshot_presets");
                 return;
             }
-            if index == 8 && !crate::pinned_screenshot::closed_restore_available() {
-                return;
-            }
-            if index == 5 && !crate::pinned_screenshot::policy::recoverable() {
-                return;
-            }
-            if matches!(index, 6 | 7)
-                && !crate::pinned_screenshot::visibility::available(index == 6)
+            if action_available(index)
+                && let Some(event) = action_for_index(index, request.anchor)
             {
-                return;
-            }
-            if matches!(index, 3 | 4) && !crate::annotation::image_import::available() {
-                return;
-            }
-            if let Some(event) = action_for_index(index, request.anchor) {
                 finish_later(key, Some(event), false, "action");
             }
         });
@@ -231,6 +221,7 @@ pub(crate) fn show(request: TrayMenuRequest) {
                     &crate::i18n::tr("Image history"),
                     &crate::i18n::tr("Open image"),
                     &crate::i18n::tr("Pin image from clipboard"),
+                    &crate::i18n::tr("Pin text from clipboard"),
                     &crate::i18n::tr("Turn off mouse passthrough for all pins"),
                     &crate::i18n::tr("Hide all pins"),
                     &crate::i18n::tr("Restore hidden pins"),
@@ -240,32 +231,24 @@ pub(crate) fn show(request: TrayMenuRequest) {
                 ],
                 &text,
             );
-            if matches == [8] && !crate::pinned_screenshot::closed_restore_available() {
-                return;
-            }
-            if matches == [5] && !crate::pinned_screenshot::policy::recoverable() {
-                return;
-            }
-            if matches.len() == 1
-                && matches!(matches[0], 6 | 7)
-                && !crate::pinned_screenshot::visibility::available(matches[0] == 6)
-            {
-                return;
-            }
-            if matches == [9] {
-                finish_later(key, None, false, "screenshot_presets");
-                return;
-            }
             if matches.len() == 1 {
-                finish_later(
-                    key,
-                    action_for_index(
-                        if matches[0] == 10 { 9 } else { matches[0] },
-                        request.anchor,
-                    ),
-                    false,
-                    "mnemonic_action",
-                );
+                let index = match matches[0] {
+                    5 => 11,
+                    6..=9 => matches[0] - 1,
+                    10 => 10,
+                    11 => 9,
+                    row => row,
+                };
+                if index == 10 {
+                    finish_later(key, None, false, "screenshot_presets");
+                } else if action_available(index) {
+                    finish_later(
+                        key,
+                        action_for_index(index, request.anchor),
+                        false,
+                        "mnemonic_action",
+                    );
+                }
             } else if let Some(next) = matches
                 .iter()
                 .copied()
@@ -403,6 +386,17 @@ fn place(window: &TrayMenuWindow, request: TrayMenuRequest, lifecycle: &WindowLi
     }
 }
 
+fn action_available(index: i32) -> bool {
+    match index {
+        3 | 4 => crate::annotation::image_import::available(),
+        5 => crate::pinned_screenshot::policy::recoverable(),
+        6 | 7 => crate::pinned_screenshot::visibility::available(index == 6),
+        8 => crate::pinned_screenshot::closed_restore_available(),
+        11 => crate::bridge::text_pin::available(),
+        _ => true,
+    }
+}
+
 fn action_for_index(index: i32, anchor: lexift_core::domain::geometry::Point) -> Option<AppEvent> {
     Some(match index {
         0 => AppEvent::MainWindowRequested,
@@ -431,6 +425,7 @@ fn action_for_index(index: i32, anchor: lexift_core::domain::geometry::Point) ->
             anchor,
         }),
         9 => AppEvent::ExitRequested,
+        11 => AppEvent::TextPin(lexift_core::domain::text_pin::Event::Requested(anchor)),
         _ => return None,
     })
 }

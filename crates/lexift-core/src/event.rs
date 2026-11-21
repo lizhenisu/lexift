@@ -13,6 +13,7 @@ pub enum AppEvent {
     ImageImport(crate::domain::image_import::Event),
     ImageHistory(crate::domain::image_history::workflow::Event),
     PinnedImage(crate::domain::pinned_image::Event),
+    TextPin(crate::domain::text_pin::Event),
     Screenshot(crate::domain::screenshot::ScreenshotEvent),
     AnnotationExport(crate::domain::annotation_export::ExportEvent),
     Ocr(crate::domain::ocr::OcrEvent),

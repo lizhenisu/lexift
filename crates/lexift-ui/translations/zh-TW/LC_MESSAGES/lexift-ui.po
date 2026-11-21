@@ -2600,3 +2600,24 @@ msgstr "無法變更成品聲音"
 
 msgid "Changing MP4 audio re-encodes the video."
 msgstr "調整 MP4 聲音會重新編碼畫面。"
+
+msgid "Pin text from clipboard"
+msgstr "從剪貼簿貼文字"
+
+msgid "Pinned text"
+msgstr "文字貼圖"
+
+msgid "The clipboard has no text to pin."
+msgstr "剪貼簿中沒有可貼出的文字。"
+
+msgid "Text pins are limited to 64 KiB."
+msgstr "文字貼圖最多支援 64 KiB。"
+
+msgid "Could not read clipboard text."
+msgstr "無法讀取剪貼簿文字。"
+
+msgid "Close a text pin before adding another. The limit is 20."
+msgstr "最多同時保留 20 張文字貼圖，請先關閉一張。"
+
+msgid "Could not open the text pin."
+msgstr "無法開啟文字貼圖。"

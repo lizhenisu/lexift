@@ -2600,3 +2600,24 @@ msgstr "내보내기 오디오를 변경할 수 없습니다"
 
 msgid "Changing MP4 audio re-encodes the video."
 msgstr "MP4 오디오를 변경하면 영상이 다시 인코딩됩니다."
+
+msgid "Pin text from clipboard"
+msgstr "클립보드 텍스트 고정"
+
+msgid "Pinned text"
+msgstr "고정된 텍스트"
+
+msgid "The clipboard has no text to pin."
+msgstr "클립보드에 고정할 텍스트가 없습니다."
+
+msgid "Text pins are limited to 64 KiB."
+msgstr "텍스트는 최대 64 KiB까지 고정할 수 있습니다."
+
+msgid "Could not read clipboard text."
+msgstr "클립보드 텍스트를 읽을 수 없습니다."
+
+msgid "Close a text pin before adding another. The limit is 20."
+msgstr "새 텍스트를 추가하려면 기존 텍스트 창을 닫으세요. 최대 20개까지 가능합니다."
+
+msgid "Could not open the text pin."
+msgstr "고정된 텍스트를 열 수 없습니다."

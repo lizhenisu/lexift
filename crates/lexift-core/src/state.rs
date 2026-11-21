@@ -53,6 +53,7 @@ pub struct AppState {
     pub pin_restore: Option<(u64, u64)>,
     pub pin_restore_serial: u64,
     pub pin_restore_notice: Option<(crate::domain::geometry::Point, bool)>,
+    pub text_pins: crate::domain::text_pin::State,
     pub pinned_images: crate::domain::pinned_image::States,
     pub pin_visibility: crate::domain::pinned_image::visibility::State,
     pub screenshot: crate::domain::screenshot::ScreenshotState,
@@ -110,6 +111,7 @@ impl AppState {
             pin_restore: None,
             pin_restore_serial: 0,
             pin_restore_notice: None,
+            text_pins: Default::default(),
             pinned_images: Default::default(),
             pin_visibility: Default::default(),
             screenshot: Default::default(),
@@ -228,6 +230,7 @@ impl AppState {
             AppEvent::ImageHistory(event) => {
                 crate::domain::image_history::workflow::reduce(self, event)
             }
+            AppEvent::TextPin(event) => crate::domain::text_pin::reduce(self, event),
             AppEvent::PinnedImage(event) => crate::domain::pinned_image::reduce(self, event),
             AppEvent::Screenshot(event) => crate::domain::screenshot::reduce(self, event),
             AppEvent::AnnotationExport(event) => {
@@ -1083,6 +1086,8 @@ impl AppState {
                     .checked_add(1)
                     .expect("pin visibility exhausted");
                 self.pinned_images.clear();
+                self.text_pins.pins.clear();
+                self.text_pins.creation = None;
                 self.screenshot.shortcut_pending = None;
                 self.screenshot.phase = crate::domain::screenshot::ScreenshotPhase::Idle;
                 self.screenshot.refresh = None;

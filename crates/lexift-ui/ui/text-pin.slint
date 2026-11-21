@@ -1,0 +1,251 @@
+import { ScrollView } from "std-widgets.slint";
+import { Colors } from "design/colors.slint";
+import { Metrics } from "design/metrics.slint";
+import { Spacing } from "design/spacing.slint";
+import { Typography } from "design/typography.slint";
+import { MenuMetrics } from "design/menu.slint";
+import { ResizeEdges } from "design/resize-edges.slint";
+import { CaptureButton } from "long-capture.slint";
+
+struct TextPinAction { label: string, icon: image, checked: bool }
+
+export component TextPinWindow inherits Window {
+    title: @tr("Pinned text");
+    no-frame: true;
+    always-on-top: root.topmost;
+    background: Colors.surface;
+    preferred-width: 420px;
+    preferred-height: 280px;
+    min-width: 276px;
+    min-height: 160px;
+    in property <string> content;
+    in property <bool> input-enabled: true;
+    in-out property <bool> topmost: true;
+    private property <bool> menu-open;
+    private property <length> menu-x;
+    private property <length> menu-y;
+    private property <int> menu-index;
+    private property <length> menu-label-inset: 2 * Spacing.small + Metrics.auxiliary-header-icon;
+    private property <[TextPinAction]> actions: [
+        { label: @tr("Copy all text"), icon: @image-url("assets/icons/copy.svg"), checked: false },
+        { label: @tr("Always on top"), icon: @image-url("assets/icons/header-pin.svg"), checked: root.topmost },
+        { label: @tr("Close"), icon: @image-url("assets/icons/header-close.svg"), checked: false }
+    ];
+    callback close-pin();
+    callback copy-text(int, int);
+    callback copy-all();
+    callback change-topmost(bool);
+    callback move-requested();
+    callback resize-requested(int);
+
+    public function open-menu(x: float, y: float) {
+        if root.input-enabled {
+            root.menu-x = x * 1px;
+            root.menu-y = y * 1px;
+            root.menu-index = 0;
+            root.menu-open = true;
+            menu-keys.focus();
+        }
+    }
+
+    public function close-menu() {
+        if root.menu-open {
+            root.menu-open = false;
+            body.focus();
+        }
+    }
+
+    function activate-menu(index: int) {
+        root.close-menu();
+        if index == 0 { root.copy-all(); }
+        else if index == 1 { root.change-topmost(!root.topmost); }
+        else if index == 2 { root.close-pin(); }
+    }
+
+    forward-focus: keys;
+    keys := FocusScope {
+        enabled: root.input-enabled;
+        forward-focus: body;
+        capture-key-pressed(event) => {
+            if event.text == Key.Escape {
+                if root.menu-open { root.close-menu(); }
+                else { root.close-pin(); }
+                return accept;
+            }
+            return reject;
+        }
+        Rectangle {
+            border-color: Colors.outline;
+            border-width: 1px;
+            width: 100%;
+            height: 100%;
+        }
+        Rectangle {
+            x: 1px;
+            y: 1px;
+            width: parent.width - 2px;
+            height: Metrics.auxiliary-header-height;
+            background: Colors.background;
+            Rectangle {
+                x: Spacing.medium;
+                y: (parent.height - self.height) / 2;
+                width: Metrics.auxiliary-header-button;
+                height: self.width;
+                border-radius: Metrics.auxiliary-header-icon / 2;
+                background: Colors.primary-container;
+                Image {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: Metrics.auxiliary-header-icon;
+                    height: self.width;
+                    source: @image-url("assets/icons/header-pin.svg");
+                    colorize: Colors.primary;
+                }
+            }
+            Text {
+                x: Spacing.medium * 3 + Spacing.small;
+                width: parent.width - self.x - Metrics.auxiliary-header-button - Spacing.medium;
+                height: parent.height;
+                text: @tr("Pinned text");
+                font-size: Typography.body-size;
+                font-weight: 600;
+                overflow: elide;
+                vertical-alignment: center;
+                color: Colors.foreground;
+            }
+            Rectangle {
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: Colors.outline;
+            }
+            TouchArea {
+                width: parent.width - Metrics.auxiliary-header-button - Spacing.medium;
+                pointer-event(event) => {
+                    if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                        root.move-requested();
+                    }
+                }
+            }
+            CaptureButton {
+                x: parent.width - self.width - Spacing.small;
+                y: (parent.height - self.height) / 2;
+                icon: @image-url("assets/icons/header-close.svg");
+                label: @tr("Close");
+                clicked => { root.close-pin(); }
+            }
+        }
+        viewport := ScrollView {
+            x: Spacing.medium;
+            y: Metrics.auxiliary-header-height + Spacing.medium;
+            width: parent.width - 2 * Spacing.medium;
+            height: parent.height - self.y - Spacing.medium;
+            content-width: self.width;
+            content-height: max(self.height, body.preferred-height + Spacing.small);
+            body := TextInput {
+                width: max(1px, viewport.width - Spacing.medium);
+                height: max(self.preferred-height, viewport.height);
+                text: root.content;
+                read-only: true;
+                single-line: false;
+                wrap: word-wrap;
+                color: Colors.foreground;
+                selection-foreground-color: Colors.foreground;
+                selection-background-color: Colors.primary-container;
+                font-size: Typography.body-size;
+                accessible-role: text-input;
+                accessible-label: @tr("Pinned text");
+                cursor-position-changed(pos) => {
+                    if pos.y + viewport.content-y < 0px {
+                        viewport.content-y = -pos.y;
+                    } else if pos.y + viewport.content-y > viewport.height - 24px {
+                        viewport.content-y = viewport.height - 24px - pos.y;
+                    }
+                }
+                key-pressed(event) => {
+                    if event.modifiers.control && !event.modifiers.alt
+                        && (event.text == "c" || event.text == "C" || event.text == Key.Insert) {
+                        root.copy-text(self.anchor-position-byte-offset, self.cursor-position-byte-offset);
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+        }
+
+        if root.menu-open: TouchArea { clicked => { root.close-menu(); } }
+        menu := Rectangle {
+            visible: root.menu-open;
+            x: clamp(root.menu-x, 1px, max(1px, root.width - self.width - 1px));
+            y: clamp(root.menu-y, 1px, max(1px, root.height - self.height - 1px));
+            width: min(root.width - 2px, max(MenuMetrics.minimum-width,
+                max(copy-width.preferred-width, max(top-width.preferred-width, close-width.preferred-width))
+                    + 2 * (MenuMetrics.padding + root.menu-label-inset)));
+            height: 3 * MenuMetrics.row-height + 2 * MenuMetrics.padding;
+            background: Colors.surface;
+            border-color: Colors.outline;
+            border-width: 1px;
+            border-radius: MenuMetrics.radius;
+            drop-shadow-blur: Spacing.small;
+            drop-shadow-offset-y: 2px;
+            drop-shadow-color: Colors.menu-shadow;
+            copy-width := Text { visible: false; text: @tr("Copy all text"); font-size: Typography.menu-size; }
+            top-width := Text { visible: false; text: @tr("Always on top"); font-size: Typography.menu-size; }
+            close-width := Text { visible: false; text: @tr("Close"); font-size: Typography.menu-size; }
+            menu-keys := FocusScope {
+                key-pressed(event) => {
+                    if event.text == Key.UpArrow { root.menu-index = mod(root.menu-index + 2, 3); }
+                    else if event.text == Key.DownArrow { root.menu-index = mod(root.menu-index + 1, 3); }
+                    else if event.text == Key.Return || event.text == " " { root.activate-menu(root.menu-index); }
+                    else { return reject; }
+                    return accept;
+                }
+            }
+            VerticalLayout {
+                padding: MenuMetrics.padding;
+                for action[index] in root.actions: Rectangle {
+                    height: MenuMetrics.row-height;
+                    border-radius: MenuMetrics.row-radius;
+                    background: root.menu-index == index ? Colors.menu-hover : transparent;
+                    accessible-role: button;
+                    accessible-label: action.label;
+                    accessible-action-default => { root.activate-menu(index); }
+                    Image {
+                        x: Spacing.small;
+                        y: (parent.height - self.height) / 2;
+                        width: Metrics.auxiliary-header-icon;
+                        height: self.width;
+                        colorize: Colors.secondary-foreground;
+                        source: action.icon;
+                    }
+                    Text {
+                        x: root.menu-label-inset;
+                        width: parent.width - 2 * root.menu-label-inset;
+                        height: parent.height;
+                        text: action.label;
+                        overflow: elide;
+                        font-size: Typography.menu-size;
+                        color: Colors.foreground;
+                        vertical-alignment: center;
+                    }
+                    if action.checked: Image {
+                        x: parent.width - self.width - Spacing.small;
+                        y: (parent.height - self.height) / 2;
+                        width: Metrics.auxiliary-header-icon;
+                        height: self.width;
+                        source: @image-url("assets/icons/check.svg");
+                        colorize: Colors.primary;
+                    }
+                    TouchArea {
+                        changed has-hover => { if self.has-hover { root.menu-index = index; } }
+                        clicked => { root.activate-menu(index); }
+                    }
+                }
+            }
+        }
+    }
+    ResizeEdges {
+        visible: root.input-enabled && !root.menu-open;
+        resize-requested(edge) => { root.resize-requested(edge); }
+    }
+}
