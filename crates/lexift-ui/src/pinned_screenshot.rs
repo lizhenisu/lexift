@@ -235,7 +235,6 @@ struct Pin {
     restore_interaction: Option<bool>,
     feedback: Slot<crate::ScreenshotToastWindow>,
     feedback_timer: slint::Timer,
-    feedback_measurement: Option<(u64, slint::PhysicalSize)>,
 }
 struct Registry {
     frozen: bool,
@@ -655,7 +654,6 @@ fn clear_feedback(id: u64, expected: Option<u64>) {
             return None;
         }
         p.feedback_timer.stop();
-        p.feedback_measurement = None;
         Some(std::mem::take(&mut p.feedback))
     });
     drop(retired);
@@ -740,110 +738,20 @@ fn show_feedback_details(
     let Some((w, revision)) = current else { return };
     match prepare(w.window()) {
         PassiveWindowPreparation::Ready => {
-            if outcome.is_some() {
-                for _ in 0..3 {
-                    w.window().set_size(slint::LogicalSize::new(
-                        w.get_content_width(),
-                        w.get_content_height(),
-                    ));
-                    let _ = w.window().take_snapshot();
-                }
-                if !(lifecycle.configure_hint_window)(w.window()) {
-                    clear_feedback(id, Some(revision));
-                    return;
-                }
+            if outcome.is_some() && !(lifecycle.configure_hint_window)(w.window()) {
+                clear_feedback(id, Some(revision));
+                return;
             }
-            if let Some(area) = (lifecycle.popup_work_area)(lexift_core::domain::geometry::Point {
+            let origin = lexift_core::domain::geometry::Point {
                 x: position.x,
                 y: position.y,
-            }) {
-                let size = if outcome.is_some() {
-                    let scale = w.window().scale_factor();
-                    slint::PhysicalSize::new(
-                        (w.get_content_width() * scale).round().max(1.) as u32,
-                        (w.get_content_height() * scale).round().max(1.) as u32,
-                    )
-                } else {
-                    w.window().size()
-                };
-                let width = size.width.min((area.right - area.left - 16).max(1) as u32);
-                let height = size.height.min((area.bottom - area.top - 16).max(1) as u32);
-                w.window().set_size(slint::PhysicalSize::new(width, height));
-                w.window().set_position(slint::PhysicalPosition::new(
-                    position.x.clamp(
-                        area.left + 8,
-                        (area.right - 8 - width as i32).max(area.left + 8),
-                    ),
-                    position.y.clamp(
-                        area.top + 8,
-                        (area.bottom - 8 - height as i32).max(area.top + 8),
-                    ),
-                ));
-            }
-            if outcome.is_some() {
-                let scale = w.window().scale_factor();
-                let size = slint::PhysicalSize::new(
-                    (w.get_content_width() * scale).round().max(1.) as u32,
-                    (w.get_content_height() * scale).round().max(1.) as u32,
-                );
-                let stable = STATE.with(|s| {
-                    let mut s = s.borrow_mut();
-                    let Some(p) = s.as_mut().and_then(|r| r.windows.get_mut(&id)) else {
-                        return false;
-                    };
-                    let stable = p.feedback_measurement == Some((revision, size));
-                    p.feedback_measurement = Some((revision, size));
-                    stable
-                });
-                if !stable {
-                    if attempt >= 20 {
-                        clear_feedback(id, Some(revision));
-                        return;
-                    }
-                    let message = message.to_owned();
-                    STATE.with(|s| {
-                        if let Some(p) = s.borrow().as_ref().and_then(|r| r.windows.get(&id)) {
-                            p.feedback
-                                .prepare_after(Duration::from_millis(16), move || {
-                                    show_feedback_details(
-                                        id,
-                                        &message,
-                                        outcome,
-                                        attempt + 1,
-                                        Some(revision),
-                                    )
-                                });
-                        }
-                    });
-                    return;
-                }
-            }
-            if outcome.is_some() {
-                let frame = crate::screen_interaction::window::premultiplied_snapshot(w.window());
-                if !(lifecycle.configure_capture_feedback)(w.window())
-                    || !frame.as_ref().is_ok_and(|pixels| {
-                        (lifecycle.annotation_frame_presenter)(
-                            w.window(),
-                            pixels.as_bytes(),
-                            pixels.width(),
-                            pixels.height(),
-                        )
-                    })
-                {
-                    clear_feedback(id, Some(revision));
-                    return;
-                }
-            }
-            let _ = w.show();
-            STATE.with(|s| {
-                if let Some(p) = s.borrow_mut().as_mut().and_then(|r| r.windows.get_mut(&id)) {
-                    p.feedback_timer.start(
-                        slint::TimerMode::SingleShot,
-                        Duration::from_secs(if outcome.is_some() { 3 } else { 4 }),
-                        move || clear_feedback(id, Some(revision)),
-                    );
-                }
-            });
+            };
+            let area = (lifecycle.popup_work_area)(origin);
+            crate::screen_interaction::toast::prepare(
+                &w,
+                crate::screen_interaction::toast::Placement::AtPin(origin, area),
+                move |ready| finish_feedback(id, revision, outcome.is_some(), ready),
+            );
         }
         PassiveWindowPreparation::Pending if attempt < 20 => {
             let message = message.to_string();
@@ -907,6 +815,59 @@ pub(crate) fn capture_idle() -> bool {
             })
         })
 }
+fn finish_feedback(id: u64, revision: u64, passive: bool, ready: bool) {
+    let context = STATE.with(|s| {
+        let s = s.borrow();
+        let r = s.as_ref()?;
+        let p = r.windows.get(&id)?;
+        if p.phase != Phase::Visible || p.feedback.revision() != revision {
+            return None;
+        }
+        Some((p.feedback.get()?.clone_strong(), r.lifecycle.clone()))
+    });
+    let Some((w, lifecycle)) = context else {
+        return;
+    };
+    if !ready {
+        clear_feedback(id, Some(revision));
+        return;
+    }
+    if passive {
+        let frame = crate::screen_interaction::window::premultiplied_snapshot(w.window());
+        if !(lifecycle.configure_capture_feedback)(w.window())
+            || !frame.as_ref().is_ok_and(|pixels| {
+                (lifecycle.annotation_frame_presenter)(
+                    w.window(),
+                    pixels.as_bytes(),
+                    pixels.width(),
+                    pixels.height(),
+                )
+            })
+        {
+            clear_feedback(id, Some(revision));
+            return;
+        }
+    }
+    if w.show().is_err() {
+        clear_feedback(id, Some(revision));
+        return;
+    }
+    STATE.with(|s| {
+        if let Some(p) = s
+            .borrow_mut()
+            .as_mut()
+            .and_then(|r| r.windows.get_mut(&id))
+            .filter(|p| p.feedback.revision() == revision)
+        {
+            p.feedback_timer.start(
+                slint::TimerMode::SingleShot,
+                Duration::from_secs(if passive { 3 } else { 4 }),
+                move || clear_feedback(id, Some(revision)),
+            );
+        }
+    });
+}
+
 pub(crate) fn active() -> bool {
     STATE.with(|s| s.borrow().as_ref().is_some_and(|s| !s.windows.is_empty()))
 }
@@ -1621,7 +1582,6 @@ fn show_from(
                 restore_interaction: None,
                 feedback: Slot::default(),
                 feedback_timer: slint::Timer::default(),
-                feedback_measurement: None,
             },
         );
         Ok(id)

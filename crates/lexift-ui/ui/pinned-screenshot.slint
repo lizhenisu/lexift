@@ -206,8 +206,10 @@ export component ScreenshotToastWindow inherits Window {
     in property <string> message; callback dismissed();
     out property <length> content-width:Metrics.toast-width;
     out property <length> content-height:toast.height;
+    out property <length> layout-width: root.width;
+    out property <length> layout-height: root.height;
     preferred-width:root.content-width; preferred-height:root.content-height;
     min-width:root.content-width; max-width:root.content-width;
     min-height:root.content-height; max-height:root.content-height;
-    toast := AppToast { width:parent.width; adaptive-height:true; height-limit:200px; error:root.error; dismissible:!root.passive; message:root.message; dismissed=>{root.dismissed();} }
+    toast := AppToast { width:root.content-width; adaptive-height:true; height-limit:200px; error:root.error; dismissible:!root.passive; message:root.message; dismissed=>{root.dismissed();} }
 }

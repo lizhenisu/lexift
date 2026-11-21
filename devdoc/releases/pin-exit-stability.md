@@ -32,3 +32,5 @@
 | `f2c1a88` Release | `94ab9c6e48c24c7fd04a43b9845ddf416df8f8d224ce14d30ca913f3fa785343` |
 | `0dec026` Release | `60748e26329a445a6f53e3d1cf2b9a42ddd668a2a62d7cdf1ef7cad823f7f6a9` |
 | 修复版 Release | `63d6be173075d7cabf32b0d904a50a69857ce94c2199d6b55d67ad344d88ac5e` |
+
+本记录中的渲染缓冲区断言另见[软件渲染稳定性验证](slint-software-buffer-stability.md)。

@@ -352,69 +352,69 @@ fn prepare_toast(revision: u64, area: lexift_core::domain::geometry::Rect, attem
     slint::Timer::single_shot(
         Duration::from_millis(if attempt == 0 { 0 } else { 16 }),
         move || {
-            let result = REGISTRY.with(|slot| {
-                let mut slot = slot.borrow_mut();
-                let r = slot.as_mut()?;
+            let context = REGISTRY.with(|slot| {
+                let slot = slot.borrow();
+                let r = slot.as_ref()?;
                 if r.toast.revision() != revision {
                     return None;
                 }
-                let w = r.toast.get()?;
-                match (r.prepare)(w.window()) {
-                    PassiveWindowPreparation::Ready => {
-                        for _ in 0..2 {
-                            w.window().set_size(slint::LogicalSize::new(
-                                w.get_content_width(),
-                                w.get_content_height(),
-                            ));
-                            let _ = w.window().take_snapshot();
-                        }
-                        let size = w.window().size();
-                        let dpi = w.window().scale_factor();
-                        w.window().set_position(slint::PhysicalPosition::new(
-                            area.left + ((area.right - area.left - size.width as i32) / 2).max(0),
-                            (area.bottom - size.height as i32 - (24. * dpi) as i32).max(area.top),
-                        ));
-                        if !(r.lifecycle.configure_hint_window)(w.window())
-                            || w.show().is_err()
-                            || !(r.lifecycle.configure_hint_window)(w.window())
-                        {
-                            return Some(false);
-                        }
-                        r.toast_timer.start(
-                            slint::TimerMode::SingleShot,
-                            Duration::from_secs(3),
-                            move || {
-                                REGISTRY.with(|slot| {
-                                    if let Some(r) = slot.borrow_mut().as_mut()
-                                        && r.toast.revision() == revision
-                                    {
-                                        r.toast.clear();
-                                    }
-                                });
-                                schedule_idle_memory_trim();
-                            },
-                        );
-                        Some(true)
-                    }
-                    PassiveWindowPreparation::Pending if attempt < 20 => {
-                        prepare_toast(revision, area, attempt + 1);
-                        None
-                    }
-                    _ => Some(false),
-                }
+                Some((
+                    r.toast.get()?.clone_strong(),
+                    r.prepare,
+                    r.lifecycle.clone(),
+                ))
             });
-            if result == Some(false) {
-                REGISTRY.with(|slot| {
-                    if let Some(r) = slot.borrow_mut().as_mut()
-                        && r.toast.revision() == revision
-                    {
-                        r.toast.clear();
-                    }
-                });
-                schedule_idle_memory_trim();
+            let Some((w, prepare, lifecycle)) = context else {
+                return;
+            };
+            match prepare(w.window()) {
+                PassiveWindowPreparation::Ready
+                    if (lifecycle.configure_hint_window)(w.window()) =>
+                {
+                    crate::screen_interaction::toast::prepare(
+                        &w,
+                        crate::screen_interaction::toast::Placement::BottomCenter(area),
+                        move |ready| finish_toast(revision, ready),
+                    );
+                }
+                PassiveWindowPreparation::Pending if attempt < 20 => {
+                    prepare_toast(revision, area, attempt + 1);
+                }
+                _ => finish_toast(revision, false),
             }
         },
     );
+}
+
+fn finish_toast(revision: u64, ready: bool) {
+    let context = REGISTRY.with(|slot| {
+        let slot = slot.borrow();
+        let r = slot.as_ref()?;
+        if r.toast.revision() != revision {
+            return None;
+        }
+        Some((r.toast.get()?.clone_strong(), r.lifecycle.clone()))
+    });
+    let Some((w, lifecycle)) = context else {
+        return;
+    };
+    let shown = ready && w.show().is_ok() && (lifecycle.configure_hint_window)(w.window());
+    REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(r) = slot.as_mut().filter(|r| r.toast.revision() == revision) else {
+            return;
+        };
+        if shown {
+            r.toast_timer.start(
+                slint::TimerMode::SingleShot,
+                Duration::from_secs(3),
+                move || finish_toast(revision, false),
+            );
+        } else {
+            r.toast.clear();
+            schedule_idle_memory_trim();
+        }
+    });
 }
 
 fn open(view: &lexift_core::domain::image_history::workflow::Window) {

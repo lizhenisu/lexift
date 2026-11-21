@@ -21,3 +21,5 @@
 - 脚本、合成夹具、原始日志、布局截图及构建哈希保存在忽略的 `target/pin-manager/`。
 
 退出异常的后续归因、修复及双屏复测见[贴图退出稳定性验证](pin-exit-stability.md)。
+
+Slint 软件渲染缓冲区断言的复现与修复见[软件渲染稳定性验证](slint-software-buffer-stability.md)。

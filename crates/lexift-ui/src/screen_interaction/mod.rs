@@ -3,6 +3,7 @@ pub(crate) mod pixel_picker;
 pub(crate) mod screenshot_help;
 pub(crate) mod selection;
 pub(crate) mod size_label;
+pub(crate) mod toast;
 pub(crate) mod window;
 use crate::{PassiveWindowPreparation, WindowLifecycleCallbacks};
 use lexift_core::{domain::geometry::Rect, ports::screen_capture::CapturedRegion};
