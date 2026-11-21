@@ -8,8 +8,10 @@ export component CaptureButton inherits Rectangle {
     in property <bool> enabled: true;
     in property <bool> selected: false;
     in property <bool> busy: false;
+    out property <bool> hovered: area.has-hover;
     private property <angle> busy-turn;
     Timer { interval: 80ms; running: root.busy; triggered => { root.busy-turn += 45deg; } }
+    callback press-started();
     callback clicked();
     width: Metrics.long-capture-button-size; height: Metrics.long-capture-button-size; border-radius: 6px;
     accessible-role: button; accessible-label: root.label; accessible-enabled: root.enabled;
@@ -19,7 +21,12 @@ export component CaptureButton inherits Rectangle {
         source: root.busy ? @image-url("assets/icons/refresh.svg") : root.icon;
         transform-rotation: root.busy ? root.busy-turn : 0deg;
         colorize: root.selected ? Colors.primary : root.enabled || root.busy ? Colors.foreground : Colors.outline; image-fit: contain; }
-    area := TouchArea { clicked => { if root.enabled { root.clicked(); } } }
+    area := TouchArea {
+        pointer-event(event) => {
+            if root.enabled && event.button == PointerEventButton.left && event.kind == PointerEventKind.down { root.press-started(); }
+        }
+        clicked => { if root.enabled { root.clicked(); } }
+    }
     AnnotationHintTarget { width: parent.width; height: parent.height; text: root.label; hovered: area.has-hover; pressed: area.pressed; }
 }
 export component CaptureSeparator inherits Rectangle {
@@ -37,7 +44,7 @@ export component LongCaptureControl inherits Window {
     measure-wide := Text { visible: false; text: "32000000 脳 1 px"; font-size: 12px; }
     measure-target := Text { visible: false; text: @tr("Focus content and move pointer inside"); font-size: 12px; }
     private property <length> status-width: max(measure-square.preferred-width, max(measure-wide.preferred-width, measure-target.preferred-width)) + 8px;
-    out property <length> content-width: root.status-width + 66px + (root.horizontal ? 9 : 10) * Metrics.long-capture-button-size;
+    out property <length> content-width: root.status-width + 66px + 10 * Metrics.long-capture-button-size;
     out property <length> content-height: Metrics.long-capture-control-height;
     in property <bool> ready;
     in property <bool> paused;
@@ -46,10 +53,18 @@ export component LongCaptureControl inherits Window {
     in property <string> dimensions;
     in property <bool> auto-waiting;
     in property <bool> auto-running;
+    in-out property <bool> auto-stop-hover;
+    private property <bool> auto-hovered: auto-button.hovered;
+    changed auto-hovered => { if !self.auto-hovered { self.auto-stop-hover = false; } }
+    public pure function auto-scroll-contains(x: length, y: length) -> bool {
+        return x >= auto-button.absolute-position.x && x < auto-button.absolute-position.x + auto-button.width
+            && y >= auto-button.absolute-position.y && y < auto-button.absolute-position.y + auto-button.height;
+    }
     in property <bool> trim-pending;
     in property <bool> horizontal;
     in property <bool> axis-enabled;
     callback axis-menu();
+    callback auto-scroll-pressed(bool);
     callback auto-scroll();
     callback trim-menu();
     callback quick-save-menu();
@@ -84,7 +99,14 @@ export component LongCaptureControl inherits Window {
                 CaptureSeparator {}
                 CaptureButton { icon: @image-url("assets/icons/crop.svg"); label: @tr("Crop image"); enabled: root.ready && !root.paused && !root.finishing && !root.frozen && !root.trim-pending; clicked => { keys.focus(); root.trim-menu(); } }
                 CaptureButton { icon: @image-url("assets/icons/capture-direction.svg"); label: @tr("Capture direction"); enabled: root.axis-enabled; clicked => { keys.focus(); root.axis-menu(); } }
-                if !root.horizontal: CaptureButton { icon: @image-url("assets/icons/capture-auto-scroll.svg"); label: root.auto-waiting || root.auto-running ? @tr("Stop automatic scrolling") : @tr("Automatic scrolling"); enabled: root.ready && !root.paused && !root.finishing && !root.frozen; selected: root.auto-waiting || root.auto-running; clicked => { root.auto-scroll(); } }
+                auto-button := CaptureButton {
+                    icon: @image-url("assets/icons/capture-auto-scroll.svg");
+                    label: self.selected ? @tr("Stop automatic scrolling") : @tr("Automatic scrolling");
+                    enabled: root.ready && !root.paused && !root.finishing && !root.frozen;
+                    selected: root.auto-waiting || root.auto-running || root.auto-stop-hover;
+                    press-started => { root.auto-scroll-pressed(!self.selected); }
+                    clicked => { root.auto-stop-hover = false; root.auto-scroll(); }
+                }
                 CaptureButton { icon: root.paused ? @image-url("assets/icons/capture-play.svg") : @image-url("assets/icons/capture-pause.svg"); label: root.paused ? @tr("Continue") : @tr("Pause"); enabled: root.ready && !root.finishing && !root.frozen; selected: root.paused; busy: !root.ready || root.finishing; clicked => { root.pause(); } }
                 CaptureButton { icon: @image-url("icons/credential-edit.svg"); label: @tr("Edit"); enabled: root.ready && !root.finishing; clicked => { root.finish(); } }
                 CaptureSeparator {}

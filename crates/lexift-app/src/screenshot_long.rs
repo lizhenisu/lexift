@@ -9,7 +9,13 @@ use std::time::{Duration, Instant};
 
 use lexift_core::{domain::geometry::Rect, ports::screen_capture::LongScrollTarget};
 
-type AutoControl = Mutex<auto_scroll::State>;
+#[derive(Clone, Copy, Default)]
+struct AutoAuthorization {
+    state: auto_scroll::State,
+    axis: Axis,
+}
+
+type AutoControl = Mutex<AutoAuthorization>;
 type AutoEvents<'a> = (&'a AutoControl, &'a dyn Fn(u64, Option<Stop>));
 type TrimQueue = Mutex<Option<(u64, Option<Trim>)>>;
 type TrimEvents<'a> = (&'a TrimQueue, &'a dyn Fn());
@@ -52,10 +58,13 @@ pub(super) fn sync(
     }) && let Some(j) = job.take()
     {
         let mut desired = j.auto.lock().unwrap();
-        *desired = auto_scroll::State::default();
+        *desired = AutoAuthorization::default();
         j.cancel.store(true, Ordering::Release);
     } else if let (Some(job), Some(long)) = (job.as_ref(), state.long.as_ref()) {
-        *job.auto.lock().unwrap() = long.auto_scroll;
+        *job.auto.lock().unwrap() = AutoAuthorization {
+            state: long.auto_scroll,
+            axis: long.axis,
+        };
         job.choosing_directory
             .store(state.quick_directory_pending, Ordering::Release);
     }
@@ -196,7 +205,7 @@ pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, 
                 axis: axis.clone(),
             }) {
                 let mut desired = old.auto.lock().unwrap();
-                *desired = auto_scroll::State::default();
+                *desired = AutoAuthorization::default();
                 old.cancel.store(true, Ordering::Release);
             }
             let factory = runtime.capture;
@@ -291,6 +300,7 @@ pub(super) fn execute(runtime: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, 
 
 struct AutoRun {
     generation: u64,
+    axis: Axis,
     started: Instant,
     anchor: Option<(LongScrollTarget, Instant)>,
     steps: Steps,
@@ -299,9 +309,10 @@ struct AutoRun {
 }
 
 impl AutoRun {
-    fn new(generation: u64) -> Self {
+    fn new(generation: u64, axis: Axis) -> Self {
         Self {
             generation,
+            axis,
             started: Instant::now(),
             anchor: None,
             steps: Steps::default(),
@@ -310,10 +321,15 @@ impl AutoRun {
         }
     }
 
+    fn settling(&self, aligned: bool) -> bool {
+        self.steps.settling(self.started.elapsed(), aligned)
+    }
+
     fn stop(&mut self, notify: &dyn Fn(u64, Option<Stop>), reason: Stop) {
         self.stopped = true;
         tracing::debug!(
             generation = self.generation,
+            axis = ?self.axis,
             ?reason,
             "Long capture automatic scroll stopped"
         );
@@ -365,10 +381,13 @@ impl AutoRun {
                 // Keep final authorization and wheel injection ordered with session retirement.
                 let result = {
                     let desired = control.lock().unwrap();
-                    if desired.generation != self.generation || desired.mode != Mode::Running {
+                    if desired.state.generation != self.generation
+                        || desired.state.mode != Mode::Running
+                        || desired.axis != self.axis
+                    {
                         return;
                     }
-                    port.long_scroll_step(bounds, target)
+                    port.long_scroll_step(bounds, target, self.axis)
                 };
                 match result {
                     Ok(()) => {
@@ -494,7 +513,14 @@ fn run(
             stats.flatten += started.elapsed();
             return result;
         }
-        if let Some((queue, notify, sizes)) = axis {
+        if let Some((queue, notify, sizes)) = axis
+            && !auto_run.as_ref().is_some_and(|run| {
+                run.settling(
+                    stitch.as_ref().is_some_and(Stitcher::at_tail)
+                        && matches!(last_feedback, Feedback::Accepted | Feedback::Unchanged),
+                )
+            })
+        {
             let request = queue.lock().unwrap().take();
             if let Some((request, expected, desired)) = request {
                 let started = Instant::now();
@@ -622,6 +648,7 @@ fn run(
                     {
                         tracing::debug!(
                             generation = run.generation,
+                            axis = ?run.axis,
                             step_ms = sent.elapsed().as_secs_f64() * 1000.,
                             elapsed_ms = run.started.elapsed().as_secs_f64() * 1000.,
                             "Long capture automatic scroll confirmed"
@@ -647,15 +674,12 @@ fn run(
         }
         let aligned = stitch.as_ref().is_some_and(Stitcher::at_tail)
             && matches!(last_feedback, Feedback::Accepted | Feedback::Unchanged);
+        let settling = auto_run.as_ref().is_some_and(|run| run.settling(aligned));
         if let Some((queue, ready)) = trim {
             if trim_request.is_none() {
                 trim_request = queue.lock().unwrap().take();
             }
-            if !auto_run
-                .as_ref()
-                .is_some_and(|run| run.steps.settling(run.started.elapsed(), aligned))
-                && let Some((expected, direction)) = trim_request.take()
-            {
+            if !settling && let Some((expected, direction)) = trim_request.take() {
                 let started = Instant::now();
                 if let Some(direction) = direction
                     && sequence == expected
@@ -686,24 +710,28 @@ fn run(
         }
         if let Some((control, notify)) = auto {
             let desired = *control.lock().unwrap();
-            if desired.mode == Mode::Manual {
-                if !auto_run
-                    .as_ref()
-                    .is_some_and(|run| run.steps.settling(run.started.elapsed(), aligned))
-                {
+            if desired.state.mode == Mode::Manual {
+                if !settling {
                     auto_run = None;
                 }
             } else if !paused.load(Ordering::Acquire)
                 && !finish.load(Ordering::Acquire)
                 && !cancel.load(Ordering::Acquire)
+                && stitch.as_ref().is_some_and(|s| s.axis() == desired.axis)
+                // A quick restart must leave the preceding wheel step time to settle.
+                && (!settling
+                    || auto_run.as_ref().is_some_and(|run| {
+                        run.generation == desired.state.generation && run.axis == desired.axis
+                    }))
             {
-                let run = auto_run.get_or_insert_with(|| AutoRun::new(desired.generation));
-                if run.generation != desired.generation {
-                    *run = AutoRun::new(desired.generation);
+                let run = auto_run
+                    .get_or_insert_with(|| AutoRun::new(desired.state.generation, desired.axis));
+                if run.generation != desired.state.generation || run.axis != desired.axis {
+                    *run = AutoRun::new(desired.state.generation, desired.axis);
                 }
                 run.tick(
                     (control, notify),
-                    desired.mode,
+                    desired.state.mode,
                     port.as_ref(),
                     bounds,
                     aligned,
@@ -878,7 +906,7 @@ mod tests {
     #[test]
     fn automatic_scroll_revalidates_authorization_before_injecting() {
         use lexift_core::{domain::geometry::Point, ports::magnifier::WindowToken};
-        struct Wheel(AtomicUsize, bool);
+        struct Wheel(Mutex<Vec<Axis>>, bool);
         impl ScreenCapturePort for Wheel {
             fn is_available(&self) -> bool {
                 true
@@ -896,21 +924,24 @@ mod tests {
             fn long_scroll_matches(&self, _: Rect, _: LongScrollTarget) -> bool {
                 true
             }
-            fn long_scroll_step(&self, _: Rect, _: LongScrollTarget) -> Result<()> {
-                self.0.fetch_add(1, Ordering::Relaxed);
+            fn long_scroll_step(&self, _: Rect, _: LongScrollTarget, axis: Axis) -> Result<()> {
+                self.0.lock().unwrap().push(axis);
                 if self.1 {
                     return Err(Error::new("fixture rejected input"));
                 }
                 Ok(())
             }
         }
-        let gate = AutoControl::new(auto_scroll::State {
-            generation: 2,
-            mode: Mode::Running,
-            reason: None,
+        let gate = AutoControl::new(AutoAuthorization {
+            state: auto_scroll::State {
+                generation: 2,
+                mode: Mode::Running,
+                reason: None,
+            },
+            axis: Axis::Horizontal,
         });
         let bounds = frame(0).bounds;
-        let mut run = AutoRun::new(1);
+        let mut run = AutoRun::new(1, Axis::Horizontal);
         run.anchor = Some((
             LongScrollTarget {
                 hit: WindowToken(10),
@@ -922,22 +953,32 @@ mod tests {
             },
             Instant::now(),
         ));
-        let wheel = Wheel(AtomicUsize::new(0), false);
+        let wheel = Wheel(Mutex::default(), false);
         let notify = |_, _| panic!("unexpected scroll event");
         run.tick((&gate, &notify), Mode::Running, &wheel, bounds, true);
-        assert_eq!(wheel.0.load(Ordering::Relaxed), 0);
+        assert!(wheel.0.lock().unwrap().is_empty());
         run.generation = 2;
+        run.axis = Axis::Vertical;
+        run.tick((&gate, &notify), Mode::Running, &wheel, bounds, true);
+        assert!(wheel.0.lock().unwrap().is_empty());
+        run.axis = Axis::Horizontal;
         run.tick((&gate, &notify), Mode::Running, &wheel, bounds, true);
         run.tick((&gate, &notify), Mode::Running, &wheel, bounds, true);
-        assert_eq!(wheel.0.load(Ordering::Relaxed), 1);
+        assert_eq!(*wheel.0.lock().unwrap(), [Axis::Horizontal]);
 
+        gate.lock().unwrap().state.mode = Mode::Manual;
         run.steps = Steps::default();
-        let rejected = Wheel(AtomicUsize::new(0), true);
+        run.tick((&gate, &notify), Mode::Running, &wheel, bounds, true);
+        assert_eq!(*wheel.0.lock().unwrap(), [Axis::Horizontal]);
+
+        gate.lock().unwrap().state.mode = Mode::Running;
+        run.steps = Steps::default();
+        let rejected = Wheel(Mutex::default(), true);
         let events = Mutex::new(Vec::new());
         let notify = |generation, reason| events.lock().unwrap().push((generation, reason));
         run.tick((&gate, &notify), Mode::Running, &rejected, bounds, true);
         run.tick((&gate, &notify), Mode::Running, &rejected, bounds, true);
-        assert_eq!(rejected.0.load(Ordering::Relaxed), 1);
+        assert_eq!(*rejected.0.lock().unwrap(), [Axis::Horizontal]);
         assert_eq!(
             *events.lock().unwrap(),
             vec![(2, Some(Stop::InputUnavailable))]

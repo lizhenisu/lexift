@@ -1,5 +1,9 @@
 //! Asynchronous, clean desktop pixels for live annotation effects.
-use crate::{Result, domain::geometry::Rect, ports::magnifier::WindowToken};
+use crate::{
+    Result,
+    domain::{geometry::Rect, long_capture::Axis},
+    ports::magnifier::WindowToken,
+};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -157,8 +161,13 @@ pub trait ScreenCapturePort: Send + Sync {
         false
     }
 
-    /// Revalidate the target and issue one downward wheel detent.
-    fn long_scroll_step(&self, _bounds: Rect, _target: LongScrollTarget) -> Result<()> {
+    /// Revalidate the target and issue one wheel detent toward the capture tail.
+    fn long_scroll_step(
+        &self,
+        _bounds: Rect,
+        _target: LongScrollTarget,
+        _axis: Axis,
+    ) -> Result<()> {
         Err(crate::Error::new("Automatic scrolling is unavailable"))
     }
     fn is_available(&self) -> bool;

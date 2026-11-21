@@ -45,7 +45,7 @@ pub enum Next {
     Stop(Stop),
 }
 
-/// A step starts only after its predecessor has appended rows and settled.
+/// A step starts only after its predecessor has appended content and settled.
 #[derive(Default)]
 pub struct Steps {
     sent: Option<Duration>,
@@ -116,14 +116,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn waits_for_accepted_rows_and_settling_then_times_out_on_duplicates() {
+    fn waits_for_accepted_content_and_settling_then_times_out_on_duplicates() {
         let ms = Duration::from_millis;
         let mut steps = Steps::default();
         assert_eq!(steps.next(ms(0), false), Next::Stop(Stop::Uncertain));
         assert_eq!(steps.next(ms(0), true), Next::Scroll);
         steps.sent(ms(0));
         steps.frame(Feedback::Unchanged, ms(50));
-        assert_eq!(steps.next(ms(250), true), Next::Wait);
+        steps.frame(Feedback::Located, ms(200));
+        assert_eq!(steps.next(ms(250), false), Next::Wait);
+        steps.frame(Feedback::Unchanged, ms(260));
+        assert_eq!(steps.next(ms(270), true), Next::Wait);
         steps.frame(Feedback::Accepted, ms(300));
         steps.frame(Feedback::Accepted, ms(400));
         assert_eq!(steps.next(ms(579), true), Next::Wait);

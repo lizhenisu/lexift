@@ -880,10 +880,29 @@ fn open_control(session: u64, operation: u64, bounds: Rect) {
                 }
             });
         });
+        let auto_request = std::rc::Rc::new(std::cell::Cell::new(None));
+        let pressed = auto_request.clone();
+        w.on_auto_scroll_pressed(move |active| {
+            // A target loss can update the button before the queued click is handled.
+            let request = FLOW.with(|flow| {
+                let flow = flow.borrow();
+                let long = flow.state.long.as_ref()?;
+                Some(Event::SetAutoScroll {
+                    session,
+                    operation,
+                    generation: long.auto_scroll.generation,
+                    active,
+                })
+            });
+            pressed.set(request);
+        });
         w.on_auto_scroll(move || {
+            let Some(request) = auto_request.take() else {
+                return;
+            };
             work.post(move || {
                 if current(session, operation, rev) {
-                    send(Event::ToggleAutoScroll { session, operation });
+                    send(request);
                 }
             })
         });
@@ -1308,28 +1327,7 @@ pub(in crate::annotation) fn sync() {
             return;
         }
         w.set_ready(l.sequence > 0);
-        let horizontal = l.axis == lexift_core::domain::long_capture::Axis::Horizontal;
-        if w.get_horizontal() != horizontal {
-            w.set_horizontal(horizontal);
-            let scale = w.window().scale_factor();
-            let area = v.area;
-            let width = (w.get_content_width() * scale).ceil() as i32;
-            let height = w.window().size().height;
-            let pos = w.window().position();
-            if pos.x >= area.left && pos.x < area.right && pos.y >= area.top && pos.y < area.bottom
-            {
-                let width = width.min(area.right - area.left);
-                w.window()
-                    .set_size(slint::PhysicalSize::new(width as u32, height));
-                w.window().set_position(slint::PhysicalPosition::new(
-                    pos.x.min(area.right - width),
-                    pos.y,
-                ));
-            } else {
-                w.window()
-                    .set_size(slint::PhysicalSize::new(width as u32, height));
-            }
-        }
+        w.set_horizontal(l.axis == lexift_core::domain::long_capture::Axis::Horizontal);
         w.set_axis_enabled(
             l.phase == Phase::Capturing
                 && l.sequence != 0
@@ -1339,6 +1337,24 @@ pub(in crate::annotation) fn sync() {
                 && l.auto_scroll.mode == Mode::Manual
                 && !state.quick_directory_pending,
         );
+        if l.phase != Phase::Capturing || l.auto_scroll.mode != Mode::Manual {
+            w.set_auto_stop_hover(false);
+        } else if l.auto_scroll.reason == Some(Stop::TargetChanged)
+            && (w.get_auto_waiting() || w.get_auto_running())
+        {
+            // Win32 updates the cursor before dispatching the button press. Keep the stop
+            // affordance if target loss arrived while the pointer was landing on it.
+            let cursor =
+                REGISTRY.with(|r| (r.borrow().as_ref()?.lifecycle.toolbar_cursor_position)());
+            if let Some(cursor) = cursor {
+                let origin = w.window().position();
+                let dpi = w.window().scale_factor();
+                w.set_auto_stop_hover(w.invoke_auto_scroll_contains(
+                    (cursor.x - origin.x) as f32 / dpi,
+                    (cursor.y - origin.y) as f32 / dpi,
+                ));
+            }
+        }
         w.set_auto_waiting(l.auto_scroll.mode == Mode::Waiting);
         w.set_auto_running(l.auto_scroll.mode == Mode::Running);
         w.set_paused(l.phase == Phase::Paused);
@@ -2458,13 +2474,21 @@ mod tests {
                     w.set_axis_enabled(true);
                     w.set_dimensions("2400 × 600 px".into());
                     let horizontal_width = w.get_content_width();
-                    assert!(horizontal_width < fixed_width);
+                    assert_eq!(horizontal_width, fixed_width);
                     draw(
                         &adapter,
                         format!("horizontal-control-{}-{dark}-{scale}", language.code()),
                         (horizontal_width * scale) as u32,
                         (40. * scale) as u32,
                     );
+                    w.set_auto_waiting(true);
+                    draw(
+                        &adapter,
+                        format!("horizontal-waiting-{}-{dark}-{scale}", language.code()),
+                        (fixed_width * scale) as u32,
+                        (40. * scale) as u32,
+                    );
+                    w.set_auto_waiting(false);
                     w.set_horizontal(false);
                     w.set_axis_enabled(false);
                     w.set_dimensions("600 × 2400 px".into());
@@ -2537,6 +2561,42 @@ mod tests {
                 }
             }
         }
+
+        w.set_horizontal(true);
+        w.set_auto_running(true);
+        let intent = Rc::new(std::cell::Cell::new(None));
+        let observed = intent.clone();
+        w.on_auto_scroll_pressed(move |active| observed.set(Some(active)));
+        let clicks = Rc::new(std::cell::Cell::new(0));
+        let observed = clicks.clone();
+        w.on_auto_scroll(move || observed.set(observed.get() + 1));
+        let position = slint::LogicalPosition::new(w.get_content_width() - 270., 20.);
+        w.window().dispatch_event(WindowEvent::PointerPressed {
+            position,
+            button: PointerEventButton::Left,
+        });
+        assert_eq!(intent.get(), Some(false));
+        w.set_auto_running(false);
+        w.window().dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
+        assert_eq!(intent.get(), Some(false));
+        assert_eq!(clicks.get(), 1);
+
+        assert!(w.invoke_auto_scroll_contains(position.x, position.y));
+        w.set_auto_stop_hover(true);
+        w.window().dispatch_event(WindowEvent::PointerPressed {
+            position,
+            button: PointerEventButton::Left,
+        });
+        assert_eq!(intent.get(), Some(false));
+        w.window().dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
+        assert!(!w.get_auto_stop_hover());
+        assert_eq!(clicks.get(), 2);
     }
     #[test]
     fn controls_never_overlap_capture_even_at_edges() {

@@ -62,9 +62,11 @@ pub enum Event {
         feedback: Feedback,
         preview: Preview,
     },
-    ToggleAutoScroll {
+    SetAutoScroll {
         session: u64,
         operation: u64,
+        generation: u64,
+        active: bool,
     },
     ChangeAxis {
         session: u64,
@@ -233,7 +235,9 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
         | Event::Progress {
             session, operation, ..
         }
-        | Event::ToggleAutoScroll { session, operation }
+        | Event::SetAutoScroll {
+            session, operation, ..
+        }
         | Event::ChangeAxis {
             session, operation, ..
         }
@@ -278,7 +282,7 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
             Event::Finish { .. }
                 | Event::Trim { .. }
                 | Event::ChangeAxis { .. }
-                | Event::ToggleAutoScroll { .. }
+                | Event::SetAutoScroll { .. }
                 | Event::Cancel { .. }
         )
     {
@@ -359,13 +363,16 @@ pub(crate) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<ScreenshotCom
             l.trim_pending = false;
             vec![]
         }
-        Event::ToggleAutoScroll { .. }
-            if l.phase == Phase::Capturing
-                && !l.trim_pending
-                && l.axis_pending.is_none()
-                && l.axis == Axis::Vertical =>
+        Event::SetAutoScroll {
+            generation, active, ..
+        } if l.phase == Phase::Capturing
+            && l.sequence != 0
+            && !l.trim_pending
+            && l.axis_pending.is_none()
+            && generation == l.auto_scroll.generation
+            && active == (l.auto_scroll.mode == Mode::Manual) =>
         {
-            if l.auto_scroll.mode == Mode::Manual {
+            if active {
                 l.auto_scroll.generation += 1;
                 l.auto_scroll.mode = Mode::Waiting;
                 l.auto_scroll.reason = None;
@@ -613,9 +620,11 @@ mod tests {
         assert!(
             reduce(
                 &mut s,
-                Event::ToggleAutoScroll {
+                Event::SetAutoScroll {
                     session: 9,
-                    operation
+                    operation,
+                    generation: 0,
+                    active: true,
                 }
             )
             .is_empty()
@@ -633,20 +642,36 @@ mod tests {
     fn automatic_scroll_is_owned_by_one_capture_and_one_start() {
         let mut state = screenshot();
         let operation = start(&mut state);
-        let toggle = Event::ToggleAutoScroll {
+        let set_auto = |generation, active| Event::SetAutoScroll {
             session: 9,
             operation,
+            generation,
+            active,
         };
-        reduce(&mut state, toggle.clone());
+        reduce(&mut state, set_auto(0, true));
         assert_eq!(state.long.as_ref().unwrap().auto_scroll.mode, Mode::Manual);
-        state.long.as_mut().unwrap().phase = Phase::Capturing;
-        reduce(&mut state, toggle.clone());
+        let long = state.long.as_mut().unwrap();
+        long.phase = Phase::Capturing;
+        long.sequence = 1;
+        reduce(&mut state, set_auto(0, true));
         let first = state.long.as_ref().unwrap().auto_scroll.generation;
         assert_eq!(state.long.as_ref().unwrap().auto_scroll.mode, Mode::Waiting);
-        reduce(&mut state, toggle.clone());
-        reduce(&mut state, toggle);
+        // Native target loss can stop the run before the UI click is delivered.
+        reduce(
+            &mut state,
+            Event::AutoScrollStopped {
+                session: 9,
+                operation,
+                generation: first,
+                reason: Stop::TargetChanged,
+            },
+        );
+        reduce(&mut state, set_auto(first, false));
+        assert_eq!(state.long.as_ref().unwrap().auto_scroll.mode, Mode::Manual);
+        reduce(&mut state, set_auto(first, true));
         let next = state.long.as_ref().unwrap().auto_scroll.generation;
         assert_ne!(first, next);
+        reduce(&mut state, set_auto(first, false));
         let started = |generation| Event::AutoScrollStarted {
             session: 9,
             operation,
@@ -683,6 +708,59 @@ mod tests {
         );
         reduce(&mut state, started(next));
         assert!(state.long.is_none());
+    }
+
+    #[test]
+    fn horizontal_scroll_waits_for_confirmed_axis_and_blocks_axis_changes_until_stopped() {
+        let mut state = screenshot();
+        let operation = start(&mut state);
+        let long = state.long.as_mut().unwrap();
+        long.phase = Phase::Capturing;
+        long.sequence = 1;
+
+        let change_axis = |sequence, axis| Event::ChangeAxis {
+            session: 9,
+            operation,
+            sequence,
+            axis,
+        };
+        let set_auto = |generation, active| Event::SetAutoScroll {
+            session: 9,
+            operation,
+            generation,
+            active,
+        };
+        reduce(&mut state, change_axis(1, Axis::Horizontal));
+        reduce(&mut state, set_auto(0, true));
+        assert_eq!(state.long.as_ref().unwrap().auto_scroll.mode, Mode::Manual);
+        reduce(
+            &mut state,
+            Event::AxisChanged {
+                session: 9,
+                operation,
+                request: 1,
+                sequence: 2,
+                axis: Axis::Horizontal,
+                preview: Some(preview()),
+            },
+        );
+        reduce(&mut state, set_auto(0, true));
+        let long = state.long.as_ref().unwrap();
+        assert_eq!(long.axis, Axis::Horizontal);
+        assert_eq!(long.auto_scroll.mode, Mode::Waiting);
+        let generation = long.auto_scroll.generation;
+        let started = Event::AutoScrollStarted {
+            session: 9,
+            operation,
+            generation,
+        };
+        reduce(&mut state, started.clone());
+        assert_eq!(state.long.as_ref().unwrap().auto_scroll.mode, Mode::Running);
+        assert!(reduce(&mut state, change_axis(2, Axis::Vertical)).is_empty());
+        reduce(&mut state, set_auto(generation, false));
+        assert!(!reduce(&mut state, change_axis(2, Axis::Vertical)).is_empty());
+        reduce(&mut state, started);
+        assert_eq!(state.long.as_ref().unwrap().auto_scroll.mode, Mode::Manual);
     }
 
     #[test]

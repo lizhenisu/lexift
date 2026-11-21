@@ -167,8 +167,9 @@ impl ScreenCapturePort for WindowsScreenCapturePort {
         &self,
         bounds: lexift_core::domain::geometry::Rect,
         target: lexift_core::ports::screen_capture::LongScrollTarget,
+        axis: lexift_core::domain::long_capture::Axis,
     ) -> Result<()> {
-        long_scroll::step(bounds, target)
+        long_scroll::step(bounds, target, axis)
     }
 
     fn query_screenshot_elements(
