@@ -201,6 +201,15 @@ impl Encoder {
         Ok(statistics.qwNumSamplesEncoded)
     }
     pub fn write_audio(&self, samples: &[[f32; 2]], first_frame: u64) -> Result<()> {
+        self.write_audio_with_gain(samples, first_frame, 1.0)
+    }
+
+    pub(super) fn write_audio_with_gain(
+        &self,
+        samples: &[[f32; 2]],
+        first_frame: u64,
+        gain: f32,
+    ) -> Result<()> {
         use lexift_core::domain::recording_audio::{MAX_QUEUE_FRAMES, sample_time};
         let stream = self
             .audio
@@ -223,7 +232,7 @@ impl Encoder {
             buffer.Lock(&mut data, None, None)?;
             for (i, value) in samples.iter().flatten().enumerate() {
                 let value = if value.is_finite() {
-                    (*value * 32768.).round().clamp(-32768., 32767.) as i16
+                    (*value * gain * 32768.).round().clamp(-32768., 32767.) as i16
                 } else {
                     0
                 };

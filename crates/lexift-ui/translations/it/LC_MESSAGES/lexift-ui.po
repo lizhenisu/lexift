@@ -2579,3 +2579,24 @@ msgstr "Velocità di riproduzione"
 
 msgid "Could not change playback speed"
 msgstr "Impossibile modificare la velocità di riproduzione"
+
+msgid "Export audio"
+msgstr "Audio esportato"
+
+msgid "Original sound"
+msgstr "Audio originale"
+
+msgid "50% volume"
+msgstr "Volume al 50%"
+
+msgid "Remove audio track"
+msgstr "Rimuovi traccia audio"
+
+msgid "No audio track"
+msgstr "Nessuna traccia audio"
+
+msgid "Could not change export audio"
+msgstr "Impossibile modificare l’audio esportato"
+
+msgid "Changing MP4 audio re-encodes the video."
+msgstr "Modificare l’audio MP4 ricodifica il video."

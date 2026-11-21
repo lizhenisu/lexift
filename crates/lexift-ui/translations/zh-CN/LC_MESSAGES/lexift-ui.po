@@ -2579,3 +2579,24 @@ msgstr "播放速度"
 
 msgid "Could not change playback speed"
 msgstr "无法更改播放速度"
+
+msgid "Export audio"
+msgstr "成品声音"
+
+msgid "Original sound"
+msgstr "原声"
+
+msgid "50% volume"
+msgstr "50% 音量"
+
+msgid "Remove audio track"
+msgstr "移除音轨"
+
+msgid "No audio track"
+msgstr "无音轨"
+
+msgid "Could not change export audio"
+msgstr "无法更改成品声音"
+
+msgid "Changing MP4 audio re-encodes the video."
+msgstr "调整 MP4 声音会重新编码画面。"

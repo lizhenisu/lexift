@@ -185,6 +185,7 @@
 - [录屏首尾裁剪验证](releases/recording-trim.md)
 - [录屏画面裁剪验证](releases/recording-frame-crop.md)
 - [录屏成品变速验证](releases/recording-speed.md)
+- [录屏成品声音验证](releases/recording-export-audio.md)
 - [录屏 GIF 导出验证](releases/recording-gif-export.md)
 - [录屏全局快捷键](features/recording-hotkeys.md)
 - [录屏快捷键验证](releases/recording-hotkeys.md)

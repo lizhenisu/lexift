@@ -149,9 +149,7 @@ pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, comman
                 c,
                 Event::PreviewNotice {
                     identity: command.identity,
-                    notice: lexift_core::domain::recording_preview::Notice::Failed(
-                        error.to_string(),
-                    ),
+                    notice: command.dispatch_failure(error.to_string()),
                 },
             );
         }
@@ -469,6 +467,7 @@ mod trim_tests {
             range: None,
             range_version: 0,
             speed: Default::default(),
+            export_audio: Default::default(),
             frame_crop: None,
             owner: None,
             default_name: "owned".into(),

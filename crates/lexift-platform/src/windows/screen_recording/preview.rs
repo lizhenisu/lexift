@@ -3,8 +3,8 @@ mod blit;
 mod engine;
 mod surface;
 mod worker;
-pub(super) use worker::Worker;
 pub(crate) use worker::position;
+pub(super) use worker::{PlaybackSettings, Worker};
 #[cfg(test)]
 mod audio_test;
 #[cfg(test)]

@@ -454,7 +454,8 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
             if request.identity == recording.lifecycle.identity
                 && recording.lifecycle.phase == lifecycle::Phase::PendingSave
                 && recording.preview.as_ref().is_none_or(|p| {
-                    p.speed_pending.is_none()
+                    !p.export_audio_pending()
+                        && p.speed_pending.is_none()
                         && matches!(
                             p.phase,
                             preview::Phase::Paused
@@ -486,6 +487,10 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
                 .preview
                 .as_ref()
                 .map_or_else(Default::default, |p| p.speed);
+            request.export_audio = recording
+                .preview
+                .as_ref()
+                .map_or_else(Default::default, |p| p.export_audio);
             request.gif_plan =
                 recording
                     .artifact
@@ -964,6 +969,17 @@ mod tests {
         running(&mut s);
         assert!(!s.screenshot.editable());
         frozen(&mut s);
+        use crate::domain::recording_trim::ExportAudio;
+        let preview = s
+            .screenshot
+            .recording
+            .as_mut()
+            .unwrap()
+            .preview
+            .as_mut()
+            .unwrap();
+        preview.export_audio = ExportAudio::HalfVolume;
+        preview.muted = true;
         for outcome in [
             lifecycle::Event::SaveCancelled,
             lifecycle::Event::SaveFailed,
@@ -977,6 +993,7 @@ mod tests {
                 range: None,
                 range_version: 0,
                 speed: Default::default(),
+                export_audio: Default::default(),
                 frame_crop: None,
                 identity: id(&s),
                 artifact: lifecycle::Artifact(9),
@@ -987,7 +1004,8 @@ mod tests {
             };
             assert!(matches!(
                 &emit(&mut s, Event::Save(request))[0],
-                AppCommand::Screenshot(ScreenshotCommand::Recording(Command::Save(_)))
+                AppCommand::Screenshot(ScreenshotCommand::Recording(Command::Save(r)))
+                    if r.export_audio == ExportAudio::HalfVolume
             ));
             input(&mut s, outcome);
         }

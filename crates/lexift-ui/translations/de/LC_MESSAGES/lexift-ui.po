@@ -2579,3 +2579,24 @@ msgstr "Wiedergabegeschwindigkeit"
 
 msgid "Could not change playback speed"
 msgstr "Wiedergabegeschwindigkeit konnte nicht geändert werden"
+
+msgid "Export audio"
+msgstr "Ausgabeton"
+
+msgid "Original sound"
+msgstr "Originalton"
+
+msgid "50% volume"
+msgstr "50 % Lautstärke"
+
+msgid "Remove audio track"
+msgstr "Tonspur entfernen"
+
+msgid "No audio track"
+msgstr "Keine Tonspur"
+
+msgid "Could not change export audio"
+msgstr "Ausgabeton konnte nicht geändert werden"
+
+msgid "Changing MP4 audio re-encodes the video."
+msgstr "Beim Ändern des MP4-Tons wird das Video neu kodiert."

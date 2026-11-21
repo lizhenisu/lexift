@@ -1,5 +1,5 @@
 //! Playback belongs to a sealed recording, with its own command generation.
-use super::recording_trim::{FrameCrop, Range, Speed};
+use super::recording_trim::{ExportAudio, FrameCrop, Range, Speed};
 use super::{
     geometry::Rect,
     screen_recording::{Artifact, Identity as RecordingIdentity},
@@ -52,6 +52,7 @@ pub enum Input {
     Seek(Duration),
     Mute,
     SetSpeed(Speed),
+    SetExportAudio(ExportAudio),
     Save,
     Close,
     Retry,
@@ -68,6 +69,10 @@ pub enum Notice {
     Visible,
     FrameCropPresented(bool),
     SpeedConfigured(bool),
+    ExportAudioConfigured {
+        request: u64,
+        success: bool,
+    },
     Paused,
     Ended,
     Failed(String),
@@ -84,6 +89,7 @@ pub enum Action {
         crop: Option<FrameCrop>,
         speed: Speed,
         muted: bool,
+        audio: ExportAudio,
     },
     Play,
     Pause,
@@ -97,6 +103,10 @@ pub enum Action {
     SetFrameCrop(Option<FrameCrop>),
     CropGuide(Option<FrameCrop>),
     Mute(bool),
+    SetExportAudio {
+        request: u64,
+        mode: ExportAudio,
+    },
     SetSpeed(Speed),
     Close,
     Handoff,
@@ -110,6 +120,17 @@ pub enum Action {
 pub struct Command {
     pub identity: Identity,
     pub action: Action,
+}
+impl Command {
+    pub fn dispatch_failure(self, message: String) -> Notice {
+        match self.action {
+            Action::SetExportAudio { request, .. } => Notice::ExportAudioConfigured {
+                request,
+                success: false,
+            },
+            _ => Notice::Failed(message),
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct State {
@@ -131,6 +152,10 @@ pub struct State {
     pub speed: Speed,
     pub speed_pending: Option<Speed>,
     pub speed_error: bool,
+    pub export_audio: ExportAudio,
+    pub export_audio_error: bool,
+    audio_request: u64,
+    audio_pending: Option<(u64, ExportAudio)>,
     pub error: Option<String>,
     pub presented: bool,
     pub visible: bool,
@@ -173,6 +198,10 @@ impl State {
             speed: Speed::Normal,
             speed_pending: None,
             speed_error: false,
+            export_audio: ExportAudio::Original,
+            export_audio_error: false,
+            audio_request: 0,
+            audio_pending: None,
             error: None,
             presented: false,
             visible: false,
@@ -186,9 +215,18 @@ impl State {
         self.visible
             && self.intent.is_none()
             && self.speed_pending.is_none()
+            && !self.export_audio_pending()
             && !self.frame_crop_editing
             && self.frame_crop_pending.is_none()
             && matches!(self.phase, Phase::Paused | Phase::Playing | Phase::Ended)
+    }
+
+    pub fn can_set_export_audio(&self) -> bool {
+        self.has_audio && self.can_set_speed()
+    }
+
+    pub fn export_audio_pending(&self) -> bool {
+        self.audio_pending.is_some()
     }
 
     pub fn configure(&mut self, frames: u64, fps: u32) {
@@ -227,11 +265,21 @@ impl State {
             return None;
         }
         if self.frame_crop_pending.is_some()
-            || self.speed_pending.is_some() && !matches!(input, Input::Failed(_))
+            || (self.speed_pending.is_some() || self.export_audio_pending())
+                && !matches!(input, Input::Failed(_))
         {
             return None;
         }
         match input {
+            Input::SetExportAudio(mode)
+                if self.can_set_export_audio() && self.export_audio != mode =>
+            {
+                self.audio_request += 1;
+                let request = self.audio_request;
+                self.audio_pending = Some((request, mode));
+                self.export_audio_error = false;
+                Some(self.command(Action::SetExportAudio { request, mode }))
+            }
             Input::SetSpeed(speed) if self.can_set_speed() && self.speed != speed => {
                 if self.phase != Phase::Ended {
                     self.phase = Phase::Paused;
@@ -280,6 +328,7 @@ impl State {
                 crop: self.frame_crop,
                 speed: self.speed,
                 muted: self.muted,
+                audio: self.export_audio,
             }),
             Input::PlayPause
                 if self.intent.is_none() && matches!(self.phase, Phase::Paused | Phase::Ended) =>
@@ -428,9 +477,11 @@ impl State {
                 self.resume = false;
                 self.presented = false;
                 self.speed_error = false;
+                self.export_audio_error = false;
                 Some(self.command(Action::PrepareView))
             }
             Input::Failed(error) => {
+                self.audio_pending = None;
                 self.speed_pending = None;
                 self.frame_crop_pending = None;
                 self.frame_crop_editing = false;
@@ -447,6 +498,19 @@ impl State {
             return None;
         }
         match notice {
+            Notice::ExportAudioConfigured { request, success } => {
+                if let Some((pending, mode)) = self.audio_pending
+                    && pending == request
+                {
+                    self.audio_pending = None;
+                    self.export_audio_error = !success;
+                    if success {
+                        self.export_audio = mode;
+                        self.range_version += 1;
+                    }
+                }
+                None
+            }
             Notice::SpeedConfigured(success) => {
                 if let Some(speed) = self.speed_pending.take() {
                     self.speed_error = !success;
@@ -542,6 +606,7 @@ impl State {
                 None
             }
             Notice::Failed(error) if self.phase != Phase::Retiring => {
+                self.audio_pending = None;
                 self.speed_pending = None;
                 self.frame_crop_pending = None;
                 self.frame_crop_editing = false;
@@ -593,6 +658,98 @@ mod tests {
             Artifact(4),
         )
     }
+    #[test]
+    fn export_audio_confirmation_is_independent_of_playback_and_mute() {
+        let mut s = state();
+        s.configure(120, 30);
+        s.position = Range::time(12, 30);
+        s.phase = Phase::Playing;
+        s.visible = true;
+        s.muted = true;
+        let mode = ExportAudio::HalfVolume;
+        assert_eq!(s.export_audio, ExportAudio::Original);
+        assert!(s.input(s.identity, Input::SetExportAudio(mode)).is_none());
+        s.has_audio = true;
+        let identity = s.identity;
+        let change = s.input(identity, Input::SetExportAudio(mode)).unwrap();
+        let Action::SetExportAudio { request, .. } = change.action else {
+            panic!("expected audio command");
+        };
+        assert_eq!(change.identity, identity);
+        assert_eq!(s.phase, Phase::Playing);
+        assert!(s.input(identity, Input::Save).is_none());
+        assert!(s.input(identity, Input::BeginSeek).is_none());
+        s.notice(
+            identity,
+            Notice::ExportAudioConfigured {
+                request: request + 1,
+                success: true,
+            },
+        );
+        assert!(s.export_audio_pending());
+        let stale = Identity {
+            instance: identity.instance + 1,
+            ..identity
+        };
+        s.notice(
+            stale,
+            Notice::ExportAudioConfigured {
+                request,
+                success: true,
+            },
+        );
+        assert_eq!(s.export_audio, ExportAudio::Original);
+        s.notice(
+            identity,
+            change.dispatch_failure("test dispatch error".into()),
+        );
+        assert!(s.export_audio_error);
+        assert!(!s.export_audio_pending());
+        assert_eq!(s.phase, Phase::Playing);
+        s.input(identity, Input::SetExportAudio(mode)).unwrap();
+        s.notice(
+            identity,
+            Notice::ExportAudioConfigured {
+                request,
+                success: true,
+            },
+        );
+        assert!(s.export_audio_pending());
+        s.notice(
+            identity,
+            Notice::ExportAudioConfigured {
+                request: request + 1,
+                success: true,
+            },
+        );
+        assert_eq!(s.export_audio, mode);
+        assert_eq!(s.range_version, 1);
+        assert_eq!(s.position, Range::time(12, 30));
+        assert_eq!(s.phase, Phase::Playing);
+        assert!(s.muted);
+        assert!(!s.export_audio_error);
+
+        s.input(identity, Input::Failed("test player failure".into()));
+        s.input(identity, Input::Retry).unwrap();
+        let open = s
+            .input(
+                s.identity,
+                Input::Target(Target {
+                    window: WindowToken(10),
+                    bounds: Rect::default(),
+                }),
+            )
+            .unwrap();
+        assert!(matches!(
+            open.action,
+            Action::Open {
+                muted: true,
+                audio: ExportAudio::HalfVolume,
+                ..
+            }
+        ));
+    }
+
     #[test]
     fn speed_waits_for_the_owned_confirmation_and_preserves_edit_state() {
         let mut s = state();

@@ -130,6 +130,7 @@ pub struct SaveRequest {
     pub range: Option<crate::domain::recording_trim::Range>,
     pub range_version: u64,
     pub speed: crate::domain::recording_trim::Speed,
+    pub export_audio: crate::domain::recording_trim::ExportAudio,
     pub frame_crop: Option<crate::domain::recording_trim::FrameCrop>,
     pub identity: Identity,
     pub artifact: Artifact,

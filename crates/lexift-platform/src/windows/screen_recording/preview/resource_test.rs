@@ -328,7 +328,13 @@ fn native_trim_playback_gate() {
         },
         file,
         Range::time(frames - 1, fps),
-        (Some((range, fps)), None, Default::default(), false),
+        super::PlaybackSettings {
+            range: Some((range, fps)),
+            crop: None,
+            speed: Default::default(),
+            muted: false,
+            audio: Default::default(),
+        },
         Arc::new(move |id, n| {
             let _ = tx.send((id, n));
         }),
@@ -492,6 +498,39 @@ fn native_trim_playback_gate() {
             assert!(Instant::now() < deadline, "speed not confirmed: {notice:?}");
         }
         id.request += 1;
+        use lexift_core::domain::recording_trim::ExportAudio;
+        let audio = match std::env::var("LEXIFT_PREVIEW_EXPORT_AUDIO").as_deref() {
+            Ok("half") => Some(ExportAudio::HalfVolume),
+            Ok("remove") => Some(ExportAudio::RemoveTrack),
+            _ => None,
+        };
+        if let Some(mode) = audio {
+            // The native command shares the current playback identity. The
+            // independent policy request is the only identifier it echoes.
+            worker
+                .control(Command {
+                    identity: id,
+                    action: Action::SetExportAudio { request: 90, mode },
+                })
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let (reply, notice) = rx.recv_timeout(Duration::from_millis(250)).unwrap();
+                if reply == id
+                    && notice
+                        == (Notice::ExportAudioConfigured {
+                            request: 90,
+                            success: true,
+                        })
+                {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "audio policy not confirmed: {notice:?}"
+                );
+            }
+        }
         let started = Instant::now();
         worker
             .control(Command {

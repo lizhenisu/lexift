@@ -3,7 +3,7 @@ use super::*;
 use crate::{LongCaptureConfirmation, RecordingPreview};
 use lexift_core::domain::{
     recording_preview as p,
-    recording_trim::{FrameCrop, Speed},
+    recording_trim::{ExportAudio, FrameCrop, Speed},
 };
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 #[path = "recording_frame_crop.rs"]
@@ -459,6 +459,17 @@ fn act(action: i32, value: f32) {
             p::Input::SetSpeed(*speed)
         }
 
+        18 => {
+            let Some(mode) = [
+                ExportAudio::Original,
+                ExportAudio::HalfVolume,
+                ExportAudio::RemoveTrack,
+            ]
+            .get(value as usize) else {
+                return;
+            };
+            p::Input::SetExportAudio(*mode)
+        }
         _ => return,
     };
     input(event);
@@ -484,6 +495,17 @@ pub(super) fn sync(s: &lexift_core::domain::screenshot::recording::Session) {
             Speed::Normal => 0,
             Speed::OneAndHalf => 1,
             Speed::Double => 2,
+        });
+        w.set_export_audio_index(match p.export_audio {
+            ExportAudio::Original => 0,
+            ExportAudio::HalfVolume => 1,
+            ExportAudio::RemoveTrack => 2,
+        });
+        w.set_export_audio_enabled(p.can_set_export_audio());
+        w.set_export_audio_error(if p.export_audio_error {
+            crate::i18n::tr("Could not change export audio").into()
+        } else {
+            "".into()
         });
         w.set_speed_enabled(p.can_set_speed());
         w.set_speed_error(if p.speed_error {
@@ -520,7 +542,8 @@ pub(super) fn sync(s: &lexift_core::domain::screenshot::recording::Session) {
             s.lifecycle.phase == Phase::Saving
                 || matches!(p.phase, p::Phase::Preparing | p::Phase::Retiring)
                 || p.frame_crop_pending.is_some()
-                || p.speed_pending.is_some(),
+                || p.speed_pending.is_some()
+                || p.export_audio_pending(),
         );
         w.set_error(
             p.error

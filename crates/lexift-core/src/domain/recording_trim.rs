@@ -80,12 +80,32 @@ impl Speed {
     }
 }
 
-/// The spatial and temporal boundaries frozen for one export.
+/// Policy for the mixed audio track of a sealed recording.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ExportAudio {
+    #[default]
+    Original,
+    HalfVolume,
+    RemoveTrack,
+}
+
+impl ExportAudio {
+    pub const fn gain(self) -> f32 {
+        match self {
+            Self::Original => 1.0,
+            Self::HalfVolume => 0.5,
+            Self::RemoveTrack => 0.0,
+        }
+    }
+}
+
+/// The spatial and temporal boundaries and audio policy frozen for one export.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Selection {
     pub range: Range,
     pub crop: Option<FrameCrop>,
     pub speed: Speed,
+    pub audio: ExportAudio,
 }
 
 impl From<Range> for Selection {
@@ -94,6 +114,7 @@ impl From<Range> for Selection {
             range,
             crop: None,
             speed: Speed::Normal,
+            audio: ExportAudio::Original,
         }
     }
 }

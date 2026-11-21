@@ -78,6 +78,7 @@ pub fn save(
     let range_version = request.range_version;
     let crop = request.frame_crop;
     let speed = request.speed;
+    let audio = request.export_audio;
     if crop.is_some_and(|crop| !crop.valid(info.width, info.height)) {
         return Err(Error::new("Invalid recording frame crop"));
     }
@@ -126,7 +127,8 @@ pub fn save(
     }
     match selected.map(|s| s.path) {
         Some(path)
-            if speed == Default::default()
+            if audio == Default::default()
+                && speed == Default::default()
                 && crop.is_none()
                 && range == lexift_core::domain::recording_trim::Range::full(info.frames) =>
         {
@@ -147,7 +149,12 @@ pub fn save(
                 source,
                 &file.path,
                 info,
-                lexift_core::domain::recording_trim::Selection { range, crop, speed },
+                lexift_core::domain::recording_trim::Selection {
+                    range,
+                    crop,
+                    speed,
+                    audio,
+                },
                 &cancel,
                 progress,
             ) {

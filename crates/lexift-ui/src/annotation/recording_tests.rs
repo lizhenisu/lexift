@@ -250,8 +250,8 @@ fn recording_preview_renders_all_languages_themes_sizes_and_dpis() {
     w.on_action({
         let picked = picked.clone();
         move |action, value| {
-            if action == 17 {
-                picked.set(Some(value as i32));
+            if matches!(action, 17 | 18) {
+                picked.set(Some((action, value as i32)));
             }
         }
     });
@@ -296,7 +296,34 @@ fn recording_preview_renders_all_languages_themes_sizes_and_dpis() {
         );
     }
     click(372., 663.);
-    assert_eq!(picked.get(), Some(1));
+    assert_eq!(picked.get(), Some((17, 1)));
+    click(342., 712.);
+    assert_eq!(picked.get(), Some((17, 1)));
+    w.set_export_audio_enabled(true);
+    click(342., 712.);
+    adapter.request_redraw();
+    adapter.draw_if_needed(|renderer| {
+        renderer.render(&mut menu_pixels, 960);
+    });
+    if let Ok(directory) = std::env::var("LEXIFT_PREVIEW_RENDER_DIR") {
+        crate::i18n::write_test_bitmap(
+            &directory,
+            "preview-export-audio",
+            960,
+            760,
+            menu_pixels.iter().map(|p| [p.r, p.g, p.b, 255]),
+        );
+    }
+    for text in [
+        slint::platform::Key::RightArrow,
+        slint::platform::Key::Return,
+    ] {
+        w.window()
+            .dispatch_event(WindowEvent::KeyPressed { text: text.into() });
+        w.window()
+            .dispatch_event(WindowEvent::KeyReleased { text: text.into() });
+    }
+    assert_eq!(picked.get(), Some((18, 1)));
     for language in lexift_core::domain::ui_language::UiLanguage::ALL {
         crate::i18n::select(language);
         for dark in [false, true] {
@@ -330,6 +357,8 @@ fn recording_preview_renders_all_languages_themes_sizes_and_dpis() {
                         w.set_speed_index(phase % 3);
                         w.set_speed_enabled(matches!(phase, 0 | 1));
                         w.set_has_audio(phase != 0);
+                        w.set_export_audio_enabled(phase == 1);
+                        w.set_export_audio_index(phase % 3);
                         w.set_error(if phase == 2 {
                             crate::i18n::tr("Recording preview unavailable").into()
                         } else {

@@ -95,7 +95,10 @@ pub(super) fn export(
                 .map_err(err)?,
             )
             .map_err(err)?;
-        let has_audio = reader.GetNativeMediaType(audio, 0).is_ok();
+        let has_audio = selection.audio
+            != lexift_core::domain::recording_trim::ExportAudio::RemoveTrack
+            && reader.GetNativeMediaType(audio, 0).is_ok();
+        let gain = selection.audio.gain();
         if has_audio {
             let kind = MFCreateMediaType().map_err(err)?;
             kind.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio)
@@ -153,13 +156,15 @@ pub(super) fn export(
                             break;
                         }
                         encoder
-                            .write_audio(&tempo_block[..count], *written)
+                            .write_audio_with_gain(&tempo_block[..count], *written, gain)
                             .map_err(err)?;
                         *written += count as u64;
                     }
                 } else if !block.is_empty() {
                     cancelled(cancel)?;
-                    encoder.write_audio(block, *written).map_err(err)?;
+                    encoder
+                        .write_audio_with_gain(block, *written, gain)
+                        .map_err(err)?;
                     *written += block.len() as u64;
                 }
                 Ok(())
@@ -473,6 +478,11 @@ mod tests {
             range,
             crop,
             speed: super::super::fixture_speed(),
+            audio: match std::env::var("LEXIFT_TRIM_AUDIO").as_deref() {
+                Ok("half") => lexift_core::domain::recording_trim::ExportAudio::HalfVolume,
+                Ok("remove") => lexift_core::domain::recording_trim::ExportAudio::RemoveTrack,
+                _ => Default::default(),
+            },
         };
         let outcome = export(&source, &output, &info, selection, &cancel, |_, _, _| {});
         if std::env::var_os("LEXIFT_TRIM_EXPECT_ERROR").is_some() {

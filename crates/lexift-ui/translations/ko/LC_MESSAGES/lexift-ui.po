@@ -2579,3 +2579,24 @@ msgstr "재생 속도"
 
 msgid "Could not change playback speed"
 msgstr "재생 속도를 변경할 수 없습니다"
+
+msgid "Export audio"
+msgstr "내보내기 오디오"
+
+msgid "Original sound"
+msgstr "원본 소리"
+
+msgid "50% volume"
+msgstr "볼륨 50%"
+
+msgid "Remove audio track"
+msgstr "오디오 트랙 제거"
+
+msgid "No audio track"
+msgstr "오디오 트랙 없음"
+
+msgid "Could not change export audio"
+msgstr "내보내기 오디오를 변경할 수 없습니다"
+
+msgid "Changing MP4 audio re-encodes the video."
+msgstr "MP4 오디오를 변경하면 영상이 다시 인코딩됩니다."

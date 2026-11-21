@@ -1109,6 +1109,7 @@ fn service(receiver: Receiver<Message>, sender: SyncSender<Message>, shared: Arc
                         crop,
                         speed,
                         muted,
+                        audio,
                     } = command.action
                     {
                         j.preview.take();
@@ -1120,7 +1121,13 @@ fn service(receiver: Receiver<Message>, sender: SyncSender<Message>, shared: Arc
                                 j.frames.saturating_sub(1) as f64
                                     / f64::from(j.request.video.frame_rate.get()),
                             ),
-                            (Some((range, fps)), crop, speed, muted),
+                            preview::PlaybackSettings {
+                                range: Some((range, fps)),
+                                crop,
+                                speed,
+                                muted,
+                                audio,
+                            },
                             listener.clone(),
                         )
                         .map(|w| j.preview = Some(w))
@@ -1133,12 +1140,15 @@ fn service(receiver: Receiver<Message>, sender: SyncSender<Message>, shared: Arc
                         Err(Error::new("Recording preview unavailable"))
                     };
                     if let Err(error) = result {
-                        listener(command.identity, Notice::Failed(error.to_string()));
+                        listener(
+                            command.identity,
+                            command.dispatch_failure(error.to_string()),
+                        );
                     }
                 } else {
                     listener(
                         command.identity,
-                        Notice::Failed("Recording preview unavailable".into()),
+                        command.dispatch_failure("Recording preview unavailable".into()),
                     );
                 }
             }

@@ -1,7 +1,7 @@
 use super::{engine::Engine, surface::Surface};
 use lexift_core::{
     Error, Result,
-    domain::recording_trim::Range,
+    domain::recording_trim::{ExportAudio, FrameCrop, Range, Speed},
     domain::{
         geometry::Rect,
         recording_preview::{Action, Command, Identity, Notice, Target},
@@ -58,6 +58,14 @@ pub(crate) fn position(window: WindowToken, bounds: Rect) -> bool {
         false
     }
 }
+pub(crate) struct PlaybackSettings {
+    pub range: Option<(Range, u32)>,
+    pub crop: Option<FrameCrop>,
+    pub speed: Speed,
+    pub muted: bool,
+    pub audio: ExportAudio,
+}
+
 pub(crate) struct Worker {
     shared: Arc<Shared>,
     thread: Option<thread::JoinHandle<()>>,
@@ -69,12 +77,7 @@ impl Worker {
         target: Target,
         file: Arc<super::super::FileArtifact>,
         last_frame: Duration,
-        initial: (
-            Option<(Range, u32)>,
-            Option<lexift_core::domain::recording_trim::FrameCrop>,
-            lexift_core::domain::recording_trim::Speed,
-            bool,
-        ),
+        initial: PlaybackSettings,
         listener: PreviewListener,
     ) -> Result<Self> {
         let shared = Arc::new(Shared {
@@ -146,12 +149,7 @@ fn run(
     target: Target,
     file: Arc<super::super::FileArtifact>,
     last_frame: Duration,
-    initial: (
-        Option<(Range, u32)>,
-        Option<lexift_core::domain::recording_trim::FrameCrop>,
-        lexift_core::domain::recording_trim::Speed,
-        bool,
-    ),
+    initial: PlaybackSettings,
     listener: PreviewListener,
     shared: Arc<Shared>,
 ) {
@@ -186,11 +184,14 @@ fn run(
         {
             surface.test_probe = Some((500, 66));
         }
-        let mut range = initial.0;
-        engine.crop = initial.1;
-        let mut speed = initial.2;
+        let mut range = initial.range;
+        engine.crop = initial.crop;
+        let mut speed = initial.speed;
         let mut initial_speed = true;
-        unsafe { engine.media.SetMuted(initial.3)? };
+        unsafe {
+            engine.media.SetVolume(f64::from(initial.audio.gain()))?;
+            engine.media.SetMuted(initial.muted)?;
+        }
 
         let mut initial_seek = range.is_some_and(|(r, _)| r.start > 0);
         let mut ending = false;
@@ -333,6 +334,19 @@ fn run(
                                 }
                             };
                             listener(id, Notice::SpeedConfigured(success));
+                        }
+                        Action::SetExportAudio { request, mode } => {
+                            let result = engine.media.SetVolume(f64::from(mode.gain()));
+                            if let Err(error) = &result {
+                                tracing::debug!(%error, ?mode, "Recording preview audio policy rejected");
+                            }
+                            listener(
+                                id,
+                                Notice::ExportAudioConfigured {
+                                    request,
+                                    success: result.is_ok(),
+                                },
+                            );
                         }
                         Action::Mute(muted) => engine.media.SetMuted(muted)?,
                         _ => {}

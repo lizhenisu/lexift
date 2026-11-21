@@ -19,12 +19,31 @@ export component RecordingPreview inherits Window {
  in property <bool> speed-enabled;
  in property <string> speed-error;
  private property <image> empty-icon;
- private property <bool> speed-menu-open;
- private property <int> speed-menu-choice;
- changed speed-enabled => { if !root.speed-enabled { root.speed-menu-open = false; } }
- function dismiss-speed-menu() { root.speed-menu-open = false; speed-button.focus-button(); }
- function choose-speed(index: int) { root.dismiss-speed-menu(); root.action(17,index); }
+ in property <int> export-audio-index;
+ in property <bool> export-audio-enabled;
+ in property <string> export-audio-error;
+ private property <bool> options-open;
+ private property <bool> audio-options;
+ private property <int> option-choice;
  private property <[string]> speed-labels: ["1×", "1.5×", "2×"];
+ private property <[string]> audio-labels: [@tr("Original sound"), @tr("50% volume"), @tr("Remove audio track")];
+ changed speed-enabled => { if !root.speed-enabled && !root.audio-options { root.options-open = false; } }
+ changed export-audio-enabled => { if !root.export-audio-enabled && root.audio-options { root.options-open = false; } }
+ function open-options(audio: bool) {
+  root.audio-options = audio;
+  root.option-choice = audio ? root.export-audio-index : root.speed-index;
+  root.options-open = true;
+  option-keys.focus();
+ }
+ function dismiss-options() {
+  root.options-open = false;
+  if root.audio-options { audio-button.focus-button(); }
+  else { speed-button.focus-button(); }
+ }
+ function choose-option(index: int) {
+  root.dismiss-options();
+  root.action(root.audio-options ? 18 : 17, index);
+ }
  in property <float> progress;in property <float> duration-seconds;
  out property <float> video-x:12;out property <float> video-y:44;
  out property <float> video-width:(root.width - 24px)/1px;out property <float> video-height:max(1,(root.height - (root.compact-controls ? 240px : 192px))/1px);
@@ -85,10 +104,24 @@ export component RecordingPreview inherits Window {
     label:root.speed-labels[root.speed-index];
     enabled:root.speed-enabled && !root.busy;
     accessibility-label:@tr("Playback speed") + " " + root.speed-labels[root.speed-index];
-    clicked=>{root.speed-menu-open = true; root.speed-menu-choice = root.speed-index; speed-menu-keys.focus();}
+    clicked=>{root.open-options(false);}
     AnnotationHintTarget {width:parent.width;height:parent.height;text:@tr("Playback speed");hovered:speed-button.hovered;pressed:speed-button.pressed;}
    }
-   VerticalLayout {horizontal-stretch:1;spacing:1px;Text {text:root.time-label;color:Colors.foreground;font-size:13px;}Text {text:root.exporting ? root.export-label : root.speed-error != "" ? root.speed-error : root.range-label + " · " + root.metadata;color:Colors.secondary-foreground;font-size:11px;overflow:elide;min-width:0px;}}
+   audio-button := SettingsButton {
+    compact: true;
+    available-width: 40px;
+    icon: @image-url("assets/icons/recording-export-audio.svg");
+    label: "";
+    enabled: root.export-audio-enabled && !root.busy;
+    primary: root.has-audio && root.export-audio-index != 0;
+    accessibility-label: @tr("Export audio") + " · " + (root.has-audio ? root.audio-labels[root.export-audio-index] : @tr("No audio track"));
+    clicked => { root.open-options(true); }
+    AnnotationHintTarget {
+     width: parent.width; height: parent.height; text: audio-button.accessibility-label;
+     hovered: audio-button.hovered; pressed: audio-button.pressed;
+    }
+   }
+   VerticalLayout {horizontal-stretch:1;spacing:1px;Text {text:root.time-label;color:Colors.foreground;font-size:13px;}Text {text:root.exporting ? root.export-label : root.export-audio-error != "" ? root.export-audio-error : root.speed-error != "" ? root.speed-error : root.range-label + " · " + root.metadata;color:Colors.secondary-foreground;font-size:11px;overflow:elide;min-width:0px;}}
    if !root.compact-controls: SettingsButton {compact:true;label:root.exporting ? @tr("Cancel") : @tr("Save video");enabled:root.exporting || !root.busy;primary:true;clicked=>{root.action(root.exporting ? 12 : 4,0);}}
    if !root.compact-controls: SettingsButton {compact:true;label:@tr("Close");enabled:root.exporting || !root.busy;clicked=>{root.action(5,0);}}
   }
@@ -97,31 +130,40 @@ export component RecordingPreview inherits Window {
    SettingsButton {compact:true;label:@tr("Close");enabled:root.exporting || !root.busy;clicked=>{root.action(5,0);}}
   }
  }
- // The native video child covers the video rectangle. Keep the menu in the
- // Slint control area above the speed button and intercept outside clicks there.
- speed-menu-keys := FocusScope {
-  visible:root.speed-menu-open;width:root.width;height:root.height;
+ // The native video child covers the video rectangle. Keep both menus within
+ // the Slint control area and share focus, backdrop and keyboard behavior.
+ option-keys := FocusScope {
+  visible: root.options-open; width: root.width; height: root.height;
   key-pressed(event) => {
-   if event.text == Key.Escape || event.text == Key.Tab { root.dismiss-speed-menu(); return accept; }
-   if event.text == Key.LeftArrow { root.speed-menu-choice = max(0,root.speed-menu-choice - 1); return accept; }
-   if event.text == Key.RightArrow { root.speed-menu-choice = min(2,root.speed-menu-choice + 1); return accept; }
-   if event.text == Key.Return || event.text == Key.Space { root.choose-speed(root.speed-menu-choice); return accept; }
+   if event.text == Key.Escape || event.text == Key.Tab { root.dismiss-options(); return accept; }
+   if event.text == Key.LeftArrow { root.option-choice = max(0,root.option-choice - 1); return accept; }
+   if event.text == Key.RightArrow { root.option-choice = min(2,root.option-choice + 1); return accept; }
+   if event.text == Key.Return || event.text == Key.Space { root.choose-option(root.option-choice); return accept; }
    return reject;
   }
-  TouchArea { clicked=>{root.dismiss-speed-menu();} }
+  TouchArea { clicked => { root.dismiss-options(); } }
   Rectangle {
-   x:clamp(speed-button.absolute-position.x,0px,root.width - self.width);
-   y:speed-button.absolute-position.y - self.height - 4px;
-   width:268px;height:44px;
-   background:Colors.surface;border-color:Colors.outline;border-width:1px;border-radius:6px;
+   x: clamp(root.audio-options ? audio-button.absolute-position.x : speed-button.absolute-position.x, 8px, root.width - self.width - 8px);
+   y: speed-button.absolute-position.y - self.height - 4px;
+   width: root.audio-options ? min(560px, root.width - 16px) : 268px;
+   height: root.audio-options ? 66px : 44px;
+   background: Colors.surface; border-color: Colors.outline; border-width: 1px; border-radius: 6px;
    TouchArea {}
-   HorizontalLayout {padding:4px;spacing:4px;
-    for rate[index] in root.speed-labels: SettingsButton {
-     compact:true;label:rate;primary:index == root.speed-menu-choice;
-     icon:index == root.speed-index ? @image-url("assets/icons/check.svg") : root.empty-icon;
-     accessible-checkable:true;accessible-checked:index == root.speed-index;
-     clicked=>{root.choose-speed(index);}
+   HorizontalLayout {
+    y: 0px; height: 44px; padding: 4px; spacing: 4px;
+    for label[index] in root.audio-options ? root.audio-labels : root.speed-labels: SettingsButton {
+     compact: true; label: label; primary: index == root.option-choice;
+     icon: self.accessible-checked ? @image-url("assets/icons/check.svg") : root.empty-icon;
+     accessible-checkable: true;
+     accessible-checked: index == (root.audio-options ? root.export-audio-index : root.speed-index);
+     clicked => { root.choose-option(index); }
     }
+   }
+   if root.audio-options: Text {
+    x: 8px; y: 44px; width: parent.width - 16px; height: parent.height - 44px;
+    text: @tr("Changing MP4 audio re-encodes the video.");
+    color: Colors.secondary-foreground; font-size: 11px; vertical-alignment: center;
+    overflow: elide;
    }
   }
  }

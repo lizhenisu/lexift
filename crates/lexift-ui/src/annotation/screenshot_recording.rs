@@ -827,6 +827,7 @@ fn save_request() {
             range: None,
             range_version: 0,
             speed: Default::default(),
+            export_audio: Default::default(),
             frame_crop: None,
             identity: state.lifecycle.identity,
             artifact,
