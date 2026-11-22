@@ -112,6 +112,7 @@
 - [Windows 长截图自动滚动验证](releases/screenshot-long-auto-scroll.md)
 - [Windows 横向长截图自动滚动验证](releases/long-capture-horizontal-auto-scroll.md)
 - [Windows 横向长截图固定列验证](releases/long-capture-horizontal-fixed-columns.md)
+- [Windows 长截图双向拼接验证](releases/long-capture-bidirectional.md)
 - [长截图固定页眉和页脚验证](releases/screenshot-long-fixed-bands.md)
 - [长截图采集内裁剪验证](releases/screenshot-long-live-trim.md)
 - [截图与长图快速保存验证](releases/quick-image-save.md)

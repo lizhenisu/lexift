@@ -1853,8 +1853,8 @@ msgstr "화면을 일치시킬 수 없습니다. 마지막 캡처 영역으로 �
 msgid "Image limit reached. Finish the current capture."
 msgstr "이미지 한도에 도달했습니다. 현재 캡처를 완료하세요."
 
-msgid "Scroll down to extend the image"
-msgstr "아래로 스크롤하여 이미지 확장"
+msgid "Scroll up or down to extend the image"
+msgstr "위나 아래로 스크롤해 이미지 이어 붙이기"
 
 msgid "Long capture unavailable. Select a smaller scrolling area."
 msgstr "스크롤 캡처를 시작할 수 없습니다. 더 작은 영역을 선택하세요."
@@ -2388,8 +2388,8 @@ msgstr "현재 화면 왼쪽 자르기"
 msgid "Trim right of current view"
 msgstr "현재 화면 오른쪽 자르기"
 
-msgid "Scroll right to extend the image"
-msgstr "오른쪽으로 스크롤하여 이미지 확장"
+msgid "Scroll left or right to extend the image"
+msgstr "왼쪽이나 오른쪽으로 스크롤해 이미지 이어 붙이기"
 
 msgid "More"
 msgstr "더 보기"

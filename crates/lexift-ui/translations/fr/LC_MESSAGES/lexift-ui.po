@@ -1853,8 +1853,8 @@ msgstr "Impossible de raccorder cette image. Revenez à la dernière zone captur
 msgid "Image limit reached. Finish the current capture."
 msgstr "Limite d’image atteinte. Terminez la capture actuelle."
 
-msgid "Scroll down to extend the image"
-msgstr "Faites défiler vers le bas pour agrandir l’image"
+msgid "Scroll up or down to extend the image"
+msgstr "Faites défiler vers le haut ou le bas pour étendre l’image"
 
 msgid "Long capture unavailable. Select a smaller scrolling area."
 msgstr "Capture défilante indisponible. Sélectionnez une zone plus petite."
@@ -2388,8 +2388,8 @@ msgstr "Rogner à gauche de la vue actuelle"
 msgid "Trim right of current view"
 msgstr "Rogner à droite de la vue actuelle"
 
-msgid "Scroll right to extend the image"
-msgstr "Faites défiler vers la droite pour étendre l’image"
+msgid "Scroll left or right to extend the image"
+msgstr "Faites défiler vers la gauche ou la droite pour étendre l’image"
 
 msgid "More"
 msgstr "Plus"

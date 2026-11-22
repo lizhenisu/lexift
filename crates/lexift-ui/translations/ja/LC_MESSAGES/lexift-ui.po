@@ -1853,8 +1853,8 @@ msgstr "画面を照合できません。最後に撮影した範囲まで戻し
 msgid "Image limit reached. Finish the current capture."
 msgstr "画像の上限に達しました。撮影を完了してください。"
 
-msgid "Scroll down to extend the image"
-msgstr "下にスクロールして画像を延長"
+msgid "Scroll up or down to extend the image"
+msgstr "上下にスクロールして画像を拡張"
 
 msgid "Long capture unavailable. Select a smaller scrolling area."
 msgstr "スクロール撮影を開始できません。小さい範囲を選択してください。"
@@ -2388,8 +2388,8 @@ msgstr "現在の表示範囲より左を切り取る"
 msgid "Trim right of current view"
 msgstr "現在の表示範囲より右を切り取る"
 
-msgid "Scroll right to extend the image"
-msgstr "右にスクロールして画像を広げる"
+msgid "Scroll left or right to extend the image"
+msgstr "左右にスクロールして画像を拡張"
 
 msgid "More"
 msgstr "その他"

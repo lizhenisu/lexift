@@ -1853,8 +1853,8 @@ msgstr "Impossibile allineare questa immagine. Tornare all’ultima area acquisi
 msgid "Image limit reached. Finish the current capture."
 msgstr "Limite immagine raggiunto. Terminare la cattura corrente."
 
-msgid "Scroll down to extend the image"
-msgstr "Scorrere verso il basso per estendere l’immagine"
+msgid "Scroll up or down to extend the image"
+msgstr "Scorri verso l’alto o il basso per estendere l’immagine"
 
 msgid "Long capture unavailable. Select a smaller scrolling area."
 msgstr "Cattura a scorrimento non disponibile. Selezionare un’area più piccola."
@@ -2388,8 +2388,8 @@ msgstr "Ritaglia a sinistra della vista corrente"
 msgid "Trim right of current view"
 msgstr "Ritaglia a destra della vista corrente"
 
-msgid "Scroll right to extend the image"
-msgstr "Scorri a destra per estendere l’immagine"
+msgid "Scroll left or right to extend the image"
+msgstr "Scorri verso sinistra o destra per estendere l’immagine"
 
 msgid "More"
 msgstr "Altro"

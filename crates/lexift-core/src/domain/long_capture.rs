@@ -1,7 +1,7 @@
-//! Bounded downward registration. Pixels are immutable; an uncertain frame never advances the anchor.
+//! Bounded scroll registration over immutable image strips.
 use super::geometry::Rect;
 use crate::{Error, Result, ports::screen_capture::CapturedRegion};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{
     Arc,
@@ -38,6 +38,13 @@ pub enum Trim {
     Below,
 }
 
+/// Restrict growth while the capture worker owns an automatic wheel step.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Growth {
+    Both,
+    TailOnly,
+}
+
 impl Preview {
     pub fn can_trim(&self, direction: Trim) -> bool {
         self.can_trim_on(Axis::Vertical, direction)
@@ -67,21 +74,20 @@ pub struct Preview {
     pub body: Option<Rect>,
 }
 
-/// Retains only the accepted image strips and one full physical capture as a matching anchor.
+/// Retains accepted body strips and the full captures at both boundaries.
 pub struct Stitcher {
     axis: Axis,
     width: usize,
     height: usize,
-    anchor: Arc<CapturedRegion>,
-    strips: Vec<Arc<[u8]>>,
+    head: Arc<CapturedRegion>,
+    tail: Arc<CapturedRegion>,
+    strips: VecDeque<Arc<[u8]>>,
     bands: Option<Bands>,
-    header: Arc<[u8]>,
-    first_body: std::ops::Range<usize>,
-    row_keys: Vec<u64>,
+    row_keys: VecDeque<u64>,
     known_rows: HashSet<u64>,
     position: Option<usize>,
+    preview_position: usize,
     located: Option<Arc<CapturedRegion>>,
-    returning_to_tail: bool,
 }
 
 /// Fixed rows in physical capture coordinates. Zero rows means ordinary stitching.
@@ -289,16 +295,15 @@ impl Stitcher {
             axis,
             width,
             height,
-            strips: vec![Arc::from(first.pixels.as_slice())],
-            header: Arc::from([]),
-            first_body: 0..first.pixels.len(),
+            strips: VecDeque::from([Arc::from(first.pixels.as_slice())]),
             row_keys: first.pixels.chunks_exact(width * 4).map(row_key).collect(),
             known_rows: HashSet::new(),
-            anchor: first,
+            head: first.clone(),
+            tail: first,
             bands: None,
             position: Some(0),
             located: None,
-            returning_to_tail: false,
+            preview_position: 0,
         })
     }
     pub fn size(&self) -> (usize, usize) {
@@ -314,17 +319,27 @@ impl Stitcher {
         if axis == self.axis || self.bands.is_some() {
             return Ok(false);
         }
-        // The original first frame remains the anchor until the first accepted append.
-        let first = Arc::new(transpose(&self.anchor, cancel)?);
+        let first = Arc::new(transpose(&self.head, cancel)?);
         *self = Self::new_on_axis(first, axis)?;
         Ok(true)
     }
     pub fn retained_bytes(&self) -> usize {
         let stride = self.width * 4;
-        let footer = self.bands.unwrap_or_default().bottom * stride;
-        self.height * stride + self.strips[0].len() - self.first_body.len() - footer
-            + self.anchor.pixels.len()
-            + self.located.as_ref().map_or(0, |frame| frame.pixels.len())
+        let bands = self.bands.unwrap_or_default();
+        (self.height - bands.top - bands.bottom) * stride
+            + self.head.pixels.len()
+            + if Arc::ptr_eq(&self.head, &self.tail) {
+                0
+            } else {
+                self.tail.pixels.len()
+            }
+            + self.located.as_ref().map_or(0, |frame| {
+                if Arc::ptr_eq(frame, &self.head) || Arc::ptr_eq(frame, &self.tail) {
+                    0
+                } else {
+                    frame.pixels.len()
+                }
+            })
     }
 
     pub fn invalidate_position(&mut self) {
@@ -333,11 +348,20 @@ impl Stitcher {
     }
 
     pub fn at_tail(&self) -> bool {
-        self.position == Some(self.height - self.anchor.pixels.len() / (self.width * 4))
+        self.position == Some(self.height - self.frame_height())
     }
 
     pub fn position(&self) -> Option<usize> {
         self.position
+    }
+
+    fn frame_height(&self) -> usize {
+        self.head.pixels.len() / (self.width * 4)
+    }
+
+    fn confirm_position(&mut self, offset: usize) {
+        self.position = Some(offset);
+        self.preview_position = offset;
     }
 
     /// Match retained rows without flattening. Stop before expensive or ambiguous comparisons.
@@ -350,7 +374,7 @@ impl Stitcher {
             return Ok(None);
         };
         let stride = self.width * 4;
-        if !bands.matches(&self.anchor.pixels, &frame.pixels, stride) {
+        if !bands.matches(&self.head.pixels, &frame.pixels, stride) {
             return Ok(None);
         }
         let body = bands.body(&frame.pixels, stride);
@@ -419,11 +443,26 @@ impl Stitcher {
         Ok(found)
     }
     pub fn push(&mut self, frame: Arc<CapturedRegion>, cancel: &AtomicBool) -> Result<Feedback> {
+        let feedback = self.sample(frame, Growth::Both, cancel)?;
+        if matches!(feedback, Feedback::Uncertain | Feedback::Limit) {
+            self.invalidate_position();
+        }
+        Ok(feedback)
+    }
+
+    /// Try the latest compositor sample while leaving the confirmed position intact
+    /// on rejection. The worker invalidates it once the viewport settles or times out.
+    pub fn sample(
+        &mut self,
+        frame: Arc<CapturedRegion>,
+        growth: Growth,
+        cancel: &AtomicBool,
+    ) -> Result<Feedback> {
         if cancel.load(Ordering::Relaxed) {
             return Ok(Feedback::Cancelled);
         }
         let frame = if self.axis == Axis::Horizontal {
-            if transpose_rect(frame.bounds) != self.anchor.bounds {
+            if transpose_rect(frame.bounds) != self.head.bounds {
                 return Err(Error::new("Long capture geometry changed"));
             }
             match transpose(&frame, cancel) {
@@ -435,113 +474,140 @@ impl Stitcher {
             frame
         };
         let (w, h) = dimensions(&frame)?;
-        if frame.bounds != self.anchor.bounds || w != self.width {
+        if frame.bounds != self.head.bounds || w != self.width {
             return Err(Error::new("Long capture geometry changed"));
         }
         if cancel.load(Ordering::Relaxed) {
             return Ok(Feedback::Cancelled);
         }
-        if self
-            .located
-            .as_ref()
-            .is_some_and(|known| known.pixels == frame.pixels)
+
+        let at_head = self.position == Some(0);
+        let at_tail = self.at_tail();
+        let same_as_tail = self.tail.pixels == frame.pixels;
+        if same_as_tail && (at_tail || self.bands.is_none()) {
+            self.confirm_position(self.height - h);
+            return Ok(Feedback::Unchanged);
+        }
+        let same_as_head = if Arc::ptr_eq(&self.head, &self.tail) {
+            same_as_tail
+        } else {
+            self.head.pixels == frame.pixels
+        };
+        if (at_head && same_as_head)
+            || self
+                .located
+                .as_ref()
+                .is_some_and(|known| known.pixels == frame.pixels)
         {
             return Ok(Feedback::Located);
         }
-        let was_at_tail = self.at_tail();
-        self.invalidate_position();
-        let same_as_tail = frame.pixels == self.anchor.pixels;
-        if same_as_tail && (was_at_tail || self.bands.is_none()) {
-            self.position = Some(self.height - h);
-            self.returning_to_tail = false;
-            return Ok(Feedback::Unchanged);
-        }
-        match self.locate(&frame, cancel) {
-            Ok(Some(offset)) => {
-                self.position = Some(offset);
-                self.returning_to_tail = offset != self.height - h;
-                if self.returning_to_tail {
-                    self.located = Some(frame);
-                    return Ok(Feedback::Located);
-                }
-                return Ok(Feedback::Unchanged);
-            }
-            Err(()) => {
-                return Ok(if cancel.load(Ordering::Relaxed) {
-                    Feedback::Cancelled
-                } else {
-                    Feedback::Uncertain
-                });
-            }
-            Ok(None) => {}
-        }
-        // The horizontal frame has already been transposed. Its outer columns are
-        // bands in this axis, and even a full-frame match must be exact.
-        let exact = self.axis == Axis::Horizontal;
-        let matched = if self.returning_to_tail || same_as_tail {
-            None
-        } else if let Some(bands) = self.bands {
-            bands
-                .displacement(&self.anchor.pixels, &frame.pixels, w, exact, cancel)
-                .map(|dy| (bands, dy))
-        } else {
-            initial_match(&self.anchor.pixels, &frame.pixels, w, exact, cancel)
-        };
-        let Some((bands, dy)) = matched else {
-            return Ok(if cancel.load(Ordering::Relaxed) {
+
+        let unavailable = || {
+            if cancel.load(Ordering::Relaxed) {
                 Feedback::Cancelled
             } else {
                 Feedback::Uncertain
-            });
+            }
         };
-        let Some(height) = self.height.checked_add(dy) else {
+        match self.locate(&frame, cancel) {
+            Ok(Some(offset)) => {
+                self.confirm_position(offset);
+                self.located = None;
+                if self.at_tail() {
+                    return Ok(Feedback::Unchanged);
+                }
+                if offset != 0 {
+                    self.located = Some(frame);
+                }
+                return Ok(Feedback::Located);
+            }
+            Err(()) => return Ok(unavailable()),
+            Ok(None) => {}
+        }
+
+        // With transposed frames the same registration searches along physical columns.
+        let exact = self.axis == Axis::Horizontal;
+        let match_boundary = |a, b| {
+            if let Some(bands) = self.bands {
+                bands
+                    .displacement(a, b, w, exact, cancel)
+                    .map(|shift| (bands, shift))
+            } else {
+                initial_match(a, b, w, exact, cancel)
+            }
+        };
+        let head = (growth == Growth::Both && at_head && !same_as_head && !same_as_tail)
+            .then(|| match_boundary(&frame.pixels, &self.head.pixels))
+            .flatten();
+        let tail = (at_tail && !same_as_head && !same_as_tail)
+            .then(|| match_boundary(&self.tail.pixels, &frame.pixels))
+            .flatten();
+        let (prepend, bands, shift) = match (head, tail) {
+            (Some((bands, shift)), None) => (true, bands, shift),
+            (None, Some((bands, shift))) => (false, bands, shift),
+            _ => return Ok(unavailable()),
+        };
+
+        let Some(height) = self.height.checked_add(shift) else {
             return Ok(Feedback::Limit);
         };
-        // Reserve space for flattening, output composition, two in-flight captures and the anchor.
+        // Reserve flattening, output composition, both anchors and two in-flight captures.
         let pixels = w.checked_mul(height);
         if height > MAX_HEIGHT
             || pixels.is_none_or(|p| {
-                p > MAX_PIXELS || p * 48 + frame.pixels.len() * 3 > MAX_BUFFER_BYTES
+                p > MAX_PIXELS || p * 48 + frame.pixels.len() * 4 > MAX_BUFFER_BYTES
             })
         {
             return Ok(Feedback::Limit);
         }
-        if cancel.load(Ordering::Relaxed) {
-            return Ok(Feedback::Cancelled);
-        }
-        let end = (h - bands.bottom) * w * 4;
-        let appended = &frame.pixels[end - dy * w * 4..end];
-        let mut keys = Vec::with_capacity(dy);
-        for row in appended.chunks_exact(w * 4) {
+        let stride = w * 4;
+        let body = bands.body(&frame.pixels, stride);
+        let new_pixels = if prepend {
+            &body[..shift * stride]
+        } else {
+            &body[body.len() - shift * stride..]
+        };
+        let mut keys = Vec::with_capacity(shift);
+        for row in new_pixels.chunks_exact(stride) {
             if cancel.load(Ordering::Relaxed) {
                 return Ok(Feedback::Cancelled);
             }
             keys.push(row_key(row));
         }
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(Feedback::Cancelled);
+        }
+
         if self.bands.is_none() {
-            self.first_body = bands.top * w * 4..end;
-            self.header = Arc::from(&self.strips[0][..self.first_body.start]);
-            self.row_keys.truncate(h - bands.bottom);
-            self.row_keys.drain(..bands.top);
+            if bands != Bands::default() {
+                self.strips[0] = Arc::from(bands.body(&self.head.pixels, stride));
+                self.row_keys.truncate(h - bands.bottom);
+                self.row_keys.drain(..bands.top);
+            }
             self.known_rows.extend(self.row_keys.iter().copied());
         }
         self.known_rows.extend(keys.iter().copied());
-        self.row_keys.extend(keys);
-        self.strips.push(Arc::from(appended));
+        let strip = Arc::from(new_pixels);
+        if prepend {
+            self.strips.push_front(strip);
+            for key in keys.into_iter().rev() {
+                self.row_keys.push_front(key);
+            }
+            self.head = frame;
+        } else {
+            self.strips.push_back(strip);
+            self.row_keys.extend(keys);
+            self.tail = frame;
+        }
         self.bands = Some(bands);
         self.height = height;
-        self.position = Some(height - h);
-        self.anchor = frame;
+        self.located = None;
+        self.confirm_position(if prepend { 0 } else { height - h });
         Ok(Feedback::Accepted)
     }
+
     fn body_strips(&self) -> impl Iterator<Item = &[u8]> {
-        self.strips.iter().enumerate().map(|(index, strip)| {
-            if index == 0 {
-                &strip[self.first_body.clone()]
-            } else {
-                strip.as_ref()
-            }
-        })
+        self.strips.iter().map(AsRef::as_ref)
     }
 
     pub fn trim(&mut self, direction: Trim) -> bool {
@@ -549,7 +615,7 @@ impl Stitcher {
             return false;
         };
         let stride = self.width * 4;
-        let frame_height = self.anchor.pixels.len() / stride;
+        let frame_height = self.frame_height();
         let removed = match direction {
             Trim::Above => offset,
             Trim::Below => self.height - offset - frame_height,
@@ -557,64 +623,57 @@ impl Stitcher {
         if removed == 0 {
             return false;
         }
-        let bands = self.bands.unwrap_or_default();
-        let body_end = self.height - bands.top - bands.bottom;
-        let keep = match direction {
-            Trim::Above => offset * stride..body_end * stride,
-            Trim::Below => 0..(offset + frame_height - bands.top - bands.bottom) * stride,
+        let frame = if offset == 0 {
+            self.head.clone()
+        } else if self.at_tail() {
+            self.tail.clone()
+        } else {
+            self.located.take().expect("known interior capture")
         };
-        let mut start = 0;
-        let mut strips = Vec::new();
-        let mut first_body = 0..0;
-        for (index, strip) in self.strips.iter().enumerate() {
-            let range = if index == 0 {
-                self.first_body.clone()
-            } else {
-                0..strip.len()
-            };
-            let end = start + range.len();
-            let left = start.max(keep.start);
-            let right = end.min(keep.end);
-            if left < right {
-                let slice = range.start + left - start..range.start + right - start;
-                let retained = if slice == range {
-                    if strips.is_empty() {
-                        first_body = range;
-                    }
-                    strip.clone()
-                } else {
-                    if strips.is_empty() {
-                        first_body = 0..slice.len();
-                    }
-                    Arc::from(&strip[slice])
-                };
-                strips.push(retained);
+        let mut remaining = removed * stride;
+        while remaining > 0 {
+            let strip = match direction {
+                Trim::Above => self.strips.pop_front(),
+                Trim::Below => self.strips.pop_back(),
             }
-            start = end;
+            .expect("accepted body covers trim");
+            if remaining >= strip.len() {
+                remaining -= strip.len();
+            } else {
+                match direction {
+                    Trim::Above => self.strips.push_front(Arc::from(&strip[remaining..])),
+                    Trim::Below => self
+                        .strips
+                        .push_back(Arc::from(&strip[..strip.len() - remaining])),
+                }
+                break;
+            }
         }
-        self.strips = strips;
-        self.first_body = first_body;
-        self.row_keys.truncate(keep.end / stride);
-        self.row_keys.drain(..keep.start / stride);
-        self.known_rows.clear();
-        self.known_rows.extend(self.row_keys.iter().copied());
         self.height -= removed;
         match direction {
-            Trim::Above => self.position = Some(0),
+            Trim::Above => {
+                self.row_keys.drain(..removed);
+                self.head = frame;
+                self.confirm_position(0);
+            }
             Trim::Below => {
-                self.anchor = self.located.take().expect("interior capture");
-                self.returning_to_tail = false;
+                self.row_keys.truncate(self.row_keys.len() - removed);
+                self.tail = frame;
+                self.confirm_position(self.height - frame_height);
             }
         }
+        self.known_rows.clear();
+        self.known_rows.extend(self.row_keys.iter().copied());
         true
     }
 
     fn output_strips(&self) -> impl Iterator<Item = &[u8]> {
-        let footer = self.bands.unwrap_or_default().bottom * self.width * 4;
-        std::iter::once(self.header.as_ref())
+        let bands = self.bands.unwrap_or_default();
+        let stride = self.width * 4;
+        std::iter::once(&self.head.pixels[..bands.top * stride])
             .chain(self.body_strips())
             .chain(std::iter::once(
-                &self.anchor.pixels[self.anchor.pixels.len() - footer..],
+                &self.tail.pixels[self.tail.pixels.len() - bands.bottom * stride..],
             ))
     }
 
@@ -679,15 +738,16 @@ impl Stitcher {
                 left: 0,
                 top: (offset + bands.top) as i32,
                 right: self.width as i32,
-                bottom: (offset + self.anchor.pixels.len() / (self.width * 4) - bands.bottom)
-                    as i32,
+                bottom: (offset + self.frame_height() - bands.bottom) as i32,
             })
             .unwrap_or_default();
         let tail = self.height - visible_height;
-        let start = if self.at_tail() || self.position.is_none() {
+        let start = if self.preview_position == self.height - self.frame_height() {
             tail
+        } else if self.preview_position == 0 {
+            0
         } else {
-            ((current.top as usize + current.bottom as usize) / 2)
+            (self.preview_position + (bands.top + self.frame_height() - bands.bottom) / 2)
                 .saturating_sub(visible_height / 2)
                 .min(tail)
         };
@@ -1213,6 +1273,128 @@ mod tests {
     }
 
     #[test]
+    fn both_axes_grow_at_either_boundary_and_resume_after_cropping() {
+        let cancel = AtomicBool::new(false);
+        for axis in [Axis::Vertical, Axis::Horizontal] {
+            for (top, bottom) in [(0, 0), (12, 16)] {
+                let orient = |frame: CapturedRegion| {
+                    if axis == Axis::Horizontal {
+                        transpose(&frame, &cancel).unwrap()
+                    } else {
+                        frame
+                    }
+                };
+                let frame = |offset| Arc::new(orient((*fixed_frame(offset, top, bottom)).clone()));
+                let expected = |start, end| {
+                    let stride = 96 * 4;
+                    let first = fixed_frame(start, top, bottom);
+                    let footer = (160 - bottom) * stride;
+                    let mut pixels = first.pixels[..footer].to_vec();
+                    let extra = image(start + 160 - bottom);
+                    pixels.extend_from_slice(&extra.pixels[..(end - start - 160) * stride]);
+                    pixels.extend_from_slice(&first.pixels[footer..]);
+                    orient(CapturedRegion {
+                        bounds: Rect {
+                            left: 0,
+                            top: 0,
+                            right: 96,
+                            bottom: (end - start) as i32,
+                        },
+                        pixels,
+                    })
+                };
+                let mut stitch = Stitcher::new(frame(120)).unwrap();
+                stitch.change_axis(axis, &cancel).unwrap();
+                for offset in [100, 70] {
+                    assert_eq!(
+                        stitch.push(frame(offset), &cancel).unwrap(),
+                        Feedback::Accepted
+                    );
+                }
+                assert_eq!(stitch.push(frame(95), &cancel).unwrap(), Feedback::Located);
+                let preview = stitch.preview(80, 80);
+                assert_eq!(
+                    stitch.push(frame(50), &cancel).unwrap(),
+                    Feedback::Uncertain
+                );
+                let unknown = stitch.preview(80, 80);
+                assert_eq!(unknown.visible, preview.visible);
+                assert_eq!(unknown.image.pixels, preview.image.pixels);
+                assert_eq!(unknown.current, Rect::default());
+                assert_eq!(stitch.push(frame(70), &cancel).unwrap(), Feedback::Located);
+                assert_eq!(stitch.push(frame(48), &cancel).unwrap(), Feedback::Accepted);
+                assert_eq!(stitch.position(), Some(0));
+                assert_eq!(
+                    stitch.push(frame(120), &cancel).unwrap(),
+                    Feedback::Unchanged
+                );
+                assert_eq!(
+                    stitch.push(frame(145), &cancel).unwrap(),
+                    Feedback::Accepted
+                );
+                assert!(stitch.flatten(&cancel).unwrap().pixels == expected(48, 305).pixels);
+
+                assert_eq!(stitch.push(frame(80), &cancel).unwrap(), Feedback::Located);
+                assert!(stitch.trim(Trim::Above));
+                assert_eq!(stitch.push(frame(65), &cancel).unwrap(), Feedback::Accepted);
+                assert_eq!(stitch.push(frame(115), &cancel).unwrap(), Feedback::Located);
+                assert!(stitch.trim(Trim::Below));
+                assert!(stitch.at_tail());
+                assert_eq!(
+                    stitch.push(frame(135), &cancel).unwrap(),
+                    Feedback::Accepted
+                );
+                let expected = expected(65, 295);
+                assert_eq!(
+                    stitch.size(),
+                    (
+                        expected.bounds.right as usize,
+                        expected.bounds.bottom as usize
+                    )
+                );
+                assert!(stitch.flatten(&cancel).unwrap().pixels == expected.pixels);
+                assert!(stitch.preview(300, 300).image.pixels == expected.pixels);
+                assert!(stitch.trim(Trim::Above));
+                assert!(Arc::ptr_eq(&stitch.head, &stitch.tail));
+            }
+        }
+    }
+
+    #[test]
+    fn automatic_growth_rejects_new_head_content_but_can_locate_both_ends() {
+        let cancel = AtomicBool::new(false);
+        let mut stitch = Stitcher::new(image(50)).unwrap();
+        assert_eq!(
+            stitch.sample(image(40), Growth::TailOnly, &cancel).unwrap(),
+            Feedback::Uncertain
+        );
+        assert_eq!(stitch.size(), (96, 160));
+        assert_eq!(
+            stitch.push(image(50), &cancel).unwrap(),
+            Feedback::Unchanged
+        );
+        assert_eq!(stitch.push(image(40), &cancel).unwrap(), Feedback::Accepted);
+        assert_eq!(
+            stitch.sample(image(50), Growth::TailOnly, &cancel).unwrap(),
+            Feedback::Unchanged
+        );
+        assert_eq!(
+            stitch.sample(image(65), Growth::TailOnly, &cancel).unwrap(),
+            Feedback::Accepted
+        );
+        assert_eq!(
+            stitch.sample(image(40), Growth::TailOnly, &cancel).unwrap(),
+            Feedback::Located
+        );
+        assert!(!stitch.at_tail());
+        assert_eq!(
+            stitch.sample(image(35), Growth::TailOnly, &cancel).unwrap(),
+            Feedback::Uncertain
+        );
+        assert_eq!(stitch.size(), (96, 185));
+    }
+
+    #[test]
     fn fixed_edges_are_kept_once_in_export_and_preview() {
         let cancel = AtomicBool::new(false);
         for (top, bottom) in [(12, 0), (0, 16), (12, 16)] {
@@ -1338,7 +1520,9 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let mut stitch = Stitcher::new(image(0)).unwrap();
         assert_eq!(stitch.push(image(50), &cancel).unwrap(), Feedback::Accepted);
-        stitch.strips.push(Arc::from(image(0).pixels.as_slice()));
+        stitch
+            .strips
+            .push_back(Arc::from(image(0).pixels.as_slice()));
         stitch
             .row_keys
             .extend(image(0).pixels.chunks_exact(stitch.width * 4).map(row_key));
@@ -1365,7 +1549,7 @@ mod tests {
         let mut offset = 90;
         loop {
             let height = stitch.height;
-            let anchor = stitch.anchor.clone();
+            let anchor = stitch.tail.clone();
             match stitch.push(frame(offset + 90), &cancel).unwrap() {
                 Feedback::Accepted => {
                     offset += 90;
@@ -1376,8 +1560,8 @@ mod tests {
                 }
                 Feedback::Limit => {
                     assert_eq!(stitch.height, height);
-                    assert!(Arc::ptr_eq(&stitch.anchor, &anchor));
-                    assert_eq!(stitch.retained_bytes(), (height + 160) * width * 4);
+                    assert!(Arc::ptr_eq(&stitch.tail, &anchor));
+                    assert_eq!(stitch.retained_bytes(), (height - 12 + 320) * width * 4);
                     break;
                 }
                 feedback => panic!("unexpected feedback: {feedback:?}"),

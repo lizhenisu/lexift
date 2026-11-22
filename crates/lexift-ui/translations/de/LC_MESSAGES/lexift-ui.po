@@ -1853,8 +1853,8 @@ msgstr "Bild nicht zuordenbar. Zum zuletzt erfassten Bereich zurückscrollen."
 msgid "Image limit reached. Finish the current capture."
 msgstr "Bildlimit erreicht. Aktuelle Aufnahme abschließen."
 
-msgid "Scroll down to extend the image"
-msgstr "Nach unten scrollen, um das Bild zu erweitern"
+msgid "Scroll up or down to extend the image"
+msgstr "Scrollen Sie nach oben oder unten, um das Bild zu erweitern"
 
 msgid "Long capture unavailable. Select a smaller scrolling area."
 msgstr "Scroll-Aufnahme nicht verfügbar. Kleineren Bereich wählen."
@@ -2388,8 +2388,8 @@ msgstr "Links vom aktuellen Bildausschnitt abschneiden"
 msgid "Trim right of current view"
 msgstr "Rechts vom aktuellen Bildausschnitt abschneiden"
 
-msgid "Scroll right to extend the image"
-msgstr "Nach rechts scrollen, um das Bild zu erweitern"
+msgid "Scroll left or right to extend the image"
+msgstr "Scrollen Sie nach links oder rechts, um das Bild zu erweitern"
 
 msgid "More"
 msgstr "Mehr"

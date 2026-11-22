@@ -1,7 +1,7 @@
 //! Sequential background orchestration; matching and acceptance policy belong to Core.
 use super::*;
 use lexift_core::domain::long_capture::{
-    Axis, Feedback, Preview, Stitcher, Trim,
+    Axis, Feedback, Growth, Preview, Stitcher, Trim,
     auto_scroll::{self, Mode, Next, Steps, Stop},
     workflow::{Command, Event, Phase},
 };
@@ -445,6 +445,7 @@ fn run(
     let mut auto_run: Option<AutoRun> = None;
     let mut trim_request = None;
     let mut last_frame = Instant::now();
+    let mut unsettled_since: Option<Instant> = None;
     struct Stats {
         start: Instant,
         frames: u64,
@@ -514,6 +515,7 @@ fn run(
             return result;
         }
         if let Some((queue, notify, sizes)) = axis
+            && unsettled_since.is_none()
             && !auto_run.as_ref().is_some_and(|run| {
                 run.settling(
                     stitch.as_ref().is_some_and(Stitcher::at_tail)
@@ -558,6 +560,7 @@ fn run(
             }
             if !suspended {
                 port.clear();
+                unsettled_since = None;
                 suspended = true;
             }
             std::thread::sleep(Duration::from_millis(30));
@@ -579,6 +582,7 @@ fn run(
             layout_checked = Instant::now();
             if layout().map_or(true, |b| normalize(b) != original_layout) {
                 if let Some(s) = &mut stitch {
+                    unsettled_since = None;
                     s.invalidate_position();
                     paused.store(true, Ordering::Release);
                     sequence += 1;
@@ -604,9 +608,21 @@ fn run(
                 let first = stitch.is_none();
                 let matching = Instant::now();
                 let prior_position = stitch.as_ref().and_then(Stitcher::position);
+                let tail_only = auto
+                    .is_some_and(|(control, _)| control.lock().unwrap().state.mode != Mode::Manual)
+                    || auto_run.as_ref().is_some_and(|run| {
+                        let aligned = stitch.as_ref().is_some_and(Stitcher::at_tail)
+                            && matches!(last_feedback, Feedback::Accepted | Feedback::Unchanged);
+                        run.settling(aligned)
+                    });
                 stats.frames += 1;
                 let feedback = if let Some(stitch) = &mut stitch {
-                    stitch.push(image, cancel)?
+                    let growth = if tail_only {
+                        Growth::TailOnly
+                    } else {
+                        Growth::Both
+                    };
+                    stitch.sample(image, growth, cancel)?
                 } else {
                     stitch = Some(Stitcher::new(image)?);
                     Feedback::Accepted
@@ -623,14 +639,27 @@ fn run(
                 stats.working_peak = stats
                     .working_peak
                     .max(retained.max(retained_before) + incoming * if horizontal { 2 } else { 1 });
-                if first
-                    || feedback != last_feedback
-                    || feedback == Feedback::Accepted
-                    || stitch.as_ref().unwrap().position() != prior_position
+                let stitch = stitch.as_mut().unwrap();
+                // The capture port advances its serial only when pixels change. An
+                // intermediate compositor frame can be unmatchable during a scroll.
+                let unsettled = feedback == Feedback::Uncertain && stitch.position().is_some();
+                if unsettled {
+                    unsettled_since.get_or_insert(last_frame);
+                } else {
+                    unsettled_since = None;
+                    if feedback == Feedback::Limit {
+                        stitch.invalidate_position();
+                    }
+                }
+                if !unsettled
+                    && (first
+                        || feedback != last_feedback
+                        || feedback == Feedback::Accepted
+                        || stitch.position() != prior_position)
                 {
                     sequence += 1;
                     let feedback_started = Instant::now();
-                    progress(sequence, stitch.as_ref().unwrap(), feedback);
+                    progress(sequence, stitch, feedback);
                     stats.feedback += feedback_started.elapsed();
                     if feedback == Feedback::Located || feedback == Feedback::Uncertain {
                         tracing::trace!(
@@ -641,7 +670,7 @@ fn run(
                     }
                 }
                 last_feedback = feedback;
-                if let Some(run) = &mut auto_run {
+                if tail_only && let Some(run) = &mut auto_run {
                     run.steps.frame(feedback, run.started.elapsed());
                     if feedback == Feedback::Accepted
                         && let Some(sent) = run.sent.take()
@@ -661,6 +690,7 @@ fn run(
             }
             Err(error) if stitch.is_none() => return Err(error),
             Err(_) => {
+                unsettled_since = None;
                 paused.store(true, Ordering::Release);
                 sequence += 1;
                 let stitch = stitch.as_mut().unwrap();
@@ -672,6 +702,16 @@ fn run(
             }
             _ => {}
         }
+        if unsettled_since.is_some_and(|since| {
+            last_frame.elapsed() >= auto_scroll::SETTLE
+                || since.elapsed() >= auto_scroll::STEP_TIMEOUT
+        }) && let Some(stitch) = &mut stitch
+        {
+            unsettled_since = None;
+            stitch.invalidate_position();
+            sequence += 1;
+            progress(sequence, stitch, Feedback::Uncertain);
+        }
         let aligned = stitch.as_ref().is_some_and(Stitcher::at_tail)
             && matches!(last_feedback, Feedback::Accepted | Feedback::Unchanged);
         let settling = auto_run.as_ref().is_some_and(|run| run.settling(aligned));
@@ -679,7 +719,10 @@ fn run(
             if trim_request.is_none() {
                 trim_request = queue.lock().unwrap().take();
             }
-            if !settling && let Some((expected, direction)) = trim_request.take() {
+            if !settling
+                && unsettled_since.is_none()
+                && let Some((expected, direction)) = trim_request.take()
+            {
                 let started = Instant::now();
                 if let Some(direction) = direction
                     && sequence == expected
@@ -699,6 +742,7 @@ fn run(
                     tracing::debug!(
                         sequence,
                         ?direction,
+                        width = stitch.size().0,
                         height = stitch.size().1,
                         elapsed_ms = started.elapsed().as_secs_f64() * 1000.,
                         "Long capture trim committed"
@@ -988,6 +1032,14 @@ mod tests {
     #[test]
     fn long_capture_pause_releases_resources_and_finishes_latest_accepted_pixels() {
         let port = capture();
+        port.frames.lock().unwrap().insert(
+            1,
+            Arc::new(ScreenCaptureFrame {
+                revision: 1,
+                serial: 3,
+                regions: vec![frame(0)],
+            }),
+        );
         let cancel = AtomicBool::new(false);
         let paused = Arc::new(AtomicBool::new(false));
         let finish = AtomicBool::new(false);
@@ -1029,6 +1081,68 @@ mod tests {
         assert_eq!(port.requests.load(Ordering::SeqCst), 2);
         assert!(port.clears.load(Ordering::SeqCst) >= 2);
     }
+    #[test]
+    fn compositor_transition_can_recover_but_stable_unknown_invalidates_position() {
+        let port = capture();
+        let mut invalid = frame(0);
+        invalid.pixels.fill(0);
+        *port.frames.lock().unwrap() = [frame(20), invalid.clone(), frame(0), invalid]
+            .into_iter()
+            .enumerate()
+            .map(|(index, image)| {
+                Arc::new(ScreenCaptureFrame {
+                    revision: 1,
+                    serial: index as u64 + 1,
+                    regions: vec![image],
+                })
+            })
+            .collect();
+        let cancel = AtomicBool::new(false);
+        let finish = AtomicBool::new(false);
+        let (done, deadline) = std::sync::mpsc::channel();
+        let image = std::thread::scope(|scope| {
+            let cancelled = &cancel;
+            scope.spawn(move || {
+                if deadline.recv_timeout(Duration::from_secs(3)).is_err() {
+                    cancelled.store(true, Ordering::Release);
+                }
+            });
+            let result = run(
+                || Some(port),
+                frame(0).bounds,
+                vec![],
+                (
+                    &cancel,
+                    &AtomicBool::new(false),
+                    &finish,
+                    &AtomicBool::new(false),
+                ),
+                (None, None, None),
+                || Ok(vec![frame(0).bounds]),
+                |sequence, stitch, feedback| match sequence {
+                    1 => assert_eq!(feedback, Feedback::Accepted),
+                    2 => {
+                        assert_eq!(feedback, Feedback::Accepted);
+                        assert_eq!(stitch.position(), Some(0));
+                        assert_eq!(stitch.size(), (64, 100));
+                    }
+                    3 => {
+                        assert_eq!(feedback, Feedback::Uncertain);
+                        assert_eq!(stitch.position(), None);
+                        finish.store(true, Ordering::Release);
+                    }
+                    _ => unreachable!(),
+                },
+            );
+            let _ = done.send(());
+            result
+        })
+        .unwrap();
+        let mut expected = frame(0).pixels;
+        expected.extend_from_slice(&frame(20).pixels[60 * 64 * 4..]);
+        assert_eq!(image.pixels, expected);
+    }
+
     #[test]
     fn long_capture_cancel_drops_result_and_clears_owned_capture() {
         let port = capture();

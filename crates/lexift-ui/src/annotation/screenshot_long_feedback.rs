@@ -90,25 +90,31 @@ pub(super) fn preview(
         );
     }
     let size = (8. * dpi) as i32;
+    let inset = t as f32;
+    let cx = stride as f32 / 2.;
+    let cy = h as f32 / 2. + inset;
     for i in 0..size {
-        let distance = (size - i) as f32;
+        let distance = inset + i as f32;
         let offset = i as f32;
-        if preview.visible.top > 0 {
-            let cx = stride as f32 / 2.;
-            let y = t as f32 + distance;
-            fill(&mut p, cx - offset, y, t as f32, t as f32, primary);
-            fill(&mut p, cx + offset, y, t as f32, t as f32, primary);
-        }
-        let cy = h as f32 / 2. + t as f32;
-        for x in [
-            (preview.visible.left > 0).then_some(t as f32 + distance),
-            (preview.visible.right < preview.extent.right).then_some((w + t) as f32 - distance),
+        for y in [
+            (preview.visible.top > 0).then_some(inset + distance),
+            (preview.visible.bottom < preview.extent.bottom).then_some(h as f32 - distance),
         ]
         .into_iter()
         .flatten()
         {
-            fill(&mut p, x, cy - offset, t as f32, t as f32, primary);
-            fill(&mut p, x, cy + offset, t as f32, t as f32, primary);
+            fill(&mut p, cx - offset, y, inset, inset, primary);
+            fill(&mut p, cx + offset, y, inset, inset, primary);
+        }
+        for x in [
+            (preview.visible.left > 0).then_some(inset + distance),
+            (preview.visible.right < preview.extent.right).then_some(w as f32 - distance),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            fill(&mut p, x, cy - offset, inset, inset, primary);
+            fill(&mut p, x, cy + offset, inset, inset, primary);
         }
     }
     Some(p)
@@ -192,6 +198,15 @@ mod tests {
                     .iter()
                     .all(|p| *p == [100, 110, 120, 255])
             );
+            let mut middle = p;
+            middle.visible.bottom = 1800;
+            middle.current = Rect::default();
+            let drawn = preview(&middle, dpi, blue, green).unwrap();
+            let pixels = drawn.data().as_chunks::<4>().0;
+            let cx = stride / 2;
+            assert_eq!(pixels[2 * t * stride + cx], [20, 80, 240, 255]);
+            assert_eq!(pixels[(200 - t) * stride + cx], [20, 80, 240, 255]);
+            assert_eq!(pixels[(200 - t) * stride + cx - 5], [100, 110, 120, 255]);
         }
     }
 }

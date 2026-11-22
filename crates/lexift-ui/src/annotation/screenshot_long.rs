@@ -1196,6 +1196,54 @@ fn move_control(event: PopupPointerInput) -> bool {
     }
     matches!(event, PopupPointerInput::Moved { .. })
 }
+/// Keep a tall vertical preview clear of both the capture and its controls where space permits.
+fn vertical_preview_left(
+    source: Rect,
+    area: Rect,
+    control: Option<Rect>,
+    y: i32,
+    width: i32,
+    height: i32,
+    gap: i32,
+) -> i32 {
+    let before = source.left - width - gap;
+    let after = source.right + gap;
+    let max_x = (area.right - width).max(area.left);
+    let candidates = [
+        Some(after),
+        Some(before),
+        control.map(|bar| bar.right + gap),
+        control.map(|bar| bar.left - width - gap),
+    ];
+    candidates
+        .into_iter()
+        .flatten()
+        .find(|&x| {
+            (area.left..=max_x).contains(&x)
+                && (x <= before || x >= after)
+                && control.is_none_or(|bar| {
+                    !intersects(
+                        bar,
+                        Rect {
+                            left: x,
+                            top: y,
+                            right: x + width,
+                            bottom: y + height,
+                        },
+                    )
+                })
+        })
+        .unwrap_or_else(|| {
+            if after <= max_x {
+                after
+            } else if before >= area.left {
+                before
+            } else {
+                (source.right - width - gap).clamp(area.left, max_x)
+            }
+        })
+}
+
 fn present_preview(p: Preview, axis: lexift_core::domain::long_capture::Axis) -> bool {
     let horizontal = axis == lexift_core::domain::long_capture::Axis::Horizontal;
     REGISTRY.with(|s| {
@@ -1246,15 +1294,19 @@ fn present_preview(p: Preview, axis: lexift_core::domain::long_capture::Axis) ->
                 };
                 (x, y)
             } else {
-                let x = if src.right + gap + width <= a.right {
-                    src.right + gap
-                } else if src.left - gap - width >= a.left {
-                    src.left - gap - width
-                } else {
-                    (src.right - width - gap).clamp(a.left, max_x)
-                };
                 let y = (src.bottom - height)
                     .clamp(a.top + gap, (a.bottom - height - gap).max(a.top + gap));
+                let control = v.control.get().map(|control| {
+                    let pos = control.window().position();
+                    let size = control.window().size();
+                    Rect {
+                        left: pos.x,
+                        top: pos.y,
+                        right: pos.x + size.width as i32,
+                        bottom: pos.y + size.height as i32,
+                    }
+                });
+                let x = vertical_preview_left(src, a, control, y, width, height, gap);
                 (x, y)
             };
             w.window().set_position(slint::PhysicalPosition::new(x, y));
@@ -1266,7 +1318,8 @@ fn present_preview(p: Preview, axis: lexift_core::domain::long_capture::Axis) ->
             w.set_current_top(top);
             w.set_current_width(width);
             w.set_current_height(height);
-            w.set_clipped(p.visible.top > 0);
+            w.set_clipped_top(p.visible.top > 0);
+            w.set_clipped_bottom(p.visible.bottom < p.extent.bottom);
             w.set_clipped_left(p.visible.left > 0);
             w.set_clipped_right(p.visible.right < p.extent.right);
             if !w.window().is_visible() {
@@ -2598,6 +2651,36 @@ mod tests {
         assert!(!w.get_auto_stop_hover());
         assert_eq!(clicks.get(), 2);
     }
+    #[test]
+    fn tall_preview_moves_beside_the_controls_without_covering_the_source() {
+        let area = Rect {
+            left: 0,
+            top: 0,
+            right: 2560,
+            bottom: 1420,
+        };
+        let source = Rect {
+            left: 229,
+            top: 178,
+            right: 629,
+            bottom: 778,
+        };
+        let controls = Rect {
+            left: 229,
+            top: 788,
+            right: 992,
+            bottom: 838,
+        };
+        assert_eq!(
+            vertical_preview_left(source, area, Some(controls), 394, 256, 384, 10),
+            639
+        );
+        assert_eq!(
+            vertical_preview_left(source, area, Some(controls), 10, 256, 1376, 10),
+            1002
+        );
+    }
+
     #[test]
     fn controls_never_overlap_capture_even_at_edges() {
         let area = Rect {

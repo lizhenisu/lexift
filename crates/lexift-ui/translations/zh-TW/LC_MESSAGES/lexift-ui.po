@@ -1853,8 +1853,8 @@ msgstr "無法比對此畫面，請捲回上次擷取的區域。"
 msgid "Image limit reached. Finish the current capture."
 msgstr "已達圖片上限，請完成目前截圖。"
 
-msgid "Scroll down to extend the image"
-msgstr "向下捲動以延伸圖片"
+msgid "Scroll up or down to extend the image"
+msgstr "向上或向下捲動以延伸圖片"
 
 msgid "Long capture unavailable. Select a smaller scrolling area."
 msgstr "無法開始長截圖，請選取較小的捲動區域。"
@@ -2388,8 +2388,8 @@ msgstr "裁掉目前畫面左側"
 msgid "Trim right of current view"
 msgstr "裁掉目前畫面右側"
 
-msgid "Scroll right to extend the image"
-msgstr "向右捲動以延伸圖片"
+msgid "Scroll left or right to extend the image"
+msgstr "向左或向右捲動以延伸圖片"
 
 msgid "More"
 msgstr "更多"

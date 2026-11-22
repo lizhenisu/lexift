@@ -1853,8 +1853,8 @@ msgstr "无法匹配此画面，请滚回上次采集的区域。"
 msgid "Image limit reached. Finish the current capture."
 msgstr "已达到图片上限，请完成当前截图。"
 
-msgid "Scroll down to extend the image"
-msgstr "向下滚动以扩展图片"
+msgid "Scroll up or down to extend the image"
+msgstr "向上或向下滚动以延伸图片"
 
 msgid "Long capture unavailable. Select a smaller scrolling area."
 msgstr "无法开始长截图，请选择较小的滚动区域。"
@@ -2388,8 +2388,8 @@ msgstr "裁掉当前画面左侧"
 msgid "Trim right of current view"
 msgstr "裁掉当前画面右侧"
 
-msgid "Scroll right to extend the image"
-msgstr "向右滚动以扩展图片"
+msgid "Scroll left or right to extend the image"
+msgstr "向左或向右滚动以延伸图片"
 
 msgid "More"
 msgstr "更多"

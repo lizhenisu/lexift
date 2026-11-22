@@ -1853,8 +1853,8 @@ msgstr "Não foi possível alinhar esta imagem. Volte à última área capturada
 msgid "Image limit reached. Finish the current capture."
 msgstr "Limite da imagem atingido. Conclua a captura atual."
 
-msgid "Scroll down to extend the image"
-msgstr "Role para baixo para ampliar a imagem"
+msgid "Scroll up or down to extend the image"
+msgstr "Role para cima ou para baixo para estender a imagem"
 
 msgid "Long capture unavailable. Select a smaller scrolling area."
 msgstr "Captura com rolagem indisponível. Selecione uma área menor."
@@ -2388,8 +2388,8 @@ msgstr "Cortar à esquerda da vista atual"
 msgid "Trim right of current view"
 msgstr "Cortar à direita da vista atual"
 
-msgid "Scroll right to extend the image"
-msgstr "Role para a direita para estender a imagem"
+msgid "Scroll left or right to extend the image"
+msgstr "Role para a esquerda ou para a direita para estender a imagem"
 
 msgid "More"
 msgstr "Mais"

@@ -35,8 +35,8 @@ impl State {
 
 pub const TARGET_WAIT: Duration = Duration::from_secs(5);
 pub const TARGET_DWELL: Duration = Duration::from_millis(300);
-const STEP_TIMEOUT: Duration = Duration::from_millis(1500);
-const SETTLE: Duration = Duration::from_millis(180);
+pub const STEP_TIMEOUT: Duration = Duration::from_millis(1500);
+pub const SETTLE: Duration = Duration::from_millis(180);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Next {

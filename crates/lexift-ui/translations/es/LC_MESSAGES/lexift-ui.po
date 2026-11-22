@@ -1853,8 +1853,8 @@ msgstr "No se puede unir esta imagen. Vuelva a la última zona capturada."
 msgid "Image limit reached. Finish the current capture."
 msgstr "Se alcanzó el límite de imagen. Finalice la captura actual."
 
-msgid "Scroll down to extend the image"
-msgstr "Desplácese hacia abajo para ampliar la imagen"
+msgid "Scroll up or down to extend the image"
+msgstr "Desplázate hacia arriba o abajo para extender la imagen"
 
 msgid "Long capture unavailable. Select a smaller scrolling area."
 msgstr "Captura con desplazamiento no disponible. Seleccione una zona menor."
@@ -2388,8 +2388,8 @@ msgstr "Recortar a la izquierda de la vista actual"
 msgid "Trim right of current view"
 msgstr "Recortar a la derecha de la vista actual"
 
-msgid "Scroll right to extend the image"
-msgstr "Desplázate a la derecha para ampliar la imagen"
+msgid "Scroll left or right to extend the image"
+msgstr "Desplázate hacia la izquierda o derecha para extender la imagen"
 
 msgid "More"
 msgstr "Más"
