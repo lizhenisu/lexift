@@ -108,7 +108,14 @@ impl Bands {
         a[..top] == b[..top] && a[bottom..] == b[bottom..]
     }
 
-    fn displacement(self, a: &[u8], b: &[u8], width: usize, cancel: &AtomicBool) -> Option<usize> {
+    fn displacement(
+        self,
+        a: &[u8],
+        b: &[u8],
+        width: usize,
+        exact: bool,
+        cancel: &AtomicBool,
+    ) -> Option<usize> {
         let stride = width * 4;
         if !self.matches(a, b, stride) {
             return None;
@@ -117,7 +124,7 @@ impl Bands {
             self.body(a, stride),
             self.body(b, stride),
             width,
-            self != Self::default(),
+            exact || self != Self::default(),
             cancel,
         )
     }
@@ -173,7 +180,13 @@ fn edge_rows(
     Some(0)
 }
 
-fn initial_match(a: &[u8], b: &[u8], width: usize, cancel: &AtomicBool) -> Option<(Bands, usize)> {
+fn initial_match(
+    a: &[u8],
+    b: &[u8],
+    width: usize,
+    exact: bool,
+    cancel: &AtomicBool,
+) -> Option<(Bands, usize)> {
     let stride = width * 4;
     let top = edge_rows(a, b, stride, false, cancel)?;
     let bottom = edge_rows(a, b, stride, true, cancel)?;
@@ -189,7 +202,7 @@ fn initial_match(a: &[u8], b: &[u8], width: usize, cancel: &AtomicBool) -> Optio
         {
             continue;
         }
-        if let Some(dy) = bands.displacement(a, b, width, cancel) {
+        if let Some(dy) = bands.displacement(a, b, width, exact, cancel) {
             if found.is_some() || ambiguous_boundary(bands, a, b, stride, dy) {
                 return None;
             }
@@ -462,20 +475,17 @@ impl Stitcher {
             }
             Ok(None) => {}
         }
+        // The horizontal frame has already been transposed. Its outer columns are
+        // bands in this axis, and even a full-frame match must be exact.
+        let exact = self.axis == Axis::Horizontal;
         let matched = if self.returning_to_tail || same_as_tail {
             None
         } else if let Some(bands) = self.bands {
-            if self.axis == Axis::Horizontal {
-                displacement(&self.anchor.pixels, &frame.pixels, w, true, cancel)
-            } else {
-                bands.displacement(&self.anchor.pixels, &frame.pixels, w, cancel)
-            }
-            .map(|dy| (bands, dy))
-        } else if self.axis == Axis::Horizontal {
-            displacement(&self.anchor.pixels, &frame.pixels, w, true, cancel)
-                .map(|shift| (Bands::default(), shift))
+            bands
+                .displacement(&self.anchor.pixels, &frame.pixels, w, exact, cancel)
+                .map(|dy| (bands, dy))
         } else {
-            initial_match(&self.anchor.pixels, &frame.pixels, w, cancel)
+            initial_match(&self.anchor.pixels, &frame.pixels, w, exact, cancel)
         };
         let Some((bands, dy)) = matched else {
             return Ok(if cancel.load(Ordering::Relaxed) {
@@ -934,25 +944,100 @@ mod tests {
         );
     }
 
+    fn fixed_columns(
+        offset: usize,
+        width: usize,
+        left: usize,
+        right: usize,
+    ) -> Arc<CapturedRegion> {
+        let mut image = (*columns(offset, width)).clone();
+        let header = columns(9000, width);
+        let footer = columns(11000, right);
+        let stride = width * 4;
+        for (y, row) in image.pixels.chunks_exact_mut(stride).enumerate() {
+            let start = y * stride;
+            row[..left * 4].copy_from_slice(&header.pixels[start..start + left * 4]);
+            let end = stride - right * 4;
+            row[end..].copy_from_slice(&footer.pixels[y * right * 4..(y + 1) * right * 4]);
+        }
+        Arc::new(image)
+    }
+
     #[test]
-    fn horizontal_sidebars_and_lost_overlap_do_not_advance_the_anchor() {
+    fn horizontal_fixed_columns_are_kept_once_through_preview_trim_and_continuation() {
         let cancel = AtomicBool::new(false);
-        let with_sidebar = |offset| {
-            let mut image = (*columns(offset, 80)).clone();
-            let stationary = columns(0, 80);
-            for (y, row) in image.pixels.as_chunks_mut::<320>().0.iter_mut().enumerate() {
-                row[..32].copy_from_slice(&stationary.pixels[y * 320..y * 320 + 32]);
+        for (left, right) in [(8, 0), (0, 12), (8, 12)] {
+            let frame = |offset| fixed_columns(offset, 80, left, right);
+            let mut stitch = Stitcher::new(frame(0)).unwrap();
+            assert!(stitch.change_axis(Axis::Horizontal, &cancel).unwrap());
+            assert_eq!(stitch.flatten(&cancel).unwrap().pixels, frame(0).pixels);
+            for offset in [1, 25, 55] {
+                assert_eq!(
+                    stitch.push(frame(offset), &cancel).unwrap(),
+                    Feedback::Accepted
+                );
             }
-            Arc::new(image)
-        };
-        let first = with_sidebar(0);
+            let expected = fixed_columns(0, 135, left, right);
+            assert_eq!(stitch.flatten(&cancel).unwrap().pixels, expected.pixels);
+            let full = stitch.preview(135, 40);
+            assert_eq!(full.image.pixels, expected.pixels);
+            let tail = stitch.preview(90, 40);
+            assert_eq!(tail.visible.left, 45);
+            assert_eq!(tail.current.left, (55 + left) as i32);
+            assert_eq!(tail.current.right, (135 - right) as i32);
+            let clipped: Vec<_> = expected
+                .pixels
+                .as_chunks::<{ 135 * 4 }>()
+                .0
+                .iter()
+                .flat_map(|row| row[45 * 4..].iter().copied())
+                .collect();
+            assert_eq!(tail.image.pixels, clipped);
+
+            assert_eq!(stitch.push(frame(25), &cancel).unwrap(), Feedback::Located);
+            assert!(stitch.trim(Trim::Above));
+            assert_eq!(
+                stitch.flatten(&cancel).unwrap().pixels,
+                fixed_columns(25, 110, left, right).pixels
+            );
+            assert_eq!(stitch.push(frame(40), &cancel).unwrap(), Feedback::Located);
+            assert!(stitch.trim(Trim::Below));
+            assert_eq!(
+                stitch.flatten(&cancel).unwrap().pixels,
+                fixed_columns(25, 95, left, right).pixels
+            );
+            assert_eq!(stitch.push(frame(65), &cancel).unwrap(), Feedback::Accepted);
+            assert_eq!(
+                stitch.flatten(&cancel).unwrap().pixels,
+                fixed_columns(25, 120, left, right).pixels
+            );
+        }
+    }
+
+    #[test]
+    fn horizontal_band_mutations_and_lost_overlap_preserve_the_accepted_image() {
+        let cancel = AtomicBool::new(false);
+        let first = fixed_columns(0, 80, 8, 12);
         let mut stitch = Stitcher::new(first.clone()).unwrap();
         assert!(stitch.change_axis(Axis::Horizontal, &cancel).unwrap());
-        for next in [with_sidebar(24), columns(100, 80)] {
+        let second = fixed_columns(25, 80, 8, 12);
+        assert_eq!(
+            stitch.push(second.clone(), &cancel).unwrap(),
+            Feedback::Accepted
+        );
+        let accepted = stitch.flatten(&cancel).unwrap();
+        let mut changed = (*fixed_columns(45, 80, 8, 12)).clone();
+        changed.pixels[0] ^= 0x80;
+        for next in [
+            Arc::new(changed),
+            fixed_columns(45, 80, 12, 12),
+            fixed_columns(100, 80, 8, 12),
+        ] {
             assert_eq!(stitch.push(next, &cancel).unwrap(), Feedback::Uncertain);
-            assert_eq!(stitch.flatten(&cancel).unwrap().pixels, first.pixels);
+            assert_eq!(stitch.flatten(&cancel).unwrap().pixels, accepted.pixels);
             assert!(stitch.position().is_none());
         }
+        assert_eq!(stitch.push(second, &cancel).unwrap(), Feedback::Unchanged);
         cancel.store(true, Ordering::Relaxed);
         assert_eq!(stitch.push(first, &cancel).unwrap(), Feedback::Cancelled);
     }
@@ -1309,12 +1394,6 @@ mod tests {
             frame.pixels[..12 * stride].fill(230);
             Arc::new(frame)
         };
-        let mut stitch = Stitcher::new(solid(0)).unwrap();
-        assert_eq!(
-            stitch.push(solid(25), &cancel).unwrap(),
-            Feedback::Uncertain
-        );
-
         let first = fixed_frame(0, 12, 0);
         let mut moved = (*fixed_frame(25, 12, 0)).clone();
         let mut ambiguous = (*first).clone();
@@ -1322,13 +1401,27 @@ mod tests {
         ambiguous.pixels[36 * stride..37 * stride].copy_from_slice(&row);
         // Preserve the exact 25-row body overlap while making the 11-row boundary valid too.
         moved.pixels[11 * stride..12 * stride].copy_from_slice(&row);
-        let first = Arc::new(ambiguous);
-        let mut stitch = Stitcher::new(first.clone()).unwrap();
-        assert_eq!(
-            stitch.push(Arc::new(moved), &cancel).unwrap(),
-            Feedback::Uncertain
-        );
-        assert!(stitch.flatten(&cancel).unwrap().pixels == first.pixels);
+        for (first, moved) in [
+            (solid(0), solid(25)),
+            (Arc::new(ambiguous), Arc::new(moved)),
+        ] {
+            for axis in [Axis::Vertical, Axis::Horizontal] {
+                let orient = |image: &Arc<CapturedRegion>| match axis {
+                    Axis::Vertical => image.clone(),
+                    Axis::Horizontal => Arc::new(transpose(image, &cancel).unwrap()),
+                };
+                let expected = orient(&first);
+                let mut stitch = Stitcher::new(expected.clone()).unwrap();
+                if axis == Axis::Horizontal {
+                    assert!(stitch.change_axis(axis, &cancel).unwrap());
+                }
+                assert_eq!(
+                    stitch.push(orient(&moved), &cancel).unwrap(),
+                    Feedback::Uncertain
+                );
+                assert!(stitch.flatten(&cancel).unwrap().pixels == expected.pixels);
+            }
+        }
     }
 
     #[test]
