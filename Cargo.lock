@@ -2530,7 +2530,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lexift-app"
-version = "0.0.1-rc.15"
+version = "0.0.1-rc.16"
 dependencies = [
  "i-slint-backend-winit",
  "lexift-config",
@@ -2547,7 +2547,7 @@ dependencies = [
 
 [[package]]
 name = "lexift-config"
-version = "0.0.1-rc.15"
+version = "0.0.1-rc.16"
 dependencies = [
  "atomic-write-file",
  "dirs",
@@ -2560,11 +2560,11 @@ dependencies = [
 
 [[package]]
 name = "lexift-core"
-version = "0.0.1-rc.15"
+version = "0.0.1-rc.16"
 
 [[package]]
 name = "lexift-observability"
-version = "0.0.1-rc.15"
+version = "0.0.1-rc.16"
 dependencies = [
  "dirs",
  "tracing",
@@ -2574,7 +2574,7 @@ dependencies = [
 
 [[package]]
 name = "lexift-platform"
-version = "0.0.1-rc.15"
+version = "0.0.1-rc.16"
 dependencies = [
  "dirs",
  "image",
@@ -2595,7 +2595,7 @@ dependencies = [
 
 [[package]]
 name = "lexift-translate"
-version = "0.0.1-rc.15"
+version = "0.0.1-rc.16"
 dependencies = [
  "lexift-core",
  "reqwest",
@@ -2606,7 +2606,7 @@ dependencies = [
 
 [[package]]
 name = "lexift-ui"
-version = "0.0.1-rc.15"
+version = "0.0.1-rc.16"
 dependencies = [
  "ab_glyph",
  "chrono",
