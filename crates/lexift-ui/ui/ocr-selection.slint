@@ -1,20 +1,101 @@
 import { ToolButton } from "annotation.slint";
 export struct PolygonVertex { x: length, y: length }
-import { Button } from "std-widgets.slint";
 import { Colors } from "design/colors.slint";
+import { Spacing } from "design/spacing.slint";
+import { Typography } from "design/typography.slint";
 export struct MultiRegionMark { left: length, top: length, width: length, height: length, label: string, current: bool }
 import { ScreenshotPixelPicker } from "screenshot-pixel-picker.slint";
 import { ScreenshotSizeLabel, SizeLabelStyle } from "screenshot-size-label.slint";
 import { ScreenshotHelp } from "screenshot-help.slint";
 import { Metrics } from "design/metrics.slint";
 import { RegionPreview, ScreenInteractionHint } from "screen-interaction.slint";
+
+component SelectionAction inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <bool> prominent;
+    in property <bool> checkable;
+    in property <bool> checked;
+    in property <image> icon;
+    private property <bool> icon-only: root.icon.width > 0;
+    callback clicked();
+    callback hint-changed(string, bool);
+    private property <bool> hint-active: root.icon-only && hit.has-hover && !hit.pressed;
+    changed hint-active => { root.hint-changed(root.label, self.hint-active); }
+    height: 34px;
+    min-width: root.icon-only ? 34px : caption.preferred-width + 2 * Spacing.small;
+    preferred-width: self.min-width;
+    border-radius: 6px;
+    border-width: keyboard.has-focus ? 1px : 0px;
+    border-color: Colors.primary;
+    background: root.enabled && hit.pressed ? Colors.icon-button-pressed
+        : root.enabled && hit.has-hover ? Colors.icon-button-hover
+        : root.enabled && (root.prominent || root.checked) ? Colors.primary-container : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-checkable: root.checkable;
+    accessible-checked: root.checked;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+    forward-focus: keyboard;
+    keyboard := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == " " || event.text == Key.Return {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    caption := Text {
+        visible: !root.icon-only;
+        x: Spacing.small; width: max(0px, parent.width - 2 * self.x);
+        height: parent.height; text: root.label;
+        color: !root.enabled ? Colors.secondary-foreground.with-alpha(0.6)
+            : root.prominent || root.checked ? Colors.primary : Colors.foreground;
+        font-size: Typography.compact-size; font-weight: root.prominent || root.checked ? 600 : 400;
+        overflow: elide; horizontal-alignment: center; vertical-alignment: center;
+    }
+    if root.icon-only: Image {
+        width: 18px; height: 18px;
+        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        source: root.icon;
+        colorize: root.checked ? Colors.primary : root.enabled ? Colors.foreground : Colors.outline;
+    }
+    hit := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
 export component OcrSelectionWindow inherits Window {
     in property <bool> mode-control;
     in property <bool> mode-windows-available;
     in property <bool> mode-busy;
     in property <bool> mode-confirm;
     in property <int> selection-mode;
-    out property <float> mode-control-width: mode-strip.width / 1px;
+    private property <bool> has-actions: root.multi-mode && root.multi-controls;
+    private property <bool> compact-actions: root.width < 900px;
+    private property <length> mode-button-size: 38px;
+    private property <image> no-action-icon;
+    private property <string> action-hint;
+    changed selection-mode => { root.action-hint = ""; }
+    changed mode-confirm => { root.action-hint = ""; }
+    changed has-actions => { root.action-hint = ""; }
+    function set-action-hint(label: string, active: bool) {
+        if active { root.action-hint = label; }
+        else if root.action-hint == label { root.action-hint = ""; }
+    }
+    public pure function controls-contain(x: length, y: length) -> bool {
+        return dock.visible && x >= dock.x && x < dock.x + dock.width
+            && y >= dock.y && y < dock.y + dock.height;
+    }
+    public pure function mode-control-contains(x: length, y: length) -> bool {
+        let p = mode-anchor.absolute-position;
+        return root.mode-control && (root.mode-confirm || !root.has-actions ? root.controls-contain(x, y)
+            : x >= p.x && x < p.x + mode-anchor.width && y >= p.y && y < p.y + mode-anchor.height);
+    }
+    function open-mode-menu() {
+        mode-menu.show({x: 0px, y: dock.y + dock.height - mode-anchor.absolute-position.y + 4px});
+    }
     callback mode-action(int);
     in property <bool> multi-mode;
     in property <bool> mask-copy-mode;
@@ -61,7 +142,7 @@ export component OcrSelectionWindow inherits Window {
                 return accept;
             }
             if root.mode-control && !root.mode-busy && event.text == Key.F2 {
-                mode-menu.show({x: 0px, y: 38px});
+                root.open-mode-menu();
                 return accept;
             }
             if root.multi-mode {
@@ -120,7 +201,7 @@ export component OcrSelectionWindow inherits Window {
         x:root.picker-left;y:root.picker-top;width:root.picker-width;height:root.picker-height;
         grid:root.picker-grid;coordinates:root.picker-coordinates;hex:root.picker-hex;rgb:root.picker-rgb;status:root.picker-status;
     }
-    if root.screenshot-mode && !root.window-mode && !root.polygon-mode && !root.combine-mode && root.size-visible: ScreenshotSizeLabel {
+    if root.screenshot-mode && !root.multi-mode && root.size-visible: ScreenshotSizeLabel {
         x:root.size-left; y:root.size-top; width:root.size-width; height:root.size-height; text:root.size-text;
     }
     if !root.screenshot-mode: ScreenInteractionHint {
@@ -164,25 +245,90 @@ export component OcrSelectionWindow inherits Window {
             label := Text { x: 6px; height: parent.height; vertical-alignment: center; color: Colors.screen-help-foreground; text: mark.label; }
         }
     }
-    if root.multi-mode && root.multi-controls: Rectangle {
-        x: 0px; y: 0px; height: 76px; width: min(parent.width, 660px);
-        background: Colors.surface;
-        VerticalLayout {
-            padding: 6px; spacing: 4px;
+    if !root.multi-mode: TouchArea {
+        mouse-cursor: crosshair;
+        pointer-event(event) => {
+            if event.button == PointerEventButton.right && event.kind == PointerEventKind.down { root.cancelled(); }
+        }
+    }
+
+    dock := Rectangle {
+        visible: root.mode-control || root.has-actions;
+        x: Spacing.medium; y: Spacing.medium;
+        width: min(max(0px, root.width - 2 * self.x),
+            root.mode-confirm ? confirmation.preferred-width
+                : root.has-actions ? normal.preferred-width : root.mode-button-size + 2 * Spacing.small);
+        height: root.mode-confirm ? confirmation.preferred-height
+            : root.has-actions ? normal.preferred-height : root.mode-button-size + 2 * Spacing.small;
+        border-radius: 10px; border-width: 1px;
+        border-color: Colors.outline; background: Colors.surface;
+        drop-shadow-color: Colors.menu-shadow;
+        drop-shadow-offset-y: 3px; drop-shadow-blur: 12px;
+
+        normal := VerticalLayout {
+            visible: !root.mode-confirm;
+            padding: Spacing.small; spacing: 4px;
             HorizontalLayout {
-                spacing: 6px;
-                if root.combine-mode: Button { text: @tr("Add selection"); checkable: true; checked: !root.combine-remove; enabled: !root.combine-busy; clicked => { root.multi-action(3); } }
-                if root.combine-mode: Button { text: @tr("Subtract selection"); checkable: true; checked: root.combine-remove; enabled: !root.combine-busy; clicked => { root.multi-action(4); } }
-                if !root.window-mode: Button { text: root.freehand-mode ? @tr("Redraw contour") : root.combine-mode ? @tr("Undo") : root.polygon-mode ? (root.polygon-closed ? @tr("Continue editing polygon") : @tr("Remove last vertex")) : @tr("Delete current region"); enabled: root.multi-can-delete; clicked => { root.multi-action(0); } }
-                Button { text: root.freehand-mode ? @tr("Save PNG") : root.polygon-mode ? (root.polygon-closed ? @tr("Save PNG") : @tr("Close polygon")) : (root.window-mode || root.combine-mode) ? @tr("Save PNG") : root.multi-retry ? @tr("Retry") : @tr("Save all PNG"); enabled: root.multi-can-save; clicked => { root.multi-action(1); } }
-                if root.mask-copy-mode: Button { text: @tr("Copy image"); enabled: root.mask-copy-enabled; clicked => { root.multi-action(5); } }
-                if root.mask-copy-mode: ToolButton {
+                spacing: 4px;
+                mode-anchor := Rectangle {
+                    width: root.mode-control ? root.mode-button-size : 0px; height: root.mode-button-size;
+                    visible: root.mode-control;
+                    ToolButton {
+                        kind: 35; label: @tr("Screenshot mode"); enabled: !root.mode-busy;
+                        clicked => { root.open-mode-menu(); }
+                    }
+                    mode-menu := ContextMenuArea {
+                        x: 0px; y: 0px; width: parent.width; height: parent.height;
+                        enabled: false;
+                        Menu {
+                            MenuItem { title: @tr("Rectangle"); checkable: true; checked: root.selection-mode == 0; activated => { root.mode-action(0); } }
+                            MenuItem { title: root.mode-windows-available ? @tr("Multi-window screenshot") : @tr("Multi-window screenshot") + " — " + @tr("Start a new screenshot"); enabled: root.mode-windows-available; checkable: true; checked: root.selection-mode == 1; activated => { root.mode-action(1); } }
+                            MenuItem { title: @tr("Polygon screenshot"); checkable: true; checked: root.selection-mode == 2; activated => { root.mode-action(2); } }
+                            MenuItem { title: @tr("Combine screenshot regions"); checkable: true; checked: root.selection-mode == 3; activated => { root.mode-action(3); } }
+                            MenuItem { title: @tr("Freehand screenshot"); checkable: true; checked: root.selection-mode == 4; activated => { root.mode-action(4); } }
+                        }
+                    }
+                }
+                if root.mode-control && root.has-actions: Rectangle {
+                    width: 1px; height: 22px; background: Colors.outline;
+                }
+                if root.has-actions && root.combine-mode: SelectionAction {
+                    label: @tr("Add selection");
+                    icon: root.compact-actions ? @image-url("icons/sequence-plus.svg") : root.no-action-icon;
+                    checkable: true; checked: !root.combine-remove; enabled: !root.combine-busy;
+                    clicked => { root.multi-action(3); }
+                    hint-changed(label, active) => { root.set-action-hint(label, active); }
+                }
+                if root.has-actions && root.combine-mode: SelectionAction {
+                    label: @tr("Subtract selection");
+                    icon: root.compact-actions ? @image-url("icons/sequence-minus.svg") : root.no-action-icon;
+                    checkable: true; checked: root.combine-remove; enabled: !root.combine-busy;
+                    clicked => { root.multi-action(4); }
+                    hint-changed(label, active) => { root.set-action-hint(label, active); }
+                }
+                if root.has-actions && !root.window-mode: SelectionAction {
+                    label: root.freehand-mode ? @tr("Redraw contour") : root.combine-mode ? @tr("Undo") : root.polygon-mode ? (root.polygon-closed ? @tr("Continue editing polygon") : @tr("Remove last vertex")) : @tr("Delete current region");
+                    icon: !root.compact-actions || root.combine-mode ? root.no-action-icon :
+                        root.freehand-mode ? @image-url("assets/icons/refresh.svg") :
+                        root.polygon-mode && !root.polygon-closed ? @image-url("icons/sequence-minus.svg") :
+                        root.polygon-mode ? @image-url("assets/icons/edit-polygon.svg") : @image-url("icons/credential-delete.svg");
+                    enabled: root.multi-can-delete; clicked => { root.multi-action(0); }
+                    hint-changed(label, active) => { root.set-action-hint(label, active); }
+                }
+                if root.has-actions: SelectionAction { prominent: true; label: root.freehand-mode ? @tr("Save PNG") : root.polygon-mode ? (root.polygon-closed ? @tr("Save PNG") : @tr("Close polygon")) : (root.window-mode || root.combine-mode) ? @tr("Save PNG") : root.multi-retry ? @tr("Retry") : @tr("Save all PNG"); enabled: root.multi-can-save; clicked => { root.multi-action(1); } }
+                if root.has-actions && root.mask-copy-mode: SelectionAction {
+                    label: @tr("Copy image");
+                    icon: root.compact-actions ? @image-url("assets/icons/copy.svg") : root.no-action-icon;
+                    enabled: root.mask-copy-enabled; clicked => { root.multi-action(5); }
+                    hint-changed(label, active) => { root.set-action-hint(label, active); }
+                }
+                if root.has-actions && root.mask-copy-mode: ToolButton {
                     kind: 26; busy: root.mask-recognizing;
                     label: root.mask-recognizing ? @tr("Recognizing text…") : @tr("Recognize text");
                     enabled: root.mask-copy-enabled;
                     clicked => { root.multi-action(8); }
                 }
-                if root.mask-copy-mode: Rectangle {
+                if root.has-actions && root.mask-copy-mode: Rectangle {
                     width: 20px; height: 38px;
                     accessible-role: button; accessible-label: @tr("OCR options"); accessible-enabled: root.mask-copy-enabled;
                     Image { x: 3px; y: 12px; width: 14px; height: 14px; source: @image-url("assets/icons/chevron-down.svg"); colorize: root.mask-copy-enabled ? Colors.foreground : Colors.outline; }
@@ -195,38 +341,39 @@ export component OcrSelectionWindow inherits Window {
                         }
                     }
                 }
-                if root.mask-copy-mode: ToolButton { kind: 3; label: @tr("Annotate"); enabled: root.mask-copy-enabled; clicked => { root.multi-action(7); } }
-                if root.mask-copy-mode: ToolButton { kind: 24; label: @tr("Pin screenshot"); enabled: root.mask-copy-enabled; clicked => { root.multi-action(6); } }
-                Button { text: root.multi-finished ? @tr("Close") : @tr("Cancel"); clicked => { root.multi-action(2); } }
+                if root.has-actions && root.mask-copy-mode: ToolButton { kind: 3; label: @tr("Annotate"); enabled: root.mask-copy-enabled; clicked => { root.multi-action(7); } }
+                if root.has-actions && root.mask-copy-mode: ToolButton { kind: 24; label: @tr("Pin screenshot"); enabled: root.mask-copy-enabled; clicked => { root.multi-action(6); } }
+                if root.has-actions: SelectionAction {
+                    label: root.multi-finished ? @tr("Close") : @tr("Cancel");
+                    icon: root.compact-actions ? @image-url("assets/icons/screenshot-close.svg") : root.no-action-icon;
+                    clicked => { root.multi-action(2); }
+                    hint-changed(label, active) => { root.set-action-hint(label, active); }
+                }
             }
-            Text { text: root.multi-feedback; color: Colors.foreground; overflow: elide; }
-        }
-    }
-    if !root.multi-mode: TouchArea { mouse-cursor: crosshair; pointer-event(event) => { if event.button == PointerEventButton.right && event.kind == PointerEventKind.down { root.cancelled(); } } }
-    mode-strip := Rectangle {
-        visible: root.mode-control;
-        width: min(parent.width, root.mode-confirm ? 660px : 38px); height: 38px;
-        x: 0px; y: 76px; background: Colors.surface; border-radius: 6px;
-        if !root.mode-confirm: ToolButton {
-            kind: 35; label: @tr("Screenshot mode"); enabled: !root.mode-busy;
-            clicked => { mode-menu.show({ x: 0px, y: 38px }); }
-        }
-        mode-menu := ContextMenuArea {
-            x: 0px; y: 0px; width: parent.width; height: parent.height;
-            enabled: false;
-            Menu {
-                MenuItem { title: @tr("Rectangle"); checkable: true; checked: root.selection-mode == 0; activated => { root.mode-action(0); } }
-                MenuItem { title: root.mode-windows-available ? @tr("Multi-window screenshot") : @tr("Multi-window screenshot") + " — " + @tr("Start a new screenshot"); enabled: root.mode-windows-available; checkable: true; checked: root.selection-mode == 1; activated => { root.mode-action(1); } }
-                MenuItem { title: @tr("Polygon screenshot"); checkable: true; checked: root.selection-mode == 2; activated => { root.mode-action(2); } }
-                MenuItem { title: @tr("Combine screenshot regions"); checkable: true; checked: root.selection-mode == 3; activated => { root.mode-action(3); } }
-                MenuItem { title: @tr("Freehand screenshot"); checkable: true; checked: root.selection-mode == 4; activated => { root.mode-action(4); } }
+            if root.has-actions && (root.multi-feedback != "" || root.action-hint != ""): HorizontalLayout {
+                spacing: Spacing.small;
+                Text {
+                    text: root.multi-feedback;
+                    font-size: Typography.compact-size; color: Colors.secondary-foreground;
+                    overflow: elide;
+                }
+                if root.compact-actions && root.action-hint != "": Text {
+                    text: root.action-hint; min-width: 0px;
+                    font-size: Typography.compact-size; color: Colors.secondary-foreground;
+                    overflow: elide; horizontal-alignment: right;
+                }
             }
         }
-        if root.mode-confirm: HorizontalLayout {
-            padding-left: 8px; padding-right: 6px; spacing: 6px;
-            Text { text: @tr("Discard the current selection?"); color: Colors.foreground; vertical-alignment: center; wrap: word-wrap; }
-            Button { text: @tr("Cancel"); clicked => { root.mode-action(5); } }
-            Button { text: @tr("Discard"); clicked => { root.mode-action(6); } }
+        confirmation := HorizontalLayout {
+            visible: root.mode-confirm;
+            padding: Spacing.small; spacing: 4px;
+            Text {
+                text: @tr("Discard the current selection?");
+                color: Colors.foreground; font-size: Typography.compact-size; vertical-alignment: center;
+                min-width: 50px; wrap: word-wrap;
+            }
+            SelectionAction { label: @tr("Cancel"); clicked => { root.mode-action(5); } }
+            SelectionAction { label: @tr("Discard"); prominent: true; clicked => { root.mode-action(6); } }
         }
     }
 }

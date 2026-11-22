@@ -2068,12 +2068,15 @@ fn mode_pointer(generation: u64, screen: Rect, event: PopupPointerInput) -> bool
             }
             _ => return (confirm, None),
         };
-        let in_control =
-            x >= 0. && x < host.window.get_mode_control_width() && (76. ..116.).contains(&y);
-        if !confirm
-            && !(control && in_control && !r.gesture.active() && r.stroke.is_none()
-                || !pressed && r.mode_button_down.is_some())
-        {
+        let begins_control = pressed
+            && control
+            && !r.gesture.active()
+            && r.stroke.is_none()
+            && r.multi_drag.is_none()
+            && !r.multi_button
+            && host.window.invoke_mode_control_contains(x, y);
+        let ends_control = !pressed && r.mode_button_down.is_some();
+        if !confirm && !begins_control && !ends_control {
             return (false, None);
         }
         let owner = if pressed {
@@ -2638,8 +2641,7 @@ fn multi_pointer(generation: u64, screen: Rect, event: PopupPointerInput) -> boo
                 if r.multi_button
                     || matches!(event, PopupPointerInput::LeftPressed { .. })
                         && r.multi_screen == Some(screen)
-                        && (0.0..76.0).contains(&(y / scale))
-                        && (0.0..660.0).contains(&(x / scale)) =>
+                        && host.window.invoke_controls_contain(x / scale, y / scale) =>
             {
                 r.multi_button = matches!(event, PopupPointerInput::LeftPressed { .. });
                 let position = slint::LogicalPosition::new(x / scale, y / scale);

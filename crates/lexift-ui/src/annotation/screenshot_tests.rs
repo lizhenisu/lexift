@@ -281,23 +281,24 @@ fn screenshot_toolbars_are_exclusive_and_restore_document_undo_after_failed_outp
         None,
     );
     assert!(!super::super::is_open());
+    // Ending a selection over the mode button still belongs to the canvas drag.
     selection_host::pointer(
         id,
         frames[0].bounds,
         1.,
-        PopupPointerInput::LeftPressed { x: 40., y: 40. },
+        PopupPointerInput::LeftPressed { x: 200., y: 160. },
     );
     selection_host::pointer(
         id,
         frames[0].bounds,
         1.,
-        PopupPointerInput::Moved { x: 200., y: 160. },
+        PopupPointerInput::Moved { x: 40., y: 40. },
     );
     selection_host::pointer(
         id,
         frames[0].bounds,
         1.,
-        PopupPointerInput::LeftReleased { x: 200., y: 160. },
+        PopupPointerInput::LeftReleased { x: 40., y: 40. },
     );
     pump("screenshot", || {
         REGISTRY.with(|s| s.borrow().as_ref().unwrap().canvas_state.annotation_ready)

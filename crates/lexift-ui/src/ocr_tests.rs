@@ -54,6 +54,77 @@ fn frozen_pixels_remain_clear_inside_selection_and_dim_outside_at_both_dpis() {
 }
 
 #[test]
+fn screenshot_selection_toolbar_renders_and_hits_as_one_panel() {
+    use lexift_core::domain::{settings::ThemePreference, ui_language::UiLanguage};
+    let slot = Rc::new(RefCell::new(None));
+    slint::platform::set_platform(Box::new(TestPlatform(slot.clone()))).unwrap();
+    let view = OcrSelectionWindow::new().unwrap();
+    view.set_screenshot_mode(true);
+    view.set_multi_mode(true);
+    view.set_multi_controls(true);
+    view.set_mode_control(true);
+    view.set_mask_copy_mode(true);
+    view.set_mask_copy_enabled(true);
+    view.set_polygon_mode(true);
+    view.set_polygon_closed(true);
+    view.set_multi_can_save(true);
+    view.set_multi_can_delete(true);
+    view.set_multi_feedback("82 × 59 px".into());
+    view.show().unwrap();
+    let window = slot.borrow().as_ref().unwrap().clone();
+    for (language, theme, scale) in [
+        (UiLanguage::SimplifiedChinese, ThemePreference::Light, 1.),
+        (UiLanguage::German, ThemePreference::Dark, 1.25),
+    ] {
+        crate::i18n::select(language);
+        crate::theme::set_current(theme);
+        crate::theme::apply(&view);
+        view.window()
+            .dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged {
+                scale_factor: scale,
+            });
+        let width = if scale == 1. { 960. } else { 640. };
+        view.window().set_size(slint::LogicalSize::new(width, 200.));
+        assert!(view.invoke_controls_contain(30., 36.));
+        assert!(view.invoke_mode_control_contains(38., 36.));
+        assert!(view.invoke_controls_contain(100., 36.));
+        assert!(!view.invoke_mode_control_contains(100., 36.));
+        assert!(!view.invoke_controls_contain(2., 36.));
+        assert!(!view.invoke_controls_contain(32., 152.));
+        assert!(!view.invoke_controls_contain(width - 5., 36.));
+
+        let size = window.size();
+        let mut pixels = vec![slint::Rgb8Pixel::default(); (size.width * size.height) as usize];
+        window.request_redraw();
+        window.draw_if_needed(|renderer| {
+            renderer.render(&mut pixels, size.width as usize);
+        });
+        let at = |x: f32, y: f32| {
+            pixels[(y * scale) as usize * size.width as usize + (x * scale) as usize]
+        };
+        assert_ne!(at(30., 60.), at(2., 60.));
+        assert_eq!(at(32., 162.), at(2., 162.));
+        if let Ok(directory) = std::env::var("LEXIFT_SELECTION_RENDER") {
+            crate::i18n::write_test_bitmap(
+                &directory,
+                &format!("toolbar-{}-{scale}", language.code()),
+                size.width,
+                size.height,
+                pixels.iter().map(|pixel| [pixel.r, pixel.g, pixel.b, 255]),
+            );
+        }
+    }
+    view.set_mode_confirm(true);
+    assert!(view.invoke_mode_control_contains(100., 36.));
+    view.set_mode_confirm(false);
+    view.set_multi_controls(false);
+    assert!(view.invoke_mode_control_contains(38., 36.));
+    assert!(!view.invoke_controls_contain(100., 36.));
+    view.set_mode_control(false);
+    assert!(!view.invoke_controls_contain(38., 36.));
+}
+
+#[test]
 fn provider_resource_page_is_separate_and_renders_all_locales() {
     use crate::SettingsWindow;
     use lexift_core::{
