@@ -197,24 +197,31 @@ pub(super) fn enqueue(runtime: &Arc<ScreenshotRuntime>, controller: &Arc<AppCont
 #[test]
 fn auto_save_keeps_one_waiting_copy_and_cancels_it_on_exit() {
     let mut queue = Queue::default();
-    let job = |operation| Job {
+    let job = |operation, prefix: &str| Job {
         session: 1,
         operation,
-        name: "Lexift.png".into(),
+        name: format!("{prefix}-20261122-143052.png"),
         directory: "D:/screenshots".into(),
         image: CopiedImage(Arc::new(CapturedRegion {
             bounds: Default::default(),
             pixels: Vec::new(),
         })),
     };
-    let Admission::Start(cancel, _) = queue.admit(job(1)) else {
+    let Admission::Start(cancel, _) = queue.admit(job(1, "Lexift")) else {
         panic!("first copy must start");
     };
-    assert!(matches!(queue.admit(job(2)), Admission::Queued));
-    assert!(matches!(queue.admit(job(3)), Admission::Full(_)));
+    assert!(matches!(queue.admit(job(2, "报表")), Admission::Queued));
+    assert!(matches!(
+        queue.admit(job(3, "后来修改")),
+        Admission::Full(_)
+    ));
     assert_eq!(queue.pending.as_ref().unwrap().operation, 2);
+    assert_eq!(
+        queue.pending.as_ref().unwrap().name,
+        "报表-20261122-143052.png"
+    );
     queue.close();
     assert!(cancel.load(Ordering::Acquire));
     assert!(queue.pending.is_none());
-    assert!(matches!(queue.admit(job(4)), Admission::Closed));
+    assert!(matches!(queue.admit(job(4, "后来修改")), Admission::Closed));
 }

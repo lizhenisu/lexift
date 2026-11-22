@@ -163,6 +163,7 @@ impl RuntimeManager {
             | SettingsField::ScreenshotPresets
             | SettingsField::QuickSaveDirectory
             | SettingsField::ScreenshotAutoSave
+            | SettingsField::ScreenshotSavePrefix
             | SettingsField::UiLanguage => {}
             SettingsField::RecordingPauseHotkey => self
                 .hotkey_port()
@@ -216,6 +217,7 @@ impl RuntimeManager {
             | SettingsField::ScreenshotPresets
             | SettingsField::QuickSaveDirectory
             | SettingsField::ScreenshotAutoSave
+            | SettingsField::ScreenshotSavePrefix
             | SettingsField::UiLanguage => {}
             SettingsField::RecordingPauseHotkey => {
                 current.recording_pause_hotkey = config.recording_pause_hotkey

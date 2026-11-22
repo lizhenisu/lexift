@@ -2657,3 +2657,18 @@ msgstr "숨겨짐"
 
 msgid "Source paused"
 msgstr "원본 일시 중지"
+
+msgid "Screenshot file name prefix"
+msgstr "스크린샷 파일 이름 접두사"
+
+msgid "Enter 1–32 characters that are valid in a Windows file name."
+msgstr "Windows 파일 이름에 사용할 수 있는 문자를 1~32자 입력하세요."
+
+msgid "Example: {}"
+msgstr "예: {}"
+
+msgid "Save"
+msgstr "저장"
+
+msgid "Restore default"
+msgstr "기본값 복원"

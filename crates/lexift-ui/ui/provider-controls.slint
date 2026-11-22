@@ -48,7 +48,10 @@ export component ProviderInput inherits Rectangle {
     in-out property <string> text;
     in property <string> placeholder;
     in property <bool> secret: false;
+    in property <bool> enabled: true;
+    in property <string> input-label;
     callback edited();
+    callback accepted();
     callback focus-state-changed(bool);
     callback selection-changed(int, int);
     // A request counter reaches editors inside conditional layouts without exposing their ids.
@@ -65,9 +68,11 @@ export component ProviderInput inherits Rectangle {
     input := TextInput {
         x: 12px; width: parent.width - 24px; height: parent.height;
         text <=> root.text; input-type: root.secret ? InputType.password : InputType.text;
+        enabled: root.enabled; accessible-label: root.input-label;
         color: Colors.foreground; font-size: Typography.body-size; vertical-alignment: center;
         selection-background-color: SettingsColors.selected; selection-foreground-color: Colors.foreground;
         edited => { root.edited(); }
+        accepted => { root.accepted(); }
         changed has-focus => { root.focus-state-changed(self.has-focus); }
         cursor-position-changed(position) => { if self.has-focus { root.selection-changed(self.anchor-position-byte-offset, self.cursor-position-byte-offset); } }
     }

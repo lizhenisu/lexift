@@ -469,6 +469,7 @@ pub enum ScreenshotCommand {
         operation: u64,
         kind: ScreenshotOutput,
         request: ExportRequest,
+        quick_save_name: Option<String>,
     },
     Restore {
         session: u64,
@@ -609,7 +610,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                     AppCommand::Screenshot(ScreenshotCommand::AutoSave {
                         session,
                         operation,
-                        name,
+                        name: state.settings.screenshot_save_prefix.for_snapshot(&name),
                         directory,
                         image,
                     }),
@@ -1391,6 +1392,12 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 session,
                 operation,
                 kind,
+                quick_save_name: (kind == ScreenshotOutput::QuickSave).then(|| {
+                    state
+                        .settings
+                        .screenshot_save_prefix
+                        .for_snapshot(&request.snapshot.name)
+                }),
                 request,
             })
         }
@@ -2120,6 +2127,10 @@ mod tests {
         ] {
             let mut state = AppState::new(Settings {
                 screenshot_auto_save: enabled,
+                screenshot_save_prefix: super::super::screenshot_save_name::Prefix::parse(
+                    "报表 1.0",
+                )
+                .unwrap(),
                 quick_save_directory: Some("D:/screenshots".into()),
                 ..Settings::default()
             });
@@ -2146,14 +2157,18 @@ mod tests {
             let copied = AppEvent::Screenshot(ScreenshotEvent::ImageCopied {
                 session: 1,
                 operation: 2,
-                name: "Lexift.png".into(),
+                name: "Lexift-20261122-143052.png".into(),
                 image: CopiedImage(pixels.clone()),
             });
             let commands = state.reduce(copied.clone());
             let job = commands.iter().find_map(|command| match command {
                 AppCommand::Screenshot(ScreenshotCommand::AutoSave {
-                    directory, image, ..
+                    name,
+                    directory,
+                    image,
+                    ..
                 }) => {
+                    assert_eq!(name, "报表 1.0-20261122-143052.png");
                     assert_eq!(directory, "D:/screenshots");
                     assert!(Arc::ptr_eq(&image.0, &pixels));
                     Some(())
@@ -2165,6 +2180,90 @@ mod tests {
             assert_eq!(state.screenshot.last_region.is_some(), !masked);
             assert!(state.reduce(copied).is_empty());
         }
+    }
+
+    #[test]
+    fn quick_save_freezes_the_confirmed_prefix_without_renaming_other_exports() {
+        use super::super::screenshot_save_name::Prefix;
+        for kind in [
+            ScreenshotOutput::QuickSave,
+            ScreenshotOutput::Save,
+            ScreenshotOutput::Copy,
+        ] {
+            let mut state = begin();
+            state.settings.screenshot_save_prefix = Prefix::parse("报表").unwrap();
+            state.desired_settings.screenshot_save_prefix = Prefix::parse("尚未生效").unwrap();
+            let bounds = bounds();
+            state.reduce(AppEvent::Screenshot(ScreenshotEvent::Prepared {
+                session: 1,
+                result: Ok(vec![bounds]),
+            }));
+            state.reduce(AppEvent::Screenshot(ScreenshotEvent::Selected {
+                session: 1,
+                bounds,
+            }));
+            let mut request = request(1, 1, bounds);
+            Arc::make_mut(&mut request.snapshot).name = "Lexift-20261122-143052.png".into();
+            let commands = state.reduce(AppEvent::Screenshot(ScreenshotEvent::Output {
+                session: 1,
+                operation: 1,
+                kind,
+                request,
+            }));
+            state.settings.screenshot_save_prefix = Prefix::parse("随后修改").unwrap();
+            assert!(commands.iter().any(|command| match command {
+                AppCommand::Screenshot(ScreenshotCommand::Output {
+                    quick_save_name,
+                    request,
+                    ..
+                }) => {
+                    assert_eq!(request.snapshot.name, "Lexift-20261122-143052.png");
+                    assert_eq!(
+                        quick_save_name.as_deref(),
+                        (kind == ScreenshotOutput::QuickSave).then_some("报表-20261122-143052.png")
+                    );
+                    true
+                }
+                _ => false,
+            }));
+        }
+    }
+
+    #[test]
+    fn save_prefix_only_changes_after_successful_persistence() {
+        use super::super::{screenshot_save_name::Prefix, settings::SettingsChange};
+        let mut state = AppState::default();
+        let prefix = Prefix::parse("测试 2.0").unwrap();
+        let change = SettingsChange::ScreenshotSavePrefix(prefix.clone());
+        let request = || AppEvent::SettingsChangeRequested {
+            change: change.clone(),
+        };
+        let commands = state.reduce(request());
+        assert!(
+            matches!(&commands[..], [AppCommand::PersistSettings { settings, .. }]
+            if settings.screenshot_save_prefix == prefix)
+        );
+        assert_eq!(state.settings.screenshot_save_prefix.as_str(), "Lexift");
+        assert_eq!(
+            state.desired_settings.screenshot_save_prefix.as_str(),
+            "Lexift"
+        );
+        state.reduce(AppEvent::SettingsSaveFailed {
+            change: change.clone(),
+            error: "fixture failure".into(),
+        });
+        assert_eq!(state.settings.screenshot_save_prefix.as_str(), "Lexift");
+        let commands = state.reduce(request());
+        let [AppCommand::PersistSettings { settings, .. }] = commands.as_slice() else {
+            panic!("prefix was not retried")
+        };
+        state.reduce(AppEvent::RuntimeConfigUpdated {
+            settings: settings.clone(),
+            config: state.runtime_config.clone(),
+            change,
+        });
+        assert_eq!(state.settings.screenshot_save_prefix, prefix);
+        assert_eq!(state.desired_settings.screenshot_save_prefix, prefix);
     }
 
     #[test]

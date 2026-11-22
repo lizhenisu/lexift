@@ -763,6 +763,8 @@ impl AppState {
             } => {
                 self.settings = settings;
                 self.desired_settings.screenshot_presets = self.settings.screenshot_presets.clone();
+                self.desired_settings.screenshot_save_prefix =
+                    self.settings.screenshot_save_prefix.clone();
                 if matches!(
                     change,
                     SettingsChange::QuickSaveDirectory { .. }
@@ -1160,6 +1162,7 @@ impl AppState {
             SettingsChange::QuickSaveDirectory { .. }
                 | SettingsChange::ScreenshotPresets { .. }
                 | SettingsChange::ScreenshotAutoSave { .. }
+                | SettingsChange::ScreenshotSavePrefix(_)
         ) {
             change.apply_to(&mut self.desired_settings);
         }
@@ -1327,6 +1330,7 @@ impl AppState {
             | SettingsField::ScreenshotPresets
             | SettingsField::QuickSaveDirectory
             | SettingsField::ScreenshotAutoSave
+            | SettingsField::ScreenshotSavePrefix
             | SettingsField::ScreenshotHotkey
             | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
@@ -1356,6 +1360,7 @@ impl AppState {
             | SettingsField::ScreenshotPresets
             | SettingsField::QuickSaveDirectory
             | SettingsField::ScreenshotAutoSave
+            | SettingsField::ScreenshotSavePrefix
             | SettingsField::ScreenshotHotkey
             | SettingsField::ClipboardHistoryEnabled
             | SettingsField::ClipboardHistoryLimit
@@ -1432,6 +1437,10 @@ impl AppState {
             }
             SettingsField::ScreenshotAutoSave => {
                 self.desired_settings.screenshot_auto_save = self.settings.screenshot_auto_save;
+            }
+            SettingsField::ScreenshotSavePrefix => {
+                self.desired_settings.screenshot_save_prefix =
+                    self.settings.screenshot_save_prefix.clone();
             }
             SettingsField::QuickSaveDirectory => {
                 self.desired_settings.quick_save_directory =

@@ -570,6 +570,12 @@ export component SettingsWindow inherits Window {
     in property <bool> history-supported: true;
     in property <string> history-error;
     in property <bool> screenshot-auto-save;
+    in property <string> screenshot-prefix-saved;
+    in-out property <string> screenshot-prefix-draft: "Lexift";
+    out property <string> screenshot-prefix-example: root.screenshot-prefix-preview(root.screenshot-prefix-draft);
+    private property <bool> screenshot-prefix-can-save: !root.screenshot-save-busy && root.screenshot-prefix-example != "" && root.screenshot-prefix-draft != root.screenshot-prefix-saved;
+    pure callback screenshot-prefix-preview(string) -> string;
+    callback screenshot-prefix-save-requested(string);
     in property <string> quick-save-directory;
     in property <bool> screenshot-save-busy;
     in-out property <int> screenshot-save-picker-request;
@@ -1026,6 +1032,40 @@ export component SettingsWindow inherits Window {
                     SettingsButton {
                         label: @tr("Change quick save directory"); enabled: !root.screenshot-save-busy;
                         clicked => { root.quick-save-directory-requested(); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                Rectangle { height: 1px; background: Colors.outline.with-alpha(0.5); }
+                Text {
+                    text: @tr("Screenshot file name prefix");
+                    font-size: Typography.body-size; color: Colors.foreground;
+                    wrap: word-wrap;
+                }
+                ProviderInput {
+                    text <=> root.screenshot-prefix-draft;
+                    input-label: @tr("Screenshot file name prefix");
+                    enabled: !root.screenshot-save-busy;
+                    accepted => {
+                        if root.screenshot-prefix-can-save { root.screenshot-prefix-save-requested(root.screenshot-prefix-draft); }
+                    }
+                }
+                Text {
+                    text: root.screenshot-prefix-example == "" ?
+                          @tr("Enter 1–32 characters that are valid in a Windows file name.") :
+                          @tr("Example: {}", root.screenshot-prefix-example);
+                    color: root.screenshot-prefix-example == "" ? Colors.error : Colors.secondary-foreground;
+                    font-size: Typography.body-size; wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: Spacing.small;
+                    SettingsButton {
+                        label: @tr("Save"); enabled: root.screenshot-prefix-can-save;
+                        clicked => { root.screenshot-prefix-save-requested(root.screenshot-prefix-draft); }
+                    }
+                    SettingsButton {
+                        label: @tr("Restore default");
+                        enabled: !root.screenshot-save-busy && root.screenshot-prefix-draft != "Lexift";
+                        clicked => { root.screenshot-prefix-draft = "Lexift"; }
                     }
                     Rectangle { horizontal-stretch: 1; }
                 }

@@ -250,6 +250,13 @@ fn screenshot_settings_render_all_locales_themes_and_dpis() {
                     w.show().unwrap();
                     w.set_active_category(3);
                     w.set_screenshot_auto_save(true);
+                    w.on_screenshot_prefix_preview(crate::binding::screenshot_prefix_preview);
+                    w.set_screenshot_prefix_saved("Lexift".into());
+                    w.set_screenshot_prefix_draft("文档 2.0".into());
+                    assert_eq!(
+                        w.get_screenshot_prefix_example().as_str(),
+                        "文档 2.0-20261122-143052.png"
+                    );
                     w.set_quick_save_directory(
                         "D:/Lexift/自动保存/Long Screenshot Directory".into(),
                     );
@@ -258,7 +265,7 @@ fn screenshot_settings_render_all_locales_themes_and_dpis() {
                     if let Ok(dir) = std::env::var("LEXIFT_GUIDE_RENDER") {
                         crate::i18n::write_test_bitmap(
                             &dir,
-                            &format!("auto-save-{}-{dark}-{scale}-{width}", language.code()),
+                            &format!("save-prefix-{}-{dark}-{scale}-{width}", language.code()),
                             image.width(),
                             image.height(),
                             image.as_slice().iter().map(|p| [p.r, p.g, p.b, p.a]),

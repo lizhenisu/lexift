@@ -124,10 +124,8 @@ pub(super) fn snapshot_at(r: &Registry, monitor: Rect, scale: f32) -> Option<Sna
         monitors,
         excluded: super::capture_exclusions(r),
         owner: main.and_then(|main| (r.lifecycle.annotation_window_token)(main.window())),
-        name: format!(
-            "Lexift-{}.png",
-            chrono::Local::now().format("%Y%m%d-%H%M%S")
-        ),
+        name: lexift_core::domain::screenshot_save_name::Prefix::default()
+            .filename(&chrono::Local::now().format("%Y%m%d-%H%M%S").to_string()),
         title: crate::i18n::tr("Save image"),
     })
 }

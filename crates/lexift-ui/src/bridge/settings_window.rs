@@ -336,6 +336,23 @@ pub(super) fn wire_settings_callbacks(
     });
     let weak = settings.as_weak();
     let settings_handler = Rc::clone(&handler);
+    settings.on_screenshot_prefix_preview(crate::binding::screenshot_prefix_preview);
+    settings.on_screenshot_prefix_save_requested(move |draft| {
+        if let Some(settings) = weak.upgrade()
+            && !settings.get_screenshot_save_busy()
+            && let Some(prefix) = lexift_core::domain::screenshot_save_name::Prefix::parse(&draft)
+        {
+            if settings.get_screenshot_prefix_saved().as_str() == prefix.as_str() {
+                settings.set_screenshot_prefix_draft(prefix.as_str().into());
+            } else {
+                settings_handler(AppEvent::SettingsChangeRequested {
+                    change: SettingsChange::ScreenshotSavePrefix(prefix),
+                });
+            }
+        }
+    });
+    let weak = settings.as_weak();
+    let settings_handler = Rc::clone(&handler);
     settings.on_screenshot_auto_save_changed(move |enabled| {
         if let Some(settings) = weak.upgrade() {
             if settings.get_screenshot_save_busy() {
@@ -741,10 +758,14 @@ pub(super) fn settings_feedback_content(feedback: SettingsFeedback) -> (&'static
             ("Recognition language wasn't saved", true)
         }
         SettingsFeedback::SettingsSaved(
-            SettingsField::QuickSaveDirectory | SettingsField::ScreenshotAutoSave,
+            SettingsField::QuickSaveDirectory
+            | SettingsField::ScreenshotAutoSave
+            | SettingsField::ScreenshotSavePrefix,
         ) => ("Screenshot settings saved", false),
         SettingsFeedback::SettingsSaveFailed(
-            SettingsField::QuickSaveDirectory | SettingsField::ScreenshotAutoSave,
+            SettingsField::QuickSaveDirectory
+            | SettingsField::ScreenshotAutoSave
+            | SettingsField::ScreenshotSavePrefix,
         ) => ("Could not save screenshot settings", true),
         SettingsFeedback::SettingsSaved(SettingsField::Theme) => ("Theme saved", false),
         SettingsFeedback::SettingsSaveFailed(SettingsField::Theme) => {

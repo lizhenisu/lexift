@@ -1,6 +1,12 @@
 use crate::{SettingsWindow, TranslationPopup, mapper::UiState};
 use slint::ComponentHandle;
 
+pub(crate) fn screenshot_prefix_preview(draft: slint::SharedString) -> slint::SharedString {
+    lexift_core::domain::screenshot_save_name::Prefix::parse(&draft)
+        .map(|prefix| prefix.filename("20261122-143052").into())
+        .unwrap_or_default()
+}
+
 pub(crate) fn apply_settings(settings: &SettingsWindow, state: &UiState) {
     settings.set_deepseek_environment_key(state.deepseek_environment_key);
     crate::llm_settings::sync(settings, &state.llm);
@@ -33,6 +39,10 @@ pub(crate) fn apply_settings(settings: &SettingsWindow, state: &UiState) {
     settings.set_history_error(state.history_error.clone().into());
     settings.set_history_enabled(state.history_enabled);
     settings.set_screenshot_auto_save(state.screenshot_auto_save);
+    if settings.get_screenshot_prefix_saved().as_str() != state.screenshot_save_prefix {
+        settings.set_screenshot_prefix_saved(state.screenshot_save_prefix.clone().into());
+        settings.set_screenshot_prefix_draft(state.screenshot_save_prefix.clone().into());
+    }
     settings.set_quick_save_directory(
         state
             .quick_save_directory

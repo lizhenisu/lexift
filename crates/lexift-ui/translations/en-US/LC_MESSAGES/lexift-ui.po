@@ -2657,3 +2657,18 @@ msgstr "Pin hidden"
 
 msgid "Source paused"
 msgstr "Source paused"
+
+msgid "Screenshot file name prefix"
+msgstr "Screenshot file name prefix"
+
+msgid "Enter 1–32 characters that are valid in a Windows file name."
+msgstr "Enter 1–32 characters that are valid in a Windows file name."
+
+msgid "Example: {}"
+msgstr "Example: {}"
+
+msgid "Save"
+msgstr "Save"
+
+msgid "Restore default"
+msgstr "Restore default"

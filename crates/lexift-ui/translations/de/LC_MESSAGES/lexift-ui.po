@@ -2657,3 +2657,18 @@ msgstr "Ausgeblendet"
 
 msgid "Source paused"
 msgstr "Quelle pausiert"
+
+msgid "Screenshot file name prefix"
+msgstr "Dateinamenspräfix für Screenshots"
+
+msgid "Enter 1–32 characters that are valid in a Windows file name."
+msgstr "Gib 1–32 Zeichen ein, die in einem Windows-Dateinamen zulässig sind."
+
+msgid "Example: {}"
+msgstr "Beispiel: {}"
+
+msgid "Save"
+msgstr "Speichern"
+
+msgid "Restore default"
+msgstr "Standard wiederherstellen"

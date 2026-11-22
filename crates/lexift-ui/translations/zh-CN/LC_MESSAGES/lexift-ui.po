@@ -2657,3 +2657,18 @@ msgstr "已隐藏"
 
 msgid "Source paused"
 msgstr "来源已暂停"
+
+msgid "Screenshot file name prefix"
+msgstr "截图文件名前缀"
+
+msgid "Enter 1–32 characters that are valid in a Windows file name."
+msgstr "请输入 1–32 个 Windows 文件名允许的字符。"
+
+msgid "Example: {}"
+msgstr "示例：{}"
+
+msgid "Save"
+msgstr "保存"
+
+msgid "Restore default"
+msgstr "恢复默认"

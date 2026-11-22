@@ -171,6 +171,13 @@ fn settings_interaction_colors_follow_theme_across_pages_and_overlays() {
             );
             w.set_translation_settings_open(false);
             w.set_screenshot_auto_save(true);
+            w.on_screenshot_prefix_preview(crate::binding::screenshot_prefix_preview);
+            w.set_screenshot_prefix_saved("Lexift".into());
+            w.set_screenshot_prefix_draft("文档 2.0".into());
+            assert_eq!(
+                w.get_screenshot_prefix_example().as_str(),
+                "文档 2.0-20261122-143052.png"
+            );
             w.set_quick_save_directory("D:/Lexift/自动保存".into());
             for category in [0, 2, 3, 5] {
                 w.set_active_category(category);

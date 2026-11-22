@@ -10,6 +10,7 @@ pub(crate) struct UiState {
     pub selection_toolbar: bool,
     pub history_enabled: bool,
     pub screenshot_auto_save: bool,
+    pub screenshot_save_prefix: String,
     pub quick_save_directory: Option<String>,
     pub screenshot_save_busy: bool,
     pub history_limit: i32,
@@ -61,6 +62,7 @@ pub(crate) fn view_state(state: &AppState) -> UiState {
         selection_toolbar: state.desired_settings.selection_toolbar,
         history_enabled: state.desired_settings.clipboard_history_enabled,
         screenshot_auto_save: state.settings.screenshot_auto_save,
+        screenshot_save_prefix: state.settings.screenshot_save_prefix.as_str().into(),
         quick_save_directory: state.settings.quick_save_directory.clone(),
         screenshot_save_busy: state.settings_saving
             || state.screenshot.save_directory_picker.is_some(),

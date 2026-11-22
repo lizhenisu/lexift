@@ -94,7 +94,9 @@ impl ImageFilePort for WindowsImageFilePort {
             .ok_or_else(|| Error::new("Invalid quick save filename"))?;
         let _apartment = Apartment::new()?;
         let bytes = encode_image(&request, ImageFormat::Png)?;
-        let path = directory.join(stem).with_extension("png");
+        let mut name = stem.to_os_string();
+        name.push(".png");
+        let path = directory.join(name);
         publish_image(&path, &bytes, &cancelled, false)
             .map(|saved| {
                 if saved {
@@ -434,13 +436,14 @@ mod tests {
             }
         }
         let _cleanup = Cleanup(directory.clone());
-        std::fs::write(directory.join("Lexift.png"), b"existing").unwrap();
+        let stem = "文档 2.0-20261122-143052";
+        std::fs::write(directory.join(format!("{stem}.png")), b"existing").unwrap();
         std::thread::scope(|scope| {
             for _ in 0..2 {
                 let directory = &directory;
                 scope.spawn(move || {
                     let mut request = request();
-                    request.default_name = "Lexift".into();
+                    request.default_name = format!("{stem}.png");
                     assert_eq!(
                         WindowsImageFilePort
                             .quick_save_png(request, directory, Arc::new(AtomicBool::new(false)))
@@ -451,11 +454,11 @@ mod tests {
             }
         });
         assert_eq!(
-            std::fs::read(directory.join("Lexift.png")).unwrap(),
+            std::fs::read(directory.join(format!("{stem}.png"))).unwrap(),
             b"existing"
         );
         for index in [2, 3] {
-            let bytes = std::fs::read(directory.join(format!("Lexift-{index}.png"))).unwrap();
+            let bytes = std::fs::read(directory.join(format!("{stem}-{index}.png"))).unwrap();
             assert_eq!(
                 import::decode(&bytes).unwrap().pixels,
                 request().image.pixels

@@ -1537,6 +1537,7 @@ impl ScreenshotRuntime {
                 operation,
                 kind,
                 request,
+                quick_save_name,
             } => {
                 let shaped = request.snapshot.session.image_mask.is_some();
                 let use_raw = shaped
@@ -1614,7 +1615,7 @@ impl ScreenshotRuntime {
                                             ImageSaveRequest {
                                                 image: image.clone(),
                                                 owner: request.snapshot.owner,
-                                                default_name: request.snapshot.name.clone(),
+                                                default_name: quick_save_name.ok_or_else(|| Error::new("Missing quick save filename"))?,
                                                 title: request.snapshot.title.clone(),
                                                 options: crate::annotation_export::save_options(&worker_controller),
                                             },

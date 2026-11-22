@@ -2657,3 +2657,18 @@ msgstr "非表示"
 
 msgid "Source paused"
 msgstr "ソースは一時停止中"
+
+msgid "Screenshot file name prefix"
+msgstr "スクリーンショットのファイル名の接頭辞"
+
+msgid "Enter 1–32 characters that are valid in a Windows file name."
+msgstr "Windows のファイル名に使用できる文字を 1～32 文字入力してください。"
+
+msgid "Example: {}"
+msgstr "例: {}"
+
+msgid "Save"
+msgstr "保存"
+
+msgid "Restore default"
+msgstr "既定に戻す"

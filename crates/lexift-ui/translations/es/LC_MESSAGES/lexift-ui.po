@@ -2657,3 +2657,18 @@ msgstr "Oculto"
 
 msgid "Source paused"
 msgstr "Origen en pausa"
+
+msgid "Screenshot file name prefix"
+msgstr "Prefijo del nombre de archivo de la captura"
+
+msgid "Enter 1–32 characters that are valid in a Windows file name."
+msgstr "Introduce entre 1 y 32 caracteres válidos en un nombre de archivo de Windows."
+
+msgid "Example: {}"
+msgstr "Ejemplo: {}"
+
+msgid "Save"
+msgstr "Guardar"
+
+msgid "Restore default"
+msgstr "Restaurar valor predeterminado"

@@ -25,6 +25,7 @@ pub enum SettingsField {
     RecordingFinishHotkey,
     QuickSaveDirectory,
     ScreenshotAutoSave,
+    ScreenshotSavePrefix,
     ScreenshotPresets,
     OcrLanguage,
     OcrKoreanAuto,
@@ -90,6 +91,7 @@ pub enum SettingsChange {
         enabled: Option<bool>,
         directory: Option<String>,
     },
+    ScreenshotSavePrefix(super::screenshot_save_name::Prefix),
     OcrLanguage(Option<String>),
     OcrKoreanAuto(bool),
     Provider(ProviderConfig),
@@ -134,6 +136,7 @@ impl SettingsChange {
             Self::ScreenshotPresets { .. } => SettingsField::ScreenshotPresets,
             Self::QuickSaveDirectory { .. } => SettingsField::QuickSaveDirectory,
             Self::ScreenshotAutoSave { .. } => SettingsField::ScreenshotAutoSave,
+            Self::ScreenshotSavePrefix(_) => SettingsField::ScreenshotSavePrefix,
             Self::OcrLanguage(_) => SettingsField::OcrLanguage,
             Self::OcrKoreanAuto(_) => SettingsField::OcrKoreanAuto,
             Self::Provider(_) => SettingsField::Provider,
@@ -280,6 +283,7 @@ impl SettingsChange {
             Self::QuickSaveDirectory {
                 directory: value, ..
             } => settings.quick_save_directory = Some(value.clone()),
+            Self::ScreenshotSavePrefix(prefix) => settings.screenshot_save_prefix = prefix.clone(),
             Self::ScreenshotAutoSave { enabled, directory } => {
                 if let Some(enabled) = enabled {
                     settings.screenshot_auto_save = *enabled;
@@ -358,6 +362,7 @@ impl SettingsChange {
             Self::RecordingPauseHotkey(value) => settings.recording_pause_hotkey == *value,
             Self::RecordingFinishHotkey(value) => settings.recording_finish_hotkey == *value,
             Self::ScreenshotPresets { .. } => false,
+            Self::ScreenshotSavePrefix(prefix) => settings.screenshot_save_prefix == *prefix,
             Self::ScreenshotAutoSave { enabled, directory } => {
                 enabled.is_none_or(|value| settings.screenshot_auto_save == value)
                     && directory
@@ -411,6 +416,7 @@ pub struct Settings {
     pub screenshot_presets: Vec<super::screenshot_presets::Preset>,
     pub quick_save_directory: Option<String>,
     pub screenshot_auto_save: bool,
+    pub screenshot_save_prefix: super::screenshot_save_name::Prefix,
     pub ocr_language: Option<String>,
     pub ocr_enabled: bool,
     pub ocr_korean_auto: bool,
@@ -440,6 +446,7 @@ impl Default for Settings {
             screenshot_presets: vec![],
             quick_save_directory: None,
             screenshot_auto_save: false,
+            screenshot_save_prefix: Default::default(),
             ocr_language: Some("auto".into()),
             ocr_enabled: true,
             ocr_korean_auto: false,
