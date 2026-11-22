@@ -2672,3 +2672,12 @@ msgstr "Guardar"
 
 msgid "Restore default"
 msgstr "Restaurar valor predeterminado"
+
+msgid "Include mouse pointer"
+msgstr "Incluir puntero del ratón"
+
+msgid "Mouse pointer is outside the selection"
+msgstr "El puntero está fuera de la selección"
+
+msgid "No frozen mouse pointer"
+msgstr "No hay un puntero capturado"

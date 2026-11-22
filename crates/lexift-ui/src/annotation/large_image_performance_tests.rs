@@ -21,6 +21,7 @@ fn fixture(width: i32, height: i32) -> Input {
     }
     Input {
         snapshot: ExportSnapshot {
+            cursor: None,
             session: Arc::new(Session::new()),
             monitor: bounds,
             scale: 1.,

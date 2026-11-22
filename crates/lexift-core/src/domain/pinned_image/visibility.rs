@@ -257,6 +257,7 @@ mod tests {
             session: 1,
             request: 1,
             snapshot: Arc::new(ExportSnapshot {
+                cursor: None,
                 session: Arc::new(Session::new()),
                 monitor: Default::default(),
                 scale: 1.,

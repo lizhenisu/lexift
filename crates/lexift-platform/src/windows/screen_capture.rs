@@ -5,6 +5,7 @@ pub(crate) mod arrival;
 pub(crate) mod capture;
 mod compose;
 mod crops;
+mod cursor;
 #[cfg(test)]
 pub(crate) mod diagnostics;
 pub(crate) mod elements;
@@ -135,6 +136,9 @@ fn screenshot_surfaces_retired(excluded: &[lexift_core::ports::magnifier::Window
 }
 
 impl ScreenCapturePort for WindowsScreenCapturePort {
+    fn screenshot_cursor(&self) -> Option<lexift_core::domain::screenshot_cursor::Cursor> {
+        cursor::read()
+    }
     fn run_window_pin(
         &self,
         request: lexift_core::ports::screen_capture::WindowPinCapture,

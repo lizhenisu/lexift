@@ -20,6 +20,7 @@ fn request(session: u64, operation: u64) -> ExportRequest {
         session,
         request: operation,
         snapshot: Arc::new(ExportSnapshot {
+            cursor: None,
             session: Arc::new(Session::new()),
             monitor: bounds(),
             scale: 1.25,

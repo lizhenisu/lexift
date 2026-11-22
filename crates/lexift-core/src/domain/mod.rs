@@ -28,6 +28,7 @@ pub mod service_provider;
 pub mod long_capture;
 pub mod pinned_image;
 pub mod screenshot;
+pub mod screenshot_cursor;
 pub mod screenshot_presets;
 pub mod screenshot_save_name;
 pub mod text_pin;

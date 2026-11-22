@@ -118,6 +118,11 @@ pub(super) fn snapshot_at(r: &Registry, monitor: Rect, scale: f32) -> Option<Sna
     }
     identify_draft_effects(&mut session)?;
     Some(Snapshot {
+        cursor: r
+            .screenshot
+            .as_ref()
+            .filter(|editing| editing.pin.is_none())
+            .and_then(|editing| super::screenshot::preview_cursor(editing.id)),
         session: Arc::new(session),
         monitor,
         scale,
@@ -232,6 +237,7 @@ mod tests {
             bottom: 16,
         };
         Snapshot {
+            cursor: None,
             session: Arc::new(Session::new()),
             monitor,
             scale: 1.,

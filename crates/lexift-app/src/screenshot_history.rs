@@ -458,6 +458,7 @@ pub(super) fn retained_document(
     let snapshot = document
         .map(|d| (*d.snapshot).clone())
         .unwrap_or_else(|| ExportSnapshot {
+            cursor: None,
             session: Arc::new(lexift_core::domain::annotation::Session::new()),
             monitor: bounds,
             scale: 1.,
@@ -471,6 +472,7 @@ pub(super) fn retained_document(
         session: 0,
         request: 0,
         snapshot: Arc::new(ExportSnapshot {
+            cursor: None,
             session: Arc::new(session),
             excluded: vec![],
             owner: None,
@@ -510,6 +512,7 @@ mod tests {
             session: 10,
             request: 20,
             snapshot: Arc::new(ExportSnapshot {
+                cursor: None,
                 session: Arc::new(session),
                 monitor: base.bounds,
                 scale: 1.25,

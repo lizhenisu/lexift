@@ -45,6 +45,7 @@ struct ImageBase {
 }
 fn content_matches(a: &ExportSnapshot, b: &ExportSnapshot) -> bool {
     a.monitor == b.monitor
+        && a.cursor == b.cursor
         && a.scale == b.scale
         && a.monitors == b.monitors
         && a.session.objects == b.session.objects
@@ -72,6 +73,7 @@ impl Base {
         let b = &input.snapshot;
         Arc::ptr_eq(&self.capture, &input.capture)
             && a.monitor == b.monitor
+            && a.session.image_mask == b.session.image_mask
             && a.session.image_scale == b.session.image_scale
             && a.session.image_color == b.session.image_color
             && a.scale == b.scale
@@ -128,6 +130,11 @@ fn paint_cached(
         {
             cache.builds += 1;
         }
+    } else if input.crop_border
+        && let Some(base) = cache.base.as_mut()
+        && base.snapshot.cursor != input.snapshot.cursor
+    {
+        refresh_cursor(base, input, cancelled)?;
     }
     let crop_only = input.crop_border
         && input.snapshot.session.selected.is_none()
@@ -236,6 +243,36 @@ fn paint_cached(
     Some(pixmap)
 }
 
+/// Recompose only the old and new pointer footprints when the document is unchanged.
+fn refresh_cursor(base: &mut Base, input: &Input, cancelled: &AtomicBool) -> Option<()> {
+    let monitor = input.snapshot.monitor;
+    let patches = [
+        base.snapshot.cursor.as_deref(),
+        input.snapshot.cursor.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(|cursor| cursor.clip_to(monitor))
+    .map(|bounds| {
+        let mut snapshot = input.snapshot.clone();
+        snapshot.monitor = bounds;
+        crate::annotation_export_render::compose(&snapshot, input.capture.clone(), cancelled).ok()
+    })
+    .collect::<Option<Vec<_>>>()?;
+    let stride = base.composed.width() as usize * 4;
+    for patch in patches {
+        let width = (patch.bounds.right - patch.bounds.left) as usize * 4;
+        let x = (patch.bounds.left - monitor.left) as usize * 4;
+        let top = (patch.bounds.top - monitor.top) as usize;
+        for (y, row) in patch.pixels.chunks_exact(width).enumerate() {
+            let offset = (y + top) * stride + x;
+            base.composed.data_mut()[offset..offset + width].copy_from_slice(row);
+        }
+    }
+    base.snapshot.cursor = input.snapshot.cursor.clone();
+    Some(())
+}
+
 fn copy_crop(
     target: &mut tiny_skia::Pixmap,
     source: &tiny_skia::Pixmap,
@@ -321,6 +358,9 @@ fn compose_base(
                 (monitor.bottom - monitor.top) as u32,
             )?,
         )?;
+        if let Some(cursor) = &snapshot.cursor {
+            cursor.paint(monitor, frame.data_mut());
+        }
         let overlay = scene.render_document(&snapshot.session, monitor, snapshot.scale)?;
         frame.draw_pixmap(
             0,
@@ -708,6 +748,7 @@ mod timing_tests {
         };
         let mut input = Input {
             snapshot: ExportSnapshot {
+                cursor: None,
                 session: Arc::new(Session::new()),
                 monitor,
                 scale: 1.25,

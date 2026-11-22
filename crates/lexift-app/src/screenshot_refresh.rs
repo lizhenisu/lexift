@@ -140,12 +140,14 @@ pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, comman
             let runtime = c.runtime.clone();
             runtime.spawn_blocking(move || {
                 let started = std::time::Instant::now();
-                let result = prepare(
+                let mut cursor = None;
+                let result = prepare_with_cursor(
                     &r,
                     &source,
                     &request,
                     &cancel,
                     lexift_platform::screenshot_display_metrics,
+                    &mut cursor,
                 );
                 if cancel.load(Ordering::Acquire) {
                     return;
@@ -170,6 +172,9 @@ pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, comman
                     success = result.is_ok(),
                     "Screenshot refresh candidate captured"
                 );
+                if result.is_ok() {
+                    send(&c, Event::CursorCandidate(session, operation, cursor));
+                }
                 send(
                     &c,
                     Event::Captured {
@@ -257,12 +262,24 @@ pub(super) fn execute(r: &Arc<ScreenshotRuntime>, c: &Arc<AppController>, comman
         } => c.ui.finish_screenshot_refresh(session, operation, success),
     }
 }
+#[cfg(test)]
 fn prepare(
     r: &ScreenshotRuntime,
     source: &ExportRequest,
     request: &ExportRequest,
     cancel: &AtomicBool,
     metrics: impl Fn() -> Result<Vec<(lexift_core::domain::geometry::Rect, f32)>>,
+) -> Result<Vec<CapturedRegion>> {
+    prepare_with_cursor(r, source, request, cancel, metrics, &mut None)
+}
+
+fn prepare_with_cursor(
+    r: &ScreenshotRuntime,
+    source: &ExportRequest,
+    request: &ExportRequest,
+    cancel: &AtomicBool,
+    metrics: impl Fn() -> Result<Vec<(lexift_core::domain::geometry::Rect, f32)>>,
+    cursor: &mut Option<Arc<lexift_core::domain::screenshot_cursor::Cursor>>,
 ) -> Result<Vec<CapturedRegion>> {
     use lexift_core::domain::screenshot::refresh::layout_matches;
     if cancel.load(Ordering::Acquire) {
@@ -295,12 +312,14 @@ fn prepare(
     }
     let port = (r.capture)().ok_or_else(|| Error::new("Screen capture unavailable"))?;
     let capture_started = std::time::Instant::now();
+    let cursor_before = port.screenshot_cursor();
     let (captured, fast_path) = crate::annotation_export::capture_frozen_pixels(
-        port,
+        port.clone(),
         request.snapshot.monitors.iter().map(|(b, _)| *b).collect(),
         request.snapshot.excluded.clone(),
         cancel,
     )?;
+    *cursor = crate::annotation_export::stable_cursor(cursor_before, port.as_ref());
     tracing::debug!(
         session = request.session,
         operation = request.request,
@@ -456,6 +475,7 @@ mod tests {
             session: 1,
             request: 1,
             snapshot: Arc::new(ExportSnapshot {
+                cursor: None,
                 session: Arc::new(s),
                 monitor: bounds(),
                 monitors: vec![(bounds(), 1.25)],

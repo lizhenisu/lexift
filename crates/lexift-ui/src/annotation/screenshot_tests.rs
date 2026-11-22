@@ -902,6 +902,7 @@ fn frozen_preview_masks_outside_annotations_and_export_excludes_controls() {
             regions: vec![base],
         });
         let snapshot = ExportSnapshot {
+            cursor: None,
             session: Arc::new(session),
             monitor,
             scale,

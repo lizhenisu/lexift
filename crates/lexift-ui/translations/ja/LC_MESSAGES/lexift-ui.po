@@ -2672,3 +2672,12 @@ msgstr "保存"
 
 msgid "Restore default"
 msgstr "既定に戻す"
+
+msgid "Include mouse pointer"
+msgstr "マウスポインターを含める"
+
+msgid "Mouse pointer is outside the selection"
+msgstr "マウスポインターが選択範囲外にあります"
+
+msgid "No frozen mouse pointer"
+msgstr "取得したマウスポインターがありません"

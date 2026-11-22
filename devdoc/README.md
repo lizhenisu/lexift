@@ -117,6 +117,7 @@
 - [长截图采集内裁剪验证](releases/screenshot-long-live-trim.md)
 - [截图与长图快速保存验证](releases/quick-image-save.md)
 - [截图保存文件名前缀验证](releases/screenshot-save-prefix.md)
+- [静态截图鼠标指针验证](releases/screenshot-cursor.md)
 - [长截图采集、预览与编辑体验重做验证](releases/screenshot-long-redesign.md)
 - [长截图单行工具条与延迟提示验证](releases/screenshot-long-toolbar.md)
 - [长图编辑器统一图片视口验证](releases/screenshot-image-viewport.md)

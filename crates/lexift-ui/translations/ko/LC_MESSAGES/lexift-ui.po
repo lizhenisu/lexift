@@ -2672,3 +2672,12 @@ msgstr "저장"
 
 msgid "Restore default"
 msgstr "기본값 복원"
+
+msgid "Include mouse pointer"
+msgstr "마우스 포인터 포함"
+
+msgid "Mouse pointer is outside the selection"
+msgstr "마우스 포인터가 선택 영역 밖에 있습니다"
+
+msgid "No frozen mouse pointer"
+msgstr "캡처된 마우스 포인터가 없습니다"

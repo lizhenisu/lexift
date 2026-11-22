@@ -79,6 +79,8 @@ pub struct MaskedEdit {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ScreenshotState {
+    pub cursor: Option<std::sync::Arc<super::screenshot_cursor::Cursor>>,
+    pub include_cursor: bool,
     pub recording: Option<recording::Session>,
     pub frame_version: u64,
     pub mode_version: u64,
@@ -118,6 +120,64 @@ pub struct ScreenshotState {
     pub color_result: Option<ColorResult>,
 }
 impl ScreenshotState {
+    pub fn cursor_available(&self) -> bool {
+        let Some(cursor) = &self.cursor else {
+            return false;
+        };
+        if self.long.is_some() || self.recording.is_some() {
+            return false;
+        }
+        if let Some(batch) = &self.multi {
+            return batch
+                .areas
+                .iter()
+                .any(|area| cursor.intersects(area.bounds));
+        }
+        if let Some(edit) = &self.masked_edit {
+            return edit.mask.iter().any(|&rect| cursor.intersects(rect));
+        }
+        if self.selection_mode() != SelectionMode::Rectangle {
+            return self
+                .confirmed_mask()
+                .is_some_and(|mask| mask.iter().any(|&rect| cursor.intersects(rect)));
+        }
+        self.bounds.is_some_and(|bounds| cursor.intersects(bounds))
+    }
+
+    pub fn cursor_toggle_allowed(&self) -> bool {
+        self.cursor_available()
+            && matches!(
+                self.phase,
+                ScreenshotPhase::Selecting | ScreenshotPhase::Editing
+            )
+            && self.masked_edit.as_ref().is_none_or(|edit| !edit.preparing)
+            && self
+                .multi
+                .as_ref()
+                .is_none_or(|batch| !batch.running && !batch.sealed)
+    }
+
+    pub fn output_cursor(&self) -> Option<std::sync::Arc<super::screenshot_cursor::Cursor>> {
+        (self.include_cursor && self.long.is_none() && self.recording.is_none())
+            .then(|| self.cursor.clone())
+            .flatten()
+    }
+
+    pub fn preview_cursor(&self) -> Option<std::sync::Arc<super::screenshot_cursor::Cursor>> {
+        match self.refresh.as_ref() {
+            Some(refresh)
+                if self.include_cursor
+                    && matches!(
+                        refresh.stage,
+                        refresh::Stage::Presenting | refresh::Stage::Committing
+                    ) =>
+            {
+                refresh.cursor.clone()
+            }
+            _ => self.output_cursor(),
+        }
+    }
+
     pub fn selection_mode(&self) -> SelectionMode {
         if self.windows.is_some() {
             SelectionMode::Windows
@@ -261,6 +321,11 @@ pub enum ScreenshotEvent {
         request: u64,
     },
     OutputMask(u64, MaskTarget),
+    CursorFrozen(
+        u64,
+        Option<std::sync::Arc<super::screenshot_cursor::Cursor>>,
+    ),
+    ToggleCursor(u64),
     MaskedOutputFinished(u64, u64, Result<SaveOutcome>),
     Multi(u64, super::screenshot_multi::Action),
     PresetRequested {
@@ -403,6 +468,7 @@ pub enum ScreenshotCommand {
         mask: Vec<Rect>,
         mode: SelectionMode,
         target: MaskTarget,
+        cursor: Option<std::sync::Arc<super::screenshot_cursor::Cursor>>,
     },
 
     SaveRegions {
@@ -411,6 +477,7 @@ pub enum ScreenshotCommand {
         areas: Vec<(usize, super::screenshot_multi::Area)>,
         owner: Option<crate::ports::magnifier::WindowToken>,
         title: String,
+        cursor: Option<std::sync::Arc<super::screenshot_cursor::Cursor>>,
     },
     StopRegions(u64, u64),
     ChooseQuickDirectory {
@@ -511,6 +578,8 @@ fn start_capture(
     s.refresh = None;
     s.recording = None;
     s.frame_version = 0;
+    s.cursor = None;
+    s.include_cursor = false;
     s.mode_version = 0;
     s.masked_ocr_from = None;
     s.masked_ocr_view = false;
@@ -801,6 +870,18 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.phase = ScreenshotPhase::Selecting;
             command(ScreenshotCommand::Show { session })
         }
+        ScreenshotEvent::CursorFrozen(session, cursor)
+            if s.session == session && s.phase == ScreenshotPhase::Preparing =>
+        {
+            s.cursor = cursor;
+            vec![]
+        }
+        ScreenshotEvent::ToggleCursor(session)
+            if s.session == session && s.cursor_toggle_allowed() =>
+        {
+            s.include_cursor = !s.include_cursor;
+            vec![]
+        }
         ScreenshotEvent::OutputMask(session, target)
             if s.session == session
                 && s.phase == ScreenshotPhase::Selecting
@@ -825,6 +906,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                 mask: mask.clone(),
                 mode: s.selection_mode(),
                 target,
+                cursor: s.output_cursor(),
             })
         }
         ScreenshotEvent::MaskedOutputFinished(session, operation, result)
@@ -871,6 +953,7 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
                             areas,
                             owner,
                             title,
+                            cursor: s.output_cursor(),
                         });
                     }
                 }
@@ -1388,6 +1471,11 @@ pub(crate) fn reduce(state: &mut AppState, event: ScreenshotEvent) -> Vec<AppCom
             s.color_pending = None;
             s.color_result = None;
             s.error = None;
+            let mut request = request;
+            let cursor = s.output_cursor();
+            if cursor.is_some() || request.snapshot.cursor.is_some() {
+                std::sync::Arc::make_mut(&mut request.snapshot).cursor = cursor;
+            }
             command(ScreenshotCommand::Output {
                 session,
                 operation,
@@ -1699,6 +1787,7 @@ mod tests {
             session,
             request: operation,
             snapshot: Arc::new(ExportSnapshot {
+                cursor: None,
                 session: Arc::new(Session::new()),
                 monitor: bounds,
                 scale: 1.,

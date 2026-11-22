@@ -9,11 +9,12 @@ import { ScrollView } from "std-widgets.slint";
 
 export component AnnotationChoiceWindow inherits Window {
     in property <int> disabled-index: -1;
+    in property <int> secondary-disabled-index: -1;
     in property <bool> capture-trim-menu;
     in property <bool> trim-above;
     in property <bool> trim-below;
     function option-enabled(index: int) -> bool {
-        return index != root.disabled-index && (!root.capture-trim-menu || (index == 0 ? root.trim-above : root.trim-below));
+        return index != root.disabled-index && index != root.secondary-disabled-index && (!root.capture-trim-menu || (index == 0 ? root.trim-above : root.trim-below));
     }
     // Optional two independent radio groups; navigation still has four actions.
     in property <bool> two-choice-groups: false;

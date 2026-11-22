@@ -122,6 +122,7 @@ fn recording_roi_is_not_mistaken_for_a_changed_monitor_layout() {
         session: 7,
         request: 1,
         snapshot: Arc::new(lexift_core::domain::annotation_export::ExportSnapshot {
+            cursor: None,
             session: Arc::new(Session::new()),
             monitor: bounds,
             monitors: vec![(monitor, 1.25)],

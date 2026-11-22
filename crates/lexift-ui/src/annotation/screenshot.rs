@@ -62,6 +62,39 @@ struct Flow {
     mask_input_screen: Option<Rect>,
 }
 thread_local! { static FLOW:RefCell<Flow>=RefCell::new(Flow::default()); }
+pub(super) fn preview_cursor(
+    id: u64,
+) -> Option<Arc<lexift_core::domain::screenshot_cursor::Cursor>> {
+    FLOW.with(|flow| {
+        let flow = flow.try_borrow().ok()?;
+        (flow.state.session == id && flow.state.active())
+            .then(|| flow.state.preview_cursor())
+            .flatten()
+    })
+}
+
+fn cursor_menu_state() -> (bool, bool, bool) {
+    FLOW.with(|flow| {
+        let state = &flow.borrow().state;
+        (
+            state.include_cursor,
+            state.cursor_toggle_allowed(),
+            state.cursor.is_some(),
+        )
+    })
+}
+
+fn toggle_cursor() {
+    let id = REGISTRY.with(|slot| {
+        let slot = slot.borrow();
+        let r = slot.as_ref()?;
+        let editor = r.screenshot.as_ref()?;
+        (!r.gesture.is_some() && !editor.region.dragging()).then_some(editor.id)
+    });
+    if let Some(id) = id {
+        emit(ScreenshotEvent::ToggleCursor(id));
+    }
+}
 pub(crate) fn active() -> bool {
     FLOW.with(|s| {
         let s = s.borrow();

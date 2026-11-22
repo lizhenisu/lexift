@@ -974,6 +974,7 @@ mod orientation_tests {
             session: 42,
             request: 3,
             snapshot: Arc::new(lexift_core::domain::annotation_export::ExportSnapshot {
+                cursor: None,
                 session: Arc::new(session.restored_image()),
                 monitor: crop,
                 scale: 1.,

@@ -92,6 +92,10 @@ pub enum WindowPinUpdate {
 }
 
 pub trait ScreenCapturePort: Send + Sync {
+    /// Observe the visible static screenshot cursor on the capture worker.
+    fn screenshot_cursor(&self) -> Option<crate::domain::screenshot_cursor::Cursor> {
+        None
+    }
     /// Runs on a dedicated background worker and publishes window-local immutable crops.
     fn run_window_pin(
         &self,

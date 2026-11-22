@@ -8,6 +8,7 @@ use std::sync::Arc;
 /// Immutable visible document; excludes undo history and all UI components.
 #[derive(Clone)]
 pub struct ExportSnapshot {
+    pub cursor: Option<Arc<super::screenshot_cursor::Cursor>>,
     pub session: Arc<Session>,
     pub monitor: Rect,
     pub scale: f32,
@@ -125,6 +126,7 @@ mod tests {
             session,
             request,
             snapshot: Arc::new(ExportSnapshot {
+                cursor: None,
                 session: Arc::new(Session::new()),
                 monitor: Rect {
                     left: 0,

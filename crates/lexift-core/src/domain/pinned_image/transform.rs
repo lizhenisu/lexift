@@ -133,6 +133,7 @@ mod tests {
             session: 0,
             request: 1,
             snapshot: Arc::new(ExportSnapshot {
+                cursor: None,
                 session: Arc::new(session),
                 monitor: full,
                 scale: 1.,

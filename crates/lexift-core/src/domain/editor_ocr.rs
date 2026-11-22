@@ -313,6 +313,7 @@ mod tests {
             session: 7,
             request: 1,
             snapshot: std::sync::Arc::new(ExportSnapshot {
+                cursor: None,
                 session: std::sync::Arc::new(super::super::annotation::Session::new()),
                 monitor: source,
                 scale: 1.,

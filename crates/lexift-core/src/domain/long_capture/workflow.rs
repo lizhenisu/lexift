@@ -836,6 +836,7 @@ mod tests {
                     session: 9,
                     request: operation,
                     snapshot: Arc::new(ExportSnapshot {
+                        cursor: None,
                         session: Arc::new(Session::new()),
                         monitor: result.bounds,
                         scale: 1.,

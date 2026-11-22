@@ -185,6 +185,7 @@ fn capture_with_timeout(
 
 /// Preparation contains only frozen pixels and stable top-level window geometry.
 pub(crate) struct PreparedCapture {
+    pub cursor: Option<Arc<lexift_core::domain::screenshot_cursor::Cursor>>,
     pub layers: Vec<lexift_core::domain::screenshot_windows::Layer>,
     pub capture: lexift_core::ports::screen_capture::ScreenshotCapture,
 }
@@ -226,6 +227,7 @@ pub(crate) fn capture_screenshot_frame(
         Vec::new()
     };
     let window_ms = started.elapsed().as_millis();
+    let cursor_before = port.screenshot_cursor();
     let (frame, fast_path) = if multi_window {
         // Only a desktop snapshot includes the compositor's actual occlusion.
         let request = ScreenCaptureRequest {
@@ -239,6 +241,7 @@ pub(crate) fn capture_screenshot_frame(
     } else {
         capture_frozen_pixels(port.clone(), regions, excluded_windows.clone(), cancelled)?
     };
+    let cursor = stable_cursor(cursor_before, port.as_ref());
     if !multi_window
         && !layers.is_empty()
         && (!fast_path
@@ -280,11 +283,20 @@ pub(crate) fn capture_screenshot_frame(
     );
     Ok(frame.map(|frame| PreparedCapture {
         layers,
+        cursor,
         capture: lexift_core::ports::screen_capture::ScreenshotCapture {
             frame,
             windows: windows.clone(),
         },
     }))
+}
+pub(crate) fn stable_cursor(
+    before: Option<lexift_core::domain::screenshot_cursor::Cursor>,
+    port: &dyn ScreenCapturePort,
+) -> Option<Arc<lexift_core::domain::screenshot_cursor::Cursor>> {
+    before
+        .filter(|before| port.screenshot_cursor().as_ref() == Some(before))
+        .map(Arc::new)
 }
 fn rectangle_candidates(
     layers: &[lexift_core::domain::screenshot_windows::Layer],
@@ -447,6 +459,7 @@ mod tests {
             owner: None,
             name: "test.png".into(),
             title: String::new(),
+            cursor: None,
         }
     }
     #[test]

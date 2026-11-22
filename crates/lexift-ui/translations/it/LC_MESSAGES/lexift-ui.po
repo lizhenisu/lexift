@@ -2672,3 +2672,12 @@ msgstr "Salva"
 
 msgid "Restore default"
 msgstr "Ripristina valore predefinito"
+
+msgid "Include mouse pointer"
+msgstr "Includi puntatore del mouse"
+
+msgid "Mouse pointer is outside the selection"
+msgstr "Il puntatore è fuori dalla selezione"
+
+msgid "No frozen mouse pointer"
+msgstr "Nessun puntatore acquisito"

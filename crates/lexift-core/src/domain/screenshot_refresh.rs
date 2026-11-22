@@ -1,6 +1,7 @@
 //! A transactional frame replacement inside the existing screenshot session.
-use crate::domain::{annotation_export::ExportRequest, screenshot::*};
+use crate::domain::{annotation_export::ExportRequest, screenshot::*, screenshot_cursor::Cursor};
 use crate::{AppCommand, Result};
+use std::sync::Arc;
 
 /// Enumeration order is irrelevant; physical geometry and effective DPI must agree.
 pub fn layout_matches(
@@ -32,10 +33,12 @@ pub struct State {
     pub version: u64,
     pub stage: Stage,
     pub request: ExportRequest,
+    pub cursor: Option<Arc<Cursor>>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     Requested(ExportRequest),
+    CursorCandidate(u64, u64, Option<Arc<Cursor>>),
     Suspended {
         session: u64,
         operation: u64,
@@ -107,6 +110,7 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
             version: s.frame_version + 1,
             stage: Stage::Suspending,
             request,
+            cursor: None,
         });
         s.phase = ScreenshotPhase::Refreshing;
         s.color_pending = None;
@@ -140,6 +144,17 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
         } => (session, operation, Stage::Committing, result),
         Event::RolledBack { session, operation } => {
             (session, operation, Stage::RollingBack, Ok(()))
+        }
+        Event::CursorCandidate(session, operation, cursor) => {
+            if session == s.session
+                && let Some(refresh) = s
+                    .refresh
+                    .as_mut()
+                    .filter(|r| r.operation == operation && r.stage == Stage::Capturing)
+            {
+                refresh.cursor = cursor;
+            }
+            return vec![];
         }
         Event::Requested(_) => unreachable!(),
     };
@@ -177,6 +192,7 @@ pub(super) fn reduce(s: &mut ScreenshotState, event: Event) -> Vec<AppCommand> {
             let success = stage == Stage::Committing;
             if success {
                 s.frame_version = refresh.version;
+                s.cursor = refresh.cursor.take();
             }
             s.refresh = None;
             s.phase = ScreenshotPhase::Editing;
@@ -212,6 +228,7 @@ mod tests {
             session: 7,
             request: 1,
             snapshot: Arc::new(ExportSnapshot {
+                cursor: None,
                 session: Arc::new(Session::new()),
                 monitor: b,
                 monitors: vec![(b, 1.25)],
@@ -288,6 +305,68 @@ mod tests {
             .is_empty()
         );
     }
+    #[test]
+    fn refresh_only_commits_the_owned_cursor_with_its_presented_frame() {
+        use crate::domain::{geometry::Point, screenshot_cursor::Pixels};
+        let (mut s, r) = fixture();
+        let cursor = |x| {
+            Arc::new(Cursor {
+                bounds: Rect {
+                    left: x,
+                    right: x + 1,
+                    top: 0,
+                    bottom: 1,
+                },
+                hotspot: Point { x, y: 0 },
+                pixels: Pixels::Alpha(vec![0, 0, 0, 255]),
+            })
+        };
+        let old = cursor(-10);
+        let next = cursor(20);
+        s.screenshot.cursor = Some(old.clone());
+        s.screenshot.include_cursor = true;
+        emit(&mut s, Event::Requested(r));
+        emit(
+            &mut s,
+            Event::Suspended {
+                session: 7,
+                operation: 1,
+                result: Ok(()),
+            },
+        );
+        emit(&mut s, Event::CursorCandidate(7, 1, Some(next.clone())));
+        emit(&mut s, Event::CursorCandidate(7, 99, None));
+        assert_eq!(s.screenshot.preview_cursor(), Some(old.clone()));
+        emit(
+            &mut s,
+            Event::Captured {
+                session: 7,
+                operation: 1,
+                result: Ok(()),
+            },
+        );
+        assert_eq!(s.screenshot.cursor, Some(old));
+        assert_eq!(s.screenshot.preview_cursor(), Some(next.clone()));
+        emit(
+            &mut s,
+            Event::Presented {
+                session: 7,
+                operation: 1,
+                result: Ok(()),
+            },
+        );
+        emit(
+            &mut s,
+            Event::Committed {
+                session: 7,
+                operation: 1,
+                result: Ok(()),
+            },
+        );
+        assert_eq!(s.screenshot.cursor, Some(next));
+        assert!(s.screenshot.include_cursor);
+    }
+
     #[test]
     fn each_failure_keeps_old_version_until_owned_rollback_and_late_results_are_ignored() {
         for stage in 0..4 {

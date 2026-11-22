@@ -16,6 +16,7 @@ component SelectionAction inherits Rectangle {
     in property <bool> prominent;
     in property <bool> checkable;
     in property <bool> checked;
+    in property <bool> hint-when-disabled;
     in property <image> icon;
     private property <bool> icon-only: root.icon.width > 0;
     callback clicked();
@@ -63,7 +64,11 @@ component SelectionAction inherits Rectangle {
         source: root.icon;
         colorize: root.checked ? Colors.primary : root.enabled ? Colors.foreground : Colors.outline;
     }
-    hit := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { root.clicked(); } }
+    hit := TouchArea {
+        enabled: root.enabled || root.hint-when-disabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { if root.enabled { root.clicked(); } }
+    }
 }
 
 export component OcrSelectionWindow inherits Window {
@@ -99,6 +104,14 @@ export component OcrSelectionWindow inherits Window {
     callback mode-action(int);
     in property <bool> multi-mode;
     in property <bool> mask-copy-mode;
+    in property <bool> cursor-toggle-enabled;
+    in property <bool> cursor-checked;
+    in property <bool> cursor-frozen;
+    in property <image> frozen-cursor-image;
+    in property <length> frozen-cursor-x;
+    in property <length> frozen-cursor-y;
+    in property <length> frozen-cursor-width;
+    in property <length> frozen-cursor-height;
     in property <bool> mask-recognizing;
     in property <bool> mask-copy-enabled;
     in property <bool> window-mode;
@@ -189,6 +202,12 @@ export component OcrSelectionWindow inherits Window {
     in property <length> selection-width;
     in property <length> selection-height;
     Image { source: root.frozen-image; width: parent.width; height: parent.height; image-fit: fill; }
+    Image {
+        source: root.frozen-cursor-image;
+        x: root.frozen-cursor-x; y: root.frozen-cursor-y;
+        width: root.frozen-cursor-width; height: root.frozen-cursor-height;
+        image-fit: fill;
+    }
     if !root.multi-mode: RegionPreview {
         width: parent.width; height: parent.height;
         selecting: root.selecting; left: root.selection-left; top: root.selection-top;
@@ -344,6 +363,15 @@ export component OcrSelectionWindow inherits Window {
                 if root.has-actions && root.mask-copy-mode: ToolButton { kind: 3; label: @tr("Annotate"); enabled: root.mask-copy-enabled; clicked => { root.multi-action(7); } }
                 if root.has-actions && root.mask-copy-mode: ToolButton { kind: 24; label: @tr("Pin screenshot"); enabled: root.mask-copy-enabled; clicked => { root.multi-action(6); } }
                 if root.has-actions: SelectionAction {
+                    label: root.cursor-toggle-enabled ? @tr("Include mouse pointer") :
+                        root.cursor-frozen ? @tr("Mouse pointer is outside the selection") : @tr("No frozen mouse pointer");
+                    icon: @image-url("assets/icons/capture-cursor.svg");
+                    checkable: true; checked: root.cursor-checked; enabled: root.cursor-toggle-enabled;
+                    hint-when-disabled: true;
+                    clicked => { root.multi-action(10); }
+                    hint-changed(label, active) => { root.set-action-hint(label, active); }
+                }
+                if root.has-actions: SelectionAction {
                     label: root.multi-finished ? @tr("Close") : @tr("Cancel");
                     icon: root.compact-actions ? @image-url("assets/icons/screenshot-close.svg") : root.no-action-icon;
                     clicked => { root.multi-action(2); }
@@ -357,7 +385,7 @@ export component OcrSelectionWindow inherits Window {
                     font-size: Typography.compact-size; color: Colors.secondary-foreground;
                     overflow: elide;
                 }
-                if root.compact-actions && root.action-hint != "": Text {
+                if root.action-hint != "": Text {
                     text: root.action-hint; min-width: 0px;
                     font-size: Typography.compact-size; color: Colors.secondary-foreground;
                     overflow: elide; horizontal-alignment: right;

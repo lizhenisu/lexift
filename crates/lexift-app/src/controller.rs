@@ -2557,6 +2557,7 @@ mod tests {
                         session: 1,
                         request: 1,
                         snapshot: Arc::new(ExportSnapshot {
+                            cursor: None,
                             session: Arc::new(Session::new()),
                             monitor: crop,
                             scale: 1.,
@@ -4303,6 +4304,7 @@ mod tests {
             session: e.id,
             request: 1,
             snapshot: Arc::new(ExportSnapshot {
+                cursor: None,
                 session: Arc::new(session),
                 monitor: fixture().bounds,
                 scale: 1.,

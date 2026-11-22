@@ -85,6 +85,9 @@ pub(crate) fn compose(
         }
         let mut image =
             lexift_core::domain::screen_snapshot::crop_frames(&capture.regions, snapshot.monitor)?;
+        if let Some(cursor) = &snapshot.cursor {
+            cursor.paint_desktop(&mut image, &capture.regions, None);
+        }
         clip(snapshot, &mut image.pixels, cancelled)?;
         return Ok(image);
     }
@@ -135,6 +138,9 @@ pub(crate) fn compose(
                 .get(start..start + row.len())
                 .ok_or_else(|| Error::new("Incomplete screen pixels"))?,
         );
+    }
+    if let Some(cursor) = &snapshot.cursor {
+        cursor.paint(snapshot.monitor, output.data_mut());
     }
     output.draw_pixmap(
         0,

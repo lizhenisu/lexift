@@ -1919,7 +1919,59 @@ pub(crate) fn sync_multi(state: &lexift_core::domain::screenshot::ScreenshotStat
         if r.generation == state.session && repaint {
             paint_multi(r);
         }
+        if r.generation == state.session {
+            paint_cursor(r, state);
+        }
     });
+}
+
+fn paint_cursor(r: &Registry, state: &lexift_core::domain::screenshot::ScreenshotState) {
+    let mask = state.confirmed_mask();
+    let multi = state.multi.as_ref().map(|batch| {
+        batch
+            .areas
+            .iter()
+            .map(|area| area.bounds)
+            .collect::<Vec<_>>()
+    });
+    let frames = if state.windows.is_some() {
+        r.raw_mode_frames.as_ref().or(r.frames.as_ref())
+    } else {
+        r.normal_mode_frames.as_ref().or(r.frames.as_ref())
+    };
+    let mask = mask.as_deref().or(multi.as_ref());
+    let patches = match (state.output_cursor(), frames, mask) {
+        (Some(cursor), Some(frames), Some(mask)) => cursor.patches(frames, Some(mask)),
+        _ => Vec::new(),
+    };
+    let enabled = state.cursor_toggle_allowed();
+    for host in &r.windows {
+        let w = &host.window;
+        w.set_cursor_toggle_enabled(enabled);
+        w.set_cursor_frozen(state.cursor.is_some());
+        w.set_cursor_checked(state.include_cursor);
+        if let Some(patch) = patches.iter().find(|patch| {
+            patch.bounds.left >= host.bounds.left
+                && patch.bounds.right <= host.bounds.right
+                && patch.bounds.top >= host.bounds.top
+                && patch.bounds.bottom <= host.bounds.bottom
+        }) {
+            let scale = w.window().scale_factor();
+            let width = (patch.bounds.right - patch.bounds.left) as u32;
+            let height = (patch.bounds.bottom - patch.bounds.top) as u32;
+            w.set_frozen_cursor_x((patch.bounds.left - host.bounds.left) as f32 / scale);
+            w.set_frozen_cursor_y((patch.bounds.top - host.bounds.top) as f32 / scale);
+            w.set_frozen_cursor_width(width as f32 / scale);
+            w.set_frozen_cursor_height(height as f32 / scale);
+            w.set_frozen_cursor_image(slint::Image::from_rgba8_premultiplied(
+                slint::SharedPixelBuffer::clone_from_slice(&patch.pixels, width, height),
+            ));
+        } else {
+            w.set_frozen_cursor_width(0.);
+            w.set_frozen_cursor_height(0.);
+            w.set_frozen_cursor_image(Default::default());
+        }
+    }
 }
 
 fn set_mode_image(window: &OcrSelectionWindow, frame: &CapturedRegion) {
@@ -2419,6 +2471,24 @@ fn multi_action(
     owner: Option<lexift_core::ports::magnifier::WindowToken>,
 ) {
     use lexift_core::domain::screenshot::{MaskTarget, ScreenshotEvent};
+    if action == 10 {
+        let allowed = STATE.with(|slot| {
+            slot.borrow().as_ref().is_some_and(|r| {
+                r.generation == generation
+                    && !r.gesture.active()
+                    && r.multi_drag.is_none()
+                    && r.stroke.is_none()
+                    && !r.redraw
+                    && !r.window_busy
+            })
+        });
+        if allowed {
+            emit(SelectionEvent::Windows(ScreenshotEvent::ToggleCursor(
+                generation,
+            )));
+        }
+        return;
+    }
     let save = || {
         ScreenshotEvent::OutputMask(
             generation,

@@ -38,6 +38,7 @@ mod refresh;
 pub(crate) mod window_pin;
 type CaptureFactory = fn() -> Option<Arc<dyn ScreenCapturePort>>;
 struct PreparedScreenshot {
+    cursor: Option<Arc<lexift_core::domain::screenshot_cursor::Cursor>>,
     raw_frames: Option<Arc<Vec<CapturedRegion>>>,
     layers: Vec<lexift_core::domain::screenshot_windows::Layer>,
     frames: Vec<CapturedRegion>,
@@ -959,6 +960,7 @@ impl ScreenshotRuntime {
                 mask,
                 mode,
                 target,
+                cursor,
             } => {
                 let pin = matches!(target, lexift_core::domain::screenshot::MaskTarget::Pin);
                 let multi_window = mode == lexift_core::domain::screenshot::SelectionMode::Windows;
@@ -984,7 +986,11 @@ impl ScreenshotRuntime {
                 controller.clone().runtime.spawn_blocking(move || {
                     let result = (|| {
                         let (frames, source, cancelled) = current.ok_or_else(|| Error::new("Screenshot is unavailable"))?;
-                        let image = Arc::new(lexift_core::domain::screenshot_windows::compose(&frames, &mask)?);
+                        let mut image = lexift_core::domain::screenshot_windows::compose(&frames, &mask)?;
+                        if let Some(cursor) = cursor {
+                            cursor.paint_desktop(&mut image, &frames, Some(&mask));
+                        }
+                        let image = Arc::new(image);
                         use lexift_core::domain::screenshot::MaskTarget;
                         let result = match target {
                             MaskTarget::Pin => {
@@ -1046,6 +1052,7 @@ impl ScreenshotRuntime {
                 areas,
                 owner,
                 title,
+                cursor,
             } => {
                 use lexift_core::domain::screenshot_multi::Action;
                 let current = self
@@ -1091,7 +1098,10 @@ impl ScreenshotRuntime {
                                 if stop.load(Ordering::Acquire) {
                                     break;
                                 }
-                                let result = crop_frames(&frames, area.bounds).and_then(|image| {
+                                let result = crop_frames(&frames, area.bounds).and_then(|mut image| {
+                                    if let Some(cursor) = &cursor {
+                                        cursor.paint_desktop(&mut image, &frames, None);
+                                    }
                                     let image = Arc::new(image);
                                     this.save
                                         .quick_save_png(
@@ -1462,6 +1472,9 @@ impl ScreenshotRuntime {
                                             s.raw_frames = prepared.raw_frames;
                                             s.windows = prepared.windows;
                                         }
+                                        worker_controller.dispatch(AppEvent::Screenshot(
+                                            ScreenshotEvent::CursorFrozen(session, prepared.cursor),
+                                        ));
                                         tracing::debug!(
                                             session,
                                             elapsed_ms = started.elapsed().as_millis(),
@@ -1702,7 +1715,7 @@ impl ScreenshotRuntime {
         request: &ExportRequest,
         operation: u64,
     ) -> Result<(Arc<CapturedRegion>, Arc<ScreenCaptureFrame>, ExportRequest)> {
-        let base = if let Some(mask) = &request.snapshot.session.image_mask {
+        let mut base = if let Some(mask) = &request.snapshot.session.image_mask {
             Arc::new(lexift_core::domain::screenshot_windows::compose(
                 frames, mask,
             )?)
@@ -1721,6 +1734,17 @@ impl ScreenshotRuntime {
             )?)
         };
         let mut pin_snapshot = (*request.snapshot).clone();
+        if let Some(cursor) = pin_snapshot.cursor.take() {
+            cursor.paint_desktop(
+                Arc::make_mut(&mut base),
+                frames,
+                pin_snapshot
+                    .session
+                    .image_mask
+                    .as_deref()
+                    .map(Vec::as_slice),
+            );
+        }
         if request.snapshot.session.image_crop.is_none() {
             pin_snapshot.monitors = lexift_core::domain::screen_snapshot::render_partitions(
                 base.bounds,
@@ -1829,6 +1853,7 @@ impl ScreenshotRuntime {
             cancelled,
         )?;
         Ok(PreparedScreenshot {
+            cursor: prepared.cursor,
             layers,
             raw_frames,
             frames,
@@ -2266,6 +2291,7 @@ mod tests {
             session: 1,
             request: 2,
             snapshot: Arc::new(ExportSnapshot {
+                cursor: None,
                 session: Arc::new(Session::new()),
                 monitor: crop,
                 scale: 1.,
@@ -2370,6 +2396,7 @@ mod tests {
                 },
             });
             let mut snapshot = ExportSnapshot {
+                cursor: None,
                 session: Arc::new(doc),
                 monitor: full,
                 scale: 1.,
@@ -2733,6 +2760,7 @@ mod tests {
             session: 1,
             request: 1,
             snapshot: Arc::new(ExportSnapshot {
+                cursor: None,
                 session: Arc::new(Session::new()),
                 monitor: bounds,
                 scale: 1.,
@@ -2833,6 +2861,7 @@ mod tests {
             session: 1,
             request: 1,
             snapshot: Arc::new(ExportSnapshot {
+                cursor: None,
                 session: Arc::new(session),
                 monitor: bounds,
                 scale: 1.,

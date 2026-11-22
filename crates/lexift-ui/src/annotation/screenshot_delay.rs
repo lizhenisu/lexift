@@ -126,6 +126,13 @@ fn choose(sequence: u64, index: Option<i32>) {
             return;
         }
         if kind == WINDOW_PIN_MENU {
+            if quick_owner != quick_save_owner() {
+                return;
+            }
+            if index == Some(if super::masked_editing() { 0 } else { 2 }) {
+                super::toggle_cursor();
+                return;
+            }
             if index == Some(0) && quick_owner == quick_save_owner() {
                 super::request_window_pin();
             }
@@ -330,13 +337,32 @@ fn menu_kind(kind: u8) {
             &["Recognize text", "View recognition result"]
         }
     } else if kind == WINDOW_PIN_MENU {
-        if super::window_pin_available() {
-            &["Window pin", "Save region as preset"]
+        let (checked, enabled, frozen) = super::cursor_menu_state();
+        let masked = super::masked_editing();
+        let index = if masked { 0 } else { 2 };
+        if checked {
+            w.set_checked_first(index);
+        }
+        if !enabled {
+            w.set_secondary_disabled_index(index);
+        }
+        let cursor_label = if enabled {
+            "Include mouse pointer"
+        } else if frozen {
+            "Mouse pointer is outside the selection"
+        } else {
+            "No frozen mouse pointer"
+        };
+        if masked {
+            &[cursor_label]
+        } else if super::window_pin_available() {
+            &["Window pin", "Save region as preset", cursor_label]
         } else {
             w.set_disabled_index(0);
             &[
                 "Freeze or close the existing window pin first",
                 "Save region as preset",
+                cursor_label,
             ]
         }
     } else if kind == QUICK_SAVE_MENU {

@@ -248,7 +248,14 @@ impl AppState {
             }
             AppEvent::TextPin(event) => crate::domain::text_pin::reduce(self, event),
             AppEvent::PinnedImage(event) => crate::domain::pinned_image::reduce(self, event),
-            AppEvent::Screenshot(event) => crate::domain::screenshot::reduce(self, event),
+            AppEvent::Screenshot(event) => {
+                let commands = crate::domain::screenshot::reduce(self, event);
+                if self.screenshot.phase == crate::domain::screenshot::ScreenshotPhase::Idle {
+                    self.screenshot.cursor = None;
+                    self.screenshot.include_cursor = false;
+                }
+                commands
+            }
             AppEvent::AnnotationExport(event) => {
                 crate::domain::annotation_export::reduce(self, event)
             }

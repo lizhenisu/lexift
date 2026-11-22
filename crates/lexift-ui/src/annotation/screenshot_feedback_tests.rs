@@ -53,6 +53,7 @@ fn fixture(scale: f32) -> Input {
     };
     Input {
         snapshot: ExportSnapshot {
+            cursor: None,
             session: Arc::new(Session::new()),
             monitor,
             scale,
@@ -84,6 +85,45 @@ fn fixture(scale: f32) -> Input {
         crop_border: true,
         erase: None,
     }
+}
+
+#[test]
+fn frozen_cursor_repaints_the_pointer_footprint_without_rebuilding_content() {
+    use lexift_core::domain::screenshot_cursor::{Cursor, Pixels};
+    let mut input = fixture(1.25);
+    let monitor = input.snapshot.monitor;
+    let cancelled = AtomicBool::new(false);
+    let mut cache = Cache::default();
+    let clean = paint_frames(&input, &cancelled, &mut cache).unwrap();
+    let bounds = Rect {
+        left: 40,
+        top: 60,
+        right: 42,
+        bottom: 62,
+    };
+    input.snapshot.cursor = Some(Arc::new(Cursor {
+        bounds,
+        hotspot: Point { x: 41, y: 61 },
+        pixels: Pixels::Alpha([255, 0, 30, 255].repeat(4)),
+    }));
+    let shown = paint_frames(&input, &cancelled, &mut cache).unwrap();
+    let full = paint_frames(&input, &cancelled, &mut Cache::default()).unwrap();
+    assert_eq!(shown[0].data(), full[0].data());
+    assert_eq!(cache.builds, 1);
+    let pixel = |image: &tiny_skia::Pixmap| {
+        image
+            .pixel(
+                (bounds.left - monitor.left) as u32,
+                (bounds.top - monitor.top) as u32,
+            )
+            .unwrap()
+    };
+    assert_eq!(pixel(&shown[0]).red(), 255);
+    assert_eq!(input.capture.regions[0].pixels[0..4], [120, 160, 180, 255]);
+    input.snapshot.cursor = None;
+    let hidden = paint_frames(&input, &cancelled, &mut cache).unwrap();
+    assert_eq!(hidden[0].data(), clean[0].data());
+    assert_eq!(cache.builds, 1);
 }
 
 #[test]

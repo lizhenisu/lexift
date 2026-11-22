@@ -416,6 +416,7 @@ mod trim_tests {
             session: 7,
             request: 1,
             snapshot: Arc::new(ExportSnapshot {
+                cursor: None,
                 session: Arc::new(Document::new()),
                 monitor: bounds,
                 monitors: vec![(bounds, 1.)],

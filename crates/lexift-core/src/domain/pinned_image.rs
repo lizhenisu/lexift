@@ -975,6 +975,7 @@ mod tests {
             session: 1,
             request,
             snapshot: Arc::new(ExportSnapshot {
+                cursor: None,
                 session: Arc::new(Session::new()),
                 monitor: Rect {
                     left: 0,

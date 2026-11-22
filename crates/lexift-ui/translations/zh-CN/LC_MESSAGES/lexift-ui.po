@@ -2672,3 +2672,12 @@ msgstr "保存"
 
 msgid "Restore default"
 msgstr "恢复默认"
+
+msgid "Include mouse pointer"
+msgstr "保留鼠标指针"
+
+msgid "Mouse pointer is outside the selection"
+msgstr "鼠标指针在选区之外"
+
+msgid "No frozen mouse pointer"
+msgstr "未捕获到鼠标指针"
